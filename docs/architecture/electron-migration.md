@@ -118,7 +118,8 @@ read/update/auto-update preference reads, portfolio update/recalculate, and
 read-only portfolio dashboard data such as holdings, valuations, allocations,
 performance summaries, income summaries, goals, goal funding/plans, retirement
 planner simulations, activity CRUD/import-template workflows, exchange-rate
-management, contribution limits, and market data provider/custom-provider
+management, contribution limits, asset profiles, market data quote
+search/history/import/sync operations, and market data provider/custom-provider
 settings. Snapshot management and holdings CSV import also proxy through the
 sidecar so manual/imported holdings updates stay in Rust. The renderer still
 calls the typed preload IPC bridge, Electron main validates each command against

@@ -251,6 +251,74 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/limits",
   },
+  get_assets: {
+    method: "GET",
+    path: "/api/v1/assets",
+  },
+  create_asset: {
+    method: "POST",
+    path: "/api/v1/assets",
+  },
+  delete_asset: {
+    method: "DELETE",
+    path: "/api/v1/assets",
+  },
+  get_asset_profile: {
+    method: "GET",
+    path: "/api/v1/assets/profile",
+  },
+  update_asset_profile: {
+    method: "PUT",
+    path: "/api/v1/assets/profile",
+  },
+  update_quote_mode: {
+    method: "PUT",
+    path: "/api/v1/assets/pricing-mode",
+  },
+  search_symbol: {
+    method: "GET",
+    path: "/api/v1/market-data/search",
+  },
+  resolve_symbol_quote: {
+    method: "GET",
+    path: "/api/v1/market-data/resolve-currency",
+  },
+  get_quote_history: {
+    method: "GET",
+    path: "/api/v1/market-data/quotes/history",
+  },
+  fetch_yahoo_dividends: {
+    method: "GET",
+    path: "/api/v1/market-data/yahoo/dividends",
+  },
+  get_latest_quotes: {
+    method: "POST",
+    path: "/api/v1/market-data/quotes/latest",
+  },
+  update_quote: {
+    method: "PUT",
+    path: "/api/v1/market-data/quotes",
+  },
+  delete_quote: {
+    method: "DELETE",
+    path: "/api/v1/market-data/quotes/id",
+  },
+  check_quotes_import: {
+    method: "POST",
+    path: "/api/v1/market-data/quotes/check",
+  },
+  import_quotes_csv: {
+    method: "POST",
+    path: "/api/v1/market-data/quotes/import",
+  },
+  synch_quotes: {
+    method: "POST",
+    path: "/api/v1/market-data/sync/history",
+  },
+  sync_market_data: {
+    method: "POST",
+    path: "/api/v1/market-data/sync",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

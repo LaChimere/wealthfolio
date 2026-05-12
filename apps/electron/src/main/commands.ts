@@ -297,6 +297,108 @@ export async function invokeSidecarCommand<T>({
       return await invokeContributionLimitDelete<T>({ payload, sidecar, fetchImpl });
     case "calculate_deposits_for_contribution_limit":
       return await invokeContributionLimitDeposits<T>({ payload, sidecar, fetchImpl });
+    case "get_assets":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "create_asset":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.payload, "payload", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "delete_asset":
+      return await invokeAssetDelete<T>({ payload, sidecar, fetchImpl });
+    case "get_asset_profile":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["assetId", requireString(payload?.assetId, "assetId", command)]],
+      });
+    case "update_asset_profile":
+      return await invokeAssetProfileUpdate<T>({ payload, sidecar, fetchImpl });
+    case "update_quote_mode":
+      return await invokeQuoteModeUpdate<T>({ payload, sidecar, fetchImpl });
+    case "search_symbol":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["query", requireString(payload?.query, "query", command)]],
+      });
+    case "resolve_symbol_quote":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["symbol", requireString(payload?.symbol, "symbol", command)],
+          ["exchangeMic", optionalString(payload?.exchangeMic)],
+          ["instrumentType", optionalString(payload?.instrumentType)],
+          ["providerId", optionalString(payload?.providerId)],
+          ["quoteCcy", optionalString(payload?.quoteCcy)],
+        ],
+      });
+    case "get_quote_history":
+    case "fetch_yahoo_dividends":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["symbol", requireString(payload?.symbol, "symbol", command)]],
+      });
+    case "get_latest_quotes":
+      return await invokePostJson<T>({
+        command,
+        body: { assetIds: requireStringArray(payload?.assetIds, "assetIds", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "update_quote":
+      return await invokeQuoteUpdate<T>({ payload, sidecar, fetchImpl });
+    case "delete_quote":
+      return await invokeQuoteDelete<T>({ payload, sidecar, fetchImpl });
+    case "check_quotes_import":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          content: requireArray(payload?.content, "content", command),
+          hasHeaderRow: requireBoolean(payload?.hasHeaderRow, "hasHeaderRow", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "import_quotes_csv":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          quotes: requireArray(payload?.quotes, "quotes", command),
+          overwriteExisting: requireBoolean(
+            payload?.overwriteExisting,
+            "overwriteExisting",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "synch_quotes":
+      return await invokePostOptionalJson<T>({ command, sidecar, fetchImpl });
+    case "sync_market_data":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          assetIds: optionalStringArray(payload?.assetIds),
+          refetchAll: requireBoolean(payload?.refetchAll, "refetchAll", command),
+          refetchRecentDays: optionalNumber(payload?.refetchRecentDays),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -529,7 +631,7 @@ async function invokePostOptionalJson<T>({
 }: {
   command: Extract<
     ElectronCommand,
-    "update_portfolio" | "recalculate_portfolio" | "refresh_all_goal_summaries"
+    "update_portfolio" | "recalculate_portfolio" | "refresh_all_goal_summaries" | "synch_quotes"
   >;
   payload?: Record<string, unknown>;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
@@ -714,6 +816,108 @@ async function invokeContributionLimitDeposits<T>({
   });
 }
 
+async function invokeAssetDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "delete_asset");
+  return await fetchSidecarJson<T>({
+    command: "delete_asset",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_asset.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_asset.method },
+  });
+}
+
+async function invokeAssetProfileUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "update_asset_profile");
+  const assetPayload = requireRecord(payload?.payload, "payload", "update_asset_profile");
+  return await fetchSidecarJson<T>({
+    command: "update_asset_profile",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_asset_profile.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_asset_profile.method,
+      body: JSON.stringify(assetPayload),
+    },
+  });
+}
+
+async function invokeQuoteModeUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "update_quote_mode");
+  const quoteMode = requireString(payload?.quoteMode, "quoteMode", "update_quote_mode");
+  return await fetchSidecarJson<T>({
+    command: "update_quote_mode",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_quote_mode.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_quote_mode.method,
+      body: JSON.stringify({ quoteMode }),
+    },
+  });
+}
+
+async function invokeQuoteUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const symbol = requireString(payload?.symbol, "symbol", "update_quote");
+  const quote = requireRecord(payload?.quote, "quote", "update_quote");
+  return await fetchSidecarJson<T>({
+    command: "update_quote",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_quote.path}/${encodeURIComponent(symbol)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_quote.method,
+      body: JSON.stringify(quote),
+    },
+  });
+}
+
+async function invokeQuoteDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "delete_quote");
+  return await fetchSidecarJson<T>({
+    command: "delete_quote",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_quote.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_quote.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -795,6 +999,7 @@ async function invokeSimpleGet<T>({
     | "get_market_data_providers_settings"
     | "get_custom_providers"
     | "get_contribution_limits"
+    | "get_assets"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -907,9 +1112,26 @@ function requireArray(value: unknown, field: string, command: ElectronCommand): 
   return value;
 }
 
+function requireStringArray(value: unknown, field: string, command: ElectronCommand): string[] {
+  const items = requireArray(value, field, command);
+  if (items.some((item) => typeof item !== "string" || item.length === 0)) {
+    throw new Error(
+      `Electron command "${command}" requires string array payload field "${field}".`,
+    );
+  }
+  return items as string[];
+}
+
 function requireString(value: unknown, field: string, command: ElectronCommand): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
+  }
+  return value;
+}
+
+function requireBoolean(value: unknown, field: string, command: ElectronCommand): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`Electron command "${command}" requires boolean payload field "${field}".`);
   }
   return value;
 }
@@ -922,6 +1144,10 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
     : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

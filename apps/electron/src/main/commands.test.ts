@@ -967,6 +967,238 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies asset profile commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_assets",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_asset",
+      payload: { payload: { symbol: "AAPL", name: "Apple Inc." } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_profile",
+      payload: { assetId: "asset/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_asset_profile",
+      payload: { id: "asset/1", payload: { name: "Apple" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_quote_mode",
+      payload: { id: "asset/1", quoteMode: "manual" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_asset",
+        payload: { id: "asset/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/assets", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/assets",
+        "POST",
+        JSON.stringify({ symbol: "AAPL", name: "Apple Inc." }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/assets/profile?assetId=asset%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/assets/profile/asset%2F1",
+        "PUT",
+        JSON.stringify({ name: "Apple" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/assets/pricing-mode/asset%2F1",
+        "PUT",
+        JSON.stringify({ quoteMode: "manual" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/assets/asset%2F1", "DELETE", undefined],
+    ]);
+  });
+
+  test("proxies market data quote commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" || url.toString().endsWith("/market-data/sync/history")
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "search_symbol",
+      payload: { query: "AAPL US" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "resolve_symbol_quote",
+      payload: {
+        symbol: "SHOP",
+        exchangeMic: "XTSE",
+        instrumentType: "equity",
+        providerId: "yahoo",
+        quoteCcy: "CAD",
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_quote_history",
+      payload: { symbol: "BRK.B" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "fetch_yahoo_dividends",
+      payload: { symbol: "AAPL" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_latest_quotes",
+      payload: { assetIds: ["asset/1", "asset-2"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_quote",
+      payload: { symbol: "asset/1", quote: { close: 123.45 } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_quote",
+        payload: { id: "quote/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "check_quotes_import",
+      payload: { content: [115, 121, 109], hasHeaderRow: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_quotes_csv",
+      payload: { quotes: [{ symbol: "AAPL" }], overwriteExisting: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "synch_quotes",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "sync_market_data",
+      payload: { assetIds: ["asset/1"], refetchAll: false, refetchRecentDays: 30 },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/market-data/search?query=AAPL+US", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/resolve-currency?symbol=SHOP&exchangeMic=XTSE&instrumentType=equity&providerId=yahoo&quoteCcy=CAD",
+        "GET",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/quotes/history?symbol=BRK.B", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/market-data/yahoo/dividends?symbol=AAPL", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/latest",
+        "POST",
+        JSON.stringify({ assetIds: ["asset/1", "asset-2"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/asset%2F1",
+        "PUT",
+        JSON.stringify({ close: 123.45 }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/quotes/id/quote%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/check",
+        "POST",
+        JSON.stringify({ content: [115, 121, 109], hasHeaderRow: true }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/import",
+        "POST",
+        JSON.stringify({ quotes: [{ symbol: "AAPL" }], overwriteExisting: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/sync/history", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/sync",
+        "POST",
+        JSON.stringify({ assetIds: ["asset/1"], refetchAll: false, refetchRecentDays: 30 }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed asset and quote command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_quote_mode",
+        payload: { id: "asset-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "quoteMode"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_latest_quotes",
+        payload: { assetIds: ["asset-1", 1] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string array payload field "assetIds"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_market_data",
+        payload: { assetIds: ["asset-1"] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "refetchAll"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
