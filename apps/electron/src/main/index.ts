@@ -3,7 +3,12 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { IPC_CHANNELS, type RuntimeInfo } from "../shared/ipc";
+import {
+  IPC_CHANNELS,
+  isElectronCommand,
+  type ElectronInvokeRequest,
+  type RuntimeInfo,
+} from "../shared/ipc";
 import { resolveLegacyTauriPaths } from "./data-root";
 import { createMainWindow } from "./window";
 
@@ -52,6 +57,17 @@ function registerIpcHandlers(): void {
       appVersion: app.getVersion(),
       isPackaged: app.isPackaged,
     };
+  });
+  ipcMain.handle(IPC_CHANNELS.invoke, (_event, request: ElectronInvokeRequest): never => {
+    if (!request || typeof request.command !== "string") {
+      throw new Error("Invalid Electron command request.");
+    }
+
+    if (!isElectronCommand(request.command)) {
+      throw new Error(`Electron command bridge is not connected yet: ${request.command}`);
+    }
+
+    throw new Error(`Electron command is not implemented yet: ${request.command}`);
   });
 }
 

@@ -82,6 +82,23 @@ describe("adapter command parity", () => {
     expect(missing).toEqual([]);
   });
 
+  it("keeps every command reachable from the Electron adapter aligned with Tauri", () => {
+    const files = [
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/electron")),
+    ];
+    const invokedCommands = collectInvokedCommands(files);
+    const registeredCommands = collectRegisteredTauriCommands();
+    const webCommands = new Set(Object.keys(COMMANDS));
+
+    const missing = [...invokedCommands.entries()]
+      .filter(([command]) => !registeredCommands.has(command) && !webCommands.has(command))
+      .map(([command, files]) => `${command}: ${files.join(", ")}`)
+      .sort();
+
+    expect(missing).toEqual([]);
+  });
+
   it("routes allocation drilldown requests with all required filters", async () => {
     const response = new Response(JSON.stringify({ holdings: [] }), {
       status: 200,

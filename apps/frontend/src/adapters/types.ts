@@ -5,11 +5,12 @@
  */
 export const RunEnvs = {
   DESKTOP: "desktop",
+  ELECTRON: "electron",
   WEB: "web",
 } as const;
 
 /**
- * Runtime environment type - either desktop (Tauri) or web
+ * Runtime environment type - Tauri desktop, Electron desktop, or web.
  */
 export type RunEnv = (typeof RunEnvs)[keyof typeof RunEnvs];
 
@@ -180,6 +181,7 @@ export interface PlatformInfo {
   is_mobile: boolean;
   is_desktop: boolean;
   is_tauri?: boolean;
+  is_electron?: boolean;
   capabilities?: PlatformCapabilities;
 }
 

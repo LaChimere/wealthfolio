@@ -47,7 +47,8 @@ common task playbooks.
 ## Overview
 
 - **Frontend**: React + Vite + Tailwind v4 + shadcn (`apps/frontend/`)
-- **Desktop**: Tauri/Rust with SQLite (`apps/tauri/`, `crates/`)
+- **Desktop**: Tauri today, Electron migration in progress (`apps/tauri/`,
+  `apps/electron/`, `crates/`)
 - **Web mode**: Axum HTTP server (`apps/server/`)
 - **Packages**: `@wealthfolio/ui`, addon-sdk, addon-dev-tools (`packages/`)
 
@@ -60,8 +61,11 @@ apps/frontend/
 │   ├── components/     # Shared components
 │   ├── features/       # Self-contained feature modules
 │   ├── commands/       # Backend call wrappers (Tauri/Web)
-│   ├── adapters/       # Runtime detection (desktop vs web)
+│   ├── adapters/       # Runtime adapters (Tauri/Electron/Web)
 │   └── addons/         # Addon runtime
+
+apps/electron/
+└── src/                # Electron main/preload/shared IPC
 
 apps/tauri/src/
 └── commands/           # Tauri IPC commands

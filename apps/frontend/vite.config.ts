@@ -20,10 +20,27 @@ const serverProxy = enableProxy
     }
   : undefined;
 
-// Determine build target: "tauri" for desktop, "web" for browser
+// Determine build target: "tauri" for Tauri desktop, "electron" for Electron,
+// and "web" for browser.
 // Default to "tauri" for local development - use BUILD_TARGET=web for web builds
 // TAURI_DEV_HOST is only set for mobile/network dev, so we can't rely on it
 const buildTarget = process.env.BUILD_TARGET || "tauri";
+const adapterTargets = {
+  electron: "./src/adapters/electron",
+  tauri: "./src/adapters/tauri",
+  web: "./src/adapters/web",
+} as const;
+const platformTargets = {
+  electron: "./src/adapters/electron/core",
+  tauri: "./src/adapters/tauri/core",
+  web: "./src/adapters/web/core",
+} as const;
+
+if (!(buildTarget in adapterTargets)) {
+  throw new Error(`Unsupported BUILD_TARGET "${buildTarget}". Expected tauri, web, or electron.`);
+}
+
+const resolvedBuildTarget = buildTarget as keyof typeof adapterTargets;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -41,15 +58,9 @@ export default defineConfig({
       "@wealthfolio/addon-sdk": path.resolve(__dirname, "../../packages/addon-sdk/src"),
       "@wealthfolio/ui": path.resolve(__dirname, "../../packages/ui/src"),
       // Conditional adapter alias based on build target
-      "@/adapters": path.resolve(
-        __dirname,
-        buildTarget === "tauri" ? "./src/adapters/tauri" : "./src/adapters/web",
-      ),
+      "@/adapters": path.resolve(__dirname, adapterTargets[resolvedBuildTarget]),
       // Platform-specific core module for shared adapters
-      "#platform": path.resolve(
-        __dirname,
-        buildTarget === "tauri" ? "./src/adapters/tauri/core" : "./src/adapters/web/core",
-      ),
+      "#platform": path.resolve(__dirname, platformTargets[resolvedBuildTarget]),
       "@": path.resolve(__dirname, "./src"),
     },
     extensions: [".js", ".ts", ".jsx", ".tsx", ".json"],
@@ -72,8 +83,8 @@ export default defineConfig({
       : undefined,
     proxy: serverProxy,
     watch: {
-      // 3. tell vite to ignore watching `apps/desktop`
-      ignored: ["**/apps/tauri/**"],
+      // 3. tell vite to ignore watching native desktop shells
+      ignored: ["**/apps/tauri/**", "**/apps/electron/**"],
     },
   },
   // 3. to make use of `TAURI_DEBUG` and other env variables

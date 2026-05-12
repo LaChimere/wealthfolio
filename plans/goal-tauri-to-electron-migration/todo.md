@@ -10,7 +10,7 @@
 | bun-tooling            | done    | Move JS package management/scripts to Bun and introduce Biome/Lefthook with minimal churn.                                    | Bun migration committed; Biome/Lefthook baseline added; `bun run check` and `bun run hooks:run` passed.                      |
 | typescript-6           | done    | Upgrade TypeScript to 6 if Electron/tooling compatibility checks pass.                                                        | TypeScript 6.0.3 installed across workspace; `bun run check`, full frontend tests, frontend/packages/addon builds passed.    |
 | electron-scaffold      | done    | Add Electron main/preload shell that can host the existing frontend side-by-side with Tauri.                                  | `apps/electron`; `bun run check`, `bun run build:electron`, Electron tests, adapter tests, and Electron binary check passed. |
-| electron-adapter       | pending | Add Electron frontend adapter and typed IPC registry preserving shared adapter APIs.                                          | Pending                                                                                                                      |
+| electron-adapter       | done    | Add Electron frontend adapter and typed IPC registry preserving shared adapter APIs.                                          | `BUILD_TARGET=electron`; adapter/core/AI tests, web build, Tauri build, Electron build, and `bun run check` passed.          |
 | rust-service-bridge    | pending | Connect Electron to existing Rust-backed services, SQLite data dir behavior, and domain event streams.                        | Pending                                                                                                                      |
 | native-parity          | pending | Replace Tauri native desktop plugins/features with Electron equivalents.                                                      | Pending                                                                                                                      |
 | electron-release       | pending | Replace Tauri desktop packaging/release artifacts with Electron packaging while preserving server prebuilds.                  | Pending                                                                                                                      |
@@ -18,13 +18,14 @@
 
 ## Review checkpoints
 
-| Checkpoint                   | Status | Notes                                                                                                          |
-| ---------------------------- | ------ | -------------------------------------------------------------------------------------------------------------- |
-| Design self-review           | done   | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates.                                        |
-| Rubber-duck design review    | done   | Re-review found no blockers for starting PR1/guardrail work.                                                   |
-| Code review after first diff | done   | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues. |
-| Tooling/TS6 milestone review | done   | PR review found docs/template/CLI/boundary-test gaps; fixes were applied and re-reviewed.                      |
-| Electron scaffold review     | done   | Code-review found a startup error-handling gap; the guarded startup fix was re-reviewed with no blockers.      |
+| Checkpoint                   | Status | Notes                                                                                                           |
+| ---------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+| Design self-review           | done   | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates.                                         |
+| Rubber-duck design review    | done   | Re-review found no blockers for starting PR1/guardrail work.                                                    |
+| Code review after first diff | done   | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues.  |
+| Tooling/TS6 milestone review | done   | PR review found docs/template/CLI/boundary-test gaps; fixes were applied and re-reviewed.                       |
+| Electron scaffold review     | done   | Code-review found a startup error-handling gap; the guarded startup fix was re-reviewed with no blockers.       |
+| Electron adapter review      | done   | Rubber-duck found web fallback/IPC allowlist risks; code-review found AI streaming zero-event risk; both fixed. |
 
 ## Non-blocking cautions carried forward
 

@@ -58,7 +58,9 @@ async function waitForRenderer(timeoutMs = 60_000) {
 process.on("SIGINT", () => shutdownAndExit(130));
 process.on("SIGTERM", () => shutdownAndExit(143));
 
-spawnNamed("web", "bun", ["run", "dev:web"]);
+process.env.WF_ENABLE_VITE_PROXY = "true";
+spawnNamed("server", "cargo", ["run", "--manifest-path", "apps/server/Cargo.toml"]);
+spawnNamed("renderer", "bun", ["run", "--cwd", "apps/frontend", "dev:electron"]);
 
 try {
   await waitForRenderer();

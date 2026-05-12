@@ -90,11 +90,15 @@ Keep the adapter seam:
 - `@/adapters` resolves to the active runtime implementation;
 - `#platform` resolves to runtime-specific `invoke`, logging, and platform
   flags;
-- `RUN_ENV` stays `"desktop"` for Electron desktop and `"web"` for web mode.
+- `RUN_ENV` distinguishes `"desktop"` (Tauri), `"electron"`, and `"web"`, while
+  `isDesktop` remains `true` for both desktop shells.
 
 The Electron adapter should preserve existing command names and typed adapter
 exports. Command parity tests should compare Electron IPC coverage with the
 existing web command map and, while Tauri remains, the Tauri command registry.
+Until the sidecar bridge is connected, Electron domain commands must reject
+through the preload IPC bridge instead of falling back to browser REST calls or
+exposing a backend URL to the renderer.
 
 ## Native desktop features
 
