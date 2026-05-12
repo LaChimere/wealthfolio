@@ -383,6 +383,38 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/taxonomies/migration/run",
   },
+  get_health_status: {
+    method: "GET",
+    path: "/api/v1/health/status",
+  },
+  run_health_checks: {
+    method: "POST",
+    path: "/api/v1/health/check",
+  },
+  dismiss_health_issue: {
+    method: "POST",
+    path: "/api/v1/health/dismiss",
+  },
+  restore_health_issue: {
+    method: "POST",
+    path: "/api/v1/health/restore",
+  },
+  get_dismissed_health_issues: {
+    method: "GET",
+    path: "/api/v1/health/dismissed",
+  },
+  execute_health_fix: {
+    method: "POST",
+    path: "/api/v1/health/fix",
+  },
+  get_health_config: {
+    method: "GET",
+    path: "/api/v1/health/config",
+  },
+  update_health_config: {
+    method: "PUT",
+    path: "/api/v1/health/config",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

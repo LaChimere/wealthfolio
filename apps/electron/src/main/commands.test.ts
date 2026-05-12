@@ -1403,6 +1403,126 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies health center commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_health_status",
+      payload: { clientTimezone: "America/Toronto" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "run_health_checks",
+      payload: { clientTimezone: "America/Vancouver" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "dismiss_health_issue",
+      payload: { issueId: "issue/1", dataHash: "hash/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "restore_health_issue",
+      payload: { issueId: "issue/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_dismissed_health_issues",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "execute_health_fix",
+      payload: { action: { id: "sync_prices", payload: ["asset-1"] } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_health_config",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_health_config",
+      payload: { config: { enabled: true } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/health/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/health/check", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/health/dismiss",
+        "POST",
+        JSON.stringify({ issueId: "issue/1", dataHash: "hash/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/health/restore",
+        "POST",
+        JSON.stringify({ issueId: "issue/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/health/dismissed", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/health/fix",
+        "POST",
+        JSON.stringify({ id: "sync_prices", payload: ["asset-1"] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/health/config", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/health/config", "PUT", JSON.stringify({ enabled: true })],
+    ]);
+    expect(calls[0]?.[1]?.headers).toMatchObject({
+      "X-Client-Timezone": "America/Toronto",
+    });
+    expect(calls[1]?.[1]?.headers).toMatchObject({
+      "X-Client-Timezone": "America/Vancouver",
+    });
+    expect(calls[1]?.[1]?.headers).not.toHaveProperty("Content-Type");
+  });
+
+  test("rejects malformed health command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "dismiss_health_issue",
+        payload: { issueId: "issue-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "dataHash"');
+    await expect(
+      invokeSidecarCommand({
+        command: "execute_health_fix",
+        payload: { action: "sync_prices" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "action"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_health_config",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "config"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

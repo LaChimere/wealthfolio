@@ -120,18 +120,18 @@ performance summaries, income summaries, goals, goal funding/plans, retirement
 planner simulations, activity CRUD/import-template workflows, exchange-rate
 management, contribution limits, asset profiles, market data quote
 search/history/import/sync operations, taxonomies, taxonomy assignments,
-taxonomy migration helpers, and market data provider/custom-provider settings.
-Snapshot management and holdings CSV import also proxy through the sidecar so
-manual/imported holdings updates stay in Rust. The renderer still calls the
-typed preload IPC bridge, Electron main validates each command against an
-explicit allowlist, waits for sidecar readiness, and proxies to the loopback
-sidecar with the per-run bearer token. Sidecar base URLs and tokens must stay
-confined to Electron main; public runtime status and command errors must redact
-loopback URLs and token-shaped values before crossing IPC. Electron app info
-must use sanitized runtime metadata and must not expose desktop DB or log paths
-to the renderer. JSON request bodies must be sent with
-`Content-Type: application/json`, and accepted/no-content sidecar responses must
-cross IPC as `undefined`.
+taxonomy migration helpers, Health Center status/fix/config operations, and
+market data provider/custom-provider settings. Snapshot management and holdings
+CSV import also proxy through the sidecar so manual/imported holdings updates
+stay in Rust. The renderer still calls the typed preload IPC bridge, Electron
+main validates each command against an explicit allowlist, waits for sidecar
+readiness, and proxies to the loopback sidecar with the per-run bearer token.
+Sidecar base URLs and tokens must stay confined to Electron main; public runtime
+status and command errors must redact loopback URLs and token-shaped values
+before crossing IPC. Electron app info must use sanitized runtime metadata and
+must not expose desktop DB or log paths to the renderer. JSON request bodies
+must be sent with `Content-Type: application/json`, and accepted/no-content
+sidecar responses must cross IPC as `undefined`.
 
 Electron domain events use the same trust boundary. Electron main owns the
 authenticated SSE connection to `/api/v1/events/stream`, retries it with

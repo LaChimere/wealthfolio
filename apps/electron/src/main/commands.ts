@@ -457,6 +457,43 @@ export async function invokeSidecarCommand<T>({
       return await invokeTaxonomyAssignmentDelete<T>({ payload, sidecar, fetchImpl });
     case "migrate_legacy_classifications":
       return await invokePostOptionalJson<T>({ command, sidecar, fetchImpl });
+    case "get_health_status":
+    case "run_health_checks":
+      return await invokeHealthStatus<T>({ command, payload, sidecar, fetchImpl });
+    case "get_dismissed_health_issues":
+    case "get_health_config":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "dismiss_health_issue":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          issueId: requireString(payload?.issueId, "issueId", command),
+          dataHash: requireString(payload?.dataHash, "dataHash", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "restore_health_issue":
+      return await invokePostJson<T>({
+        command,
+        body: { issueId: requireString(payload?.issueId, "issueId", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "execute_health_fix":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.action, "action", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "update_health_config":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.config, "config", command),
+        sidecar,
+        fetchImpl,
+      });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -1076,6 +1113,30 @@ async function invokeTaxonomyAssignmentDelete<T>({
   });
 }
 
+async function invokeHealthStatus<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "get_health_status" | "run_health_checks">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  const clientTimezone = resolveClientTimezone(payload);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      headers: clientTimezone ? { "X-Client-Timezone": clientTimezone } : undefined,
+    },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -1160,6 +1221,8 @@ async function invokeSimpleGet<T>({
     | "get_assets"
     | "get_taxonomies"
     | "get_migration_status"
+    | "get_dismissed_health_issues"
+    | "get_health_config"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1319,6 +1382,14 @@ function optionalStringArray(value: unknown): string[] | undefined {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function resolveClientTimezone(payload: Record<string, unknown> | undefined): string | undefined {
+  const payloadTimezone = optionalString(payload?.clientTimezone)?.trim();
+  if (payloadTimezone) {
+    return payloadTimezone;
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
