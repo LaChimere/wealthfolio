@@ -277,6 +277,175 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies sync crypto commands and preserves adapter return shapes", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/generate-keypair")) {
+        return Promise.resolve(jsonResponse({ publicKey: "pub", secretKey: "secret" }));
+      }
+      return Promise.resolve(jsonResponse({ value: `value:${path}` }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_root_key",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-root-key");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_dek",
+        payload: { rootKey: "root", version: 1 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/derive-dek");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_keypair",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ publicKey: "pub", secretKey: "secret" });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_shared_secret",
+        payload: { ourSecret: "ours", theirPublic: "theirs" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/compute-shared-secret");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_session_key",
+        payload: { sharedSecret: "shared", context: "ctx" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/derive-session-key");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_encrypt",
+        payload: { key: "key", plaintext: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/encrypt");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_decrypt",
+        payload: { key: "key", ciphertext: "cipher" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/decrypt");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_pairing_code",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-pairing-code");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hash_pairing_code",
+        payload: { code: "123456" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/hash-pairing-code");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hmac_sha256",
+        payload: { key: "key", data: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/hmac-sha256");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_sas",
+        payload: { sharedSecret: "shared" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/compute-sas");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_device_id",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-device-id");
+
+    expect(calls.map(([url]) => new URL(url.toString()).pathname)).toEqual([
+      "/api/v1/sync/crypto/generate-root-key",
+      "/api/v1/sync/crypto/derive-dek",
+      "/api/v1/sync/crypto/generate-keypair",
+      "/api/v1/sync/crypto/compute-shared-secret",
+      "/api/v1/sync/crypto/derive-session-key",
+      "/api/v1/sync/crypto/encrypt",
+      "/api/v1/sync/crypto/decrypt",
+      "/api/v1/sync/crypto/generate-pairing-code",
+      "/api/v1/sync/crypto/hash-pairing-code",
+      "/api/v1/sync/crypto/hmac-sha256",
+      "/api/v1/sync/crypto/compute-sas",
+      "/api/v1/sync/crypto/generate-device-id",
+    ]);
+    expect(calls[1]?.[1]?.body).toBe(JSON.stringify({ rootKey: "root", version: 1 }));
+    expect(calls[5]?.[1]?.body).toBe(JSON.stringify({ key: "key", plaintext: "" }));
+    expect(calls[9]?.[1]?.body).toBe(JSON.stringify({ key: "key", data: "" }));
+    expect(calls.every(([, init]) => init?.method === "POST")).toBe(true);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+    expect(calls[1]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed sync crypto payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_dek",
+        payload: { rootKey: "root", version: 1.5 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires unsigned integer payload field "version"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_shared_secret",
+        payload: { ourSecret: "ours" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "theirPublic"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hash_pairing_code",
+        payload: { code: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "code"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies portfolio update commands that return accepted with no body", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

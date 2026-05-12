@@ -55,6 +55,86 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         params: [["secretKey", requireString(payload?.secretKey, "secretKey", command)]],
       });
+    case "sync_generate_root_key":
+    case "sync_generate_pairing_code":
+    case "sync_generate_device_id":
+      return await invokeSyncCryptoString<T>({ command, sidecar, fetchImpl });
+    case "sync_derive_dek":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          rootKey: requireString(payload?.rootKey, "rootKey", command),
+          version: requireUnsignedInteger(payload?.version, "version", command),
+        },
+      });
+    case "sync_generate_keypair":
+      return await invokeSyncCrypto<T>({ command, sidecar, fetchImpl });
+    case "sync_compute_shared_secret":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          ourSecret: requireString(payload?.ourSecret, "ourSecret", command),
+          theirPublic: requireString(payload?.theirPublic, "theirPublic", command),
+        },
+      });
+    case "sync_derive_session_key":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          sharedSecret: requireString(payload?.sharedSecret, "sharedSecret", command),
+          context: requireString(payload?.context, "context", command),
+        },
+      });
+    case "sync_encrypt":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          key: requireString(payload?.key, "key", command),
+          plaintext: requireStringValue(payload?.plaintext, "plaintext", command),
+        },
+      });
+    case "sync_decrypt":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          key: requireString(payload?.key, "key", command),
+          ciphertext: requireString(payload?.ciphertext, "ciphertext", command),
+        },
+      });
+    case "sync_hash_pairing_code":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: { code: requireString(payload?.code, "code", command) },
+      });
+    case "sync_hmac_sha256":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: {
+          key: requireString(payload?.key, "key", command),
+          data: requireStringValue(payload?.data, "data", command),
+        },
+      });
+    case "sync_compute_sas":
+      return await invokeSyncCryptoString<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        body: { sharedSecret: requireString(payload?.sharedSecret, "sharedSecret", command) },
+      });
     case "update_portfolio":
     case "recalculate_portfolio":
       return await invokePostOptionalJson<T>({ command, payload, sidecar, fetchImpl });
@@ -982,6 +1062,79 @@ async function invokePostJson<T>({
     init: {
       method: ELECTRON_COMMANDS[command].method,
       body: JSON.stringify(body),
+    },
+  });
+}
+
+async function invokeSyncCryptoString<T>({
+  command,
+  sidecar,
+  fetchImpl,
+  body,
+}: {
+  command: Extract<
+    ElectronCommand,
+    | "sync_generate_root_key"
+    | "sync_derive_dek"
+    | "sync_compute_shared_secret"
+    | "sync_derive_session_key"
+    | "sync_encrypt"
+    | "sync_decrypt"
+    | "sync_generate_pairing_code"
+    | "sync_hash_pairing_code"
+    | "sync_hmac_sha256"
+    | "sync_compute_sas"
+    | "sync_generate_device_id"
+  >;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  body?: Record<string, unknown>;
+}): Promise<T> {
+  const response = await invokeSyncCrypto<{ value?: unknown }>({
+    command,
+    sidecar,
+    fetchImpl,
+    body,
+  });
+  if (typeof response.value !== "string") {
+    throw new Error(`Electron sync crypto command "${command}" returned an invalid value.`);
+  }
+  return response.value as T;
+}
+
+async function invokeSyncCrypto<T>({
+  command,
+  sidecar,
+  fetchImpl,
+  body,
+}: {
+  command: Extract<
+    ElectronCommand,
+    | "sync_generate_root_key"
+    | "sync_derive_dek"
+    | "sync_generate_keypair"
+    | "sync_compute_shared_secret"
+    | "sync_derive_session_key"
+    | "sync_encrypt"
+    | "sync_decrypt"
+    | "sync_generate_pairing_code"
+    | "sync_hash_pairing_code"
+    | "sync_hmac_sha256"
+    | "sync_compute_sas"
+    | "sync_generate_device_id"
+  >;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  body?: Record<string, unknown>;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: body ? JSON.stringify(body) : undefined,
     },
   });
 }
@@ -1942,6 +2095,16 @@ function requireNumber(value: unknown, field: string, command: ElectronCommand):
     throw new Error(`Electron command "${command}" requires number payload field "${field}".`);
   }
   return value;
+}
+
+function requireUnsignedInteger(value: unknown, field: string, command: ElectronCommand): number {
+  const number = requireNumber(value, field, command);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(
+      `Electron command "${command}" requires unsigned integer payload field "${field}".`,
+    );
+  }
+  return number;
 }
 
 function requireRating(value: unknown, field: string, command: ElectronCommand): number {

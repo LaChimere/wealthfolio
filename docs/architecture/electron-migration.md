@@ -128,7 +128,9 @@ thread/tool-result operations, alternative asset/liability operations, and
 market data provider/custom-provider settings, and add-on install/runtime/store
 staging operations. Temporary sidecar-backed secret set/get/delete commands are
 also proxied while durable keyring-backed Electron secret storage is still
-pending. Snapshot management and holdings CSV import also proxy through the
+pending. Device-sync crypto helpers proxy through the sidecar crypto endpoints
+and unwrap server `{ value }` responses to preserve the existing adapter return
+shape. Snapshot management and holdings CSV import also proxy through the
 sidecar so manual/imported holdings updates stay in Rust. Add-on zip payloads
 are validated as byte arrays in Electron main and forwarded to the sidecar as
 base64 JSON fields. AI chat NDJSON streaming uses dedicated start/cancel IPC

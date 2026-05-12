@@ -196,6 +196,11 @@
   main now owns the authenticated NDJSON sidecar fetch, parses stream events,
   sends them only to the originating webContents, supports cancellation before
   sidecar readiness, and redacts sidecar credentials from stream errors.
+- Turn 32: Added Electron sidecar proxy coverage for device-sync crypto helpers
+  (`sync_generate_root_key`, key derivation, ephemeral keypair, encryption,
+  pairing-code/SAS/HMAC/device-id helpers). The Electron proxy unwraps server
+  `{ value }` responses so frontend adapter callers keep the Tauri-era string
+  return shape.
 
 ## Deferred items
 

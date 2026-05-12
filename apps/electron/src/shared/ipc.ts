@@ -55,6 +55,54 @@ export const ELECTRON_COMMANDS = {
     method: "DELETE",
     path: "/api/v1/secrets",
   },
+  sync_generate_root_key: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/generate-root-key",
+  },
+  sync_derive_dek: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/derive-dek",
+  },
+  sync_generate_keypair: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/generate-keypair",
+  },
+  sync_compute_shared_secret: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/compute-shared-secret",
+  },
+  sync_derive_session_key: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/derive-session-key",
+  },
+  sync_encrypt: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/encrypt",
+  },
+  sync_decrypt: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/decrypt",
+  },
+  sync_generate_pairing_code: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/generate-pairing-code",
+  },
+  sync_hash_pairing_code: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/hash-pairing-code",
+  },
+  sync_hmac_sha256: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/hmac-sha256",
+  },
+  sync_compute_sas: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/compute-sas",
+  },
+  sync_generate_device_id: {
+    method: "POST",
+    path: "/api/v1/sync/crypto/generate-device-id",
+  },
   update_portfolio: {
     method: "POST",
     path: "/api/v1/portfolio/update",
