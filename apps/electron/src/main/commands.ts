@@ -494,6 +494,74 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "list_installed_addons":
+    case "get_enabled_addons_on_startup":
+    case "fetch_addon_store_listings":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "install_addon_zip":
+      return await invokeAddonZip<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        includeEnableAfterInstall: true,
+      });
+    case "extract_addon_zip":
+      return await invokeAddonZip<T>({ command, payload, sidecar, fetchImpl });
+    case "toggle_addon":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          addonId: requireString(payload?.addonId, "addonId", command),
+          enabled: requireBoolean(payload?.enabled, "enabled", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "uninstall_addon":
+    case "load_addon_for_runtime":
+      return await invokeAddonByIdPath<T>({ command, payload, sidecar, fetchImpl });
+    case "check_addon_update":
+    case "update_addon_from_store_by_id":
+    case "download_addon_to_staging":
+      return await invokeAddonIdBody<T>({ command, payload, sidecar, fetchImpl });
+    case "check_all_addon_updates":
+      return await invokeNoBody<T>({ command, sidecar, fetchImpl });
+    case "install_addon_from_staging":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          addonId: requireString(payload?.addonId, "addonId", command),
+          enableAfterInstall: optionalBoolean(
+            payload?.enableAfterInstall,
+            "enableAfterInstall",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "clear_addon_staging":
+      return await invokeClearAddonStaging<T>({ payload, sidecar, fetchImpl });
+    case "get_addon_ratings":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["addonId", requireString(payload?.addonId, "addonId", command)]],
+      });
+    case "submit_addon_rating":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          addonId: requireString(payload?.addonId, "addonId", command),
+          rating: requireRating(payload?.rating, "rating", command),
+          review: optionalStringField(payload?.review, "review", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "get_net_worth":
       return await invokeGetWithQuery<T>({
         command,
@@ -1410,6 +1478,9 @@ async function invokeSimpleGet<T>({
     | "get_health_config"
     | "get_alternative_holdings"
     | "get_ai_providers"
+    | "list_installed_addons"
+    | "get_enabled_addons_on_startup"
+    | "fetch_addon_store_listings"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1420,6 +1491,122 @@ async function invokeSimpleGet<T>({
     sidecar,
     url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
     init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeNoBody<T>({
+  command,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "check_all_addon_updates">;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeAddonZip<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+  includeEnableAfterInstall = false,
+}: {
+  command: Extract<ElectronCommand, "install_addon_zip" | "extract_addon_zip">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  includeEnableAfterInstall?: boolean;
+}): Promise<T> {
+  const zipBytes = requireByteArray(payload?.zipData, "zipData", command);
+  return await invokePostJson<T>({
+    command,
+    body: {
+      zipDataB64: Buffer.from(Uint8Array.from(zipBytes)).toString("base64"),
+      ...(includeEnableAfterInstall
+        ? {
+            enableAfterInstall: optionalBoolean(
+              payload?.enableAfterInstall,
+              "enableAfterInstall",
+              command,
+            ),
+          }
+        : {}),
+    },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeAddonByIdPath<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "uninstall_addon" | "load_addon_for_runtime">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  const addonId = requireString(payload?.addonId, "addonId", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(addonId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeAddonIdBody<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<
+    ElectronCommand,
+    "check_addon_update" | "update_addon_from_store_by_id" | "download_addon_to_staging"
+  >;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await invokePostJson<T>({
+    command,
+    body: { addonId: requireString(payload?.addonId, "addonId", command) },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeClearAddonStaging<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const url = new URL(ELECTRON_COMMANDS.clear_addon_staging.path, sidecar.baseUrl);
+  const addonId = optionalStringField(payload?.addonId, "addonId", "clear_addon_staging");
+  if (addonId) {
+    url.searchParams.set("addonId", addonId);
+  }
+  return await fetchSidecarJson<T>({
+    command: "clear_addon_staging",
+    fetchImpl,
+    sidecar,
+    url,
+    init: { method: ELECTRON_COMMANDS.clear_addon_staging.method },
   });
 }
 
@@ -1687,6 +1874,19 @@ function requireArray(value: unknown, field: string, command: ElectronCommand): 
   return value;
 }
 
+function requireByteArray(value: unknown, field: string, command: ElectronCommand): number[] {
+  const items = requireArray(value, field, command);
+  if (
+    items.length === 0 ||
+    items.some(
+      (item) => typeof item !== "number" || !Number.isInteger(item) || item < 0 || item > 255,
+    )
+  ) {
+    throw new Error(`Electron command "${command}" requires byte array payload field "${field}".`);
+  }
+  return items as number[];
+}
+
 function requireStringArray(value: unknown, field: string, command: ElectronCommand): string[] {
   const items = requireArray(value, field, command);
   if (items.some((item) => typeof item !== "string" || item.length === 0)) {
@@ -1718,8 +1918,32 @@ function requireNumber(value: unknown, field: string, command: ElectronCommand):
   return value;
 }
 
+function requireRating(value: unknown, field: string, command: ElectronCommand): number {
+  const rating = requireNumber(value, field, command);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new Error(
+      `Electron command "${command}" requires integer rating payload field "${field}" between 1 and 5.`,
+    );
+  }
+  return rating;
+}
+
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalStringField(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
+  }
+  return value.length > 0 ? value : undefined;
 }
 
 function nullableString(value: unknown): string | null {
@@ -1734,6 +1958,20 @@ function optionalStringArray(value: unknown): string[] | undefined {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalBoolean(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`Electron command "${command}" requires boolean payload field "${field}".`);
+  }
+  return value;
 }
 
 function optionalQueryNumber(

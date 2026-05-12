@@ -123,17 +123,19 @@ search/history/import/sync operations, taxonomies, taxonomy assignments,
 taxonomy migration helpers, Health Center status/fix/config operations, and Net
 Worth calculations/history, AI provider settings/model listing, non-streaming AI
 thread/tool-result operations, alternative asset/liability operations, and
-market data provider/custom-provider settings. Snapshot management and holdings
-CSV import also proxy through the sidecar so manual/imported holdings updates
-stay in Rust. AI chat NDJSON streaming remains a separate bridge because it
-cannot safely use the request/response JSON command proxy. The renderer still
-calls the typed preload IPC bridge, Electron main validates each command against
-an explicit allowlist, waits for sidecar readiness, and proxies to the loopback
-sidecar with the per-run bearer token. Sidecar base URLs and tokens must stay
-confined to Electron main; public runtime status and command errors must redact
-loopback URLs and token-shaped values before crossing IPC. Electron app info
-must use sanitized runtime metadata and must not expose desktop DB or log paths
-to the renderer. JSON request bodies must be sent with
+market data provider/custom-provider settings, and add-on install/runtime/store
+staging operations. Snapshot management and holdings CSV import also proxy
+through the sidecar so manual/imported holdings updates stay in Rust. Add-on zip
+payloads are validated as byte arrays in Electron main and forwarded to the
+sidecar as base64 JSON fields. AI chat NDJSON streaming remains a separate
+bridge because it cannot safely use the request/response JSON command proxy. The
+renderer still calls the typed preload IPC bridge, Electron main validates each
+command against an explicit allowlist, waits for sidecar readiness, and proxies
+to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
+tokens must stay confined to Electron main; public runtime status and command
+errors must redact loopback URLs and token-shaped values before crossing IPC.
+Electron app info must use sanitized runtime metadata and must not expose
+desktop DB or log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

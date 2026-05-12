@@ -415,6 +415,70 @@ export const ELECTRON_COMMANDS = {
     method: "PUT",
     path: "/api/v1/health/config",
   },
+  list_installed_addons: {
+    method: "GET",
+    path: "/api/v1/addons/installed",
+  },
+  install_addon_zip: {
+    method: "POST",
+    path: "/api/v1/addons/install-zip",
+  },
+  toggle_addon: {
+    method: "POST",
+    path: "/api/v1/addons/toggle",
+  },
+  uninstall_addon: {
+    method: "DELETE",
+    path: "/api/v1/addons",
+  },
+  load_addon_for_runtime: {
+    method: "GET",
+    path: "/api/v1/addons/runtime",
+  },
+  get_enabled_addons_on_startup: {
+    method: "GET",
+    path: "/api/v1/addons/enabled-on-startup",
+  },
+  extract_addon_zip: {
+    method: "POST",
+    path: "/api/v1/addons/extract",
+  },
+  fetch_addon_store_listings: {
+    method: "GET",
+    path: "/api/v1/addons/store/listings",
+  },
+  submit_addon_rating: {
+    method: "POST",
+    path: "/api/v1/addons/store/ratings",
+  },
+  get_addon_ratings: {
+    method: "GET",
+    path: "/api/v1/addons/store/ratings",
+  },
+  check_addon_update: {
+    method: "POST",
+    path: "/api/v1/addons/store/check-update",
+  },
+  check_all_addon_updates: {
+    method: "POST",
+    path: "/api/v1/addons/store/check-all",
+  },
+  update_addon_from_store_by_id: {
+    method: "POST",
+    path: "/api/v1/addons/store/update",
+  },
+  download_addon_to_staging: {
+    method: "POST",
+    path: "/api/v1/addons/store/staging/download",
+  },
+  install_addon_from_staging: {
+    method: "POST",
+    path: "/api/v1/addons/store/install-from-staging",
+  },
+  clear_addon_staging: {
+    method: "DELETE",
+    path: "/api/v1/addons/store/staging",
+  },
   get_net_worth: {
     method: "GET",
     path: "/api/v1/net-worth",

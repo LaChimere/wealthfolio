@@ -1523,6 +1523,255 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies add-on commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "list_installed_addons",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "install_addon_zip",
+      payload: { zipData: [80, 75, 3, 4] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "toggle_addon",
+      payload: { addonId: "addon/1", enabled: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "uninstall_addon",
+        payload: { addonId: "addon/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "load_addon_for_runtime",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_enabled_addons_on_startup",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "extract_addon_zip",
+      payload: { zipData: [1, 2, 255] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "fetch_addon_store_listings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "submit_addon_rating",
+      payload: { addonId: "addon/1", rating: 5, review: "Great" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_addon_ratings",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "check_addon_update",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "check_all_addon_updates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_addon_from_store_by_id",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "download_addon_to_staging",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "install_addon_from_staging",
+      payload: { addonId: "addon/1", enableAfterInstall: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        payload: { addonId: "addon/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/addons/installed", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/install-zip",
+        "POST",
+        JSON.stringify({ zipDataB64: "UEsDBA==" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/toggle",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", enabled: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/addon%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/runtime/addon%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/enabled-on-startup", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/extract",
+        "POST",
+        JSON.stringify({ zipDataB64: "AQL/" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/listings", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/ratings",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", rating: 5, review: "Great" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/ratings?addonId=addon%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/check-update",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/check-all", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/update",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/staging/download",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/install-from-staging",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", enableAfterInstall: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/staging?addonId=addon%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/store/staging", "DELETE", undefined],
+    ]);
+
+    const checkAllCall = calls.find(([url]) => url.toString().endsWith("/addons/store/check-all"));
+    expect(checkAllCall?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("rejects malformed add-on command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "extract_addon_zip",
+        payload: { zipData: [1.5] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [256] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [80], enableAfterInstall: "true" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "enableAfterInstall"');
+    await expect(
+      invokeSidecarCommand({
+        command: "toggle_addon",
+        payload: { addonId: "addon-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "enabled"');
+    await expect(
+      invokeSidecarCommand({
+        command: "uninstall_addon",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "addonId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "submit_addon_rating",
+        payload: { addonId: "addon-1", rating: 6 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires integer rating payload field "rating" between 1 and 5');
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        payload: { addonId: 1 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "addonId"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies net worth commands", async () => {
     const urls: string[] = [];
     const fetchImpl: FetchLike = (url) => {
