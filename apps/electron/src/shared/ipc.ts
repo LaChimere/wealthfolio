@@ -35,6 +35,58 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/settings/auto-update-enabled",
   },
+  update_portfolio: {
+    method: "POST",
+    path: "/api/v1/portfolio/update",
+  },
+  recalculate_portfolio: {
+    method: "POST",
+    path: "/api/v1/portfolio/recalculate",
+  },
+  get_holdings: {
+    method: "GET",
+    path: "/api/v1/holdings",
+  },
+  get_holding: {
+    method: "GET",
+    path: "/api/v1/holdings/item",
+  },
+  get_asset_holdings: {
+    method: "GET",
+    path: "/api/v1/holdings/by-asset",
+  },
+  get_historical_valuations: {
+    method: "GET",
+    path: "/api/v1/valuations/history",
+  },
+  get_latest_valuations: {
+    method: "GET",
+    path: "/api/v1/valuations/latest",
+  },
+  get_portfolio_allocations: {
+    method: "GET",
+    path: "/api/v1/allocations",
+  },
+  get_holdings_by_allocation: {
+    method: "GET",
+    path: "/api/v1/allocations/holdings",
+  },
+  calculate_accounts_simple_performance: {
+    method: "POST",
+    path: "/api/v1/performance/accounts/simple",
+  },
+  calculate_performance_history: {
+    method: "POST",
+    path: "/api/v1/performance/history",
+  },
+  calculate_performance_summary: {
+    method: "POST",
+    path: "/api/v1/performance/summary",
+  },
+  get_income_summary: {
+    method: "GET",
+    path: "/api/v1/income/summary",
+  },
 } as const satisfies Record<
   string,
   { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string }

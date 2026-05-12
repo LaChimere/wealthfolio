@@ -36,6 +36,88 @@ export async function invokeSidecarCommand<T>({
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
+    case "update_portfolio":
+    case "recalculate_portfolio":
+      return await invokePostOptionalJson<T>({ command, payload, sidecar, fetchImpl });
+    case "get_holdings":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["accountId", optionalString(payload?.accountId)]],
+      });
+    case "get_holding":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["assetId", optionalString(payload?.assetId)],
+        ],
+      });
+    case "get_asset_holdings":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["assetId", optionalString(payload?.assetId)]],
+      });
+    case "get_historical_valuations":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["startDate", optionalString(payload?.startDate)],
+          ["endDate", optionalString(payload?.endDate)],
+        ],
+      });
+    case "get_latest_valuations":
+      return await invokeGetWithRepeatedQuery<T>({
+        command,
+        sidecar,
+        fetchImpl,
+        repeatedKey: "accountIds[]",
+        values: optionalStringArray(payload?.accountIds),
+      });
+    case "get_portfolio_allocations":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["accountId", optionalString(payload?.accountId)]],
+      });
+    case "get_holdings_by_allocation":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["taxonomyId", optionalString(payload?.taxonomyId)],
+          ["categoryId", optionalString(payload?.categoryId)],
+        ],
+      });
+    case "calculate_accounts_simple_performance":
+    case "calculate_performance_history":
+    case "calculate_performance_summary":
+      return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
+    case "get_income_summary":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["accountId", optionalString(payload?.accountId)]],
+      });
   }
 
   const unimplementedCommand: never = command;
@@ -121,6 +203,105 @@ async function invokeDeleteAccount<T>({
   });
 }
 
+async function invokeGetWithQuery<T>({
+  command,
+  sidecar,
+  fetchImpl,
+  params,
+}: {
+  command: ElectronCommand;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  params: Array<[string, string | undefined]>;
+}): Promise<T> {
+  const url = new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl);
+  for (const [key, value] of params) {
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url,
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeGetWithRepeatedQuery<T>({
+  command,
+  sidecar,
+  fetchImpl,
+  repeatedKey,
+  values,
+}: {
+  command: ElectronCommand;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  repeatedKey: string;
+  values: string[] | undefined;
+}): Promise<T> {
+  const url = new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl);
+  for (const value of values ?? []) {
+    url.searchParams.append(repeatedKey, value);
+  }
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url,
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokePostOptionalJson<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "update_portfolio" | "recalculate_portfolio">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+  });
+}
+
+async function invokePostJson<T>({
+  command,
+  body,
+  sidecar,
+  fetchImpl,
+}: {
+  command: ElectronCommand;
+  body: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: JSON.stringify(body),
+    },
+  });
+}
+
 async function invokeSimpleGet<T>({
   command,
   sidecar,
@@ -175,12 +356,18 @@ async function fetchSidecarJson<T>({
   init: RequestInit;
 }): Promise<T> {
   let response: Response;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Authorization: `Bearer ${sidecar.token}`,
+  };
+  if (init.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
   try {
     response = await fetchImpl(url, {
       ...init,
       headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${sidecar.token}`,
+        ...headers,
         ...init.headers,
       },
     });
@@ -197,11 +384,12 @@ async function fetchSidecarJson<T>({
     );
   }
 
-  if (response.status === 204) {
+  if (response.status === 204 || response.status === 202) {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
 function sanitizeCommandError(error: string, sidecar: Pick<SidecarHandle, "token">): string {
@@ -229,6 +417,16 @@ function requireString(value: unknown, field: string, command: ElectronCommand):
     throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
   }
   return value;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : undefined;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

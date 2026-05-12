@@ -75,6 +75,11 @@ describe("Electron sidecar command proxy", () => {
     const [url, init] = calls[0];
     expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts");
     expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
     expect(init?.body).toBe(JSON.stringify({ name: "Brokerage", currency: "USD" }));
   });
 
@@ -185,7 +190,194 @@ describe("Electron sidecar command proxy", () => {
     const [url, init] = calls[0];
     expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/settings");
     expect(init?.method).toBe("PUT");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
     expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
+  });
+
+  test("proxies portfolio update commands that return accepted with no body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(new Response(null, { status: 202 }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_portfolio",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "recalculate_portfolio",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/portfolio/update", "POST"],
+      ["http://127.0.0.1:18444/api/v1/portfolio/recalculate", "POST"],
+    ]);
+  });
+
+  test("proxies holdings read commands with encoded query parameters", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { accountId: "account 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holding",
+      payload: { accountId: "account 1", assetId: "asset/2" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_holdings",
+      payload: { assetId: "asset/2" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/holdings?accountId=account+1",
+      "http://127.0.0.1:18444/api/v1/holdings/item?accountId=account+1&assetId=asset%2F2",
+      "http://127.0.0.1:18444/api/v1/holdings/by-asset?assetId=asset%2F2",
+    ]);
+  });
+
+  test("proxies valuation and allocation read commands", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_historical_valuations",
+      payload: { accountId: "account-1", startDate: "2024-01-01", endDate: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_latest_valuations",
+      payload: { accountIds: ["account-1", "account 2"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_portfolio_allocations",
+      payload: { accountId: "account-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings_by_allocation",
+      payload: {
+        accountId: "account-1",
+        taxonomyId: "taxonomy-1",
+        categoryId: "category/1",
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/valuations/history?accountId=account-1&startDate=2024-01-01&endDate=2024-02-01",
+      "http://127.0.0.1:18444/api/v1/valuations/latest?accountIds%5B%5D=account-1&accountIds%5B%5D=account+2",
+      "http://127.0.0.1:18444/api/v1/allocations?accountId=account-1",
+      "http://127.0.0.1:18444/api/v1/allocations/holdings?accountId=account-1&taxonomyId=taxonomy-1&categoryId=category%2F1",
+    ]);
+  });
+
+  test("proxies performance commands with JSON request bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "calculate_accounts_simple_performance",
+      payload: { accountIds: ["account-1"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "calculate_performance_history",
+      payload: { itemType: "ACCOUNT", itemId: "account-1", startDate: "2024-01-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "calculate_performance_summary",
+      payload: { itemType: "ACCOUNT", itemId: "account-1", endDate: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/performance/accounts/simple",
+        "POST",
+        JSON.stringify({ accountIds: ["account-1"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/performance/history",
+        "POST",
+        JSON.stringify({ itemType: "ACCOUNT", itemId: "account-1", startDate: "2024-01-01" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/performance/summary",
+        "POST",
+        JSON.stringify({ itemType: "ACCOUNT", itemId: "account-1", endDate: "2024-02-01" }),
+      ],
+    ]);
+    for (const [, init] of calls) {
+      expect(init?.headers).toEqual({
+        Accept: "application/json",
+        Authorization: "Bearer sidecar-token",
+        "Content-Type": "application/json",
+      });
+    }
+  });
+
+  test("proxies income summary with optional account filtering", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      payload: { accountId: "account-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/income/summary?accountId=account-1",
+      "http://127.0.0.1:18444/api/v1/income/summary",
+    ]);
   });
 
   test("rejects malformed settings update payloads before fetch", async () => {
