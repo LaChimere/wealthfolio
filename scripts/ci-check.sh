@@ -80,7 +80,7 @@ while IFS= read -r file; do
     *.ts|*.tsx|*.js|*.jsx|*.css|*.mjs|*.cjs|*.json)
       RUN_FRONTEND=true
       ;;
-    package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json)
+    package.json|bun.lock|tsconfig*.json)
       RUN_FRONTEND=true
       ;;
     vite.config.*|eslint.config.*|prettier.config.*)
@@ -134,23 +134,23 @@ if [[ "$RUN_RUST" == "true" ]]; then
 fi
 
 if [[ "$RUN_FRONTEND" == "true" ]]; then
-  echo "=== pnpm build:types ===" >&2
-  pnpm run build:types
+  echo "=== bun build:types ===" >&2
+  bun run build:types
 
-  echo "=== pnpm format:check ===" >&2
-  pnpm format:check
+  echo "=== bun format:check ===" >&2
+  bun run format:check
 
-  echo "=== pnpm lint ===" >&2
-  pnpm lint
+  echo "=== bun lint ===" >&2
+  bun run lint
 
-  echo "=== pnpm type-check ===" >&2
-  pnpm type-check
+  echo "=== bun type-check ===" >&2
+  bun run type-check
 
   if [[ "$FULL" == "true" ]]; then
-    echo "=== pnpm test ===" >&2
-    pnpm test
+    echo "=== bun test ===" >&2
+    bun run test
 
-    echo "=== pnpm build ===" >&2
-    pnpm build
+    echo "=== bun build ===" >&2
+    bun run build
   fi
 fi

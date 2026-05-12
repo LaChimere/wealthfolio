@@ -6,16 +6,16 @@
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Start development server
-npm run dev:server
+bun run dev:server
 
 # Build for production
-npm run build
+bun run build
 
 # Package addon
-npm run bundle
+bun run bundle
 ```
 
 ## Features

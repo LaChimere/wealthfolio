@@ -1,7 +1,7 @@
 {
   "build": {
-    "beforeDevCommand": "node ./apps/tauri/scripts/sync-ios-composer-icon.mjs && pnpm --filter frontend dev:tauri",
-    "beforeBuildCommand": "node ./apps/tauri/scripts/sync-ios-composer-icon.mjs && pnpm --filter frontend build:tauri",
+    "beforeDevCommand": "node ./apps/tauri/scripts/sync-ios-composer-icon.mjs && bun run --cwd apps/frontend dev:tauri",
+    "beforeBuildCommand": "node ./apps/tauri/scripts/sync-ios-composer-icon.mjs && bun run --cwd apps/frontend build:tauri",
     "frontendDist": "../../dist",
     "devUrl": "http://localhost:1420"
   },

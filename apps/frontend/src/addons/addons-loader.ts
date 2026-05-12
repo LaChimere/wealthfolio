@@ -42,7 +42,7 @@ export async function loadAllAddons(): Promise<void> {
       }
     } else if (import.meta.env.DEV) {
       logger.info(
-        "ℹ️ Addon development mode skipped. Run `pnpm dev:addons` or set VITE_ENABLE_ADDON_DEV_MODE=true to enable it.",
+        "ℹ️ Addon development mode skipped. Run `bun run dev:addons` or set VITE_ENABLE_ADDON_DEV_MODE=true to enable it.",
       );
     }
 

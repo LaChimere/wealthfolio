@@ -130,7 +130,7 @@ See [ROADMAP.md](./ROADMAP.md).
 Ensure you have the following installed on your machine:
 
 - [Node.js](https://nodejs.org/)
-- [pnpm](https://pnpm.io/)
+- [Bun](https://bun.com/)
 - [Rust](https://www.rust-lang.org/)
 - [Tauri](https://tauri.app/)
 
@@ -143,10 +143,10 @@ Ensure you have the following installed on your machine:
    cd wealthfolio
    ```
 
-2. **Install dependencies using pnpm**:
+2. **Install dependencies using Bun**:
 
    ```bash
-   pnpm install
+   bun install
    ```
 
 3. **Setup environment configuration**:
@@ -170,7 +170,7 @@ Ensure you have the following installed on your machine:
 Build and run the desktop application using Tauri:
 
 ```bash
-pnpm tauri dev
+bun tauri dev
 ```
 
 #### Addon Development Mode
@@ -180,13 +180,13 @@ Addon hot reload servers now start only when you explicitly opt in.
 **For desktop development with Tauri:**
 
 ```bash
-VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev
+VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
 ```
 
 **For browser-only development (Vite only, no Tauri):**
 
 ```bash
-pnpm dev:addons
+bun run dev:addons
 ```
 
 You can also set `VITE_ENABLE_ADDON_DEV_MODE=true` in your `.env` file to
@@ -197,7 +197,7 @@ persist the setting.
 Build the application for production:
 
 ```bash
-pnpm tauri build
+bun tauri build
 ```
 
 ### Web Mode (Browser + REST API server)
@@ -220,7 +220,7 @@ Run the web UI with a local Axum server with one command.
 2. **Start both backend and Vite dev server**:
 
    ```bash
-   pnpm run dev:web
+   bun run dev:web
    ```
 
    The Vite dev server runs at `http://localhost:1420` and proxies API calls to
@@ -366,7 +366,7 @@ docker build -t wealthfolio .
 
 The build process:
 
-1. Builds frontend assets from source (`pnpm install` + `pnpm vite build`)
+1. Builds frontend assets from source (`bun install` + `bun run build`)
 2. Compiles Rust backend from source (`cargo build --release`)
 3. Creates minimal Alpine-based image with only the runtime artifacts
 
@@ -546,20 +546,20 @@ functionality with custom features.
 1. **Create a new addon**:
 
    ```bash
-   npx @wealthfolio/addon-dev-tools create my-addon
+   bun x @wealthfolio/addon-dev-tools create my-addon
    cd my-addon
-   npm install
+   bun install
    ```
 
 2. **Start development server**:
 
    ```bash
-   npm run dev:server
+   bun run dev:server
    ```
 
 3. **Start Wealthfolio in addon development mode** (in another terminal):
    ```bash
-   VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev
+   VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
    ```
 
 Your addon will be automatically discovered and loaded with hot reload support!
@@ -625,7 +625,7 @@ for maintained addon examples including:
 - **TypeScript**: Typed superset of JavaScript.
 - **ESLint**: Pluggable linting utility for JavaScript and JSX.
 - **Prettier**: Code formatter.
-- **pnpm**: Fast, disk space efficient package manager.
+- **Bun**: JavaScript runtime and package manager.
 - **Turborepo**: High-performance build system for JavaScript and TypeScript
   codebases.
 
@@ -665,8 +665,8 @@ wealthfolio/
 ├── e2e/                         # End-to-end tests
 ├── scripts/                     # Build and dev scripts
 ├── Cargo.toml                   # Rust workspace config
-├── package.json                 # Node.js dependencies
-├── pnpm-workspace.yaml          # pnpm workspace config
+├── package.json                 # JavaScript workspace and scripts
+├── bun.lock                     # Bun lockfile
 └── tsconfig.json                # TypeScript config
 ```
 

@@ -127,4 +127,4 @@ process.on("SIGTERM", () => shutdownAndExit(143));
 // Start backend and Vite
 process.env.WF_ENABLE_VITE_PROXY = "true";
 spawnNamed("server", "cargo", ["run", "--manifest-path", "apps/server/Cargo.toml"]);
-spawnNamed("vite", "pnpm", ["--filter", "frontend", "dev"]);
+spawnNamed("vite", "bun", ["run", "--cwd", "apps/frontend", "dev"]);

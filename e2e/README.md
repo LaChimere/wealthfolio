@@ -8,7 +8,7 @@ frontend and backend must be running against a fresh database.
 
 ## Prerequisites
 
-- `pnpm` installed
+- `Bun` installed
 - Rust toolchain installed (for the backend server)
 - Chrome installed (Playwright uses the system Chrome)
 
@@ -23,13 +23,13 @@ prepares a fresh database, starts the web app, waits for both servers, runs
 Playwright, and shuts everything down.
 
 ```bash
-pnpm test:e2e
+bun run test:e2e
 ```
 
 To open the Playwright UI instead:
 
 ```bash
-pnpm test:e2e:ui
+bun run test:e2e:ui
 ```
 
 ---
@@ -54,7 +54,7 @@ this every time** before starting the server — it ensures test isolation.
 **Option A — watch the terminal output directly:**
 
 ```bash
-pnpm run dev:web
+bun run dev:web
 ```
 
 Wait until you see Vite's "ready in Xms" and the Rust server binding messages,
@@ -63,7 +63,7 @@ then move on to Step 3 in a separate terminal.
 **Option B — redirect output to a log file and use the wait script:**
 
 ```bash
-pnpm run dev:web > /tmp/wealthfolio-dev2.log 2>&1 &
+bun run dev:web > /tmp/wealthfolio-dev2.log 2>&1 &
 ./scripts/wait-for-both-servers-to-be-ready.sh
 ```
 
@@ -81,16 +81,16 @@ file, not from a live terminal.
 
 ```bash
 # Run a specific spec file
-npx playwright test e2e/10-symbol-mapping-validation.spec.ts
+bun x playwright test e2e/10-symbol-mapping-validation.spec.ts
 
 # Run with browser visible (useful for debugging)
-npx playwright test e2e/10-symbol-mapping-validation.spec.ts --headed
+bun x playwright test e2e/10-symbol-mapping-validation.spec.ts --headed
 
 # Run all tests
-npx playwright test
+bun x playwright test
 
 # Run and open the HTML report afterwards
-npx playwright test && npx playwright show-report
+bun x playwright test && bun x playwright show-report
 ```
 
 ---
@@ -102,7 +102,7 @@ npx playwright test && npx playwright show-report
   silently skip asset creation and tests may fail for unrelated reasons.
 - **Do not run E2E tests against the Tauri desktop app.** The tests are
   hardcoded to `http://localhost:1420`.
-- **Do not run E2E tests while the Tauri dev server (`pnpm tauri dev`) is
+- **Do not run E2E tests while the Tauri dev server (`bun tauri dev`) is
   running** on the same ports — they conflict.
 - Tests run **serially** (1 worker, serial mode). Do not try to parallelize
   them.
@@ -131,10 +131,10 @@ npx playwright test && npx playwright show-report
 
 ```bash
 # Run with Playwright inspector (step through actions)
-npx playwright test e2e/<spec>.spec.ts --debug
+bun x playwright test e2e/<spec>.spec.ts --debug
 
 # Show the last HTML report
-npx playwright show-report
+bun x playwright show-report
 
 # Record a trace for a failing test (trace is saved on retry)
 # Already configured in playwright.config.ts: trace: "on-first-retry"

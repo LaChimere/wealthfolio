@@ -15,11 +15,11 @@ Key directories:
 
 ## Quick Commands
 
-- Dev desktop: `pnpm tauri dev`
-- Dev web: `pnpm run dev:web`
-- Tests: `pnpm test` | `cargo test`
-- Type check: `pnpm type-check`
-- Lint: `pnpm lint`
+- Dev desktop: `bun tauri dev`
+- Dev web: `bun run dev:web`
+- Tests: `bun run test` | `cargo test`
+- Type check: `bun run type-check`
+- Lint: `bun run lint`
 
 ## Plan Mode
 

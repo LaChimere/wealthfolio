@@ -49,7 +49,7 @@ See the [README](README.md#getting-started) for detailed setup instructions.
 Install the tracked Git hooks to run CI-equivalent checks before `git push`:
 
 ```bash
-pnpm hooks:install
+bun run hooks:install
 ```
 
 Git does not enable repository hooks automatically, so each contributor must opt

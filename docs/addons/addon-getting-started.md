@@ -4,16 +4,16 @@
 # Check Node.js version (requires 20+)
 node --version
 
-# Check pnpm
-pnpm --version
+# Check Bun
+bun --version
 
-# Install pnpm if needed
-npm install -g pnpm
+# Install Bun if needed
+curl -fsSL https://bun.sh/install | bash
 ```
 
 Requirements:
 
-- Node.js 20+ and pnpm
+- Bun 1.3+ and Node.js 20+
 - Wealthfolio desktop app (optional but recommended: running in development mode
   for live reload and testing)
 - Basic TypeScript and React knowledge
@@ -30,10 +30,10 @@ git clone https://github.com/wealthfolio/wealthfolio.git
 cd wealthfolio
 
 # Install dependencies
-pnpm install
+bun install
 
 # Start in addon development mode
-VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev
+VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
 ```
 
 This enables:
@@ -44,7 +44,7 @@ This enables:
 - Console logging for development
 
 > **Note:** For browser-only development (without Tauri), you can use
-> `pnpm dev:addons` instead.
+> `bun run dev:addons` instead.
 
 ## Create New Addon
 
@@ -53,11 +53,11 @@ This enables:
 cd ~/Documents/WealthfolioAddons
 
 # Create addon using CLI
-npx @wealthfolio/addon-dev-tools create hello-world-addon
+bun x @wealthfolio/addon-dev-tools create hello-world-addon
 
 # Navigate and install
 cd hello-world-addon
-pnpm install
+bun install
 ```
 
 This will scaffold a new addon project with the following structure:
@@ -154,7 +154,7 @@ export default function enable(ctx: AddonContext) {
 
 ```bash
 # Start development server (recommended)
-pnpm dev:server
+bun run dev:server
 ```
 
 Output:
@@ -177,18 +177,18 @@ Watching for changes...
 ### Available Commands
 
 ```bash
-pnpm dev:server   # Start development server (recommended)
-pnpm build        # Production build
-pnpm type-check   # Run TypeScript checks
-pnpm lint         # Run ESLint
-pnpm format       # Run Prettier
-pnpm bundle       # Bundle addon for distribution
+bun run dev:server   # Start development server (recommended)
+bun run build        # Production build
+bun run type-check   # Run TypeScript checks
+bun run lint         # Run ESLint
+bun run format       # Run Prettier
+bun run bundle       # Bundle addon for distribution
 ```
 
 Verify in Wealthfolio:
 
 1. Open Wealthfolio in addon development mode with
-   `VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev`
+   `VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev`
 2. Check sidebar for "Hello World"
 3. Click to load addon page
 4. Check console for log message
@@ -201,7 +201,7 @@ For data access, it's recommended to use
 First, install TanStack Query in your addon:
 
 ```bash
-pnpm add @tanstack/react-query@^5.62.7
+bun add @tanstack/react-query@^5.62.7
 ```
 
 Update `src/addon.tsx` to access portfolio data using TanStack Query:
@@ -355,10 +355,10 @@ Update `manifest.json` to include account access:
 
 ```bash
 # Build for production
-pnpm build
+bun run build
 
 # Package for distribution
-pnpm bundle
+bun run bundle
 ```
 
 Creates `dist/hello-world-addon.zip` for installation.
@@ -435,13 +435,13 @@ Create `.vscode/settings.json`:
 
 ```bash
 # Type checking
-pnpm type-check
+bun run type-check
 
 # Linting
-pnpm lint
+bun run lint
 
 # Formatting
-pnpm format
+bun run format
 ```
 
 ## Configuration Files
@@ -456,7 +456,7 @@ pnpm format
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "bundle": "pnpm build && zip -r addon.zip manifest.json dist/"
+    "bundle": "bun run build && zip -r addon.zip manifest.json dist/"
   }
 }
 ```

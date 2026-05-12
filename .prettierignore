@@ -40,7 +40,7 @@ crates/
 *.eot
 
 # Lock files
-pnpm-lock.yaml
+bun.lock
 package-lock.json
 yarn.lock
 

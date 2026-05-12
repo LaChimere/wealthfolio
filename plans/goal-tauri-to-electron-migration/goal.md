@@ -1,61 +1,102 @@
 # Goal State
 
-objective: "对整个项目进行深度调研，了解这个项目是如何实现的。然后我需要你将这个基于 Tauri 的项目改造成基于 electron 的。我们的依赖需要尽量用当前最新的版本。项目需要用 typescript 6 （如果最新的 electron 支持的话），且用 bun 来进行管理。这是一个大型的迁移工程，你需要在实现过程中确保没有破坏项目的功能性。可以及时添加 UT、UI 等测试来确保没有破坏功能性，以及确保 high quality。 你可以参考 @~/Projects/volare/ 里面 biome、lefthook、tsconfig 等来确保项目的代码规范。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
-status: active
-slug: "goal-tauri-to-electron-migration"
-turns_used: 3
-turn_budget: null
-docs_update_approved: true
-gate_policy: "Standing approval: self-review, rubber-duck/code-review/pr-review-toolkit:review-pr refine until no blocking comments, then auto-advance."
-created_at: "2026-05-12T23:20:57.639+08:00"
-updated_at: "2026-05-12T23:46:00+08:00"
+| Field                | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| objective            | 对整个项目进行深度调研，了解这个项目是如何实现的。然后我需要你将这个基于 Tauri 的项目改造成基于 electron 的。我们的依赖需要尽量用当前最新的版本。项目需要用 typescript 6 （如果最新的 electron 支持的话），且用 bun 来进行管理。这是一个大型的迁移工程，你需要在实现过程中确保没有破坏项目的功能性。可以及时添加 UT、UI 等测试来确保没有破坏功能性，以及确保 high quality。 你可以参考 @~/Projects/volare/ 里面 biome、lefthook、tsconfig 等来确保项目的代码规范。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。 |
+| status               | active                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| slug                 | goal-tauri-to-electron-migration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| turns_used           | 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| turn_budget          | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| docs_update_approved | true                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| gate_policy          | Standing approval: self-review, rubber-duck/code-review/pr-review-toolkit:review-pr refine until no blocking comments, then auto-advance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| created_at           | 2026-05-12T23:20:57.639+08:00                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| updated_at           | 2026-05-13T00:05:00+08:00                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Acceptance criteria
 
 ### User-visible behavior
 
-- Desktop app runs on Electron instead of Tauri while preserving the existing Wealthfolio UI and desktop behavior.
-- Web mode remains available and functionally equivalent to the pre-migration web build.
-- Existing local SQLite data, backups, settings, add-ons, secrets, sync flows, update UX, deep links, file dialogs, and native shell interactions either keep working or have documented, tested migration behavior.
+- Desktop app runs on Electron instead of Tauri while preserving the existing
+  Wealthfolio UI and desktop behavior.
+- Web mode remains available and functionally equivalent to the pre-migration
+  web build.
+- Existing local SQLite data, backups, settings, add-ons, secrets, sync flows,
+  update UX, deep links, file dialogs, and native shell interactions either keep
+  working or have documented, tested migration behavior.
 
 ### Implementation scope
 
-- Replace Tauri desktop runtime, plugins, IPC, menu, updater, deep-link, file/dialog/shell, logging, window-state, and packaging surfaces with Electron equivalents.
-- Preserve the Rust business logic and SQLite storage behavior by keeping `crates/core`, `crates/storage-sqlite`, and related Rust service crates as the source of truth until a separately justified replacement exists.
-- Introduce an Electron main/preload/IPC layer and a frontend Electron adapter without breaking the existing web adapter seam.
-- Move JavaScript/TypeScript package management and scripts to Bun and use current compatible versions, including TypeScript 6 if Electron and repository tooling support it.
-- Adopt Biome, Lefthook, and TypeScript configuration patterns informed by `/Users/lachimere/Projects/volare`, adapted to this monorepo.
-- Update directly related documentation, including `AGENTS.md`, architecture docs, addon docs, and release/dev docs as behavior changes.
+- Replace Tauri desktop runtime, plugins, IPC, menu, updater, deep-link,
+  file/dialog/shell, logging, window-state, and packaging surfaces with Electron
+  equivalents.
+- Preserve the Rust business logic and SQLite storage behavior by keeping
+  `crates/core`, `crates/storage-sqlite`, and related Rust service crates as the
+  source of truth until a separately justified replacement exists.
+- Introduce an Electron main/preload/IPC layer and a frontend Electron adapter
+  without breaking the existing web adapter seam.
+- Move JavaScript/TypeScript package management and scripts to Bun and use
+  current compatible versions, including TypeScript 6 if Electron and repository
+  tooling support it.
+- Adopt Biome, Lefthook, and TypeScript configuration patterns informed by
+  `/Users/lachimere/Projects/volare`, adapted to this monorepo.
+- Update directly related documentation, including `AGENTS.md`, architecture
+  docs, addon docs, and release/dev docs as behavior changes.
 
 ### Validation
 
-- Keep or expand adapter parity tests so Electron IPC commands, frontend shared adapters, and web routes remain aligned.
-- Add targeted unit/integration/UI tests around new Electron bridge behavior before removing the Tauri path.
-- Run relevant Bun, TypeScript, lint/format, frontend tests, Rust tests, build checks, and Electron package/build checks at each migration slice.
-- Use repeated self-review, rubber-duck review, code-review, and `pr-review-toolkit:review-pr` passes before advancing major gates or removing legacy paths.
+- Keep or expand adapter parity tests so Electron IPC commands, frontend shared
+  adapters, and web routes remain aligned.
+- Add targeted unit/integration/UI tests around new Electron bridge behavior
+  before removing the Tauri path.
+- Run relevant Bun, TypeScript, lint/format, frontend tests, Rust tests, build
+  checks, and Electron package/build checks at each migration slice.
+- Use repeated self-review, rubber-duck review, code-review, and
+  `pr-review-toolkit:review-pr` passes before advancing major gates or removing
+  legacy paths.
 
 ### Docs/status
 
-- Maintain `plans/goal-tauri-to-electron-migration/{research.md,design.md,plan.md,todo.md,goal.md}` as the migration status anchor.
-- Update repository docs when confirmed changes make Tauri/pnpm instructions stale.
+- Maintain
+  `plans/goal-tauri-to-electron-migration/{research.md,design.md,plan.md,todo.md,goal.md}`
+  as the migration status anchor.
+- Update repository docs when confirmed changes make Tauri/pnpm instructions
+  stale.
 - Keep `AGENTS.md` aligned with the current architecture and run targets.
 
 ### Deferred/out of scope
 
-- Rewriting Rust business logic in TypeScript is out of scope unless later evidence shows Electron cannot safely reuse the existing Rust crates. reason=out_of_scope
-- Mobile app parity is out of scope for the Electron migration because Electron targets desktop. reason=out_of_scope
+- Rewriting Rust business logic in TypeScript is out of scope unless later
+  evidence shows Electron cannot safely reuse the existing Rust crates.
+  reason=out_of_scope
+- Mobile app parity is out of scope for the Electron migration because Electron
+  targets desktop. reason=out_of_scope
 - Cosmetic UI redesign is out of scope. reason=out_of_scope
 
 ## Progress log
 
-- Turn 0: Goal registered. Initial research found an adapter-based frontend seam, a Tauri/Rust desktop shell with core Rust services, and pnpm/ESLint/Prettier tooling that must be migrated in stages.
-- Turn 1: Created migration state artifacts, selected the side-by-side Electron migration strategy, incorporated rubber-duck review feedback, and validated the current adapter parity test (`pnpm --filter frontend exec vitest run src/adapters/adapter-command-parity.test.ts --silent`).
-- Turn 2: Documented the Electron migration architecture, including the local Rust sidecar profile, Tauri-compatible desktop data roots, keyring continuity, native feature replacements, updater/signing direction, and OAuth/deep-link strategy.
-- Turn 3: Added a frontend runtime-boundary guardrail test that locks current non-adapter Tauri imports to an explicit allowlist and passed targeted lint/test plus code review.
+- Turn 0: Goal registered. Initial research found an adapter-based frontend
+  seam, a Tauri/Rust desktop shell with core Rust services, and
+  pnpm/ESLint/Prettier tooling that must be migrated in stages.
+- Turn 1: Created migration state artifacts, selected the side-by-side Electron
+  migration strategy, incorporated rubber-duck review feedback, and validated
+  the current adapter parity test
+  (`pnpm --filter frontend exec vitest run src/adapters/adapter-command-parity.test.ts --silent`).
+- Turn 2: Documented the Electron migration architecture, including the local
+  Rust sidecar profile, Tauri-compatible desktop data roots, keyring continuity,
+  native feature replacements, updater/signing direction, and OAuth/deep-link
+  strategy.
+- Turn 3: Added a frontend runtime-boundary guardrail test that locks current
+  non-adapter Tauri imports to an explicit allowlist and passed targeted
+  lint/test plus code review.
+- Turn 4: Migrated JavaScript workspace installation, scripts, CI/release
+  workflows, Docker web build, addon tooling, and developer docs from pnpm to
+  Bun while keeping Tauri commands available through Bun.
 
 ## Deferred items
 
-- Mobile-specific Tauri features (iOS haptics, barcode scanner, ASWebAuthenticationSession, mobile share) will not be ported to Electron. reason=out_of_scope
+- Mobile-specific Tauri features (iOS haptics, barcode scanner,
+  ASWebAuthenticationSession, mobile share) will not be ported to Electron.
+  reason=out_of_scope
 
 ## Blockers
 

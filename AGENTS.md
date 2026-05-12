@@ -80,15 +80,15 @@ crates/
 
 ## Run Targets
 
-| Task         | Command            |
-| ------------ | ------------------ |
-| Desktop dev  | `pnpm tauri dev`   |
-| Web dev      | `pnpm run dev:web` |
-| Tests (TS)   | `pnpm test`        |
-| Tests (Rust) | `cargo test`       |
-| Type check   | `pnpm type-check`  |
-| Lint         | `pnpm lint`        |
-| All checks   | `pnpm check`       |
+| Task         | Command              |
+| ------------ | -------------------- |
+| Desktop dev  | `bun tauri dev`      |
+| Web dev      | `bun run dev:web`    |
+| Tests (TS)   | `bun run test`       |
+| Tests (Rust) | `cargo test`         |
+| Type check   | `bun run type-check` |
+| Lint         | `bun run lint`       |
+| All checks   | `bun run check`      |
 
 ---
 
@@ -155,8 +155,8 @@ Frontend → Adapter (tauri/web) → Command wrapper
 
 Before completing any task:
 
-- [ ] Builds: `pnpm build` or `pnpm tauri dev` or `cargo check`
-- [ ] Tests pass: `pnpm test` and/or `cargo test`
+- [ ] Builds: `bun run build` or `bun tauri dev` or `cargo check`
+- [ ] Tests pass: `bun run test` and/or `cargo test`
 - [ ] Both desktop and web compile if touching shared code
 - [ ] Changes are minimal and surgical
 

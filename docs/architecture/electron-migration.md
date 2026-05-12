@@ -27,9 +27,9 @@ Renderer (React)
   -> SQLite/keyring/network providers
 ```
 
-The renderer must not receive raw Node.js access, backend tokens, or the
-sidecar base URL. Electron main owns sidecar lifecycle, native desktop
-integration, and sidecar credentials.
+The renderer must not receive raw Node.js access, backend tokens, or the sidecar
+base URL. Electron main owns sidecar lifecycle, native desktop integration, and
+sidecar credentials.
 
 ## Rust sidecar profile
 
@@ -44,9 +44,9 @@ profile or startup builder with these properties:
 - use Rust keyring-backed secrets instead of the server `secrets.json` store;
 - expose domain events through SSE or an equivalent main-mediated event bridge.
 
-The current web server defaults are intentionally different: `apps/server`
-reads `WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_FILE`, auth, and CORS from
-environment variables for self-hosted deployments.
+The current web server defaults are intentionally different: `apps/server` reads
+`WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_FILE`, auth, and CORS from environment
+variables for self-hosted deployments.
 
 ## Data root compatibility
 
@@ -57,20 +57,20 @@ starting the sidecar.
 
 The Tauri app identifier is `com.teymz.wealthfolio`.
 
-| Platform | Tauri app data root | SQLite path | Log path |
-|---|---|---|---|
-| macOS | `$HOME/Library/Application Support/com.teymz.wealthfolio` | `$HOME/Library/Application Support/com.teymz.wealthfolio/app.db` | `$HOME/Library/Logs/com.teymz.wealthfolio` |
-| Linux | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio/app.db` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio/logs` |
-| Windows | `%APPDATA%\\com.teymz.wealthfolio` | `%APPDATA%\\com.teymz.wealthfolio\\app.db` | `%LOCALAPPDATA%\\com.teymz.wealthfolio\\logs` |
+| Platform | Tauri app data root                                          | SQLite path                                                         | Log path                                                          |
+| -------- | ------------------------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| macOS    | `$HOME/Library/Application Support/com.teymz.wealthfolio`    | `$HOME/Library/Application Support/com.teymz.wealthfolio/app.db`    | `$HOME/Library/Logs/com.teymz.wealthfolio`                        |
+| Linux    | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio/app.db` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio/logs` |
+| Windows  | `%APPDATA%\\com.teymz.wealthfolio`                           | `%APPDATA%\\com.teymz.wealthfolio\\app.db`                          | `%LOCALAPPDATA%\\com.teymz.wealthfolio\\logs`                     |
 
 Electron must not silently initialize its default `app.getPath('userData')`
-directory as the Wealthfolio data root unless it is explicitly set to the
-legacy Tauri path or a tested one-shot migration is implemented.
+directory as the Wealthfolio data root unless it is explicitly set to the legacy
+Tauri path or a tested one-shot migration is implemented.
 
 ## Secrets and keyring
 
-Desktop secrets must continue using the same Rust keyring namespace as the
-Tauri app:
+Desktop secrets must continue using the same Rust keyring namespace as the Tauri
+app:
 
 - service key: `wealthfolio_core::secrets::format_service_id(service)`;
 - username: `default`;

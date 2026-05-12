@@ -555,8 +555,8 @@ export default function enable(ctx: AddonContext) {
 
 1. **Build the addon**: Ensure the TypeScript compiles without errors
 2. **Test in development mode**: Run with wealthfolio with
-   `VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev`
-3. cd to the addon dir and run your addons with `pnpm dev:server`
+   `VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev`
+3. cd to the addon dir and run your addons with `bun run dev:server`
 4. **Verify routes**: Check that navigation works with the new `/addons/` prefix
 5. **Test data fetching**: Ensure all API calls work with the new assetId-based
    APIs

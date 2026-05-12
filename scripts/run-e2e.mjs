@@ -48,7 +48,7 @@ const spawnCommand = (command, args, extraEnv = {}) =>
 
 const runPlaywrightTests = (extraArgs = []) =>
   new Promise((resolve, reject) => {
-    const tests = spawnCommand("pnpm", ["exec", "playwright", "test", ...extraArgs]);
+    const tests = spawnCommand("bun", ["x", "playwright", "test", ...extraArgs]);
     tests.once("error", reject);
     tests.once("exit", (code) => {
       if (code === 0) {
@@ -62,7 +62,7 @@ const runPlaywrightTests = (extraArgs = []) =>
 const run = async () => {
   await prepE2eEnv();
 
-  const devServer = spawnCommand("pnpm", ["run", "dev:web"], {
+  const devServer = spawnCommand("bun", ["run", "dev:web"], {
     WEALTHFOLIO_E2E: "1",
     WEALTHFOLIO_FIXTURE_DIR: QUOTE_FIXTURE_DIR,
     WEALTHFOLIO_FIXTURE_AS_OF: process.env.WEALTHFOLIO_FIXTURE_AS_OF || "2026-05-12",

@@ -330,7 +330,7 @@ export default defineConfig({
     "dev:server": "wealthfolio dev",
     "clean": "rm -rf dist",
     "package": "mkdir -p dist && zip -r dist/$npm_package_name-$npm_package_version.zip manifest.json dist/ assets/ README.md",
-    "bundle": "pnpm clean && pnpm build && pnpm package",
+    "bundle": "Bun clean && bun run build && bun run package",
     "lint": "tsc --noEmit",
     "type-check": "tsc --noEmit"
   }

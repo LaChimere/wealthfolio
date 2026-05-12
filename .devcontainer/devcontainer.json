@@ -139,7 +139,7 @@
 
   // Use 'postCreateCommand' to run commands after the container is created.
   "postCreateCommand": {
-    "DEPENDENCIES": "yes|pnpm install" // Install project dependencies using pnpm after the container setup
+    "DEPENDENCIES": "yes|bun install" // Install project dependencies using Bun after the container setup
   },
 
   // Use 'postStartCommand' to run commands after the container is started.
