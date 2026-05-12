@@ -155,13 +155,37 @@ export async function invokeSidecarCommand<T>({
     case "get_platforms":
     case "get_broker_sync_states":
     case "get_broker_ingest_states":
+    case "get_device_sync_state":
+    case "device_sync_engine_status":
+    case "device_sync_pairing_source_status":
+    case "device_sync_bootstrap_overwrite_check":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "sync_broker_data":
     case "broker_ingest_run":
     case "sync_broker_connections":
     case "sync_broker_accounts":
     case "sync_broker_activities":
+    case "enable_device_sync":
+    case "reinitialize_device_sync":
+    case "device_sync_bootstrap_snapshot_if_needed":
+    case "device_sync_trigger_cycle":
+    case "device_sync_start_background_engine":
+    case "device_sync_stop_background_engine":
+    case "device_sync_generate_snapshot_now":
+    case "device_sync_cancel_snapshot_upload":
       return await invokeRequestWithoutBody<T>({ command, sidecar, fetchImpl });
+    case "clear_device_sync_data":
+      return await invokeVoidJson<T>({ command, sidecar, fetchImpl });
+    case "device_sync_reconcile_ready_state":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          allowOverwrite:
+            optionalBoolean(payload?.allowOverwrite, "allowOverwrite", command) ?? false,
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "get_import_runs":
     case "get_data_import_runs":
       return await invokeGetWithQuery<T>({
@@ -1203,7 +1227,10 @@ async function invokeVoidJson<T>({
   fetchImpl,
   body,
 }: {
-  command: Extract<ElectronCommand, "store_sync_session" | "clear_sync_session">;
+  command: Extract<
+    ElectronCommand,
+    "store_sync_session" | "clear_sync_session" | "clear_device_sync_data"
+  >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
   body?: Record<string, unknown>;
@@ -1746,6 +1773,10 @@ async function invokeSimpleGet<T>({
     | "get_platforms"
     | "get_broker_sync_states"
     | "get_broker_ingest_states"
+    | "get_device_sync_state"
+    | "device_sync_engine_status"
+    | "device_sync_pairing_source_status"
+    | "device_sync_bootstrap_overwrite_check"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1772,6 +1803,14 @@ async function invokeRequestWithoutBody<T>({
     | "sync_broker_connections"
     | "sync_broker_accounts"
     | "sync_broker_activities"
+    | "enable_device_sync"
+    | "reinitialize_device_sync"
+    | "device_sync_bootstrap_snapshot_if_needed"
+    | "device_sync_trigger_cycle"
+    | "device_sync_start_background_engine"
+    | "device_sync_stop_background_engine"
+    | "device_sync_generate_snapshot_now"
+    | "device_sync_cancel_snapshot_upload"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;

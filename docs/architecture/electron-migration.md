@@ -132,10 +132,13 @@ pending. Device-sync crypto helpers proxy through the sidecar crypto endpoints
 and unwrap server `{ value }` responses to preserve the existing adapter return
 shape. Wealthfolio Connect session, broker sync/listing, subscription/user,
 local broker data, import-run, and broker-sync-profile commands proxy through
-the sidecar Connect endpoints. Snapshot management and holdings CSV import also
-proxy through the sidecar so manual/imported holdings updates stay in Rust.
-Add-on zip payloads are validated as byte arrays in Electron main and forwarded
-to the sidecar as base64 JSON fields. AI chat NDJSON streaming uses dedicated
+the sidecar Connect endpoints. Device-sync state, enable/clear/reinitialize,
+background engine status/start/stop, bootstrap/reconcile, trigger-cycle, and
+snapshot generation/cancellation commands proxy through the sidecar Connect
+device endpoints. Snapshot management and holdings CSV import also proxy through
+the sidecar so manual/imported holdings updates stay in Rust. Add-on zip
+payloads are validated as byte arrays in Electron main and forwarded to the
+sidecar as base64 JSON fields. AI chat NDJSON streaming uses dedicated
 start/cancel IPC channels because it cannot safely use the request/response JSON
 command proxy; Electron main owns the sidecar fetch, streams parsed events only
 to the originating `webContents`, and aborts streams when the owner closes or

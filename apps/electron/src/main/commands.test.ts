@@ -735,6 +735,193 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies device sync state and background engine commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/sync-data")) {
+        return Promise.resolve(jsonResponse(null));
+      }
+      return Promise.resolve(jsonResponse({ path, ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_device_sync_state",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/sync-state", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "enable_device_sync",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/enable", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_device_sync_data",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "reinitialize_device_sync",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/reinitialize", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_engine_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/engine-status", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_pairing_source_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/pairing-source-status", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_bootstrap_overwrite_check",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/bootstrap-overwrite-check", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        payload: { allowOverwrite: true },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/reconcile-ready-state", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_bootstrap_snapshot_if_needed",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/bootstrap-snapshot", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_trigger_cycle",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/trigger-cycle", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_start_background_engine",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/start-background", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_stop_background_engine",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/stop-background", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_generate_snapshot_now",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/generate-snapshot", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_cancel_snapshot_upload",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/cancel-snapshot", ok: true });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/connect/device/sync-state", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/enable", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/sync-data", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/reinitialize", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/engine-status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/pairing-source-status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/bootstrap-overwrite-check", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/device/reconcile-ready-state",
+        "POST",
+        JSON.stringify({ allowOverwrite: true }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/connect/device/bootstrap-snapshot", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/trigger-cycle", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/start-background", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/stop-background", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/generate-snapshot", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/cancel-snapshot", "POST", undefined],
+    ]);
+    const headersWithoutBody = {
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    };
+    const headersWithBody = {
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    };
+    expect(calls.map(([, init], index) => init?.headers ?? `missing-${index}`)).toEqual([
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+    ]);
+  });
+
+  test("defaults and validates device sync reconcile payloads before fetch", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(calls[0]?.[1]?.body).toBe(JSON.stringify({ allowOverwrite: false }));
+
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        payload: { allowOverwrite: "yes" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "allowOverwrite"');
+    expect(calls).toHaveLength(1);
+  });
+
   test("proxies portfolio update commands that return accepted with no body", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

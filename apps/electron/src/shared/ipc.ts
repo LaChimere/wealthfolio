@@ -191,6 +191,62 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/connect/broker-sync-profile",
   },
+  get_device_sync_state: {
+    method: "GET",
+    path: "/api/v1/connect/device/sync-state",
+  },
+  enable_device_sync: {
+    method: "POST",
+    path: "/api/v1/connect/device/enable",
+  },
+  clear_device_sync_data: {
+    method: "DELETE",
+    path: "/api/v1/connect/device/sync-data",
+  },
+  reinitialize_device_sync: {
+    method: "POST",
+    path: "/api/v1/connect/device/reinitialize",
+  },
+  device_sync_engine_status: {
+    method: "GET",
+    path: "/api/v1/connect/device/engine-status",
+  },
+  device_sync_pairing_source_status: {
+    method: "GET",
+    path: "/api/v1/connect/device/pairing-source-status",
+  },
+  device_sync_bootstrap_overwrite_check: {
+    method: "GET",
+    path: "/api/v1/connect/device/bootstrap-overwrite-check",
+  },
+  device_sync_reconcile_ready_state: {
+    method: "POST",
+    path: "/api/v1/connect/device/reconcile-ready-state",
+  },
+  device_sync_bootstrap_snapshot_if_needed: {
+    method: "POST",
+    path: "/api/v1/connect/device/bootstrap-snapshot",
+  },
+  device_sync_trigger_cycle: {
+    method: "POST",
+    path: "/api/v1/connect/device/trigger-cycle",
+  },
+  device_sync_start_background_engine: {
+    method: "POST",
+    path: "/api/v1/connect/device/start-background",
+  },
+  device_sync_stop_background_engine: {
+    method: "POST",
+    path: "/api/v1/connect/device/stop-background",
+  },
+  device_sync_generate_snapshot_now: {
+    method: "POST",
+    path: "/api/v1/connect/device/generate-snapshot",
+  },
+  device_sync_cancel_snapshot_upload: {
+    method: "POST",
+    path: "/api/v1/connect/device/cancel-snapshot",
+  },
   update_portfolio: {
     method: "POST",
     path: "/api/v1/portfolio/update",

@@ -10,7 +10,7 @@
 | docs_update_approved | true                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | gate_policy          | Standing approval: self-review, rubber-duck/code-review/pr-review-toolkit:review-pr refine until no blocking comments, then auto-advance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | created_at           | 2026-05-12T23:20:57.639+08:00                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| updated_at           | 2026-05-13T07:45:00+08:00                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| updated_at           | 2026-05-13T08:20:00+08:00                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Acceptance criteria
 
@@ -205,6 +205,10 @@
   store/restore/clear/status, broker sync triggers/listing, subscription plans,
   user info, local synced accounts/platforms/sync states/import runs, and
   broker-sync profile reads/saves.
+- Turn 34: Added Electron sidecar proxy coverage for device-sync state,
+  enable/clear/reinitialize, background engine status/start/stop,
+  bootstrap/reconcile, trigger-cycle, and snapshot generation/cancellation
+  commands with payload validation for overwrite reconciliation.
 
 ## Deferred items
 
