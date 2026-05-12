@@ -117,14 +117,15 @@ The sidecar command paths cover account list/create/update/delete, settings
 read/update/auto-update preference reads, portfolio update/recalculate, and
 read-only portfolio dashboard data such as holdings, valuations, allocations,
 performance summaries, income summaries, goals, goal funding/plans, and
-retirement planner simulations. The renderer still calls the typed preload IPC
-bridge, Electron main validates each command against an explicit allowlist,
-waits for sidecar readiness, and proxies to the loopback sidecar with the
-per-run bearer token. Sidecar base URLs and tokens must stay confined to
-Electron main; public runtime status and command errors must redact loopback
-URLs and token-shaped values before crossing IPC. Electron app info must use
-sanitized runtime metadata and must not expose desktop DB or log paths to the
-renderer. JSON request bodies must be sent with
+retirement planner simulations. Snapshot management and holdings CSV import also
+proxy through the sidecar so manual/imported holdings updates stay in Rust. The
+renderer still calls the typed preload IPC bridge, Electron main validates each
+command against an explicit allowlist, waits for sidecar readiness, and proxies
+to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
+tokens must stay confined to Electron main; public runtime status and command
+errors must redact loopback URLs and token-shaped values before crossing IPC.
+Electron app info must use sanitized runtime metadata and must not expose
+desktop DB or log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

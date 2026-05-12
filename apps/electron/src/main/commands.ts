@@ -118,6 +118,53 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         params: [["accountId", optionalString(payload?.accountId)]],
       });
+    case "get_snapshots":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["dateFrom", optionalString(payload?.dateFrom)],
+          ["dateTo", optionalString(payload?.dateTo)],
+        ],
+      });
+    case "get_snapshot_by_date":
+    case "delete_snapshot":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["date", optionalString(payload?.date)],
+        ],
+      });
+    case "save_manual_holdings":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          accountId: requireString(payload?.accountId, "accountId", command),
+          holdings: requireArray(payload?.holdings, "holdings", command),
+          cashBalances: requireRecord(payload?.cashBalances, "cashBalances", command),
+          snapshotDate: optionalString(payload?.snapshotDate),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "import_holdings_csv":
+    case "check_holdings_import":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          accountId: requireString(payload?.accountId, "accountId", command),
+          snapshots: requireArray(payload?.snapshots, "snapshots", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":

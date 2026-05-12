@@ -380,6 +380,134 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies snapshot reads and deletes with query parameters", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" ? new Response(null, { status: 204 }) : jsonResponse([]),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_snapshots",
+      payload: { accountId: "account 1", dateFrom: "2024-01-01", dateTo: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_snapshot_by_date",
+      payload: { accountId: "account 1", date: "2024-01-15" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_snapshot",
+        payload: { accountId: "account 1", date: "2024-01-15" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots?accountId=account+1&dateFrom=2024-01-01&dateTo=2024-02-01",
+        "GET",
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/holdings?accountId=account+1&date=2024-01-15",
+        "GET",
+      ],
+      ["http://127.0.0.1:18444/api/v1/snapshots?accountId=account+1&date=2024-01-15", "DELETE"],
+    ]);
+  });
+
+  test("proxies manual holdings and CSV snapshot import bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        url.toString().endsWith("/snapshots")
+          ? new Response(null, { status: 200 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_manual_holdings",
+        payload: {
+          accountId: "account-1",
+          holdings: [{ symbol: "AAPL" }],
+          cashBalances: { USD: "100" },
+          snapshotDate: "2024-01-15",
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "check_holdings_import",
+      payload: { accountId: "account-1", snapshots: [{ date: "2024-01-15" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_holdings_csv",
+      payload: { accountId: "account-1", snapshots: [{ date: "2024-01-15" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots",
+        "POST",
+        JSON.stringify({
+          accountId: "account-1",
+          holdings: [{ symbol: "AAPL" }],
+          cashBalances: { USD: "100" },
+          snapshotDate: "2024-01-15",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/import/check",
+        "POST",
+        JSON.stringify({ accountId: "account-1", snapshots: [{ date: "2024-01-15" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/import",
+        "POST",
+        JSON.stringify({ accountId: "account-1", snapshots: [{ date: "2024-01-15" }] }),
+      ],
+    ]);
+    for (const [, init] of calls) {
+      expect(init?.headers).toEqual({
+        Accept: "application/json",
+        Authorization: "Bearer sidecar-token",
+        "Content-Type": "application/json",
+      });
+    }
+  });
+
+  test("rejects malformed snapshot command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_manual_holdings",
+        payload: { accountId: "account-1", holdings: {}, cashBalances: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "save_manual_holdings" requires array payload field "holdings".',
+    );
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

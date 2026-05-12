@@ -87,6 +87,30 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/income/summary",
   },
+  get_snapshots: {
+    method: "GET",
+    path: "/api/v1/snapshots",
+  },
+  get_snapshot_by_date: {
+    method: "GET",
+    path: "/api/v1/snapshots/holdings",
+  },
+  delete_snapshot: {
+    method: "DELETE",
+    path: "/api/v1/snapshots",
+  },
+  save_manual_holdings: {
+    method: "POST",
+    path: "/api/v1/snapshots",
+  },
+  import_holdings_csv: {
+    method: "POST",
+    path: "/api/v1/snapshots/import",
+  },
+  check_holdings_import: {
+    method: "POST",
+    path: "/api/v1/snapshots/import/check",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",
