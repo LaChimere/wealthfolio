@@ -186,6 +186,149 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "get_device":
+      return await invokeGetDevice<T>({ payload, sidecar, fetchImpl });
+    case "list_devices":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["scope", optionalStringField(payload?.scope, "scope", command)]],
+      });
+    case "update_device":
+      return await invokeUpdateDevice<T>({ payload, sidecar, fetchImpl });
+    case "delete_device":
+    case "revoke_device":
+      return await invokeDevicePathCommand<T>({ command, payload, sidecar, fetchImpl });
+    case "reset_team_sync":
+      return await invokePostJson<T>({
+        command,
+        body: { reason: optionalStringField(payload?.reason, "reason", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "create_pairing":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          codeHash: requireString(payload?.codeHash, "codeHash", command),
+          ephemeralPublicKey: requireString(
+            payload?.ephemeralPublicKey,
+            "ephemeralPublicKey",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "get_pairing":
+    case "approve_pairing":
+    case "cancel_pairing":
+    case "get_pairing_messages":
+      return await invokePairingPathCommand<T>({ command, payload, sidecar, fetchImpl });
+    case "complete_pairing":
+      return await invokePairingPathCommand<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        body: {
+          encryptedKeyBundle: requireString(
+            payload?.encryptedKeyBundle,
+            "encryptedKeyBundle",
+            command,
+          ),
+          sasProof: requireJsonStringOrRecord(payload?.sasProof, "sasProof", command),
+          signature: requireString(payload?.signature, "signature", command),
+        },
+      });
+    case "claim_pairing":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          code: requireString(payload?.code, "code", command),
+          ephemeralPublicKey: requireString(
+            payload?.ephemeralPublicKey,
+            "ephemeralPublicKey",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "confirm_pairing":
+      return await invokePairingPathCommand<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        body: {
+          proof: requireString(payload?.proof, "proof", command),
+          minSnapshotCreatedAt: optionalStringField(
+            payload?.minSnapshotCreatedAt,
+            "minSnapshotCreatedAt",
+            command,
+          ),
+        },
+      });
+    case "complete_pairing_with_transfer":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          pairingId: requireString(payload?.pairingId, "pairingId", command),
+          encryptedKeyBundle: requireString(
+            payload?.encryptedKeyBundle,
+            "encryptedKeyBundle",
+            command,
+          ),
+          sasProof: requireJsonStringOrRecord(payload?.sasProof, "sasProof", command),
+          signature: requireString(payload?.signature, "signature", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "confirm_pairing_with_bootstrap":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          pairingId: requireString(payload?.pairingId, "pairingId", command),
+          proof: optionalStringField(payload?.proof, "proof", command),
+          minSnapshotCreatedAt: optionalStringField(
+            payload?.minSnapshotCreatedAt,
+            "minSnapshotCreatedAt",
+            command,
+          ),
+          allowOverwrite:
+            optionalBoolean(payload?.allowOverwrite, "allowOverwrite", command) ?? false,
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "begin_pairing_confirm":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          pairingId: requireString(payload?.pairingId, "pairingId", command),
+          proof: requireString(payload?.proof, "proof", command),
+          minSnapshotCreatedAt: optionalStringField(
+            payload?.minSnapshotCreatedAt,
+            "minSnapshotCreatedAt",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "get_pairing_flow_state":
+    case "approve_pairing_overwrite":
+    case "cancel_pairing_flow":
+      return await invokePostJson<T>({
+        command,
+        body: { flowId: requireString(payload?.flowId, "flowId", command) },
+        sidecar,
+        fetchImpl,
+      });
     case "get_import_runs":
     case "get_data_import_runs":
       return await invokeGetWithQuery<T>({
@@ -1148,6 +1291,31 @@ async function invokePostJson<T>({
   });
 }
 
+async function invokePathJson<T>({
+  command,
+  pathSuffix,
+  sidecar,
+  fetchImpl,
+  body,
+}: {
+  command: ElectronCommand;
+  pathSuffix: string;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  body?: unknown;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(`${ELECTRON_COMMANDS[command].path}${pathSuffix}`, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+  });
+}
+
 async function invokeSyncCryptoString<T>({
   command,
   sidecar,
@@ -1246,6 +1414,90 @@ async function invokeVoidJson<T>({
     },
   });
   return undefined as T;
+}
+
+async function invokeGetDevice<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const deviceId = optionalStringField(payload?.deviceId, "deviceId", "get_device");
+  return await invokePathJson<T>({
+    command: "get_device",
+    pathSuffix: deviceId ? `/${encodeURIComponent(deviceId)}` : "/current",
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeUpdateDevice<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const deviceId = requireString(payload?.deviceId, "deviceId", "update_device");
+  return await invokePathJson<T>({
+    command: "update_device",
+    pathSuffix: `/${encodeURIComponent(deviceId)}`,
+    body: {
+      displayName: optionalStringField(payload?.displayName, "displayName", "update_device"),
+    },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeDevicePathCommand<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions & {
+  command: Extract<ElectronCommand, "delete_device" | "revoke_device">;
+}): Promise<T> {
+  const deviceId = requireString(payload?.deviceId, "deviceId", command);
+  return await invokePathJson<T>({
+    command,
+    pathSuffix: `/${encodeURIComponent(deviceId)}${command === "revoke_device" ? "/revoke" : ""}`,
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokePairingPathCommand<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+  body,
+}: ResolvedSidecarCommandOptions & {
+  command: Extract<
+    ElectronCommand,
+    | "get_pairing"
+    | "approve_pairing"
+    | "complete_pairing"
+    | "cancel_pairing"
+    | "get_pairing_messages"
+    | "confirm_pairing"
+  >;
+  body?: unknown;
+}): Promise<T> {
+  const pairingId = requireString(payload?.pairingId, "pairingId", command);
+  const suffixByCommand: Record<typeof command, string> = {
+    get_pairing: "",
+    approve_pairing: "/approve",
+    complete_pairing: "/complete",
+    cancel_pairing: "/cancel",
+    get_pairing_messages: "/messages",
+    confirm_pairing: "/confirm",
+  };
+  return await invokePathJson<T>({
+    command,
+    pathSuffix: `/${encodeURIComponent(pairingId)}${suffixByCommand[command]}`,
+    body,
+    sidecar,
+    fetchImpl,
+  });
 }
 
 async function invokeActivityDelete<T>({
@@ -2177,6 +2429,22 @@ function requireStringRecord(
     );
   }
   return record as Record<string, string>;
+}
+
+function requireJsonStringOrRecord(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): string | Record<string, unknown> {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw new Error(
+    `Electron command "${command}" requires string or object payload field "${field}".`,
+  );
 }
 
 function requireArray(value: unknown, field: string, command: ElectronCommand): unknown[] {

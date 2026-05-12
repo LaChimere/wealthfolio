@@ -247,6 +247,86 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/connect/device/cancel-snapshot",
   },
+  get_device: {
+    method: "GET",
+    path: "/api/v1/sync/device",
+  },
+  list_devices: {
+    method: "GET",
+    path: "/api/v1/sync/devices",
+  },
+  update_device: {
+    method: "PATCH",
+    path: "/api/v1/sync/device",
+  },
+  delete_device: {
+    method: "DELETE",
+    path: "/api/v1/sync/device",
+  },
+  revoke_device: {
+    method: "POST",
+    path: "/api/v1/sync/device",
+  },
+  reset_team_sync: {
+    method: "POST",
+    path: "/api/v1/sync/team/reset",
+  },
+  create_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing",
+  },
+  get_pairing: {
+    method: "GET",
+    path: "/api/v1/sync/pairing",
+  },
+  approve_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing",
+  },
+  complete_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing",
+  },
+  cancel_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing",
+  },
+  claim_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/claim",
+  },
+  get_pairing_messages: {
+    method: "GET",
+    path: "/api/v1/sync/pairing",
+  },
+  confirm_pairing: {
+    method: "POST",
+    path: "/api/v1/sync/pairing",
+  },
+  complete_pairing_with_transfer: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/complete-with-transfer",
+  },
+  confirm_pairing_with_bootstrap: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/confirm-with-bootstrap",
+  },
+  begin_pairing_confirm: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/flow/begin",
+  },
+  get_pairing_flow_state: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/flow/state",
+  },
+  approve_pairing_overwrite: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/flow/approve-overwrite",
+  },
+  cancel_pairing_flow: {
+    method: "POST",
+    path: "/api/v1/sync/pairing/flow/cancel",
+  },
   update_portfolio: {
     method: "POST",
     path: "/api/v1/portfolio/update",

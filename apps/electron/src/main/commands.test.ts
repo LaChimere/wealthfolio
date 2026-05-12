@@ -922,6 +922,372 @@ describe("Electron sidecar command proxy", () => {
     expect(calls).toHaveLength(1);
   });
 
+  test("proxies device sync device management commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const parsed = new URL(url.toString());
+      return Promise.resolve(jsonResponse({ path: parsed.pathname, search: parsed.search }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({ command: "get_device", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "get_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_device",
+      payload: { deviceId: "" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_devices",
+      payload: { scope: "trusted" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_device",
+      payload: { deviceId: "device/1", displayName: "Desktop" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "revoke_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "reset_team_sync",
+      payload: { reason: "rotate keys" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/devices?scope=trusted", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/device/device%2F1",
+        "PATCH",
+        JSON.stringify({ displayName: "Desktop" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "PATCH", JSON.stringify({})],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1/revoke", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/team/reset",
+        "POST",
+        JSON.stringify({ reason: "rotate keys" }),
+      ],
+    ]);
+    expect(calls[4]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(calls[5]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(calls[6]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("proxies device sync pairing and pairing-flow commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      return Promise.resolve(jsonResponse({ path, ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "create_pairing",
+      payload: { codeHash: "hash", ephemeralPublicKey: "pub" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "approve_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "complete_pairing",
+      payload: {
+        pairingId: "pair/1",
+        encryptedKeyBundle: "bundle",
+        sasProof: { code: "123456" },
+        signature: "sig",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "cancel_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "claim_pairing",
+      payload: { code: "123456", ephemeralPublicKey: "pub" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing_messages",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "complete_pairing_with_transfer",
+      payload: {
+        pairingId: "pair/1",
+        encryptedKeyBundle: "bundle",
+        sasProof: "proof",
+        signature: "sig",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing_with_bootstrap",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing_with_bootstrap",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        allowOverwrite: true,
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "begin_pairing_confirm",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing_flow_state",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "approve_pairing_overwrite",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "cancel_pairing_flow",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing",
+        "POST",
+        JSON.stringify({ codeHash: "hash", ephemeralPublicKey: "pub" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/approve", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/complete",
+        "POST",
+        JSON.stringify({
+          encryptedKeyBundle: "bundle",
+          sasProof: { code: "123456" },
+          signature: "sig",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/cancel", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/claim",
+        "POST",
+        JSON.stringify({ code: "123456", ephemeralPublicKey: "pub" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/messages", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/confirm",
+        "POST",
+        JSON.stringify({
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/complete-with-transfer",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          encryptedKeyBundle: "bundle",
+          sasProof: "proof",
+          signature: "sig",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/confirm-with-bootstrap",
+        "POST",
+        JSON.stringify({ pairingId: "pair/1", allowOverwrite: false }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/confirm-with-bootstrap",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+          allowOverwrite: true,
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/begin",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/state",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/approve-overwrite",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/cancel",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed device sync device and pairing payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_device",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "deviceId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_pairing",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "pairingId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "complete_pairing",
+        payload: {
+          pairingId: "pair-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: ["invalid"],
+          signature: "sig",
+        },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string or object payload field "sasProof"');
+    await expect(
+      invokeSidecarCommand({
+        command: "confirm_pairing",
+        payload: { pairingId: "pair-1" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "proof"');
+    await expect(
+      invokeSidecarCommand({
+        command: "confirm_pairing_with_bootstrap",
+        payload: { pairingId: "pair-1", allowOverwrite: "yes" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "allowOverwrite"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_pairing_flow_state",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "flowId"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies portfolio update commands that return accepted with no body", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
