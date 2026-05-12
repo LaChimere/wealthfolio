@@ -399,6 +399,64 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "get_taxonomies":
+    case "get_migration_status":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "get_taxonomy":
+    case "delete_taxonomy":
+      return await invokeTaxonomyById<T>({ command, payload, sidecar, fetchImpl });
+    case "create_taxonomy":
+    case "update_taxonomy":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.taxonomy, "taxonomy", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "create_category":
+    case "update_category":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.category, "category", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "delete_category":
+      return await invokeCategoryDelete<T>({ payload, sidecar, fetchImpl });
+    case "move_category":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          taxonomyId: requireString(payload?.taxonomyId, "taxonomyId", command),
+          categoryId: requireString(payload?.categoryId, "categoryId", command),
+          newParentId: nullableString(payload?.newParentId),
+          position: requireNumber(payload?.position, "position", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "import_taxonomy_json":
+      return await invokePostJson<T>({
+        command,
+        body: { jsonStr: requireString(payload?.jsonStr, "jsonStr", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "export_taxonomy_json":
+      return await invokeTaxonomyExport<T>({ payload, sidecar, fetchImpl });
+    case "get_asset_taxonomy_assignments":
+      return await invokeAssetTaxonomyAssignments<T>({ payload, sidecar, fetchImpl });
+    case "assign_asset_to_category":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.assignment, "assignment", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "remove_asset_taxonomy_assignment":
+      return await invokeTaxonomyAssignmentDelete<T>({ payload, sidecar, fetchImpl });
+    case "migrate_legacy_classifications":
+      return await invokePostOptionalJson<T>({ command, sidecar, fetchImpl });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -631,7 +689,11 @@ async function invokePostOptionalJson<T>({
 }: {
   command: Extract<
     ElectronCommand,
-    "update_portfolio" | "recalculate_portfolio" | "refresh_all_goal_summaries" | "synch_quotes"
+    | "update_portfolio"
+    | "recalculate_portfolio"
+    | "refresh_all_goal_summaries"
+    | "synch_quotes"
+    | "migrate_legacy_classifications"
   >;
   payload?: Record<string, unknown>;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
@@ -918,6 +980,102 @@ async function invokeQuoteDelete<T>({
   });
 }
 
+async function invokeTaxonomyById<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "get_taxonomy" | "delete_taxonomy">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  const id = requireString(payload?.id, "id", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(`${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(id)}`, sidecar.baseUrl),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeCategoryDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const taxonomyId = requireString(payload?.taxonomyId, "taxonomyId", "delete_category");
+  const categoryId = requireString(payload?.categoryId, "categoryId", "delete_category");
+  return await fetchSidecarJson<T>({
+    command: "delete_category",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_category.path}/${encodeURIComponent(
+        taxonomyId,
+      )}/categories/${encodeURIComponent(categoryId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_category.method },
+  });
+}
+
+async function invokeTaxonomyExport<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "export_taxonomy_json");
+  return await fetchSidecarJson<T>({
+    command: "export_taxonomy_json",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.export_taxonomy_json.path}/${encodeURIComponent(id)}/export`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.export_taxonomy_json.method },
+  });
+}
+
+async function invokeAssetTaxonomyAssignments<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const assetId = requireString(payload?.assetId, "assetId", "get_asset_taxonomy_assignments");
+  return await fetchSidecarJson<T>({
+    command: "get_asset_taxonomy_assignments",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.get_asset_taxonomy_assignments.path}/${encodeURIComponent(assetId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.get_asset_taxonomy_assignments.method },
+  });
+}
+
+async function invokeTaxonomyAssignmentDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "remove_asset_taxonomy_assignment");
+  return await fetchSidecarJson<T>({
+    command: "remove_asset_taxonomy_assignment",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.remove_asset_taxonomy_assignment.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.remove_asset_taxonomy_assignment.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -1000,6 +1158,8 @@ async function invokeSimpleGet<T>({
     | "get_custom_providers"
     | "get_contribution_limits"
     | "get_assets"
+    | "get_taxonomies"
+    | "get_migration_status"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1136,8 +1296,19 @@ function requireBoolean(value: unknown, field: string, command: ElectronCommand)
   return value;
 }
 
+function requireNumber(value: unknown, field: string, command: ElectronCommand): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Electron command "${command}" requires number payload field "${field}".`);
+  }
+  return value;
+}
+
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function optionalStringArray(value: unknown): string[] | undefined {

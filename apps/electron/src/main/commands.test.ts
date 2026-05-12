@@ -1199,6 +1199,210 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies taxonomy commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_taxonomies",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_taxonomy",
+      payload: { id: "taxonomy/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_taxonomy",
+      payload: { taxonomy: { name: "Asset Class" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_taxonomy",
+      payload: { taxonomy: { id: "taxonomy/1", name: "Sector" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_taxonomy",
+        payload: { id: "taxonomy/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "create_category",
+      payload: { category: { taxonomyId: "taxonomy/1", name: "Equity" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_category",
+      payload: { category: { id: "category/1", name: "Stocks" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_category",
+        payload: { taxonomyId: "taxonomy/1", categoryId: "category/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "move_category",
+      payload: {
+        taxonomyId: "taxonomy/1",
+        categoryId: "category/1",
+        newParentId: null,
+        position: 2,
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_taxonomy_json",
+      payload: { jsonStr: '{"name":"Imported"}' },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "export_taxonomy_json",
+      payload: { id: "taxonomy/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_taxonomy_assignments",
+      payload: { assetId: "asset/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "assign_asset_to_category",
+      payload: { assignment: { assetId: "asset/1", categoryId: "category/1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "remove_asset_taxonomy_assignment",
+        payload: { id: "assignment/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_migration_status",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "migrate_legacy_classifications",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/taxonomies", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies", "POST", JSON.stringify({ name: "Asset Class" })],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies",
+        "PUT",
+        JSON.stringify({ id: "taxonomy/1", name: "Sector" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories",
+        "POST",
+        JSON.stringify({ taxonomyId: "taxonomy/1", name: "Equity" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories",
+        "PUT",
+        JSON.stringify({ id: "category/1", name: "Stocks" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1/categories/category%2F1",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories/move",
+        "POST",
+        JSON.stringify({
+          taxonomyId: "taxonomy/1",
+          categoryId: "category/1",
+          newParentId: null,
+          position: 2,
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/import",
+        "POST",
+        JSON.stringify({ jsonStr: '{"name":"Imported"}' }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1/export", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/assignments/asset/asset%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/assignments",
+        "POST",
+        JSON.stringify({ assetId: "asset/1", categoryId: "category/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/assignments/assignment%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/migration/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/migration/run", "POST", undefined],
+    ]);
+  });
+
+  test("rejects malformed taxonomy command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_category",
+        payload: { taxonomyId: "taxonomy-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "categoryId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "move_category",
+        payload: { taxonomyId: "taxonomy-1", categoryId: "category-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "position"');
+    await expect(
+      invokeSidecarCommand({
+        command: "import_taxonomy_json",
+        payload: { jsonStr: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "jsonStr"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

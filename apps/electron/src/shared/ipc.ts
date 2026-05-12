@@ -319,6 +319,70 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/market-data/sync",
   },
+  get_taxonomies: {
+    method: "GET",
+    path: "/api/v1/taxonomies",
+  },
+  get_taxonomy: {
+    method: "GET",
+    path: "/api/v1/taxonomies",
+  },
+  create_taxonomy: {
+    method: "POST",
+    path: "/api/v1/taxonomies",
+  },
+  update_taxonomy: {
+    method: "PUT",
+    path: "/api/v1/taxonomies",
+  },
+  delete_taxonomy: {
+    method: "DELETE",
+    path: "/api/v1/taxonomies",
+  },
+  create_category: {
+    method: "POST",
+    path: "/api/v1/taxonomies/categories",
+  },
+  update_category: {
+    method: "PUT",
+    path: "/api/v1/taxonomies/categories",
+  },
+  delete_category: {
+    method: "DELETE",
+    path: "/api/v1/taxonomies",
+  },
+  move_category: {
+    method: "POST",
+    path: "/api/v1/taxonomies/categories/move",
+  },
+  import_taxonomy_json: {
+    method: "POST",
+    path: "/api/v1/taxonomies/import",
+  },
+  export_taxonomy_json: {
+    method: "GET",
+    path: "/api/v1/taxonomies",
+  },
+  get_asset_taxonomy_assignments: {
+    method: "GET",
+    path: "/api/v1/taxonomies/assignments/asset",
+  },
+  assign_asset_to_category: {
+    method: "POST",
+    path: "/api/v1/taxonomies/assignments",
+  },
+  remove_asset_taxonomy_assignment: {
+    method: "DELETE",
+    path: "/api/v1/taxonomies/assignments",
+  },
+  get_migration_status: {
+    method: "GET",
+    path: "/api/v1/taxonomies/migration/status",
+  },
+  migrate_legacy_classifications: {
+    method: "POST",
+    path: "/api/v1/taxonomies/migration/run",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",
