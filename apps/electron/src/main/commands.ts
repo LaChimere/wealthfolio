@@ -135,6 +135,64 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         body: { sharedSecret: requireString(payload?.sharedSecret, "sharedSecret", command) },
       });
+    case "store_sync_session":
+      return await invokeVoidJson<T>({
+        command,
+        body: { refreshToken: requireString(payload?.refreshToken, "refreshToken", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "clear_sync_session":
+      return await invokeVoidJson<T>({ command, sidecar, fetchImpl });
+    case "get_sync_session_status":
+    case "restore_sync_session":
+    case "list_broker_connections":
+    case "list_broker_accounts":
+    case "get_subscription_plans":
+    case "get_subscription_plans_public":
+    case "get_user_info":
+    case "get_synced_accounts":
+    case "get_platforms":
+    case "get_broker_sync_states":
+    case "get_broker_ingest_states":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "sync_broker_data":
+    case "broker_ingest_run":
+    case "sync_broker_connections":
+    case "sync_broker_accounts":
+    case "sync_broker_activities":
+      return await invokeRequestWithoutBody<T>({ command, sidecar, fetchImpl });
+    case "get_import_runs":
+    case "get_data_import_runs":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["runType", optionalStringField(payload?.runType, "runType", command)],
+          ["limit", optionalQueryNumber(payload?.limit, "limit", command)],
+          ["offset", optionalQueryNumber(payload?.offset, "offset", command)],
+        ],
+      });
+    case "get_broker_sync_profile":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", requireString(payload?.accountId, "accountId", command)],
+          ["sourceSystem", requireString(payload?.sourceSystem, "sourceSystem", command)],
+        ],
+      });
+    case "save_broker_sync_profile_rules":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.request, "request", command),
+        sidecar,
+        fetchImpl,
+      });
     case "update_portfolio":
     case "recalculate_portfolio":
       return await invokePostOptionalJson<T>({ command, payload, sidecar, fetchImpl });
@@ -625,7 +683,7 @@ export async function invokeSidecarCommand<T>({
     case "download_addon_to_staging":
       return await invokeAddonIdBody<T>({ command, payload, sidecar, fetchImpl });
     case "check_all_addon_updates":
-      return await invokeNoBody<T>({ command, sidecar, fetchImpl });
+      return await invokeRequestWithoutBody<T>({ command, sidecar, fetchImpl });
     case "install_addon_from_staging":
       return await invokePostJson<T>({
         command,
@@ -1137,6 +1195,30 @@ async function invokeSyncCrypto<T>({
       body: body ? JSON.stringify(body) : undefined,
     },
   });
+}
+
+async function invokeVoidJson<T>({
+  command,
+  sidecar,
+  fetchImpl,
+  body,
+}: {
+  command: Extract<ElectronCommand, "store_sync_session" | "clear_sync_session">;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  body?: Record<string, unknown>;
+}): Promise<T> {
+  await fetchSidecarJson<unknown>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: body ? JSON.stringify(body) : undefined,
+    },
+  });
+  return undefined as T;
 }
 
 async function invokeActivityDelete<T>({
@@ -1653,6 +1735,17 @@ async function invokeSimpleGet<T>({
     | "list_installed_addons"
     | "get_enabled_addons_on_startup"
     | "fetch_addon_store_listings"
+    | "get_sync_session_status"
+    | "restore_sync_session"
+    | "list_broker_connections"
+    | "list_broker_accounts"
+    | "get_subscription_plans"
+    | "get_subscription_plans_public"
+    | "get_user_info"
+    | "get_synced_accounts"
+    | "get_platforms"
+    | "get_broker_sync_states"
+    | "get_broker_ingest_states"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1666,12 +1759,20 @@ async function invokeSimpleGet<T>({
   });
 }
 
-async function invokeNoBody<T>({
+async function invokeRequestWithoutBody<T>({
   command,
   sidecar,
   fetchImpl,
 }: {
-  command: Extract<ElectronCommand, "check_all_addon_updates">;
+  command: Extract<
+    ElectronCommand,
+    | "check_all_addon_updates"
+    | "sync_broker_data"
+    | "broker_ingest_run"
+    | "sync_broker_connections"
+    | "sync_broker_accounts"
+    | "sync_broker_activities"
+  >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
 }): Promise<T> {

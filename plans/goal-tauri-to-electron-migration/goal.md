@@ -201,6 +201,10 @@
   pairing-code/SAS/HMAC/device-id helpers). The Electron proxy unwraps server
   `{ value }` responses so frontend adapter callers keep the Tauri-era string
   return shape.
+- Turn 33: Added Electron sidecar proxy coverage for Wealthfolio Connect session
+  store/restore/clear/status, broker sync triggers/listing, subscription plans,
+  user info, local synced accounts/platforms/sync states/import runs, and
+  broker-sync profile reads/saves.
 
 ## Deferred items
 

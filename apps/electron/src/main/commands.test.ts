@@ -446,6 +446,295 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies Connect session, broker sync, and local broker data commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path === "/api/v1/connect/session" && init?.method !== "GET") {
+        return Promise.resolve(jsonResponse(null));
+      }
+      if (path === "/api/v1/connect/session/restore") {
+        return Promise.resolve(jsonResponse({ accessToken: "access", refreshToken: "refresh" }));
+      }
+      if (path === "/api/v1/connect/session/status") {
+        return Promise.resolve(jsonResponse({ isConfigured: true }));
+      }
+      if (path === "/api/v1/connect/sync" && init?.method === "POST") {
+        return Promise.resolve(new Response(null, { status: 202 }));
+      }
+      if (path === "/api/v1/connect/sync/connections") {
+        return Promise.resolve(
+          jsonResponse({ synced: true, platformsCreated: 1, platformsUpdated: 2 }),
+        );
+      }
+      if (path === "/api/v1/connect/sync/accounts") {
+        return Promise.resolve(jsonResponse({ synced: true, created: 1, updated: 2, skipped: 0 }));
+      }
+      if (path === "/api/v1/connect/sync/activities") {
+        return Promise.resolve(
+          jsonResponse({
+            accountsSynced: 1,
+            activitiesUpserted: 2,
+            assetsInserted: 3,
+            accountsFailed: 0,
+          }),
+        );
+      }
+      if (path === "/api/v1/connect/broker-sync-profile") {
+        return Promise.resolve(jsonResponse({ accountId: "acct-1", rules: [] }));
+      }
+      return Promise.resolve(jsonResponse([{ path }]));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "store_sync_session",
+        payload: { refreshToken: "refresh-token" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_sync_session",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "get_sync_session_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ isConfigured: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_sync_session",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accessToken: "access", refreshToken: "refresh" });
+    await expect(
+      invokeSidecarCommand({
+        command: "list_broker_connections",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/connections" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "list_broker_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/accounts" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_data",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "broker_ingest_run",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_connections",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ synced: true, platformsCreated: 1, platformsUpdated: 2 });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ synced: true, created: 1, updated: 2, skipped: 0 });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_activities",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      accountsSynced: 1,
+      activitiesUpserted: 2,
+      assetsInserted: 3,
+      accountsFailed: 0,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "get_subscription_plans",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/plans" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_subscription_plans_public",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/plans/public" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_user_info",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/user" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_synced_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/synced-accounts" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_platforms",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/platforms" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_states",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/sync-states" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_ingest_states",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/sync-states" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_data_import_runs",
+        payload: { runType: "broker", limit: 5, offset: 10 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/import-runs" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_profile",
+        payload: { accountId: "acct/1", sourceSystem: "ibkr" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accountId: "acct-1", rules: [] });
+    await expect(
+      invokeSidecarCommand({
+        command: "save_broker_sync_profile_rules",
+        payload: { request: { accountId: "acct-1", rules: [] } },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accountId: "acct-1", rules: [] });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/connect/session",
+        "POST",
+        JSON.stringify({ refreshToken: "refresh-token" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/connect/session", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/session/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/session/restore", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/connections", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/accounts", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/connections", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/accounts", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/activities", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/plans", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/plans/public", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/user", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/synced-accounts", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/platforms", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=broker&limit=5&offset=10",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/broker-sync-profile?accountId=acct%2F1&sourceSystem=ibkr",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/broker-sync-profile",
+        "POST",
+        JSON.stringify({ accountId: "acct-1", rules: [] }),
+      ],
+    ]);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed Connect broker payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "store_sync_session",
+        payload: { refreshToken: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "refreshToken"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_data_import_runs",
+        payload: { limit: "5" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "limit"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_profile",
+        payload: { accountId: "acct-1" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "sourceSystem"');
+    await expect(
+      invokeSidecarCommand({
+        command: "save_broker_sync_profile_rules",
+        payload: { request: null },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies portfolio update commands that return accepted with no body", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

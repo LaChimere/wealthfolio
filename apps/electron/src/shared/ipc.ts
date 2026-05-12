@@ -103,6 +103,94 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/sync/crypto/generate-device-id",
   },
+  store_sync_session: {
+    method: "POST",
+    path: "/api/v1/connect/session",
+  },
+  clear_sync_session: {
+    method: "DELETE",
+    path: "/api/v1/connect/session",
+  },
+  get_sync_session_status: {
+    method: "GET",
+    path: "/api/v1/connect/session/status",
+  },
+  restore_sync_session: {
+    method: "GET",
+    path: "/api/v1/connect/session/restore",
+  },
+  list_broker_connections: {
+    method: "GET",
+    path: "/api/v1/connect/connections",
+  },
+  list_broker_accounts: {
+    method: "GET",
+    path: "/api/v1/connect/accounts",
+  },
+  sync_broker_data: {
+    method: "POST",
+    path: "/api/v1/connect/sync",
+  },
+  broker_ingest_run: {
+    method: "POST",
+    path: "/api/v1/connect/sync",
+  },
+  sync_broker_connections: {
+    method: "POST",
+    path: "/api/v1/connect/sync/connections",
+  },
+  sync_broker_accounts: {
+    method: "POST",
+    path: "/api/v1/connect/sync/accounts",
+  },
+  sync_broker_activities: {
+    method: "POST",
+    path: "/api/v1/connect/sync/activities",
+  },
+  get_subscription_plans: {
+    method: "GET",
+    path: "/api/v1/connect/plans",
+  },
+  get_subscription_plans_public: {
+    method: "GET",
+    path: "/api/v1/connect/plans/public",
+  },
+  get_user_info: {
+    method: "GET",
+    path: "/api/v1/connect/user",
+  },
+  get_synced_accounts: {
+    method: "GET",
+    path: "/api/v1/connect/synced-accounts",
+  },
+  get_platforms: {
+    method: "GET",
+    path: "/api/v1/connect/platforms",
+  },
+  get_broker_sync_states: {
+    method: "GET",
+    path: "/api/v1/connect/sync-states",
+  },
+  get_broker_ingest_states: {
+    method: "GET",
+    path: "/api/v1/connect/sync-states",
+  },
+  get_import_runs: {
+    method: "GET",
+    path: "/api/v1/connect/import-runs",
+  },
+  get_data_import_runs: {
+    method: "GET",
+    path: "/api/v1/connect/import-runs",
+  },
+  get_broker_sync_profile: {
+    method: "GET",
+    path: "/api/v1/connect/broker-sync-profile",
+  },
+  save_broker_sync_profile_rules: {
+    method: "POST",
+    path: "/api/v1/connect/broker-sync-profile",
+  },
   update_portfolio: {
     method: "POST",
     path: "/api/v1/portfolio/update",
