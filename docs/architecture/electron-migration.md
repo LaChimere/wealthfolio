@@ -117,11 +117,12 @@ The sidecar command paths cover account list/create/update/delete, settings
 read/update/auto-update preference reads, portfolio update/recalculate, and
 read-only portfolio dashboard data such as holdings, valuations, allocations,
 performance summaries, income summaries, goals, goal funding/plans, retirement
-planner simulations, activity CRUD/import-template workflows, and exchange-rate
-management. Snapshot management and holdings CSV import also proxy through the
-sidecar so manual/imported holdings updates stay in Rust. The renderer still
-calls the typed preload IPC bridge, Electron main validates each command against
-an explicit allowlist, waits for sidecar readiness, and proxies to the loopback
+planner simulations, activity CRUD/import-template workflows, exchange-rate
+management, and market data provider/custom-provider settings. Snapshot
+management and holdings CSV import also proxy through the sidecar so
+manual/imported holdings updates stay in Rust. The renderer still calls the
+typed preload IPC bridge, Electron main validates each command against an
+explicit allowlist, waits for sidecar readiness, and proxies to the loopback
 sidecar with the per-run bearer token. Sidecar base URLs and tokens must stay
 confined to Electron main; public runtime status and command errors must redact
 loopback URLs and token-shaped values before crossing IPC. Electron app info

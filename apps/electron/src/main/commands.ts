@@ -263,6 +263,25 @@ export async function invokeSidecarCommand<T>({
       });
     case "delete_exchange_rate":
       return await invokeExchangeRateDelete<T>({ payload, sidecar, fetchImpl });
+    case "get_exchanges":
+    case "get_market_data_providers":
+    case "get_market_data_providers_settings":
+    case "get_custom_providers":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "update_market_data_provider_settings":
+      return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
+    case "create_custom_provider":
+    case "test_custom_provider_source":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.payload, "payload", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "update_custom_provider":
+      return await invokeCustomProviderUpdate<T>({ payload, sidecar, fetchImpl });
+    case "delete_custom_provider":
+      return await invokeCustomProviderDelete<T>({ payload, sidecar, fetchImpl });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -572,6 +591,46 @@ async function invokeExchangeRateDelete<T>({
   });
 }
 
+async function invokeCustomProviderUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const providerId = requireString(payload?.providerId, "providerId", "update_custom_provider");
+  const providerPayload = requireRecord(payload?.payload, "payload", "update_custom_provider");
+  return await fetchSidecarJson<T>({
+    command: "update_custom_provider",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_custom_provider.path}/${encodeURIComponent(providerId)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_custom_provider.method,
+      body: JSON.stringify(providerPayload),
+    },
+  });
+}
+
+async function invokeCustomProviderDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const providerId = requireString(payload?.providerId, "providerId", "delete_custom_provider");
+  return await fetchSidecarJson<T>({
+    command: "delete_custom_provider",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_custom_provider.path}/${encodeURIComponent(providerId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_custom_provider.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -648,6 +707,10 @@ async function invokeSimpleGet<T>({
     | "get_goals"
     | "list_import_templates"
     | "get_latest_exchange_rates"
+    | "get_exchanges"
+    | "get_market_data_providers"
+    | "get_market_data_providers_settings"
+    | "get_custom_providers"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;

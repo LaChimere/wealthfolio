@@ -195,6 +195,42 @@ export const ELECTRON_COMMANDS = {
     method: "DELETE",
     path: "/api/v1/exchange-rates",
   },
+  get_exchanges: {
+    method: "GET",
+    path: "/api/v1/exchanges",
+  },
+  get_market_data_providers: {
+    method: "GET",
+    path: "/api/v1/providers",
+  },
+  get_market_data_providers_settings: {
+    method: "GET",
+    path: "/api/v1/providers/settings",
+  },
+  update_market_data_provider_settings: {
+    method: "PUT",
+    path: "/api/v1/providers/settings",
+  },
+  get_custom_providers: {
+    method: "GET",
+    path: "/api/v1/custom-providers",
+  },
+  create_custom_provider: {
+    method: "POST",
+    path: "/api/v1/custom-providers",
+  },
+  update_custom_provider: {
+    method: "PUT",
+    path: "/api/v1/custom-providers",
+  },
+  delete_custom_provider: {
+    method: "DELETE",
+    path: "/api/v1/custom-providers",
+  },
+  test_custom_provider_source: {
+    method: "POST",
+    path: "/api/v1/custom-providers/test-source",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

@@ -814,6 +814,99 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies market data provider and custom provider commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 200 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_exchanges",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_market_data_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_market_data_providers_settings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_market_data_provider_settings",
+      payload: { providerId: "yahoo", priority: 1, enabled: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_custom_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_custom_provider",
+      payload: { payload: { name: "Custom" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_custom_provider",
+      payload: { providerId: "provider/1", payload: { name: "Updated" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_custom_provider",
+        payload: { providerId: "provider/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "test_custom_provider_source",
+      payload: { payload: { providerId: "provider/1", sourceId: "source-1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/exchanges", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/providers", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/providers/settings", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/providers/settings",
+        "PUT",
+        JSON.stringify({ providerId: "yahoo", priority: 1, enabled: true }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/custom-providers", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers",
+        "POST",
+        JSON.stringify({ name: "Custom" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers/provider%2F1",
+        "PUT",
+        JSON.stringify({ name: "Updated" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/custom-providers/provider%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers/test-source",
+        "POST",
+        JSON.stringify({ providerId: "provider/1", sourceId: "source-1" }),
+      ],
+    ]);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
