@@ -907,6 +907,66 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies contribution limit commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_contribution_limits",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_contribution_limit",
+      payload: { newLimit: { groupName: "RRSP", limitAmount: "1000" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_contribution_limit",
+      payload: { id: "limit/1", updatedLimit: { groupName: "TFSA", limitAmount: "2000" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_contribution_limit",
+        payload: { id: "limit/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "calculate_deposits_for_contribution_limit",
+      payload: { limitId: "limit/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/limits", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/limits",
+        "POST",
+        JSON.stringify({ groupName: "RRSP", limitAmount: "1000" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/limits/limit%2F1",
+        "PUT",
+        JSON.stringify({ groupName: "TFSA", limitAmount: "2000" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/limits/limit%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/limits/limit%2F1/deposits", "GET", undefined],
+    ]);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

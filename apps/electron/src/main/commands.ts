@@ -282,6 +282,21 @@ export async function invokeSidecarCommand<T>({
       return await invokeCustomProviderUpdate<T>({ payload, sidecar, fetchImpl });
     case "delete_custom_provider":
       return await invokeCustomProviderDelete<T>({ payload, sidecar, fetchImpl });
+    case "get_contribution_limits":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "create_contribution_limit":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.newLimit, "newLimit", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "update_contribution_limit":
+      return await invokeContributionLimitUpdate<T>({ payload, sidecar, fetchImpl });
+    case "delete_contribution_limit":
+      return await invokeContributionLimitDelete<T>({ payload, sidecar, fetchImpl });
+    case "calculate_deposits_for_contribution_limit":
+      return await invokeContributionLimitDeposits<T>({ payload, sidecar, fetchImpl });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -631,6 +646,74 @@ async function invokeCustomProviderDelete<T>({
   });
 }
 
+async function invokeContributionLimitUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "update_contribution_limit");
+  const updatedLimit = requireRecord(
+    payload?.updatedLimit,
+    "updatedLimit",
+    "update_contribution_limit",
+  );
+  return await fetchSidecarJson<T>({
+    command: "update_contribution_limit",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_contribution_limit.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_contribution_limit.method,
+      body: JSON.stringify(updatedLimit),
+    },
+  });
+}
+
+async function invokeContributionLimitDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const id = requireString(payload?.id, "id", "delete_contribution_limit");
+  return await fetchSidecarJson<T>({
+    command: "delete_contribution_limit",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_contribution_limit.path}/${encodeURIComponent(id)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_contribution_limit.method },
+  });
+}
+
+async function invokeContributionLimitDeposits<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const limitId = requireString(
+    payload?.limitId,
+    "limitId",
+    "calculate_deposits_for_contribution_limit",
+  );
+  return await fetchSidecarJson<T>({
+    command: "calculate_deposits_for_contribution_limit",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.calculate_deposits_for_contribution_limit.path}/${encodeURIComponent(
+        limitId,
+      )}/deposits`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.calculate_deposits_for_contribution_limit.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -711,6 +794,7 @@ async function invokeSimpleGet<T>({
     | "get_market_data_providers"
     | "get_market_data_providers_settings"
     | "get_custom_providers"
+    | "get_contribution_limits"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;

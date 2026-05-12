@@ -231,6 +231,26 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/custom-providers/test-source",
   },
+  get_contribution_limits: {
+    method: "GET",
+    path: "/api/v1/limits",
+  },
+  create_contribution_limit: {
+    method: "POST",
+    path: "/api/v1/limits",
+  },
+  update_contribution_limit: {
+    method: "PUT",
+    path: "/api/v1/limits",
+  },
+  delete_contribution_limit: {
+    method: "DELETE",
+    path: "/api/v1/limits",
+  },
+  calculate_deposits_for_contribution_limit: {
+    method: "GET",
+    path: "/api/v1/limits",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",
