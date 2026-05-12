@@ -35,6 +35,18 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/settings/auto-update-enabled",
   },
+  set_secret: {
+    method: "POST",
+    path: "/api/v1/secrets",
+  },
+  get_secret: {
+    method: "GET",
+    path: "/api/v1/secrets",
+  },
+  delete_secret: {
+    method: "DELETE",
+    path: "/api/v1/secrets",
+  },
   update_portfolio: {
     method: "POST",
     path: "/api/v1/portfolio/update",

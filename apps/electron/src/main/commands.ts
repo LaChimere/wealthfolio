@@ -36,6 +36,25 @@ export async function invokeSidecarCommand<T>({
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
+    case "set_secret":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          secretKey: requireString(payload?.secretKey, "secretKey", command),
+          secret: requireStringValue(payload?.secret, "secret", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "get_secret":
+    case "delete_secret":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["secretKey", requireString(payload?.secretKey, "secretKey", command)]],
+      });
     case "update_portfolio":
     case "recalculate_portfolio":
       return await invokePostOptionalJson<T>({ command, payload, sidecar, fetchImpl });
@@ -1899,6 +1918,13 @@ function requireStringArray(value: unknown, field: string, command: ElectronComm
 
 function requireString(value: unknown, field: string, command: ElectronCommand): string {
   if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
+  }
+  return value;
+}
+
+function requireStringValue(value: unknown, field: string, command: ElectronCommand): string {
+  if (typeof value !== "string") {
     throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
   }
   return value;

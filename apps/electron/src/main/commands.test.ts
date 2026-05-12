@@ -198,6 +198,85 @@ describe("Electron sidecar command proxy", () => {
     expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
   });
 
+  test("proxies secret commands without exposing sidecar credentials", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "GET"
+          ? jsonResponse("stored-secret")
+          : new Response(null, { status: 204 }),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "set_secret",
+        payload: { secretKey: "provider/key", secret: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "get_secret",
+        payload: { secretKey: "provider/key" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBe("stored-secret");
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_secret",
+        payload: { secretKey: "provider/key" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/secrets",
+        "POST",
+        JSON.stringify({ secretKey: "provider/key", secret: "" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/secrets?secretKey=provider%2Fkey", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/secrets?secretKey=provider%2Fkey", "DELETE", undefined],
+    ]);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed secret command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "set_secret",
+        payload: { secretKey: "provider" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "secret"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_secret",
+        payload: { secretKey: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "secretKey"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies portfolio update commands that return accepted with no body", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

@@ -58,8 +58,10 @@ development until release packaging provides a bundled sidecar binary.
 Until the desktop keyring store is factored out of Tauri, the Electron dev
 sidecar points `WF_SECRET_FILE` at an isolated temporary file with a per-run
 `WF_SECRET_KEY`. This prevents the sidecar from corrupting legacy desktop
-secrets, but it also means desktop secret persistence is intentionally deferred
-until the keyring-backed sidecar secret store is implemented.
+secrets. Electron can proxy secret set/get/delete commands through the sidecar
+for current-session feature parity, but durable desktop secret persistence is
+intentionally deferred until the keyring-backed sidecar secret store is
+implemented.
 
 ## Data root compatibility
 
@@ -124,18 +126,20 @@ taxonomy migration helpers, Health Center status/fix/config operations, and Net
 Worth calculations/history, AI provider settings/model listing, non-streaming AI
 thread/tool-result operations, alternative asset/liability operations, and
 market data provider/custom-provider settings, and add-on install/runtime/store
-staging operations. Snapshot management and holdings CSV import also proxy
-through the sidecar so manual/imported holdings updates stay in Rust. Add-on zip
-payloads are validated as byte arrays in Electron main and forwarded to the
-sidecar as base64 JSON fields. AI chat NDJSON streaming remains a separate
-bridge because it cannot safely use the request/response JSON command proxy. The
-renderer still calls the typed preload IPC bridge, Electron main validates each
-command against an explicit allowlist, waits for sidecar readiness, and proxies
-to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
-tokens must stay confined to Electron main; public runtime status and command
-errors must redact loopback URLs and token-shaped values before crossing IPC.
-Electron app info must use sanitized runtime metadata and must not expose
-desktop DB or log paths to the renderer. JSON request bodies must be sent with
+staging operations. Temporary sidecar-backed secret set/get/delete commands are
+also proxied while durable keyring-backed Electron secret storage is still
+pending. Snapshot management and holdings CSV import also proxy through the
+sidecar so manual/imported holdings updates stay in Rust. Add-on zip payloads
+are validated as byte arrays in Electron main and forwarded to the sidecar as
+base64 JSON fields. AI chat NDJSON streaming remains a separate bridge because
+it cannot safely use the request/response JSON command proxy. The renderer still
+calls the typed preload IPC bridge, Electron main validates each command against
+an explicit allowlist, waits for sidecar readiness, and proxies to the loopback
+sidecar with the per-run bearer token. Sidecar base URLs and tokens must stay
+confined to Electron main; public runtime status and command errors must redact
+loopback URLs and token-shaped values before crossing IPC. Electron app info
+must use sanitized runtime metadata and must not expose desktop DB or log paths
+to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 
