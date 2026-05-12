@@ -6,7 +6,7 @@
 |---|---|---|---|
 | migration-state | done | Create persistent goal/research/design/plan/todo artifacts and review the decomposition. | `plans/goal-tauri-to-electron-migration/*`; adapter parity test passed |
 | architecture-decisions | done | Verify and document the Rust sidecar, desktop data-root, keyring, updater, and OAuth decisions before Electron scaffold work. | `/Users/lachimere/Projects/wealthfolio/docs/architecture/electron-migration.md`; diff check passed |
-| guardrail-tests | pending | Strengthen adapter/IPC parity guardrails for an Electron adapter without changing runtime behavior. | Pending |
+| guardrail-tests | done | Strengthen adapter/IPC parity guardrails for an Electron adapter without changing runtime behavior. | `apps/frontend/src/adapters/adapter-runtime-boundary.test.ts`; targeted lint/test and code review passed |
 | bun-tooling | pending | Move JS package management/scripts to Bun and introduce Biome/Lefthook with minimal churn. | Pending |
 | typescript-6 | pending | Upgrade TypeScript to 6 if Electron/tooling compatibility checks pass. | Pending |
 | electron-scaffold | pending | Add Electron main/preload shell that can host the existing frontend side-by-side with Tauri. | Pending |
@@ -22,7 +22,7 @@
 |---|---|---|
 | Design self-review | done | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates. |
 | Rubber-duck design review | done | Re-review found no blockers for starting PR1/guardrail work. |
-| Code review after first diff | pending | Run code-review or `pr-review-toolkit:review-pr` before committing the first code changes. |
+| Code review after first diff | done | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues. |
 
 ## Non-blocking cautions carried forward
 
