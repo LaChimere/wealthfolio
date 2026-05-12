@@ -192,6 +192,10 @@
   adapter secret API through Electron IPC. This uses the current temporary
   sidecar secret store; durable keyring-backed Electron persistence remains
   pending.
+- Turn 31: Added the dedicated Electron AI chat streaming IPC bridge. Electron
+  main now owns the authenticated NDJSON sidecar fetch, parses stream events,
+  sends them only to the originating webContents, supports cancellation before
+  sidecar readiness, and redacts sidecar credentials from stream errors.
 
 ## Deferred items
 

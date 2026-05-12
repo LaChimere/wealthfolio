@@ -4,7 +4,15 @@ export const IPC_CHANNELS = {
   getRuntimeInfo: "wealthfolio:runtime-info",
   invoke: "wealthfolio:invoke",
   serverEvent: "wealthfolio:server-event",
+  startAiChatStream: "wealthfolio:ai-chat-stream:start",
+  cancelAiChatStream: "wealthfolio:ai-chat-stream:cancel",
 } as const;
+
+export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
+
+export function getAiChatStreamEventName(streamId: string): string {
+  return `${AI_CHAT_STREAM_EVENT_PREFIX}${streamId}`;
+}
 
 export const ELECTRON_COMMANDS = {
   get_accounts: {
@@ -696,6 +704,8 @@ export interface ElectronEventMessage<T = unknown> {
 export interface WealthfolioElectronApi {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
+  startAiChatStream(streamId: string, request: unknown): Promise<void>;
+  cancelAiChatStream(streamId: string): Promise<void>;
   listen<T>(
     eventName: string,
     handler: (event: ElectronEventMessage<T>) => void,

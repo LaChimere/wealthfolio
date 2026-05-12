@@ -10,6 +10,10 @@ import {
 const api: WealthfolioElectronApi = {
   getRuntimeInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getRuntimeInfo),
   invoke: (command, payload) => ipcRenderer.invoke(IPC_CHANNELS.invoke, { command, payload }),
+  startAiChatStream: (streamId, request) =>
+    ipcRenderer.invoke(IPC_CHANNELS.startAiChatStream, { streamId, request }),
+  cancelAiChatStream: (streamId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelAiChatStream, { streamId }),
   listen: async (eventName, handler) => {
     if (typeof eventName !== "string" || typeof handler !== "function") {
       throw new Error("Invalid Electron event listener request.");

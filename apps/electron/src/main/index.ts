@@ -9,6 +9,7 @@ import {
   type ElectronInvokeRequest,
   type RuntimeInfo,
 } from "../shared/ipc";
+import { createAiChatStreamManager } from "./ai-chat-stream-manager";
 import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
@@ -26,6 +27,7 @@ let sidecarStopInProgress = false;
 let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
 let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
+const aiChatStreamManager = createAiChatStreamManager({ getSidecar: getReadySidecarHandle });
 
 function configureAppPaths(): void {
   const legacyPaths = resolveLegacyTauriPaths();
@@ -81,6 +83,12 @@ function registerIpcHandlers(): void {
       });
     },
   );
+  ipcMain.handle(IPC_CHANNELS.startAiChatStream, async (event, request: unknown): Promise<void> => {
+    await aiChatStreamManager.start(event.sender, request);
+  });
+  ipcMain.handle(IPC_CHANNELS.cancelAiChatStream, (_event, request: unknown): void => {
+    aiChatStreamManager.cancel(request);
+  });
 }
 
 function handleFatal(error: unknown): void {
@@ -158,6 +166,7 @@ async function startSidecarBridge(): Promise<void> {
 async function stopSidecarBridge(): Promise<void> {
   sidecarStartController?.abort();
   await sidecarStartPromise;
+  aiChatStreamManager.cancelAll();
   sidecarEventBridge?.stop();
   sidecarEventBridge = null;
   if (!sidecarHandle) {

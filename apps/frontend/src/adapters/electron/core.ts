@@ -1,4 +1,8 @@
-import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/electron/shared/ipc";
+import {
+  ELECTRON_API_KEY,
+  type ElectronEventMessage,
+  type WealthfolioElectronApi,
+} from "@wealthfolio/electron/shared/ipc";
 
 import type { Logger } from "../types";
 
@@ -25,6 +29,11 @@ function getElectronApi(): WealthfolioElectronApi {
 
 export const getRuntimeInfo = () => getElectronApi().getRuntimeInfo();
 
+export const listen = async <T>(
+  eventName: string,
+  handler: (event: ElectronEventMessage<T>) => void,
+) => getElectronApi().listen<T>(eventName, handler);
+
 export const invoke = async <T>(command: string, payload?: Record<string, unknown>): Promise<T> => {
   try {
     return await Promise.race([
@@ -40,4 +49,12 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     logger.error(`[Electron Invoke] Command "${command}" failed: ${error}`);
     throw error;
   }
+};
+
+export const startAiChatStream = async (streamId: string, request: unknown): Promise<void> => {
+  await getElectronApi().startAiChatStream(streamId, request);
+};
+
+export const cancelAiChatStream = async (streamId: string): Promise<void> => {
+  await getElectronApi().cancelAiChatStream(streamId);
 };
