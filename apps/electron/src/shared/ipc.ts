@@ -13,6 +13,12 @@ export interface RuntimeInfo {
   platform: string;
   appVersion: string;
   isPackaged: boolean;
+  sidecar: SidecarRuntimeStatus;
+}
+
+export interface SidecarRuntimeStatus {
+  ready: boolean;
+  error?: string;
 }
 
 export interface ElectronInvokeRequest {

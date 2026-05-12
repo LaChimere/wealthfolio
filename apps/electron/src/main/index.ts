@@ -10,12 +10,18 @@ import {
   type RuntimeInfo,
 } from "../shared/ipc";
 import { resolveLegacyTauriPaths } from "./data-root";
+import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(currentDir, "..");
 const packageRoot = path.resolve(currentDir, "../..");
 const repositoryRoot = path.resolve(packageRoot, "../..");
+let sidecarStatus = toPublicSidecarStatus({ ready: false });
+let sidecarHandle: SidecarHandle | null = null;
+let sidecarStopInProgress = false;
+let sidecarStartController: AbortController | null = null;
+let sidecarStartPromise: Promise<void> | null = null;
 
 function configureAppPaths(): void {
   const legacyPaths = resolveLegacyTauriPaths();
@@ -56,6 +62,7 @@ function registerIpcHandlers(): void {
       platform: process.platform,
       appVersion: app.getVersion(),
       isPackaged: app.isPackaged,
+      sidecar: sidecarStatus,
     };
   });
   ipcMain.handle(IPC_CHANNELS.invoke, (_event, request: ElectronInvokeRequest): never => {
@@ -83,6 +90,64 @@ async function createWindow(): Promise<void> {
   await createMainWindow({ preloadPath, rendererUrl, indexHtmlPath });
 }
 
+async function startSidecarBridge(): Promise<void> {
+  const legacyPaths = resolveLegacyTauriPaths();
+  const controller = new AbortController();
+  sidecarStartController = controller;
+  try {
+    sidecarHandle = await startRustSidecar({
+      legacyPaths,
+      repositoryRoot,
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      signal: controller.signal,
+    });
+    const handle = sidecarHandle;
+    handle.onExit((event) => {
+      if (event.expected) {
+        return;
+      }
+      if (sidecarHandle === handle) {
+        sidecarHandle = null;
+      }
+      const exitReason =
+        event.error ?? `process exited with ${event.signal ?? event.code ?? "unknown status"}`;
+      sidecarStatus = toPublicSidecarStatus({
+        ready: false,
+        error: `Electron sidecar stopped unexpectedly: ${exitReason}`,
+      });
+      console.error("Electron sidecar stopped unexpectedly:", event);
+    });
+    sidecarStatus = toPublicSidecarStatus({ ready: true });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return;
+    }
+    sidecarStatus = toPublicSidecarStatus({
+      ready: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    console.error("Electron sidecar startup failed:", error);
+  } finally {
+    if (sidecarStartController === controller) {
+      sidecarStartController = null;
+    }
+  }
+}
+
+async function stopSidecarBridge(): Promise<void> {
+  sidecarStartController?.abort();
+  await sidecarStartPromise;
+  if (!sidecarHandle) {
+    return;
+  }
+
+  const handle = sidecarHandle;
+  sidecarHandle = null;
+  sidecarStatus = toPublicSidecarStatus({ ready: false });
+  await handle.stop();
+}
+
 async function start(): Promise<void> {
   configureAppPaths();
 
@@ -90,6 +155,10 @@ async function start(): Promise<void> {
   configureSecurityHeaders();
   registerIpcHandlers();
   await createWindow();
+  sidecarStartPromise = startSidecarBridge().finally(() => {
+    sidecarStartPromise = null;
+  });
+  void sidecarStartPromise;
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -104,4 +173,19 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", (event) => {
+  if ((!sidecarHandle && !sidecarStartPromise) || sidecarStopInProgress) {
+    return;
+  }
+
+  event.preventDefault();
+  sidecarStopInProgress = true;
+  void stopSidecarBridge()
+    .catch((error) => console.error("Electron sidecar shutdown failed:", error))
+    .finally(() => {
+      sidecarStopInProgress = false;
+      app.quit();
+    });
 });

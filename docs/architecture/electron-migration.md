@@ -48,6 +48,19 @@ The current web server defaults are intentionally different: `apps/server` reads
 `WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_FILE`, auth, and CORS from environment
 variables for self-hosted deployments.
 
+The initial Electron sidecar profile uses `WF_SIDECAR_TOKEN` to enable a
+fail-closed bearer-token middleware on protected API routes. When that variable
+is set, the server refuses non-loopback `WF_LISTEN_ADDR` values and rejects
+empty tokens. Electron main generates the token per run, keeps the base URL and
+token out of the renderer, and starts the server through `cargo run` only in
+development until release packaging provides a bundled sidecar binary.
+
+Until the desktop keyring store is factored out of Tauri, the Electron dev
+sidecar points `WF_SECRET_FILE` at an isolated temporary file with a per-run
+`WF_SECRET_KEY`. This prevents the sidecar from corrupting legacy desktop
+secrets, but it also means desktop secret persistence is intentionally deferred
+until the keyring-backed sidecar secret store is implemented.
+
 ## Data root compatibility
 
 The existing Tauri desktop app stores its SQLite database under
