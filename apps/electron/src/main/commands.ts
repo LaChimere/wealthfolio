@@ -513,6 +513,61 @@ export async function invokeSidecarCommand<T>({
           ["endDate", requireString(payload?.endDate, "endDate", command)],
         ],
       });
+    case "get_ai_providers":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "update_ai_provider_settings": {
+      const request = requireRecord(payload?.request, "request", command);
+      requireString(request.providerId, "request.providerId", command);
+      return await invokePostJson<T>({ command, body: request, sidecar, fetchImpl });
+    }
+    case "set_default_ai_provider":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.request, "request", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "list_ai_models":
+      return await invokeAiProviderModels<T>({ payload, sidecar, fetchImpl });
+    case "list_ai_threads":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["cursor", optionalString(payload?.cursor)],
+          ["limit", optionalQueryNumber(payload?.limit, "limit", command)],
+          ["search", optionalString(payload?.search)],
+        ],
+      });
+    case "get_ai_thread":
+    case "delete_ai_thread":
+      return await invokeAiThreadById<T>({ command, payload, sidecar, fetchImpl });
+    case "get_ai_thread_messages":
+      return await invokeAiThreadNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "messages",
+      });
+    case "get_ai_thread_tags":
+      return await invokeAiThreadNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "tags",
+      });
+    case "update_ai_thread":
+      return await invokeUpdateAiThread<T>({ payload, sidecar, fetchImpl });
+    case "add_ai_thread_tag":
+      return await invokeAiThreadAddTag<T>({ payload, sidecar, fetchImpl });
+    case "remove_ai_thread_tag":
+      return await invokeAiThreadRemoveTag<T>({ payload, sidecar, fetchImpl });
+    case "update_tool_result":
+      return await invokeUpdateToolResult<T>({ payload, sidecar, fetchImpl });
     case "create_alternative_asset":
       return await invokePostJson<T>({
         command,
@@ -1354,6 +1409,7 @@ async function invokeSimpleGet<T>({
     | "get_dismissed_health_issues"
     | "get_health_config"
     | "get_alternative_holdings"
+    | "get_ai_providers"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1364,6 +1420,157 @@ async function invokeSimpleGet<T>({
     sidecar,
     url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
     init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeAiProviderModels<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const providerId = requireString(payload?.providerId, "providerId", "list_ai_models");
+  return await fetchSidecarJson<T>({
+    command: "list_ai_models",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.list_ai_models.path}/${encodeURIComponent(providerId)}/models`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.list_ai_models.method },
+  });
+}
+
+async function invokeAiThreadById<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "get_ai_thread" | "delete_ai_thread">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  const threadId = requireString(payload?.threadId, "threadId", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(threadId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeAiThreadNested<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+  suffix,
+}: {
+  command: Extract<ElectronCommand, "get_ai_thread_messages" | "get_ai_thread_tags">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  suffix: "messages" | "tags";
+}): Promise<T> {
+  const threadId = requireString(payload?.threadId, "threadId", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(threadId)}/${suffix}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeUpdateAiThread<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const request = requireRecord(payload?.request, "request", "update_ai_thread");
+  const threadId = requireString(request.id, "request.id", "update_ai_thread");
+  return await fetchSidecarJson<T>({
+    command: "update_ai_thread",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_ai_thread.path}/${encodeURIComponent(threadId)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_ai_thread.method,
+      body: JSON.stringify({ title: request.title, isPinned: request.isPinned }),
+    },
+  });
+}
+
+async function invokeAiThreadAddTag<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const threadId = requireString(payload?.threadId, "threadId", "add_ai_thread_tag");
+  const tag = requireString(payload?.tag, "tag", "add_ai_thread_tag");
+  return await fetchSidecarJson<T>({
+    command: "add_ai_thread_tag",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.add_ai_thread_tag.path}/${encodeURIComponent(threadId)}/tags`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.add_ai_thread_tag.method,
+      body: JSON.stringify({ tag }),
+    },
+  });
+}
+
+async function invokeAiThreadRemoveTag<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const threadId = requireString(payload?.threadId, "threadId", "remove_ai_thread_tag");
+  const tag = requireString(payload?.tag, "tag", "remove_ai_thread_tag");
+  return await fetchSidecarJson<T>({
+    command: "remove_ai_thread_tag",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.remove_ai_thread_tag.path}/${encodeURIComponent(
+        threadId,
+      )}/tags/${encodeURIComponent(tag)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.remove_ai_thread_tag.method },
+  });
+}
+
+async function invokeUpdateToolResult<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const request = requireRecord(payload?.request, "request", "update_tool_result");
+  return await invokePostJson<T>({
+    command: "update_tool_result",
+    body: {
+      threadId: requireString(request.threadId, "request.threadId", "update_tool_result"),
+      toolCallId: requireString(request.toolCallId, "request.toolCallId", "update_tool_result"),
+      resultPatch: requireRecord(request.resultPatch, "request.resultPatch", "update_tool_result"),
+    },
+    sidecar,
+    fetchImpl,
   });
 }
 
@@ -1527,6 +1734,17 @@ function optionalStringArray(value: unknown): string[] | undefined {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalQueryNumber(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return String(requireNumber(value, field, command));
 }
 
 function resolveClientTimezone(payload: Record<string, unknown> | undefined): string | undefined {

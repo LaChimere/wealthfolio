@@ -1574,6 +1574,223 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies AI provider commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_ai_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_ai_provider_settings",
+      payload: { request: { providerId: "openai", selectedModel: "gpt-5.4" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "set_default_ai_provider",
+      payload: { request: {} },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_ai_models",
+      payload: { providerId: "provider/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/ai/providers", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/providers/settings",
+        "PUT",
+        JSON.stringify({ providerId: "openai", selectedModel: "gpt-5.4" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/providers/default", "POST", JSON.stringify({})],
+      ["http://127.0.0.1:18444/api/v1/ai/providers/provider%2F1/models", "GET", undefined],
+    ]);
+  });
+
+  test("proxies AI thread commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" || (init?.method === "POST" && url.toString().includes("/tags"))
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "list_ai_threads",
+      payload: { cursor: "cursor/1", limit: 50, search: "tax lot" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_ai_thread",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_ai_thread_messages",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_ai_thread",
+      payload: { request: { id: "thread/1", title: "Plan", isPinned: false } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_ai_thread",
+        payload: { threadId: "thread/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "add_ai_thread_tag",
+        payload: { threadId: "thread/1", tag: "needs review" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "remove_ai_thread_tag",
+        payload: { threadId: "thread/1", tag: "needs/review #one" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_ai_thread_tags",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_tool_result",
+      payload: {
+        request: {
+          threadId: "thread/1",
+          toolCallId: "tool/1",
+          resultPatch: { submitted: true },
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads?cursor=cursor%2F1&limit=50&search=tax+lot",
+        "GET",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/messages", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1",
+        "PUT",
+        JSON.stringify({ title: "Plan", isPinned: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags",
+        "POST",
+        JSON.stringify({ tag: "needs review" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags/needs%2Freview%20%23one",
+        "DELETE",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/tool-result",
+        "PATCH",
+        JSON.stringify({
+          threadId: "thread/1",
+          toolCallId: "tool/1",
+          resultPatch: { submitted: true },
+        }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed AI command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_ai_provider_settings",
+        payload: { request: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "request.providerId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "list_ai_models",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "providerId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "list_ai_threads",
+        payload: { limit: "50" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "limit"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_ai_thread",
+        payload: { request: { title: "Missing ID" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "request.id"');
+    await expect(
+      invokeSidecarCommand({
+        command: "add_ai_thread_tag",
+        payload: { threadId: "thread-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "tag"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_tool_result",
+        payload: { request: { threadId: "thread-1", toolCallId: "tool-1", resultPatch: [] } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request.resultPatch"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies alternative asset commands", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

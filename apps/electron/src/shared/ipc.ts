@@ -423,6 +423,58 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/net-worth/history",
   },
+  get_ai_providers: {
+    method: "GET",
+    path: "/api/v1/ai/providers",
+  },
+  update_ai_provider_settings: {
+    method: "PUT",
+    path: "/api/v1/ai/providers/settings",
+  },
+  set_default_ai_provider: {
+    method: "POST",
+    path: "/api/v1/ai/providers/default",
+  },
+  list_ai_models: {
+    method: "GET",
+    path: "/api/v1/ai/providers",
+  },
+  list_ai_threads: {
+    method: "GET",
+    path: "/api/v1/ai/threads",
+  },
+  get_ai_thread: {
+    method: "GET",
+    path: "/api/v1/ai/threads",
+  },
+  get_ai_thread_messages: {
+    method: "GET",
+    path: "/api/v1/ai/threads",
+  },
+  update_ai_thread: {
+    method: "PUT",
+    path: "/api/v1/ai/threads",
+  },
+  delete_ai_thread: {
+    method: "DELETE",
+    path: "/api/v1/ai/threads",
+  },
+  add_ai_thread_tag: {
+    method: "POST",
+    path: "/api/v1/ai/threads",
+  },
+  remove_ai_thread_tag: {
+    method: "DELETE",
+    path: "/api/v1/ai/threads",
+  },
+  get_ai_thread_tags: {
+    method: "GET",
+    path: "/api/v1/ai/threads",
+  },
+  update_tool_result: {
+    method: "PATCH",
+    path: "/api/v1/ai/tool-result",
+  },
   create_alternative_asset: {
     method: "POST",
     path: "/api/v1/alternative-assets",
