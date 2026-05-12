@@ -1574,6 +1574,141 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies alternative asset commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const urlString = url.toString();
+      return Promise.resolve(
+        init?.method === "DELETE" ||
+          urlString.includes("/link-liability") ||
+          urlString.includes("/metadata")
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "create_alternative_asset",
+      payload: { request: { kind: "property", name: "House", currency: "CAD" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_alternative_asset_valuation",
+      payload: { assetId: "asset/1", request: { value: "1000", date: "2025-01-31" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_alternative_asset",
+        payload: { assetId: "asset/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "link_liability",
+        payload: { liabilityId: "liability/1", request: { targetAssetId: "asset/1" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "unlink_liability",
+        payload: { liabilityId: "liability/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_metadata",
+        payload: {
+          assetId: "asset/1",
+          metadata: { vin: "123" },
+          name: "Updated House",
+          notes: null,
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_alternative_holdings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets",
+        "POST",
+        JSON.stringify({ kind: "property", name: "House", currency: "CAD" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1/valuation",
+        "PUT",
+        JSON.stringify({ value: "1000", date: "2025-01-31" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/liability%2F1/link-liability",
+        "POST",
+        JSON.stringify({ targetAssetId: "asset/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/liability%2F1/link-liability",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1/metadata",
+        "PUT",
+        JSON.stringify({ metadata: { vin: "123" }, name: "Updated House", notes: null }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/alternative-holdings", "GET", undefined],
+    ]);
+  });
+
+  test("rejects malformed alternative asset command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_valuation",
+        payload: { assetId: "asset-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request"');
+    await expect(
+      invokeSidecarCommand({
+        command: "link_liability",
+        payload: { request: { targetAssetId: "asset-1" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "liabilityId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_metadata",
+        payload: { assetId: "asset-1", metadata: { year: 2025 } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string record payload field "metadata"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

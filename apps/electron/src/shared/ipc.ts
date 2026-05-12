@@ -423,6 +423,34 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/net-worth/history",
   },
+  create_alternative_asset: {
+    method: "POST",
+    path: "/api/v1/alternative-assets",
+  },
+  update_alternative_asset_valuation: {
+    method: "PUT",
+    path: "/api/v1/alternative-assets",
+  },
+  delete_alternative_asset: {
+    method: "DELETE",
+    path: "/api/v1/alternative-assets",
+  },
+  link_liability: {
+    method: "POST",
+    path: "/api/v1/alternative-assets",
+  },
+  unlink_liability: {
+    method: "DELETE",
+    path: "/api/v1/alternative-assets",
+  },
+  update_alternative_asset_metadata: {
+    method: "PUT",
+    path: "/api/v1/alternative-assets",
+  },
+  get_alternative_holdings: {
+    method: "GET",
+    path: "/api/v1/alternative-holdings",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

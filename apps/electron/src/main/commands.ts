@@ -513,6 +513,60 @@ export async function invokeSidecarCommand<T>({
           ["endDate", requireString(payload?.endDate, "endDate", command)],
         ],
       });
+    case "create_alternative_asset":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.request, "request", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "update_alternative_asset_valuation":
+      return await invokeAlternativeAssetNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        idField: "assetId",
+        suffix: "valuation",
+        body: requireRecord(payload?.request, "request", command),
+      });
+    case "delete_alternative_asset":
+      return await invokeAlternativeAssetDelete<T>({ payload, sidecar, fetchImpl });
+    case "link_liability":
+      return await invokeAlternativeAssetNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        idField: "liabilityId",
+        suffix: "link-liability",
+        body: requireRecord(payload?.request, "request", command),
+      });
+    case "unlink_liability":
+      return await invokeAlternativeAssetNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        idField: "liabilityId",
+        suffix: "link-liability",
+      });
+    case "update_alternative_asset_metadata":
+      return await invokeAlternativeAssetNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        idField: "assetId",
+        suffix: "metadata",
+        body: {
+          metadata: requireStringRecord(payload?.metadata, "metadata", command),
+          name: optionalString(payload?.name),
+          notes: payload?.notes === null ? null : optionalString(payload?.notes),
+        },
+      });
+    case "get_alternative_holdings":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -1156,6 +1210,63 @@ async function invokeHealthStatus<T>({
   });
 }
 
+async function invokeAlternativeAssetNested<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+  idField,
+  suffix,
+  body,
+}: {
+  command: Extract<
+    ElectronCommand,
+    | "update_alternative_asset_valuation"
+    | "link_liability"
+    | "unlink_liability"
+    | "update_alternative_asset_metadata"
+  >;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  idField: "assetId" | "liabilityId";
+  suffix: "valuation" | "link-liability" | "metadata";
+  body?: unknown;
+}): Promise<T> {
+  const id = requireString(payload?.[idField], idField, command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(id)}/${suffix}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+  });
+}
+
+async function invokeAlternativeAssetDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const assetId = requireString(payload?.assetId, "assetId", "delete_alternative_asset");
+  return await fetchSidecarJson<T>({
+    command: "delete_alternative_asset",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_alternative_asset.path}/${encodeURIComponent(assetId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_alternative_asset.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -1242,6 +1353,7 @@ async function invokeSimpleGet<T>({
     | "get_migration_status"
     | "get_dismissed_health_issues"
     | "get_health_config"
+    | "get_alternative_holdings"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -1345,6 +1457,20 @@ function requireRecord(
     throw new Error(`Electron command "${command}" requires object payload field "${field}".`);
   }
   return value as Record<string, unknown>;
+}
+
+function requireStringRecord(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): Record<string, string> {
+  const record = requireRecord(value, field, command);
+  if (Object.values(record).some((item) => typeof item !== "string")) {
+    throw new Error(
+      `Electron command "${command}" requires string record payload field "${field}".`,
+    );
+  }
+  return record as Record<string, string>;
 }
 
 function requireArray(value: unknown, field: string, command: ElectronCommand): unknown[] {
