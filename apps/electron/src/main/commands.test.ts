@@ -56,6 +56,86 @@ describe("Electron sidecar command proxy", () => {
     expect(urls).toEqual(["http://127.0.0.1:18444/api/v1/accounts?includeArchived=true"]);
   });
 
+  test("proxies create_account with the account request body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "account-2" }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "create_account",
+        payload: { account: { name: "Brokerage", currency: "USD" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ id: "account-2" });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ name: "Brokerage", currency: "USD" }));
+  });
+
+  test("proxies update_account with an encoded account id", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "acct 3" }));
+    };
+
+    await invokeSidecarCommand({
+      command: "update_account",
+      payload: { accountUpdate: { id: "acct 3", name: "Updated" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts/acct%203");
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ id: "acct 3", name: "Updated" }));
+  });
+
+  test("proxies delete_account with an encoded account id", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_account",
+        payload: { accountId: "acct/4" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts/acct%2F4");
+    expect(init?.method).toBe("DELETE");
+  });
+
+  test("rejects malformed account command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_account",
+        payload: { accountUpdate: { name: "Missing ID" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "update_account" requires string payload field "accountUpdate.id".',
+    );
+  });
+
   test("does not leak sidecar URL or token in command errors", async () => {
     const fetchImpl: FetchLike = () =>
       Promise.resolve(

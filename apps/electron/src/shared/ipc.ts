@@ -10,6 +10,18 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/accounts",
   },
+  create_account: {
+    method: "POST",
+    path: "/api/v1/accounts",
+  },
+  update_account: {
+    method: "PUT",
+    path: "/api/v1/accounts",
+  },
+  delete_account: {
+    method: "DELETE",
+    path: "/api/v1/accounts",
+  },
 } as const satisfies Record<
   string,
   { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string }

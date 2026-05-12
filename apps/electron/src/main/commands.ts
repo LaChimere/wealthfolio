@@ -25,6 +25,12 @@ export async function invokeSidecarCommand<T>({
   switch (command) {
     case "get_accounts":
       return await invokeGetAccounts<T>({ payload, sidecar, fetchImpl });
+    case "create_account":
+      return await invokeCreateAccount<T>({ payload, sidecar, fetchImpl });
+    case "update_account":
+      return await invokeUpdateAccount<T>({ payload, sidecar, fetchImpl });
+    case "delete_account":
+      return await invokeDeleteAccount<T>({ payload, sidecar, fetchImpl });
   }
 
   const unimplementedCommand: never = command;
@@ -49,6 +55,64 @@ async function invokeGetAccounts<T>({
     sidecar,
     url,
     init: { method: ELECTRON_COMMANDS.get_accounts.method },
+  });
+}
+
+async function invokeCreateAccount<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const account = requireRecord(payload?.account, "account", "create_account");
+  return await fetchSidecarJson<T>({
+    command: "create_account",
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS.create_account.path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS.create_account.method,
+      body: JSON.stringify(account),
+    },
+  });
+}
+
+async function invokeUpdateAccount<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const accountUpdate = requireRecord(payload?.accountUpdate, "accountUpdate", "update_account");
+  const accountId = requireString(accountUpdate.id, "accountUpdate.id", "update_account");
+  return await fetchSidecarJson<T>({
+    command: "update_account",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_account.path}/${encodeURIComponent(accountId)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_account.method,
+      body: JSON.stringify(accountUpdate),
+    },
+  });
+}
+
+async function invokeDeleteAccount<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const accountId = requireString(payload?.accountId, "accountId", "delete_account");
+  return await fetchSidecarJson<T>({
+    command: "delete_account",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_account.path}/${encodeURIComponent(accountId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_account.method },
   });
 }
 
@@ -102,6 +166,24 @@ function sanitizeCommandError(error: string, sidecar: Pick<SidecarHandle, "token
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requireRecord(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Electron command "${command}" requires object payload field "${field}".`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, field: string, command: ElectronCommand): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Electron command "${command}" requires string payload field "${field}".`);
+  }
+  return value;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
