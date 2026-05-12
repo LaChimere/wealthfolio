@@ -171,7 +171,7 @@ bun run build
 bun run dev
 
 # Type check
-bun run lint
+bun run type-check
 ```
 
 ### For Main App Development

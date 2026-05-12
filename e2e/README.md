@@ -42,7 +42,7 @@ restarting the server on every run.
 #### Step 1 — Prepare a fresh database
 
 ```bash
-node scripts/prep-e2e.mjs
+bun run scripts/prep-e2e.mjs
 ```
 
 This creates a new timestamped SQLite database (e.g.

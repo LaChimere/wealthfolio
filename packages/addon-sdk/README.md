@@ -184,7 +184,7 @@ Create a `manifest.json` file in your addon root:
   "homepage": "https://github.com/yourname/investment-fees-tracker",
   "license": "MIT",
   "main": "dist/addon.js",
-  "sdkVersion": "1.0.0",
+  "sdkVersion": "3.4.0",
   "minWealthfolioVersion": "1.0.0",
   "keywords": ["portfolio", "fees", "tracking", "analytics"],
   "icon": "data:image/svg+xml;base64,...",
@@ -1292,7 +1292,7 @@ We welcome contributions to improve the addon SDK!
    bun run dev
 
    # Run type checking
-   bun run lint
+   bun run type-check
 
    # Build for testing
    bun run build

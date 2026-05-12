@@ -215,7 +215,7 @@ hello-world-addon/
   "description": "Addon description",
   "author": "Your Name",
   "permissions": ["accounts.getAll", "portfolio.getHoldings"],
-  "sdkVersion": "1.0.0"
+  "sdkVersion": "3.4.0"
 }
 ```
 
@@ -330,7 +330,7 @@ export default defineConfig({
     "dev:server": "wealthfolio dev",
     "clean": "rm -rf dist",
     "package": "mkdir -p dist && zip -r dist/$npm_package_name-$npm_package_version.zip manifest.json dist/ assets/ README.md",
-    "bundle": "Bun clean && bun run build && bun run package",
+    "bundle": "bun run clean && bun run build && bun run package",
     "lint": "tsc --noEmit",
     "type-check": "tsc --noEmit"
   }

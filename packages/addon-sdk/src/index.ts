@@ -92,7 +92,7 @@ export { calculateGoalProgress } from './goal-progress';
  * React version guaranteed by the host application. Addons may assert against
  * this at runtime if they rely on a particular React feature set.
  */
-export const ReactVersion = '19.1.1';
+export const ReactVersion = '19.2.4';
 
 /**
  * Addons receive their context as a parameter to the enable() function.

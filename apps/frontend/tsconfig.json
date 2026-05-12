@@ -4,6 +4,7 @@
     "types": ["@tauri-apps/api", "vitest/globals"],
     "noEmit": true,
     "composite": false,
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],

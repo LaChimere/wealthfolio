@@ -23,6 +23,7 @@
 | Design self-review           | done   | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates.                                        |
 | Rubber-duck design review    | done   | Re-review found no blockers for starting PR1/guardrail work.                                                   |
 | Code review after first diff | done   | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues. |
+| Tooling/TS6 milestone review | done   | PR review found docs/template/CLI/boundary-test gaps; fixes were applied and re-reviewed.                      |
 
 ## Non-blocking cautions carried forward
 

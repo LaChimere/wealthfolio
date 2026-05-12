@@ -12,6 +12,7 @@
     "noImplicitOverride": true,
 
     // Path mapping for SDK package
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

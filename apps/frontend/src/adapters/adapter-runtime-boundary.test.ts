@@ -10,9 +10,10 @@ const tauriAdapterDir = path.join(frontendSrcDir, "adapters/tauri");
 
 const TAURI_IMPORT_RE =
   /(?:from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s+['"]([^'"]+)['"])/g;
-const TAURI_SPECIFIER_RE = /^(@tauri-apps\/|tauri-plugin-)/;
+const TAURI_SPECIFIER_RE = /^(@tauri-apps\/|tauri-plugin-|@\/adapters\/tauri(?:\/|$)|#platform$)/;
 
 const ALLOWED_NON_ADAPTER_TAURI_IMPORTS: Record<string, string[]> = {
+  "apps/frontend/src/adapters/shared/platform.ts": ["#platform"],
   "apps/frontend/src/features/devices-sync/components/pairing-flow/enter-code.tsx": [
     "@tauri-apps/plugin-barcode-scanner",
   ],

@@ -187,13 +187,17 @@ async function buildAddon() {
     const packageJsonPath = path.resolve(process.cwd(), "package.json");
     if (!fs.existsSync(packageJsonPath)) {
       error("No package.json found. Are you in an addon directory?");
-      return;
+      process.exitCode = 1;
+      return false;
     }
 
     await execAsync("bun run build");
     success("Addon built successfully!");
+    return true;
   } catch (err) {
     error(`Build failed: ${err.message}`);
+    process.exitCode = 1;
+    return false;
   }
 }
 
@@ -203,13 +207,17 @@ async function packageAddon() {
     info("Packaging addon...");
 
     // Build first
-    await buildAddon();
+    const buildSucceeded = await buildAddon();
+    if (!buildSucceeded) {
+      return;
+    }
 
     // Create package
     await execAsync("bun run package");
     success("Addon packaged successfully!");
   } catch (err) {
     error(`Packaging failed: ${err.message}`);
+    process.exitCode = 1;
   }
 }
 
