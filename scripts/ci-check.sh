@@ -134,6 +134,9 @@ if [[ "$RUN_RUST" == "true" ]]; then
 fi
 
 if [[ "$RUN_FRONTEND" == "true" ]]; then
+  echo "=== bun biome:ci ===" >&2
+  bun run biome:ci
+
   echo "=== bun build:types ===" >&2
   bun run build:types
 
