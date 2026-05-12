@@ -118,6 +118,92 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         params: [["accountId", optionalString(payload?.accountId)]],
       });
+    case "get_goals":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "get_goal":
+    case "delete_goal":
+      return await invokeGoalById<T>({ command, payload, sidecar, fetchImpl });
+    case "create_goal":
+    case "update_goal":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.goal, "goal", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "get_goal_funding":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "funding",
+      });
+    case "save_goal_funding":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "funding",
+        body: requireArray(payload?.rules, "rules", command),
+      });
+    case "get_goal_plan":
+    case "delete_goal_plan":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "plan",
+      });
+    case "save_goal_plan":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.plan, "plan", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "refresh_goal_summary":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "refresh-summary",
+      });
+    case "refresh_all_goal_summaries":
+      return await invokePostOptionalJson<T>({ command, sidecar, fetchImpl });
+    case "get_retirement_overview":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "retirement/overview",
+      });
+    case "get_save_up_overview":
+      return await invokeGoalNested<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        suffix: "save-up/overview",
+      });
+    case "preview_save_up_overview":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.input, "input", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "calculate_retirement_projection":
+    case "run_retirement_monte_carlo":
+    case "run_retirement_stress_tests":
+    case "run_retirement_scenario_analysis":
+    case "run_retirement_decision_sensitivity_map":
+    case "run_retirement_sorr":
+      return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
   }
 
   const unimplementedCommand: never = command;
@@ -262,7 +348,10 @@ async function invokePostOptionalJson<T>({
   sidecar,
   fetchImpl,
 }: {
-  command: Extract<ElectronCommand, "update_portfolio" | "recalculate_portfolio">;
+  command: Extract<
+    ElectronCommand,
+    "update_portfolio" | "recalculate_portfolio" | "refresh_all_goal_summaries"
+  >;
   payload?: Record<string, unknown>;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -286,7 +375,7 @@ async function invokePostJson<T>({
   fetchImpl,
 }: {
   command: ElectronCommand;
-  body: Record<string, unknown>;
+  body: unknown;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
 }): Promise<T> {
@@ -302,12 +391,76 @@ async function invokePostJson<T>({
   });
 }
 
+async function invokeGoalById<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "get_goal" | "delete_goal">;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  const goalId = requireString(payload?.goalId, "goalId", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(goalId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeGoalNested<T>({
+  command,
+  payload,
+  sidecar,
+  fetchImpl,
+  suffix,
+  body,
+}: {
+  command: Extract<
+    ElectronCommand,
+    | "get_goal_funding"
+    | "save_goal_funding"
+    | "get_goal_plan"
+    | "delete_goal_plan"
+    | "refresh_goal_summary"
+    | "get_retirement_overview"
+    | "get_save_up_overview"
+  >;
+  payload?: Record<string, unknown>;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+  suffix: string;
+  body?: unknown;
+}): Promise<T> {
+  const goalId = requireString(payload?.goalId, "goalId", command);
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS[command].path}/${encodeURIComponent(goalId)}/${suffix}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS[command].method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+  });
+}
+
 async function invokeSimpleGet<T>({
   command,
   sidecar,
   fetchImpl,
 }: {
-  command: Extract<ElectronCommand, "get_settings" | "is_auto_update_check_enabled">;
+  command: Extract<ElectronCommand, "get_settings" | "is_auto_update_check_enabled" | "get_goals">;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
 }): Promise<T> {
@@ -410,6 +563,13 @@ function requireRecord(
     throw new Error(`Electron command "${command}" requires object payload field "${field}".`);
   }
   return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, field: string, command: ElectronCommand): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Electron command "${command}" requires array payload field "${field}".`);
+  }
+  return value;
 }
 
 function requireString(value: unknown, field: string, command: ElectronCommand): string {

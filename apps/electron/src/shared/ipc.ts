@@ -87,6 +87,90 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/income/summary",
   },
+  get_goals: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  get_goal: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  create_goal: {
+    method: "POST",
+    path: "/api/v1/goals",
+  },
+  update_goal: {
+    method: "PUT",
+    path: "/api/v1/goals",
+  },
+  delete_goal: {
+    method: "DELETE",
+    path: "/api/v1/goals",
+  },
+  get_goal_funding: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  save_goal_funding: {
+    method: "PUT",
+    path: "/api/v1/goals",
+  },
+  get_goal_plan: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  save_goal_plan: {
+    method: "POST",
+    path: "/api/v1/goals/plan",
+  },
+  delete_goal_plan: {
+    method: "DELETE",
+    path: "/api/v1/goals",
+  },
+  refresh_goal_summary: {
+    method: "POST",
+    path: "/api/v1/goals",
+  },
+  refresh_all_goal_summaries: {
+    method: "POST",
+    path: "/api/v1/goals/refresh-summaries",
+  },
+  get_retirement_overview: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  get_save_up_overview: {
+    method: "GET",
+    path: "/api/v1/goals",
+  },
+  preview_save_up_overview: {
+    method: "POST",
+    path: "/api/v1/goals/save-up/preview",
+  },
+  calculate_retirement_projection: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/projection",
+  },
+  run_retirement_monte_carlo: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/monte-carlo",
+  },
+  run_retirement_stress_tests: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/stress-tests",
+  },
+  run_retirement_scenario_analysis: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/scenario-analysis",
+  },
+  run_retirement_decision_sensitivity_map: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/decision-sensitivity-map",
+  },
+  run_retirement_sorr: {
+    method: "POST",
+    path: "/api/v1/goals/retirement/sequence-of-returns",
+  },
 } as const satisfies Record<
   string,
   { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string }

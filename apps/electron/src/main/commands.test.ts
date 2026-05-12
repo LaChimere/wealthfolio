@@ -380,6 +380,236 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_goals",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_goal",
+      payload: { goalId: "goal/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_goal",
+      payload: { goal: { name: "Retire" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_goal",
+      payload: { goal: { id: "goal/1", name: "Retire early" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_goal",
+        payload: { goalId: "goal/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals", "POST", JSON.stringify({ name: "Retire" })],
+      [
+        "http://127.0.0.1:18444/api/v1/goals",
+        "PUT",
+        JSON.stringify({ id: "goal/1", name: "Retire early" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%2F1", "DELETE", undefined],
+    ]);
+    expect(calls[2][1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("proxies goal funding, plan, and refresh commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_goal_funding",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_goal_funding",
+      payload: { goalId: "goal 1", rules: [{ accountId: "acct-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_goal_plan",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_goal_plan",
+      payload: { plan: { goalId: "goal 1", planKind: "retirement" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_goal_plan",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "refresh_goal_summary",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "refresh_all_goal_summaries",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/funding", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/goal%201/funding",
+        "PUT",
+        JSON.stringify([{ accountId: "acct-1" }]),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/plan", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/plan",
+        "POST",
+        JSON.stringify({ goalId: "goal 1", planKind: "retirement" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/plan", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/refresh-summary", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/refresh-summaries", "POST", undefined],
+    ]);
+  });
+
+  test("proxies retirement overview and simulation commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_retirement_overview",
+      payload: { goalId: "goal-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_save_up_overview",
+      payload: { goalId: "goal-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "preview_save_up_overview",
+      payload: { input: { targetAmount: 1000 } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    for (const command of [
+      "calculate_retirement_projection",
+      "run_retirement_monte_carlo",
+      "run_retirement_stress_tests",
+      "run_retirement_scenario_analysis",
+      "run_retirement_decision_sensitivity_map",
+      "run_retirement_sorr",
+    ] satisfies ElectronCommand[]) {
+      await invokeSidecarCommand({
+        command,
+        payload: { goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      });
+    }
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals/goal-1/retirement/overview", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal-1/save-up/overview", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/save-up/preview",
+        "POST",
+        JSON.stringify({ targetAmount: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/projection",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/monte-carlo",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/stress-tests",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/scenario-analysis",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/decision-sensitivity-map",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/sequence-of-returns",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed goal command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_goal_funding",
+        payload: { goalId: "goal-1", rules: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Electron command "save_goal_funding" requires array payload field "rules".');
+  });
+
   test("rejects malformed settings update payloads before fetch", async () => {
     const fetchImpl: FetchLike = () => {
       throw new Error("fetch should not be called");

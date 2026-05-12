@@ -116,10 +116,11 @@ exposing a backend URL to the renderer.
 The sidecar command paths cover account list/create/update/delete, settings
 read/update/auto-update preference reads, portfolio update/recalculate, and
 read-only portfolio dashboard data such as holdings, valuations, allocations,
-performance summaries, and income summaries. The renderer still calls the typed
-preload IPC bridge, Electron main validates each command against an explicit
-allowlist, waits for sidecar readiness, and proxies to the loopback sidecar with
-the per-run bearer token. Sidecar base URLs and tokens must stay confined to
+performance summaries, income summaries, goals, goal funding/plans, and
+retirement planner simulations. The renderer still calls the typed preload IPC
+bridge, Electron main validates each command against an explicit allowlist,
+waits for sidecar readiness, and proxies to the loopback sidecar with the
+per-run bearer token. Sidecar base URLs and tokens must stay confined to
 Electron main; public runtime status and command errors must redact loopback
 URLs and token-shaped values before crossing IPC. Electron app info must use
 sanitized runtime metadata and must not expose desktop DB or log paths to the
