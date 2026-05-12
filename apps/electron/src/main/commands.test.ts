@@ -1523,6 +1523,57 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies net worth commands", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_net_worth",
+      payload: { date: "2025-01-31" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_net_worth",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_net_worth_history",
+      payload: { startDate: "2025-01-01", endDate: "2025-01-31" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/net-worth?date=2025-01-31",
+      "http://127.0.0.1:18444/api/v1/net-worth",
+      "http://127.0.0.1:18444/api/v1/net-worth/history?startDate=2025-01-01&endDate=2025-01-31",
+    ]);
+  });
+
+  test("rejects malformed net worth command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_net_worth_history",
+        payload: { startDate: "2025-01-01" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "endDate"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

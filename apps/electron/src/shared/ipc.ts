@@ -415,6 +415,14 @@ export const ELECTRON_COMMANDS = {
     method: "PUT",
     path: "/api/v1/health/config",
   },
+  get_net_worth: {
+    method: "GET",
+    path: "/api/v1/net-worth",
+  },
+  get_net_worth_history: {
+    method: "GET",
+    path: "/api/v1/net-worth/history",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

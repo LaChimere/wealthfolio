@@ -494,6 +494,25 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "get_net_worth":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["date", optionalString(payload?.date)]],
+      });
+    case "get_net_worth_history":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["startDate", requireString(payload?.startDate, "startDate", command)],
+          ["endDate", requireString(payload?.endDate, "endDate", command)],
+        ],
+      });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
