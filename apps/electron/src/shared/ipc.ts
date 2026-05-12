@@ -111,6 +111,74 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/snapshots/import/check",
   },
+  search_activities: {
+    method: "POST",
+    path: "/api/v1/activities/search",
+  },
+  create_activity: {
+    method: "POST",
+    path: "/api/v1/activities",
+  },
+  update_activity: {
+    method: "PUT",
+    path: "/api/v1/activities",
+  },
+  save_activities: {
+    method: "POST",
+    path: "/api/v1/activities/bulk",
+  },
+  delete_activity: {
+    method: "DELETE",
+    path: "/api/v1/activities",
+  },
+  link_transfer_activities: {
+    method: "POST",
+    path: "/api/v1/activities/link",
+  },
+  unlink_transfer_activities: {
+    method: "POST",
+    path: "/api/v1/activities/unlink",
+  },
+  check_activities_import: {
+    method: "POST",
+    path: "/api/v1/activities/import/check",
+  },
+  preview_import_assets: {
+    method: "POST",
+    path: "/api/v1/activities/import/assets/preview",
+  },
+  import_activities: {
+    method: "POST",
+    path: "/api/v1/activities/import",
+  },
+  get_account_import_mapping: {
+    method: "GET",
+    path: "/api/v1/activities/import/mapping",
+  },
+  save_account_import_mapping: {
+    method: "POST",
+    path: "/api/v1/activities/import/mapping",
+  },
+  link_account_template: {
+    method: "POST",
+    path: "/api/v1/activities/import/templates/link",
+  },
+  list_import_templates: {
+    method: "GET",
+    path: "/api/v1/activities/import/templates",
+  },
+  get_import_template: {
+    method: "GET",
+    path: "/api/v1/activities/import/templates/item",
+  },
+  save_import_template: {
+    method: "POST",
+    path: "/api/v1/activities/import/templates",
+  },
+  delete_import_template: {
+    method: "DELETE",
+    path: "/api/v1/activities/import/templates",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

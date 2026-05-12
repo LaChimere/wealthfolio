@@ -165,6 +165,86 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "search_activities":
+    case "check_activities_import":
+    case "preview_import_assets":
+    case "import_activities":
+      return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
+    case "create_activity":
+    case "update_activity":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.activity, "activity", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "save_activities":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.request, "request", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "delete_activity":
+      return await invokeActivityDelete<T>({ payload, sidecar, fetchImpl });
+    case "link_transfer_activities":
+    case "unlink_transfer_activities":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          activityAId: requireString(payload?.activityAId, "activityAId", command),
+          activityBId: requireString(payload?.activityBId, "activityBId", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "get_account_import_mapping":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["accountId", optionalString(payload?.accountId)],
+          ["contextKind", optionalString(payload?.contextKind)],
+        ],
+      });
+    case "save_account_import_mapping":
+      return await invokePostJson<T>({
+        command,
+        body: { mapping: requireRecord(payload?.mapping, "mapping", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "list_import_templates":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "get_import_template":
+    case "delete_import_template":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [["id", optionalString(payload?.id)]],
+      });
+    case "save_import_template":
+      return await invokePostJson<T>({
+        command,
+        body: { template: requireRecord(payload?.template, "template", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "link_account_template":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          accountId: requireString(payload?.accountId, "accountId", command),
+          templateId: requireString(payload?.templateId, "templateId", command),
+          contextKind: optionalString(payload?.contextKind),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -438,6 +518,24 @@ async function invokePostJson<T>({
   });
 }
 
+async function invokeActivityDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const activityId = requireString(payload?.activityId, "activityId", "delete_activity");
+  return await fetchSidecarJson<T>({
+    command: "delete_activity",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_activity.path}/${encodeURIComponent(activityId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_activity.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -507,7 +605,10 @@ async function invokeSimpleGet<T>({
   sidecar,
   fetchImpl,
 }: {
-  command: Extract<ElectronCommand, "get_settings" | "is_auto_update_check_enabled" | "get_goals">;
+  command: Extract<
+    ElectronCommand,
+    "get_settings" | "is_auto_update_check_enabled" | "get_goals" | "list_import_templates"
+  >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
 }): Promise<T> {

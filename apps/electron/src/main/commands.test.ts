@@ -508,6 +508,229 @@ describe("Electron sidecar command proxy", () => {
     );
   });
 
+  test("proxies core activity commands with JSON bodies and encoded ids", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "search_activities",
+      payload: { page: 1, pageSize: 25 },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_activity",
+      payload: { activity: { accountId: "acct-1", activityType: "BUY" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_activity",
+      payload: { activity: { id: "activity/1", activityType: "SELL" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_activities",
+      payload: { request: { create: [{ activityType: "DIVIDEND" }] } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_activity",
+      payload: { activityId: "activity/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "link_transfer_activities",
+      payload: { activityAId: "a-1", activityBId: "b-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "unlink_transfer_activities",
+      payload: { activityAId: "a-1", activityBId: "b-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/activities/search",
+        "POST",
+        JSON.stringify({ page: 1, pageSize: 25 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities",
+        "POST",
+        JSON.stringify({ accountId: "acct-1", activityType: "BUY" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities",
+        "PUT",
+        JSON.stringify({ id: "activity/1", activityType: "SELL" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/bulk",
+        "POST",
+        JSON.stringify({ create: [{ activityType: "DIVIDEND" }] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/activities/activity%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/link",
+        "POST",
+        JSON.stringify({ activityAId: "a-1", activityBId: "b-1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/unlink",
+        "POST",
+        JSON.stringify({ activityAId: "a-1", activityBId: "b-1" }),
+      ],
+    ]);
+  });
+
+  test("proxies activity import and template commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "check_activities_import",
+      payload: { activities: [{ id: "import-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "preview_import_assets",
+      payload: { candidates: [{ symbol: "AAPL" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_activities",
+      payload: { activities: [{ id: "import-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_account_import_mapping",
+      payload: { accountId: "account 1", contextKind: "activity" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_account_import_mapping",
+      payload: { mapping: { accountId: "account 1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_import_templates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_import_template",
+      payload: { id: "template/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_import_template",
+      payload: { template: { id: "template/1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_import_template",
+      payload: { id: "template/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "link_account_template",
+      payload: { accountId: "account 1", templateId: "template/1", contextKind: "activity" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/check",
+        "POST",
+        JSON.stringify({ activities: [{ id: "import-1" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/assets/preview",
+        "POST",
+        JSON.stringify({ candidates: [{ symbol: "AAPL" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import",
+        "POST",
+        JSON.stringify({ activities: [{ id: "import-1" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/mapping?accountId=account+1&contextKind=activity",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/mapping",
+        "POST",
+        JSON.stringify({ mapping: { accountId: "account 1" } }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/activities/import/templates", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates/item?id=template%2F1",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates",
+        "POST",
+        JSON.stringify({ template: { id: "template/1" } }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates?id=template%2F1",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates/link",
+        "POST",
+        JSON.stringify({
+          accountId: "account 1",
+          templateId: "template/1",
+          contextKind: "activity",
+        }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed activity command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "create_activity",
+        payload: { activity: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "create_activity" requires object payload field "activity".',
+    );
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
