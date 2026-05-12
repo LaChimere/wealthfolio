@@ -3,9 +3,15 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { IPC_CHANNELS, type ElectronInvokeRequest, type RuntimeInfo } from "../shared/ipc";
+import {
+  IPC_CHANNELS,
+  type ElectronEventMessage,
+  type ElectronInvokeRequest,
+  type RuntimeInfo,
+} from "../shared/ipc";
 import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
+import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
 import { validateElectronInvokeRequest } from "./ipc-validation";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
@@ -19,6 +25,7 @@ let sidecarHandle: SidecarHandle | null = null;
 let sidecarStopInProgress = false;
 let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
+let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
 
 function configureAppPaths(): void {
   const legacyPaths = resolveLegacyTauriPaths();
@@ -81,6 +88,14 @@ function handleFatal(error: unknown): void {
   app.quit();
 }
 
+function sendServerEventToWindows(message: ElectronEventMessage): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.serverEvent, message);
+    }
+  }
+}
+
 async function createWindow(): Promise<void> {
   const preloadPath = path.join(distRoot, "preload", "index.cjs");
   const rendererUrl = process.env.WF_ELECTRON_RENDERER_URL;
@@ -101,10 +116,17 @@ async function startSidecarBridge(): Promise<void> {
       signal: controller.signal,
     });
     const handle = sidecarHandle;
+    sidecarEventBridge?.stop();
+    sidecarEventBridge = startSidecarEventBridge({
+      sidecar: handle,
+      send: sendServerEventToWindows,
+    });
     handle.onExit((event) => {
       if (event.expected) {
         return;
       }
+      sidecarEventBridge?.stop();
+      sidecarEventBridge = null;
       if (sidecarHandle === handle) {
         sidecarHandle = null;
       }
@@ -136,6 +158,8 @@ async function startSidecarBridge(): Promise<void> {
 async function stopSidecarBridge(): Promise<void> {
   sidecarStartController?.abort();
   await sidecarStartPromise;
+  sidecarEventBridge?.stop();
+  sidecarEventBridge = null;
   if (!sidecarHandle) {
     return;
   }

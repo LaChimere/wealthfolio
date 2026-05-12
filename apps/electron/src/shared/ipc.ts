@@ -3,6 +3,7 @@ export const ELECTRON_API_KEY = "wealthfolioElectron";
 export const IPC_CHANNELS = {
   getRuntimeInfo: "wealthfolio:runtime-info",
   invoke: "wealthfolio:invoke",
+  serverEvent: "wealthfolio:server-event",
 } as const;
 
 export const ELECTRON_COMMANDS = {
@@ -58,9 +59,19 @@ export interface ElectronInvokeRequest {
   payload?: Record<string, unknown>;
 }
 
+export interface ElectronEventMessage<T = unknown> {
+  event: string;
+  id: number;
+  payload: T;
+}
+
 export interface WealthfolioElectronApi {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
+  listen<T>(
+    eventName: string,
+    handler: (event: ElectronEventMessage<T>) => void,
+  ): Promise<() => Promise<void>>;
 }
 
 export function isElectronCommand(command: string): command is ElectronCommand {

@@ -123,6 +123,15 @@ loopback URLs and token-shaped values before crossing IPC. Electron app info
 must use sanitized runtime metadata and must not expose desktop DB or log paths
 to the renderer.
 
+Electron domain events use the same trust boundary. Electron main owns the
+authenticated SSE connection to `/api/v1/events/stream`, retries it with
+backoff, stops it with the sidecar lifecycle, and broadcasts only
+`{ event, id, payload }` messages through preload IPC. Event payloads are
+recursively redacted for loopback URLs and token-shaped strings before they
+reach the renderer. Native desktop-only events such as file drop, deep links,
+and route navigation stay pending until their Electron-native replacements are
+implemented.
+
 ## Native desktop features
 
 Electron must replace the following Tauri plugin responsibilities before the
