@@ -1380,13 +1380,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
         liabilityId: string;
         request: Record<string, unknown>;
       };
-      url += `/${encodeURIComponent(liabilityId)}/link`;
+      url += `/${encodeURIComponent(liabilityId)}/link-liability`;
       body = JSON.stringify(request);
       break;
     }
     case "unlink_liability": {
       const { liabilityId } = payload as { liabilityId: string };
-      url += `/${encodeURIComponent(liabilityId)}/unlink`;
+      url += `/${encodeURIComponent(liabilityId)}/link-liability`;
       break;
     }
     case "update_alternative_asset_metadata": {

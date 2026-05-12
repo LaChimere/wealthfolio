@@ -40,6 +40,7 @@
 | Taxonomy proxy review           | done   | Code-review found no blocking issues in taxonomy route, body, path, validation, or redaction handling.            |
 | Health proxy review             | done   | Code-review found no blocking issues in Health Center route, body, timezone header, or no-body POST handling.     |
 | Net Worth proxy review          | done   | Code-review found no blocking issues in Net Worth route, query, validation, or redaction handling.                |
+| Web alternative route review    | done   | Code-review found no blocking issues in the liability link/unlink route alignment with Rust server endpoints.     |
 
 ## Non-blocking cautions carried forward
 

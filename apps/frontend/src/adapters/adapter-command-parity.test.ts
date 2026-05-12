@@ -328,4 +328,21 @@ describe("scope-based routing — get_income_summary", () => {
       filter: { type: "accounts", accountIds: ["acc_1", "acc_2"] },
     });
   });
+
+  it("routes alternative asset liability links to the server endpoint", async () => {
+    const response = new Response(null, { status: 204 });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await invoke("link_liability", {
+      liabilityId: "liability/1",
+      request: { targetAssetId: "asset-1" },
+    });
+    await invoke("unlink_liability", { liabilityId: "liability/1" });
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ["/api/v1/alternative-assets/liability%2F1/link-liability", "POST"],
+      ["/api/v1/alternative-assets/liability%2F1/link-liability", "DELETE"],
+    ]);
+  });
 });
