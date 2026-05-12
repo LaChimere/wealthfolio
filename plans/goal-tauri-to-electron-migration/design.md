@@ -30,7 +30,7 @@ Rejected alternatives:
 
 Electron must preserve the legacy Tauri desktop data root. Before the Electron scaffold initializes app state, Electron main should resolve the existing Tauri `app_data_dir` path for the app identifier `com.teymz.wealthfolio`, set or pass that root as the desktop data directory, and configure the sidecar with an explicit database path under that root. PR 4 must not let Electron's default `app.getPath('userData')` create a divergent `Wealthfolio` data directory without a migration.
 
-PR 1/early PR 4 must verify and document the exact OS paths for the current Tauri build. PR 6 must add a test or smoke check that Electron points at the same `app.db` and backups root before any user data migration is attempted.
+The exact OS paths and the sidecar/keyring/updater/OAuth decisions are documented in `/Users/lachimere/Projects/wealthfolio/docs/architecture/electron-migration.md`. PR 6 must add a test or smoke check that Electron points at the same `app.db` and backups root before any user data migration is attempted.
 
 ### Secrets/keyring
 

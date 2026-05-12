@@ -4,6 +4,10 @@ This document describes the adapter system used to support multiple runtime
 environments (Desktop/Tauri and Web/REST API) with compile-time environment
 detection.
 
+> Migration note: the target Electron desktop architecture is tracked in
+> [Electron Migration Architecture](./electron-migration.md). This document
+> describes the current adapter system until that migration lands.
+
 ## Overview
 
 Wealthfolio runs in two environments:

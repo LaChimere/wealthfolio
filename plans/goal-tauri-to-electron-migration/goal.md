@@ -3,12 +3,12 @@
 objective: "对整个项目进行深度调研，了解这个项目是如何实现的。然后我需要你将这个基于 Tauri 的项目改造成基于 electron 的。我们的依赖需要尽量用当前最新的版本。项目需要用 typescript 6 （如果最新的 electron 支持的话），且用 bun 来进行管理。这是一个大型的迁移工程，你需要在实现过程中确保没有破坏项目的功能性。可以及时添加 UT、UI 等测试来确保没有破坏功能性，以及确保 high quality。 你可以参考 @~/Projects/volare/ 里面 biome、lefthook、tsconfig 等来确保项目的代码规范。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-tauri-to-electron-migration"
-turns_used: 1
+turns_used: 2
 turn_budget: null
 docs_update_approved: true
 gate_policy: "Standing approval: self-review, rubber-duck/code-review/pr-review-toolkit:review-pr refine until no blocking comments, then auto-advance."
 created_at: "2026-05-12T23:20:57.639+08:00"
-updated_at: "2026-05-12T23:35:00+08:00"
+updated_at: "2026-05-12T23:45:00+08:00"
 
 ## Acceptance criteria
 
@@ -50,6 +50,7 @@ updated_at: "2026-05-12T23:35:00+08:00"
 
 - Turn 0: Goal registered. Initial research found an adapter-based frontend seam, a Tauri/Rust desktop shell with core Rust services, and pnpm/ESLint/Prettier tooling that must be migrated in stages.
 - Turn 1: Created migration state artifacts, selected the side-by-side Electron migration strategy, incorporated rubber-duck review feedback, and validated the current adapter parity test (`pnpm --filter frontend exec vitest run src/adapters/adapter-command-parity.test.ts --silent`).
+- Turn 2: Documented the Electron migration architecture, including the local Rust sidecar profile, Tauri-compatible desktop data roots, keyring continuity, native feature replacements, updater/signing direction, and OAuth/deep-link strategy.
 
 ## Deferred items
 
