@@ -5,7 +5,15 @@ export const IPC_CHANNELS = {
   invoke: "wealthfolio:invoke",
 } as const;
 
-export const ELECTRON_COMMANDS = {} as const satisfies Record<string, unknown>;
+export const ELECTRON_COMMANDS = {
+  get_accounts: {
+    method: "GET",
+    path: "/api/v1/accounts",
+  },
+} as const satisfies Record<
+  string,
+  { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string }
+>;
 
 export type ElectronCommand = keyof typeof ELECTRON_COMMANDS;
 

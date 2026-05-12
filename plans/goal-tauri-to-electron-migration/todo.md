@@ -2,19 +2,19 @@
 
 ## Active sequence
 
-| ID                     | Status      | Description                                                                                                                   | Evidence                                                                                                                         |
-| ---------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| migration-state        | done        | Create persistent goal/research/design/plan/todo artifacts and review the decomposition.                                      | `plans/goal-tauri-to-electron-migration/*`; adapter parity test passed                                                           |
-| architecture-decisions | done        | Verify and document the Rust sidecar, desktop data-root, keyring, updater, and OAuth decisions before Electron scaffold work. | `/Users/lachimere/Projects/wealthfolio/docs/architecture/electron-migration.md`; diff check passed                               |
-| guardrail-tests        | done        | Strengthen adapter/IPC parity guardrails for an Electron adapter without changing runtime behavior.                           | `apps/frontend/src/adapters/adapter-runtime-boundary.test.ts`; targeted lint/test and code review passed                         |
-| bun-tooling            | done        | Move JS package management/scripts to Bun and introduce Biome/Lefthook with minimal churn.                                    | Bun migration committed; Biome/Lefthook baseline added; `bun run check` and `bun run hooks:run` passed.                          |
-| typescript-6           | done        | Upgrade TypeScript to 6 if Electron/tooling compatibility checks pass.                                                        | TypeScript 6.0.3 installed across workspace; `bun run check`, full frontend tests, frontend/packages/addon builds passed.        |
-| electron-scaffold      | done        | Add Electron main/preload shell that can host the existing frontend side-by-side with Tauri.                                  | `apps/electron`; `bun run check`, `bun run build:electron`, Electron tests, adapter tests, and Electron binary check passed.     |
-| electron-adapter       | done        | Add Electron frontend adapter and typed IPC registry preserving shared adapter APIs.                                          | `BUILD_TARGET=electron`; adapter/core/AI tests, web build, Tauri build, Electron build, and `bun run check` passed.              |
-| rust-service-bridge    | in_progress | Connect Electron to existing Rust-backed services, SQLite data dir behavior, and domain event streams.                        | Sidecar server profile, Electron lifecycle, legacy DB/addon roots, temp secret isolation, readiness/crash/shutdown tests passed. |
-| native-parity          | pending     | Replace Tauri native desktop plugins/features with Electron equivalents.                                                      | Pending                                                                                                                          |
-| electron-release       | pending     | Replace Tauri desktop packaging/release artifacts with Electron packaging while preserving server prebuilds.                  | Pending                                                                                                                          |
-| tauri-cleanup          | pending     | Remove Tauri runtime/dependencies/docs only after Electron parity is verified.                                                | Pending                                                                                                                          |
+| ID                     | Status      | Description                                                                                                                   | Evidence                                                                                                                      |
+| ---------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| migration-state        | done        | Create persistent goal/research/design/plan/todo artifacts and review the decomposition.                                      | `plans/goal-tauri-to-electron-migration/*`; adapter parity test passed                                                        |
+| architecture-decisions | done        | Verify and document the Rust sidecar, desktop data-root, keyring, updater, and OAuth decisions before Electron scaffold work. | `/Users/lachimere/Projects/wealthfolio/docs/architecture/electron-migration.md`; diff check passed                            |
+| guardrail-tests        | done        | Strengthen adapter/IPC parity guardrails for an Electron adapter without changing runtime behavior.                           | `apps/frontend/src/adapters/adapter-runtime-boundary.test.ts`; targeted lint/test and code review passed                      |
+| bun-tooling            | done        | Move JS package management/scripts to Bun and introduce Biome/Lefthook with minimal churn.                                    | Bun migration committed; Biome/Lefthook baseline added; `bun run check` and `bun run hooks:run` passed.                       |
+| typescript-6           | done        | Upgrade TypeScript to 6 if Electron/tooling compatibility checks pass.                                                        | TypeScript 6.0.3 installed across workspace; `bun run check`, full frontend tests, frontend/packages/addon builds passed.     |
+| electron-scaffold      | done        | Add Electron main/preload shell that can host the existing frontend side-by-side with Tauri.                                  | `apps/electron`; `bun run check`, `bun run build:electron`, Electron tests, adapter tests, and Electron binary check passed.  |
+| electron-adapter       | done        | Add Electron frontend adapter and typed IPC registry preserving shared adapter APIs.                                          | `BUILD_TARGET=electron`; adapter/core/AI tests, web build, Tauri build, Electron build, and `bun run check` passed.           |
+| rust-service-bridge    | in_progress | Connect Electron to existing Rust-backed services, SQLite data dir behavior, and domain event streams.                        | Sidecar profile/lifecycle done; `get_accounts` IPC→main→sidecar smoke proxy, redaction, validation, build, and checks passed. |
+| native-parity          | pending     | Replace Tauri native desktop plugins/features with Electron equivalents.                                                      | Pending                                                                                                                       |
+| electron-release       | pending     | Replace Tauri desktop packaging/release artifacts with Electron packaging while preserving server prebuilds.                  | Pending                                                                                                                       |
+| tauri-cleanup          | pending     | Remove Tauri runtime/dependencies/docs only after Electron parity is verified.                                                | Pending                                                                                                                       |
 
 ## Review checkpoints
 
@@ -27,11 +27,13 @@
 | Electron scaffold review      | done   | Code-review found a startup error-handling gap; the guarded startup fix was re-reviewed with no blockers.       |
 | Electron adapter review       | done   | Rubber-duck found web fallback/IPC allowlist risks; code-review found AI streaming zero-event risk; both fixed. |
 | Rust sidecar lifecycle review | done   | Code-review found process lifecycle and cleanup gaps; fixes were applied and re-reviewed with no blockers.      |
+| Command proxy smoke review    | done   | Code-review found command error redaction and fail-closed gaps; fixes were re-reviewed with no high issues.     |
 
 ## Non-blocking cautions carried forward
 
-- Remaining bridge work must connect Electron commands and domain events through
-  main-mediated sidecar IPC without exposing sidecar URL/token to the renderer.
+- Remaining bridge work must expand Electron command proxy coverage and connect
+  domain events through main-mediated sidecar IPC without exposing sidecar
+  URL/token to the renderer.
 - Remaining bridge work must factor keyring-backed secret storage out of
   `apps/tauri` without creating a sidecar dependency on the Tauri app crate.
 - Verified legacy Tauri data-root paths are recorded in

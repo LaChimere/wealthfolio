@@ -3,13 +3,10 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  IPC_CHANNELS,
-  isElectronCommand,
-  type ElectronInvokeRequest,
-  type RuntimeInfo,
-} from "../shared/ipc";
+import { IPC_CHANNELS, type ElectronInvokeRequest, type RuntimeInfo } from "../shared/ipc";
+import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
+import { validateElectronInvokeRequest } from "./ipc-validation";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
 
@@ -65,17 +62,18 @@ function registerIpcHandlers(): void {
       sidecar: sidecarStatus,
     };
   });
-  ipcMain.handle(IPC_CHANNELS.invoke, (_event, request: ElectronInvokeRequest): never => {
-    if (!request || typeof request.command !== "string") {
-      throw new Error("Invalid Electron command request.");
-    }
-
-    if (!isElectronCommand(request.command)) {
-      throw new Error(`Electron command bridge is not connected yet: ${request.command}`);
-    }
-
-    throw new Error(`Electron command is not implemented yet: ${request.command}`);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.invoke,
+    async (_event, request: ElectronInvokeRequest): Promise<unknown> => {
+      const validatedRequest = validateElectronInvokeRequest(request);
+      const sidecar = await getReadySidecarHandle();
+      return await invokeSidecarCommand({
+        command: validatedRequest.command,
+        payload: validatedRequest.payload,
+        sidecar,
+      });
+    },
+  );
 }
 
 function handleFatal(error: unknown): void {
@@ -146,6 +144,15 @@ async function stopSidecarBridge(): Promise<void> {
   sidecarHandle = null;
   sidecarStatus = toPublicSidecarStatus({ ready: false });
   await handle.stop();
+}
+
+async function getReadySidecarHandle(): Promise<SidecarHandle> {
+  await sidecarStartPromise;
+  if (!sidecarHandle || !sidecarStatus.ready) {
+    const reason = sidecarStatus.error ? `: ${sidecarStatus.error}` : "";
+    throw new Error(`Electron sidecar is not ready${reason}`);
+  }
+  return sidecarHandle;
 }
 
 async function start(): Promise<void> {

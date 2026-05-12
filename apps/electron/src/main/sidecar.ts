@@ -48,7 +48,16 @@ interface SidecarEnvironmentOptions {
 }
 
 export function toPublicSidecarStatus(status: SidecarRuntimeStatus): SidecarRuntimeStatus {
-  return status.error ? { ready: status.ready, error: status.error } : { ready: status.ready };
+  return status.error
+    ? { ready: status.ready, error: sanitizeSidecarError(status.error) }
+    : { ready: status.ready };
+}
+
+export function sanitizeSidecarError(error: string): string {
+  return error
+    .replace(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/gi, "[sidecar]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[redacted]")
+    .replace(/(token=)[^&\s]+/gi, "$1[redacted]");
 }
 
 export function createSidecarEnvironment({
@@ -275,6 +284,7 @@ function watchChildFailure(child: ChildProcess): { promise: Promise<never>; disp
     child.once("exit", onExit);
     child.once("error", onError);
   });
+  void promise.catch(() => undefined);
 
   return {
     promise,

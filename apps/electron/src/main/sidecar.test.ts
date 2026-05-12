@@ -23,13 +23,19 @@ function bunEval(source: string): { command: string; args: string[] } {
 describe("Electron sidecar configuration", () => {
   test("keeps sidecar token and base URL out of public runtime status", () => {
     const publicStatus = toPublicSidecarStatus({
-      ready: true,
-      error: undefined,
+      ready: false,
+      error:
+        "Timed out waiting for Electron sidecar at http://127.0.0.1:18444 with token=sidecar-token",
     });
 
-    expect(publicStatus).toEqual({ ready: true });
+    expect(publicStatus).toEqual({
+      ready: false,
+      error: "Timed out waiting for Electron sidecar at [sidecar] with token=[redacted]",
+    });
     expect("baseUrl" in publicStatus).toBe(false);
     expect("token" in publicStatus).toBe(false);
+    expect(publicStatus.error).not.toContain("127.0.0.1");
+    expect(publicStatus.error).not.toContain("sidecar-token");
   });
 
   test("uses the legacy Tauri data root and an isolated temporary secret file", () => {

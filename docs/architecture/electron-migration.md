@@ -113,6 +113,13 @@ Until the sidecar bridge is connected, Electron domain commands must reject
 through the preload IPC bridge instead of falling back to browser REST calls or
 exposing a backend URL to the renderer.
 
+The first sidecar command smoke path is `get_accounts`: the renderer still calls
+the typed preload IPC bridge, Electron main validates the command against an
+explicit allowlist, waits for sidecar readiness, and proxies to
+`/api/v1/accounts` with the per-run bearer token. Sidecar base URLs and tokens
+must stay confined to Electron main; public runtime status and command errors
+must redact loopback URLs and token-shaped values before crossing IPC.
+
 ## Native desktop features
 
 Electron must replace the following Tauri plugin responsibilities before the
