@@ -22,6 +22,18 @@ export const ELECTRON_COMMANDS = {
     method: "DELETE",
     path: "/api/v1/accounts",
   },
+  get_settings: {
+    method: "GET",
+    path: "/api/v1/settings",
+  },
+  update_settings: {
+    method: "PUT",
+    path: "/api/v1/settings",
+  },
+  is_auto_update_check_enabled: {
+    method: "GET",
+    path: "/api/v1/settings/auto-update-enabled",
+  },
 } as const satisfies Record<
   string,
   { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string }

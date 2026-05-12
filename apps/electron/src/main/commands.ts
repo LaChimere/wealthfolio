@@ -31,6 +31,11 @@ export async function invokeSidecarCommand<T>({
       return await invokeUpdateAccount<T>({ payload, sidecar, fetchImpl });
     case "delete_account":
       return await invokeDeleteAccount<T>({ payload, sidecar, fetchImpl });
+    case "get_settings":
+    case "is_auto_update_check_enabled":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "update_settings":
+      return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
   }
 
   const unimplementedCommand: never = command;
@@ -113,6 +118,46 @@ async function invokeDeleteAccount<T>({
       sidecar.baseUrl,
     ),
     init: { method: ELECTRON_COMMANDS.delete_account.method },
+  });
+}
+
+async function invokeSimpleGet<T>({
+  command,
+  sidecar,
+  fetchImpl,
+}: {
+  command: Extract<ElectronCommand, "get_settings" | "is_auto_update_check_enabled">;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS[command].path, sidecar.baseUrl),
+    init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokeUpdateSettings<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const settingsUpdate = requireRecord(
+    payload?.settingsUpdate,
+    "settingsUpdate",
+    "update_settings",
+  );
+  return await fetchSidecarJson<T>({
+    command: "update_settings",
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS.update_settings.path, sidecar.baseUrl),
+    init: {
+      method: ELECTRON_COMMANDS.update_settings.method,
+      body: JSON.stringify(settingsUpdate),
+    },
   });
 }
 

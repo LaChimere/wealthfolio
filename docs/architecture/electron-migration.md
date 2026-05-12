@@ -113,12 +113,15 @@ Until the sidecar bridge is connected, Electron domain commands must reject
 through the preload IPC bridge instead of falling back to browser REST calls or
 exposing a backend URL to the renderer.
 
-The first sidecar command paths cover account list/create/update/delete: the
-renderer still calls the typed preload IPC bridge, Electron main validates each
-command against an explicit allowlist, waits for sidecar readiness, and proxies
-to `/api/v1/accounts` with the per-run bearer token. Sidecar base URLs and
-tokens must stay confined to Electron main; public runtime status and command
-errors must redact loopback URLs and token-shaped values before crossing IPC.
+The first sidecar command paths cover account list/create/update/delete and
+settings read/update/auto-update preference reads: the renderer still calls the
+typed preload IPC bridge, Electron main validates each command against an
+explicit allowlist, waits for sidecar readiness, and proxies to the loopback
+sidecar with the per-run bearer token. Sidecar base URLs and tokens must stay
+confined to Electron main; public runtime status and command errors must redact
+loopback URLs and token-shaped values before crossing IPC. Electron app info
+must use sanitized runtime metadata and must not expose desktop DB or log paths
+to the renderer.
 
 ## Native desktop features
 

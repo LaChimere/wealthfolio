@@ -136,6 +136,75 @@ describe("Electron sidecar command proxy", () => {
     );
   });
 
+  test("proxies settings reads and auto-update setting reads", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(
+        jsonResponse(url.toString().endsWith("auto-update-enabled") ? true : {}),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_settings",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({});
+    await expect(
+      invokeSidecarCommand({
+        command: "is_auto_update_check_enabled",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBe(true);
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/settings",
+      "http://127.0.0.1:18444/api/v1/settings/auto-update-enabled",
+    ]);
+  });
+
+  test("proxies update_settings with the settings update request body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ baseCurrency: "EUR" }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_settings",
+        payload: { settingsUpdate: { baseCurrency: "EUR" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ baseCurrency: "EUR" });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/settings");
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
+  });
+
+  test("rejects malformed settings update payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_settings",
+        payload: { settingsUpdate: null as unknown as Record<string, unknown> },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "update_settings" requires object payload field "settingsUpdate".',
+    );
+  });
+
   test("does not leak sidecar URL or token in command errors", async () => {
     const fetchImpl: FetchLike = () =>
       Promise.resolve(

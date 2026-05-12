@@ -59,12 +59,12 @@ export const restoreDatabase = async (backupFilePath: string): Promise<void> => 
 };
 
 export const getAppInfo = async (): Promise<AppInfo> => {
-  try {
-    return await invoke<AppInfo>("get_app_info");
-  } catch (error) {
-    logger.error("Error fetching app info");
-    throw error;
-  }
+  const runtime = await getRuntimeInfo();
+  return {
+    version: runtime.appVersion,
+    dbPath: "",
+    logsDir: "",
+  };
 };
 
 export const checkForUpdates = async (_options?: {
