@@ -179,6 +179,22 @@ export const ELECTRON_COMMANDS = {
     method: "DELETE",
     path: "/api/v1/activities/import/templates",
   },
+  get_latest_exchange_rates: {
+    method: "GET",
+    path: "/api/v1/exchange-rates/latest",
+  },
+  update_exchange_rate: {
+    method: "PUT",
+    path: "/api/v1/exchange-rates",
+  },
+  add_exchange_rate: {
+    method: "POST",
+    path: "/api/v1/exchange-rates",
+  },
+  delete_exchange_rate: {
+    method: "DELETE",
+    path: "/api/v1/exchange-rates",
+  },
   get_goals: {
     method: "GET",
     path: "/api/v1/goals",

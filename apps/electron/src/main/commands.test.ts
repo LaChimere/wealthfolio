@@ -731,6 +731,89 @@ describe("Electron sidecar command proxy", () => {
     );
   });
 
+  test("proxies exchange rate commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_latest_exchange_rates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_exchange_rate",
+      payload: {
+        rate: {
+          id: "fx-1",
+          fromCurrency: "USD",
+          toCurrency: "CAD",
+          rate: "1.4",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "add_exchange_rate",
+      payload: {
+        newRate: {
+          fromCurrency: "EUR",
+          toCurrency: "CAD",
+          rate: "1.5",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_exchange_rate",
+        payload: { rateId: "USD/CAD" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/exchange-rates/latest", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/exchange-rates",
+        "PUT",
+        JSON.stringify({
+          id: "fx-1",
+          fromCurrency: "USD",
+          toCurrency: "CAD",
+          rate: "1.4",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/exchange-rates",
+        "POST",
+        JSON.stringify({
+          fromCurrency: "EUR",
+          toCurrency: "CAD",
+          rate: "1.5",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/exchange-rates/USD%2FCAD", "DELETE", undefined],
+    ]);
+  });
+
   test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {

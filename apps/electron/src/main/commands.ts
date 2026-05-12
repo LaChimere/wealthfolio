@@ -245,6 +245,24 @@ export async function invokeSidecarCommand<T>({
         sidecar,
         fetchImpl,
       });
+    case "get_latest_exchange_rates":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "update_exchange_rate":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.rate, "rate", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "add_exchange_rate":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.newRate, "newRate", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "delete_exchange_rate":
+      return await invokeExchangeRateDelete<T>({ payload, sidecar, fetchImpl });
     case "get_goals":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "get_goal":
@@ -536,6 +554,24 @@ async function invokeActivityDelete<T>({
   });
 }
 
+async function invokeExchangeRateDelete<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const rateId = requireString(payload?.rateId, "rateId", "delete_exchange_rate");
+  return await fetchSidecarJson<T>({
+    command: "delete_exchange_rate",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_exchange_rate.path}/${encodeURIComponent(rateId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_exchange_rate.method },
+  });
+}
+
 async function invokeGoalById<T>({
   command,
   payload,
@@ -607,7 +643,11 @@ async function invokeSimpleGet<T>({
 }: {
   command: Extract<
     ElectronCommand,
-    "get_settings" | "is_auto_update_check_enabled" | "get_goals" | "list_import_templates"
+    | "get_settings"
+    | "is_auto_update_check_enabled"
+    | "get_goals"
+    | "list_import_templates"
+    | "get_latest_exchange_rates"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
