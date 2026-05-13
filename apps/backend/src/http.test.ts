@@ -7,6 +7,10 @@ import {
   createContributionLimitRepository,
   createContributionLimitService,
 } from "./domains/contribution-limits";
+import {
+  createCustomProviderRepository,
+  createCustomProviderService,
+} from "./domains/custom-providers";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -582,6 +586,95 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated custom provider CRUD only when a service is provided", async () => {
+    const db = createCustomProvidersDb();
+    const handler = createBackendRequestHandler(config, {
+      customProviderService: createCustomProviderService(createCustomProviderRepository(db)),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/custom-providers"))).status).toBe(
+        401,
+      );
+
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            code: " Demo ",
+            name: "Demo",
+            sources: [
+              {
+                kind: "latest",
+                format: "json",
+                url: "https://example.test/{SYMBOL}",
+                pricePath: "$.price",
+              },
+            ],
+          }),
+        }),
+      );
+      const created = await createResponse.json();
+      expect(createResponse.status).toBe(200);
+      expect(created).toMatchObject({
+        id: "demo",
+        description: "",
+        enabled: true,
+        priority: 50,
+        sources: [expect.objectContaining({ id: "demo:latest" })],
+      });
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers/demo", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ name: "Demo Updated", sources: [] }),
+        }),
+      );
+      expect(await updateResponse.json()).toMatchObject({
+        id: "demo",
+        name: "Demo Updated",
+        sources: [],
+      });
+
+      const listResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await listResponse.json()).toEqual([expect.objectContaining({ id: "demo" })]);
+
+      const deleteResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers/demo", {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteResponse.status).toBe(204);
+
+      const testSourceResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers/test-source", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(testSourceResponse.status).toBe(404);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {
@@ -622,6 +715,29 @@ function createContributionLimitsDb(): Database {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       start_date TIMESTAMP NULL,
       end_date TIMESTAMP NULL
+    );
+  `);
+  return db;
+}
+
+function createCustomProvidersDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE market_data_custom_providers (
+      id TEXT NOT NULL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 50,
+      config TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE assets (
+      id TEXT NOT NULL PRIMARY KEY,
+      provider_config TEXT
     );
   `);
   return db;

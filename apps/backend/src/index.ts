@@ -42,6 +42,22 @@ export {
   type NewContributionLimit,
 } from "./domains/contribution-limits";
 export {
+  createCustomProviderRepository,
+  createCustomProviderService,
+  type CustomProviderRepository,
+  type CustomProviderRepositoryOptions,
+  type CustomProviderService,
+  type CustomProviderSource,
+  type CustomProviderSourceFormat,
+  type CustomProviderSourceKind,
+  type CustomProviderSyncEvent,
+  type CustomProviderSyncOperation,
+  type CustomProviderWithSources,
+  type NewCustomProvider,
+  type NewCustomProviderSource,
+  type UpdateCustomProvider,
+} from "./domains/custom-providers";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,

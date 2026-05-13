@@ -64,14 +64,16 @@
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
     inert for production until TS cutover.
-  - Evidence: settings, accounts, contribution limits, and taxonomy TS
-    repository/service implementations plus guarded route tests in
+  - Evidence: settings, accounts, contribution limits, taxonomy, and custom
+    provider TS repository/service implementations plus guarded route tests in
     `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
-    `apps/backend/src/domains/contribution-limits.ts`, and
-    `apps/backend/src/domains/taxonomies.ts`, and
+    `apps/backend/src/domains/contribution-limits.ts`,
+    `apps/backend/src/domains/taxonomies.ts`,
+    `apps/backend/src/domains/custom-providers.ts`, and
     `apps/backend/src/http.test.ts`. Taxonomy migration/health endpoints are
-    deferred to the health/classification service slice.
+    deferred to the health/classification service slice; custom provider
+    `test-source` is deferred to an external-I/O slice.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -200,13 +202,26 @@ contract:
   issues.
 - `pr5-taxonomies-import-export-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-custom-providers-crud`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes provider-code route identity, UUID sync identity, list
+  priority order, create defaults and reserved-code validation, source config
+  parsing and validation, omitted-field update preservation, explicit empty
+  `sources` replacement, delete existence checks, both asset reference delete
+  guards, guarded HTTP CRUD routes, and deferred `test-source` behavior.
+- `pr5-custom-providers-crud-review`: code review found no actionable issues
+  across Rust parity, route compatibility/security, type-safety, or test
+  coverage.
+- `pr5-custom-providers-crud-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
-  mutation, assignment, and import/export slices implemented; broader migration
-  remains active.
+  mutation, assignment, import/export, and custom provider CRUD slices
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
-  endpoints move with the health/classification services.
+  endpoints move with the health/classification services; custom provider
+  `test-source` moves with external-I/O services.

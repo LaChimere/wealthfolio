@@ -2,6 +2,12 @@ import type { BackendRuntimeConfig } from "./config";
 import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
 import { parseTrackingMode } from "./domains/accounts";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
+import type {
+  CustomProviderService,
+  NewCustomProvider,
+  NewCustomProviderSource,
+  UpdateCustomProvider,
+} from "./domains/custom-providers";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -18,6 +24,7 @@ export interface BackendRequestHandlerOptions {
   debugDelayMs?: number;
   accountService?: AccountService;
   contributionLimitService?: ContributionLimitService;
+  customProviderService?: CustomProviderService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -93,6 +100,10 @@ async function routeRequest(
     return routeTaxonomyRequest(request, url, config, options.taxonomyService);
   }
 
+  if (options.customProviderService && url.pathname.startsWith("/api/v1/custom-providers")) {
+    return routeCustomProviderRequest(request, url, config, options.customProviderService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -107,6 +118,43 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeCustomProviderRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  customProviderService: CustomProviderService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/custom-providers") {
+    return jsonResponse(customProviderService.getAll());
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/custom-providers") {
+    return handleJsonMutation(request, parseNewCustomProvider, (newProvider) =>
+      customProviderService.create(newProvider),
+    );
+  }
+
+  const providerId = customProviderIdFromPath(url.pathname);
+  if (providerId && request.method === "PUT") {
+    return handleJsonMutation(request, parseUpdateCustomProvider, (update) =>
+      customProviderService.update(providerId, update),
+    );
+  }
+
+  if (providerId && request.method === "DELETE") {
+    return customProviderService
+      .delete(providerId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -416,6 +464,11 @@ function taxonomyIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function customProviderIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/custom-providers\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function taxonomyCategoryIdsFromPath(
   pathname: string,
 ): { taxonomyId: string; categoryId: string } | undefined {
@@ -556,6 +609,201 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewCustomProvider(payload: Record<string, unknown>): NewCustomProvider | Response {
+  const code = parseRequiredString(payload.code, "code");
+  if (code instanceof Response) {
+    return code;
+  }
+  const name = parseRequiredString(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const priority = parseOptionalNumberOrNull(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  const sources = parseNewCustomProviderSources(payload.sources, "sources", true);
+  if (sources instanceof Response) {
+    return sources;
+  }
+  if (!sources) {
+    return jsonResponse({ code: 400, message: "sources must be an array" }, 400);
+  }
+
+  return {
+    code,
+    name,
+    description,
+    priority,
+    sources,
+  };
+}
+
+function parseUpdateCustomProvider(
+  payload: Record<string, unknown>,
+): UpdateCustomProvider | Response {
+  const name = parseOptionalStringOrNull(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const enabled = parseOptionalBooleanOrNull(payload.enabled, "enabled");
+  if (enabled instanceof Response) {
+    return enabled;
+  }
+  const priority = parseOptionalNumberOrNull(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  const sources = parseNewCustomProviderSources(payload.sources, "sources", false);
+  if (sources instanceof Response) {
+    return sources;
+  }
+
+  return {
+    name,
+    description,
+    enabled,
+    priority,
+    sources,
+  };
+}
+
+function parseNewCustomProviderSources(
+  value: unknown,
+  field: string,
+  required: boolean,
+): NewCustomProviderSource[] | null | undefined | Response {
+  if (value === undefined) {
+    if (required) {
+      return jsonResponse({ code: 400, message: `${field} must be an array` }, 400);
+    }
+    return undefined;
+  }
+  if (value === null && !required) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an array` }, 400);
+  }
+  const sources: NewCustomProviderSource[] = [];
+  for (const [index, source] of value.entries()) {
+    if (typeof source !== "object" || source === null || Array.isArray(source)) {
+      return jsonResponse({ code: 400, message: `${field}[${index}] must be an object` }, 400);
+    }
+    const parsed = parseNewCustomProviderSource(
+      source as Record<string, unknown>,
+      `${field}[${index}]`,
+    );
+    if (parsed instanceof Response) {
+      return parsed;
+    }
+    sources.push(parsed);
+  }
+  return sources;
+}
+
+function parseNewCustomProviderSource(
+  payload: Record<string, unknown>,
+  field: string,
+): NewCustomProviderSource | Response {
+  const kind = parseRequiredString(payload.kind, `${field}.kind`);
+  if (kind instanceof Response) {
+    return kind;
+  }
+  const format = parseRequiredString(payload.format, `${field}.format`);
+  if (format instanceof Response) {
+    return format;
+  }
+  const url = parseRequiredString(payload.url, `${field}.url`);
+  if (url instanceof Response) {
+    return url;
+  }
+  const pricePath = parseRequiredString(payload.pricePath, `${field}.pricePath`);
+  if (pricePath instanceof Response) {
+    return pricePath;
+  }
+  const datePath = parseOptionalStringOrNull(payload.datePath, `${field}.datePath`);
+  if (datePath instanceof Response) {
+    return datePath;
+  }
+  const dateFormat = parseOptionalStringOrNull(payload.dateFormat, `${field}.dateFormat`);
+  if (dateFormat instanceof Response) {
+    return dateFormat;
+  }
+  const currencyPath = parseOptionalStringOrNull(payload.currencyPath, `${field}.currencyPath`);
+  if (currencyPath instanceof Response) {
+    return currencyPath;
+  }
+  const factor = parseOptionalNumberOrNull(payload.factor, `${field}.factor`);
+  if (factor instanceof Response) {
+    return factor;
+  }
+  const invert = parseOptionalBooleanOrNull(payload.invert, `${field}.invert`);
+  if (invert instanceof Response) {
+    return invert;
+  }
+  const locale = parseOptionalStringOrNull(payload.locale, `${field}.locale`);
+  if (locale instanceof Response) {
+    return locale;
+  }
+  const headers = parseOptionalStringOrNull(payload.headers, `${field}.headers`);
+  if (headers instanceof Response) {
+    return headers;
+  }
+  const openPath = parseOptionalStringOrNull(payload.openPath, `${field}.openPath`);
+  if (openPath instanceof Response) {
+    return openPath;
+  }
+  const highPath = parseOptionalStringOrNull(payload.highPath, `${field}.highPath`);
+  if (highPath instanceof Response) {
+    return highPath;
+  }
+  const lowPath = parseOptionalStringOrNull(payload.lowPath, `${field}.lowPath`);
+  if (lowPath instanceof Response) {
+    return lowPath;
+  }
+  const volumePath = parseOptionalStringOrNull(payload.volumePath, `${field}.volumePath`);
+  if (volumePath instanceof Response) {
+    return volumePath;
+  }
+  const defaultPrice = parseOptionalNumberOrNull(payload.defaultPrice, `${field}.defaultPrice`);
+  if (defaultPrice instanceof Response) {
+    return defaultPrice;
+  }
+  const dateTimezone = parseOptionalStringOrNull(payload.dateTimezone, `${field}.dateTimezone`);
+  if (dateTimezone instanceof Response) {
+    return dateTimezone;
+  }
+
+  return {
+    kind: kind as NewCustomProviderSource["kind"],
+    format: format as NewCustomProviderSource["format"],
+    url,
+    pricePath,
+    datePath,
+    dateFormat,
+    currencyPath,
+    factor,
+    invert,
+    locale,
+    headers,
+    openPath,
+    highPath,
+    lowPath,
+    volumePath,
+    defaultPrice,
+    dateTimezone,
+  };
 }
 
 function parseNewTaxonomy(payload: Record<string, unknown>): NewTaxonomy | Response {
@@ -1010,9 +1258,41 @@ function parseRequiredBoolean(value: unknown, field: string): boolean | Response
   return value;
 }
 
+function parseOptionalBooleanOrNull(
+  value: unknown,
+  field: string,
+): boolean | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "boolean") {
+    return jsonResponse({ code: 400, message: `${field} must be a boolean or null` }, 400);
+  }
+  return value;
+}
+
 function parseRequiredInteger(value: unknown, field: string): number | Response {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalNumberOrNull(
+  value: unknown,
+  field: string,
+): number | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be a finite number or null` }, 400);
   }
   return value;
 }
