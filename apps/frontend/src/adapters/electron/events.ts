@@ -64,7 +64,15 @@ export const listenBrokerSyncError = <T>(handler: EventCallback<T>): Promise<Unl
 export const listenNavigateToRoute = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent("navigate-to-route", handler);
 };
-export const listenDeepLink = listenPendingElectronBridge;
+export const listenDeepLink = async <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return await getElectronApi().listenDeepLink((event) => {
+    handler({
+      event: event.event,
+      id: event.id,
+      payload: event.payload as T,
+    });
+  });
+};
 export const listenUpdateAvailable = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent("app:update-available", handler);
 };

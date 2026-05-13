@@ -384,11 +384,16 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
   useEffect(() => {
     if (!isDesktop) return;
 
+    let disposed = false;
     let unlistenFn: (() => Promise<void>) | undefined;
 
     const setupDeepLinkListener = async () => {
       try {
-        unlistenFn = await listenDeepLink<string>((event) => {
+        const unlisten = await listenDeepLink<string>((event) => {
+          if (disposed) {
+            return;
+          }
+
           const url = event.payload;
 
           const authPayload = parseAuthCallbackUrl(url);
@@ -396,6 +401,11 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
             void handleAuthCallback(url);
           }
         });
+        if (disposed) {
+          void unlisten();
+          return;
+        }
+        unlistenFn = unlisten;
       } catch (_err) {
         logger.error("Failed to set up deep link listener.");
       }
@@ -404,6 +414,7 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
     void setupDeepLinkListener();
 
     return () => {
+      disposed = true;
       void unlistenFn?.();
     };
   }, [handleAuthCallback]);

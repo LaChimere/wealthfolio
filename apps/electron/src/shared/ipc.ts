@@ -15,6 +15,8 @@ export const IPC_CHANNELS = {
   setWindowTheme: "wealthfolio:native:set-window-theme",
   getWindowTheme: "wealthfolio:native:get-window-theme",
   toggleWindowFullscreen: "wealthfolio:native:toggle-window-fullscreen",
+  startDeepLinkListener: "wealthfolio:native:deep-link-listener-start",
+  stopDeepLinkListener: "wealthfolio:native:deep-link-listener-stop",
 } as const;
 
 export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
@@ -1033,6 +1035,9 @@ export interface WealthfolioElectronApi {
   setWindowTheme(theme: ElectronWindowThemePreference): Promise<void>;
   getWindowTheme(): Promise<ElectronWindowTheme>;
   toggleWindowFullscreen(): Promise<void>;
+  listenDeepLink(
+    handler: (event: ElectronEventMessage<string>) => void,
+  ): Promise<() => Promise<void>>;
   listen<T>(
     eventName: string,
     handler: (event: ElectronEventMessage<T>) => void,

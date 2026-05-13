@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
+import type { WebContents } from "electron";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,13 @@ import {
 import { createAiChatStreamManager } from "./ai-chat-stream-manager";
 import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
+import {
+  createSanitizedDeepLinkDescription,
+  DEEP_LINK_SCHEME,
+  findDeepLinkUrls,
+  getProtocolClientRegistration,
+  isDeepLinkUrl,
+} from "./deep-links";
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
 import { validateElectronInvokeRequest } from "./ipc-validation";
 import { installApplicationMenu } from "./menu";
@@ -30,6 +38,9 @@ let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
 let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
 let nextRendererEventId = 0;
+const pendingDeepLinkUrls: string[] = [];
+const deepLinkListenerWebContentsIds = new Set<number>();
+const deepLinkListenerCleanupWebContentsIds = new Set<number>();
 const aiChatStreamManager = createAiChatStreamManager({ getSidecar: getReadySidecarHandle });
 
 function configureAppPaths(): void {
@@ -92,6 +103,13 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.cancelAiChatStream, (_event, request: unknown): void => {
     aiChatStreamManager.cancel(request);
   });
+  ipcMain.handle(IPC_CHANNELS.startDeepLinkListener, (event): ElectronEventMessage<string>[] => {
+    markDeepLinkListenerReady(event.sender);
+    return drainPendingDeepLinkMessages();
+  });
+  ipcMain.handle(IPC_CHANNELS.stopDeepLinkListener, (event): void => {
+    deepLinkListenerWebContentsIds.delete(event.sender.id);
+  });
   registerNativeIpcHandlers({ ipcMain, dialog, shell, nativeTheme, getTargetWindow });
 }
 
@@ -113,11 +131,7 @@ function sendRendererEvent(
   payload: unknown,
   targetWindow?: BrowserWindow | null,
 ): void {
-  const message: ElectronEventMessage = {
-    event: eventName,
-    id: ++nextRendererEventId,
-    payload,
-  };
+  const message = createRendererEventMessage(eventName, payload);
 
   if (targetWindow && !targetWindow.webContents.isDestroyed()) {
     targetWindow.webContents.send(IPC_CHANNELS.serverEvent, message);
@@ -127,8 +141,120 @@ function sendRendererEvent(
   sendServerEventToWindows(message);
 }
 
+function createRendererEventMessage<T>(eventName: string, payload: T): ElectronEventMessage<T> {
+  return {
+    event: eventName,
+    id: ++nextRendererEventId,
+    payload,
+  };
+}
+
 function getTargetWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+}
+
+function markDeepLinkListenerReady(webContents: WebContents): void {
+  deepLinkListenerWebContentsIds.add(webContents.id);
+  if (deepLinkListenerCleanupWebContentsIds.has(webContents.id)) {
+    return;
+  }
+
+  deepLinkListenerCleanupWebContentsIds.add(webContents.id);
+  webContents.once("destroyed", () => {
+    deepLinkListenerWebContentsIds.delete(webContents.id);
+    deepLinkListenerCleanupWebContentsIds.delete(webContents.id);
+  });
+}
+
+function drainPendingDeepLinkMessages(): ElectronEventMessage<string>[] {
+  return pendingDeepLinkUrls
+    .splice(0, pendingDeepLinkUrls.length)
+    .map((url) => createRendererEventMessage("deep-link-received", url));
+}
+
+function focusTargetWindow(targetWindow: BrowserWindow | null = getTargetWindow()): void {
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (targetWindow.isMinimized()) {
+    targetWindow.restore();
+  }
+  targetWindow.focus();
+}
+
+function dispatchDeepLink(url: string): void {
+  if (!isDeepLinkUrl(url)) {
+    return;
+  }
+
+  const targetWindow = getTargetWindow();
+  focusTargetWindow(targetWindow);
+  if (
+    targetWindow &&
+    !targetWindow.webContents.isDestroyed() &&
+    deepLinkListenerWebContentsIds.has(targetWindow.webContents.id)
+  ) {
+    sendRendererEvent("deep-link-received", url, targetWindow);
+    return;
+  }
+
+  pendingDeepLinkUrls.push(url);
+  console.info(
+    "Queued deep link until renderer listener is ready:",
+    createSanitizedDeepLinkDescription(url),
+  );
+}
+
+function configureDeepLinkProtocolClient(): void {
+  const electronProcess = process as NodeJS.Process & { defaultApp?: boolean };
+  const registration = getProtocolClientRegistration(
+    Boolean(electronProcess.defaultApp),
+    process.platform,
+    process.argv,
+    process.execPath,
+  );
+  if (!registration) {
+    return;
+  }
+
+  const registered = registration.executablePath
+    ? app.setAsDefaultProtocolClient(
+        DEEP_LINK_SCHEME,
+        registration.executablePath,
+        registration.args ?? [],
+      )
+    : app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  if (!registered) {
+    console.warn(`Failed to register ${DEEP_LINK_SCHEME} protocol handler.`);
+  }
+}
+
+function registerDeepLinkProcessHandlers(): void {
+  if (process.platform !== "darwin") {
+    for (const url of findDeepLinkUrls(process.argv)) {
+      dispatchDeepLink(url);
+    }
+  }
+
+  app.on("will-finish-launching", () => {
+    app.on("open-url", (event, url) => {
+      event.preventDefault();
+      dispatchDeepLink(url);
+    });
+  });
+
+  app.on("second-instance", (_event, argv) => {
+    const urls = findDeepLinkUrls(argv);
+    if (urls.length === 0) {
+      focusTargetWindow();
+      return;
+    }
+
+    for (const url of urls) {
+      dispatchDeepLink(url);
+    }
+  });
 }
 
 function configureApplicationMenu(): void {
@@ -267,7 +393,14 @@ async function start(): Promise<void> {
   });
 }
 
-void start().catch(handleFatal);
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  configureDeepLinkProtocolClient();
+  registerDeepLinkProcessHandlers();
+  void start().catch(handleFatal);
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

@@ -2,6 +2,7 @@ import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/elec
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  listenDeepLink,
   listenNavigateToRoute,
   listenMarketSyncComplete,
   listenPortfolioUpdateStart,
@@ -14,6 +15,7 @@ function installElectronApi(api: Partial<WealthfolioElectronApi>) {
     getRuntimeInfo: vi.fn(),
     invoke: vi.fn(),
     listen: vi.fn(),
+    listenDeepLink: vi.fn(),
     ...api,
   } as WealthfolioElectronApi;
 }
@@ -69,6 +71,28 @@ describe("electron event adapter", () => {
       event: "navigate-to-route",
       id: 2,
       payload: { route: "/settings/general" },
+    });
+  });
+
+  it("delegates deep-link listeners through the preload drain/listen bridge", async () => {
+    const unlisten = vi.fn();
+    const listenDeepLinkBridge = vi.fn().mockResolvedValue(unlisten);
+    installElectronApi({ listenDeepLink: listenDeepLinkBridge });
+
+    const deepLinkHandler = vi.fn();
+    await expect(listenDeepLink(deepLinkHandler)).resolves.toBe(unlisten);
+
+    expect(listenDeepLinkBridge).toHaveBeenCalledWith(expect.any(Function));
+    const [bridgeHandler] = listenDeepLinkBridge.mock.calls[0];
+    bridgeHandler({
+      event: "deep-link-received",
+      id: 3,
+      payload: "wealthfolio://auth/callback?code=abc",
+    });
+    expect(deepLinkHandler).toHaveBeenCalledWith({
+      event: "deep-link-received",
+      id: 3,
+      payload: "wealthfolio://auth/callback?code=abc",
     });
   });
 

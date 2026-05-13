@@ -167,9 +167,10 @@ authenticated SSE connection to `/api/v1/events/stream`, retries it with
 backoff, stops it with the sidecar lifecycle, and broadcasts only
 `{ event, id, payload }` messages through preload IPC. Event payloads are
 recursively redacted for loopback URLs and token-shaped strings before they
-reach the renderer. Native desktop-only events such as file drop, deep links,
-and route navigation stay pending until their Electron-native replacements are
-implemented.
+reach the renderer. Native desktop-only events also use this boundary: menu
+route navigation emits existing route events, and deep links are validated by
+Electron main before they are forwarded as `deep-link-received` events. File
+drop remains pending until its Electron-native replacement is implemented.
 
 ## Native desktop features
 
@@ -193,16 +194,18 @@ dedicated IPC methods, not as renderer Node APIs:
 - Window theme and fullscreen operations are behind the runtime adapter seam.
   Electron main owns `nativeTheme` updates and focused-window fullscreen
   toggles; Tauri keeps using `getCurrentWindow()` only inside the Tauri adapter.
+- Wealthfolio deep links are owned by Electron main. The app registers the
+  `wealthfolio://` protocol, enforces a single-instance lock before sidecar
+  startup, queues callback URLs until the renderer's dedicated deep-link
+  listener drains them, and only forwards validated URLs to the main window.
 
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
-- file-drop and deep-link events;
-- single-instance behavior;
+- file-drop events;
 - window state persistence and titlebar behavior;
 - app logging;
 - updater install/progress events;
-- OAuth callback handling for Wealthfolio Connect.
 
 Mobile-only Tauri features are not part of the Electron migration.
 
@@ -219,15 +222,14 @@ Tauri release workflow.
 
 ## OAuth and deep links
 
-Replace `tauri-plugin-web-auth-api` with an Electron-supported desktop OAuth
-flow. Prefer external-browser login with either:
-
-- a custom protocol/deep-link callback handled by Electron main; or
-- a short-lived loopback callback handled by Electron main.
-
-Electron main should validate the callback, store or forward tokens through the
-Rust sidecar/keyring path, and emit existing adapter event names to the
-renderer.
+Electron desktop OAuth uses the existing external-browser flow and a custom
+protocol callback handled by Electron main. Callback URLs must start with
+`wealthfolio://`, are never logged with query strings, and are delivered through
+the `listenDeepLink` adapter only after the renderer has registered a dedicated
+listener. The existing Wealthfolio Connect provider parses the forwarded URL and
+stores refresh tokens through the Rust sidecar/keyring path. Mobile-only
+ASWebAuthenticationSession behavior remains Tauri-specific and outside the
+Electron desktop migration.
 
 ## Validation expectations
 
