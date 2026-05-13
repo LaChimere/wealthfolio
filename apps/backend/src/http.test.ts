@@ -8,6 +8,7 @@ import {
   createContributionLimitService,
 } from "./domains/contribution-limits";
 import { createSettingsService } from "./domains/settings";
+import { createTaxonomyReadRepository, createTaxonomyReadService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
@@ -327,6 +328,55 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated taxonomy read domain only when a service is provided", async () => {
+    const db = createTaxonomiesDb();
+    const handler = createBackendRequestHandler(config, {
+      taxonomyService: createTaxonomyReadService(createTaxonomyReadRepository(db)),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/taxonomies"))).status).toBe(401);
+
+      db.prepare(
+        `
+          INSERT INTO taxonomies (
+            id, name, color, is_system, is_single_select, sort_order
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run("strategy", "Strategy", "#4385be", 0, 1, 10);
+      db.prepare(
+        `
+          INSERT INTO taxonomy_categories (
+            id, taxonomy_id, name, key, color, sort_order
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run("growth", "strategy", "Growth", "growth", "#4385be", 1);
+
+      const listResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await listResponse.json()).toEqual([
+        expect.objectContaining({ id: "strategy", isSingleSelect: true }),
+      ]);
+
+      const detailResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/strategy", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      await expect(detailResponse.json()).resolves.toEqual({
+        taxonomy: expect.objectContaining({ id: "strategy" }),
+        categories: [expect.objectContaining({ id: "growth", taxonomyId: "strategy" })],
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {
@@ -367,6 +417,38 @@ function createContributionLimitsDb(): Database {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       start_date TIMESTAMP NULL,
       end_date TIMESTAMP NULL
+    );
+  `);
+  return db;
+}
+
+function createTaxonomiesDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE taxonomies (
+      id TEXT NOT NULL PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#8abceb',
+      description TEXT,
+      is_system INTEGER NOT NULL DEFAULT 0,
+      is_single_select INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+
+    CREATE TABLE taxonomy_categories (
+      id TEXT NOT NULL,
+      taxonomy_id TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      key TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#808080',
+      description TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      PRIMARY KEY (taxonomy_id, id)
     );
   `);
   return db;

@@ -53,6 +53,15 @@ export {
   type SettingsUpdate,
 } from "./domains/settings";
 export {
+  createTaxonomyReadRepository,
+  createTaxonomyReadService,
+  type Taxonomy,
+  type TaxonomyCategory,
+  type TaxonomyReadRepository,
+  type TaxonomyReadService,
+  type TaxonomyWithCategories,
+} from "./domains/taxonomies";
+export {
   DEFAULT_MIGRATIONS_RELATIVE_PATH,
   DIESEL_SCHEMA_MIGRATIONS_TABLE,
   applyConnectionPragmas,

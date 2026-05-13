@@ -3,6 +3,7 @@ import type { AccountService, AccountUpdate, NewAccount } from "./domains/accoun
 import { parseTrackingMode } from "./domains/accounts";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
+import type { TaxonomyReadService } from "./domains/taxonomies";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
 export interface BackendRequestHandlerOptions {
@@ -11,6 +12,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   contributionLimitService?: ContributionLimitService;
   settingsService?: SettingsService;
+  taxonomyService?: TaxonomyReadService;
 }
 
 export function createBackendRequestHandler(
@@ -80,6 +82,10 @@ async function routeRequest(
     );
   }
 
+  if (options.taxonomyService && url.pathname.startsWith("/api/v1/taxonomies")) {
+    return routeTaxonomyRequest(request, url, config, options.taxonomyService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -94,6 +100,28 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeTaxonomyRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  taxonomyService: TaxonomyReadService,
+): Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/taxonomies") {
+    return jsonResponse(taxonomyService.getTaxonomies());
+  }
+
+  const taxonomyId = taxonomyIdFromPath(url.pathname);
+  if (taxonomyId && request.method === "GET") {
+    return jsonResponse(taxonomyService.getTaxonomy(taxonomyId));
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -289,6 +317,11 @@ function contributionLimitIdFromPath(pathname: string): string | undefined {
 
 function contributionLimitDepositsIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/limits\/([^/]+)\/deposits$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function taxonomyIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/taxonomies\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 

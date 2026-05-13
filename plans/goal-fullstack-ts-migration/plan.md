@@ -10,26 +10,26 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues low-risk domain vertical slices with contribution limits after
-the settings and accounts slices:
+PR 5 continues low-risk domain vertical slices with taxonomy read parity after
+the settings, accounts, and contribution limits slices:
 
-- Add TS contribution limits models, repository/service behavior, and route
+- Add TS taxonomy read models, repository/service behavior, and guarded route
   tests.
-- Preserve Rust contribution limits CRUD semantics, including generated IDs,
-  optional-field nulling on update, idempotent deletes, and lightweight
-  portfolio update triggers.
-- Keep deposit calculation injectable for the later calculation-heavy migration
-  while preserving Rust-compatible zero results for empty account selections.
-- Keep the route guarded behind explicit TS runtime handler wiring and sidecar
+- Preserve Rust taxonomy/category read semantics: sort order, boolean mapping,
+  timestamp shape, and `null` missing detail responses.
+- Keep taxonomy mutation/assignment/import-export work in follow-up atomic
+  sub-slices because those paths involve validation, sync bundles, and migration
+  services.
+- Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-accounts/settings/limits deletion is in scope for this slice.
+accounts/settings/limits/taxonomies deletion is in scope for this slice.
 
 ## Next slices
 
-1. Continue low-risk domain slices: taxonomies and other CRUD/read-heavy
-   domains.
+1. Continue taxonomy sub-slices: mutation/category CRUD, assignments,
+   import/export JSON, sync hooks, then migration/health endpoints.
 2. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
 3. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.
