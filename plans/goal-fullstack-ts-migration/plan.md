@@ -10,22 +10,21 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk activities/import HTTP seam after
-the market-data route seam:
+PR 5 continues vertical slices with a low-risk AI chat/thread HTTP seam after
+the activities/import route seam:
 
-- Add an `ActivityService` interface and guarded `/activities/*` route tests for
-  search, create/update/bulk/delete, transfer link/unlink, import check/preview
-  /apply, CSV parse, mapping, templates, account-template links, and duplicate
-  checks.
-- Preserve Rust HTTP semantics for search filter normalization, sort
-  object/array handling, date validation, JSON body pass-through, tuple-shaped
-  link/unlink responses, multipart CSV parsing, mapping/template wrapper bodies,
-  default `ACTIVITY` import context, duplicate response wrapping, path/query
-  decoding, and sidecar bearer-token checks.
-- Defer real activity persistence, import parsing/mapping/template storage,
-  duplicate lookups, transfer mutation behavior, asset preview resolution, and
-  portfolio recalculation side effects to dedicated activities/import/runtime
-  parity slices.
+- Add an `AiChatService` interface and guarded `/ai/chat/stream`,
+  `/ai/threads/*`, and `/ai/tool-result` route tests for NDJSON streaming,
+  thread list/get/messages/update/delete, tag reads/no-op mutations, and tool
+  result updates.
+- Preserve Rust HTTP semantics for NDJSON headers and newline framing,
+  pre-stream and mid-stream AI error shapes/statuses, stream cancellation,
+  query/path decoding, `u32` limit validation, optional update body handling,
+  JSON `null` thread responses, tag no-op body validation, missing-thread tag
+  defaults, tool-result `resultPatch` presence, and sidecar bearer-token checks.
+- Defer real AI chat service persistence, provider streaming, tool execution,
+  thread storage, tag persistence, and tool-result mutation behavior to
+  dedicated AI runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -33,8 +32,8 @@ No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
-runtime, market-data runtime, or activities/import runtime deletion is in scope
-for this slice.
+runtime, market-data runtime, activities/import runtime, or AI chat runtime
+deletion is in scope for this slice.
 
 ## Next slices
 

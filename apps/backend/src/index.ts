@@ -41,6 +41,14 @@ export {
   type ActivitySearchRequest,
   type ActivityService,
 } from "./domains/activities";
+export {
+  AI_CHAT_ERROR_STATUS_BY_CODE,
+  type AiChatListThreadsRequest,
+  type AiChatService,
+  type AiChatServiceErrorShape,
+  type AiChatUpdateThreadRequest,
+  type AiChatUpdateToolResultRequest,
+} from "./domains/ai-chat";
 export type {
   AddonRatingRequest,
   AddonService,

@@ -14,6 +14,14 @@ import {
   type ActivitySearchRequest,
   type ActivityService,
 } from "./domains/activities";
+import {
+  AI_CHAT_ERROR_STATUS_BY_CODE,
+  type AiChatListThreadsRequest,
+  type AiChatService,
+  type AiChatServiceErrorShape,
+  type AiChatUpdateThreadRequest,
+  type AiChatUpdateToolResultRequest,
+} from "./domains/ai-chat";
 import type {
   AiProviderService,
   AiProviderSettingsUpdate,
@@ -75,6 +83,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   activityService?: ActivityService;
   addonService?: AddonService;
+  aiChatService?: AiChatService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
   appUtilityService?: AppUtilityService;
@@ -159,6 +168,10 @@ async function routeRequest(
 
   if (options.addonService && url.pathname.startsWith("/api/v1/addons")) {
     return routeAddonRequest(request, url, config, options.addonService);
+  }
+
+  if (options.aiChatService && isAiChatPath(url.pathname)) {
+    return routeAiChatRequest(request, url, config, options.aiChatService);
   }
 
   if (options.aiProviderService && url.pathname.startsWith("/api/v1/ai/providers")) {
@@ -529,6 +542,82 @@ function routeAddonRequest(
     return Promise.resolve(addonService.uninstallAddon(addonId))
       .then(() => new Response(null, { status: 204 }))
       .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAiChatRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  aiChatService: AiChatService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/ai/chat/stream") {
+    return handleAiChatStreamRequest(request, aiChatService);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/ai/threads") {
+    const input = parseAiChatListThreadsQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(aiChatService.listThreads(input))
+      .then(jsonResponse)
+      .catch(aiChatErrorResponse);
+  }
+
+  const messagesThreadId = aiThreadMessagesIdFromPath(url.pathname);
+  if (request.method === "GET" && messagesThreadId !== undefined) {
+    return Promise.resolve(aiChatService.getMessages(messagesThreadId))
+      .then(jsonResponse)
+      .catch(aiChatErrorResponse);
+  }
+
+  const tagRoute = aiThreadTagRouteFromPath(url.pathname);
+  if (tagRoute !== undefined) {
+    if (request.method === "GET" && tagRoute.tag === undefined) {
+      return Promise.resolve(aiChatService.getThread(tagRoute.threadId))
+        .then((thread) => jsonResponse(parseAiThreadTags(thread)))
+        .catch(aiChatErrorResponse);
+    }
+    if (request.method === "POST" && tagRoute.tag === undefined) {
+      return handleJsonMutationNoContent(request, parseAiChatTagRequest, async () => {
+        // Rust currently validates the JSON body and treats tag add/remove as no-ops.
+      });
+    }
+    if (request.method === "DELETE" && tagRoute.tag !== undefined) {
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  const threadId = aiThreadIdFromPath(url.pathname);
+  if (threadId !== undefined) {
+    if (request.method === "GET") {
+      return Promise.resolve(aiChatService.getThread(threadId))
+        .then(jsonResponse)
+        .catch(aiChatErrorResponse);
+    }
+    if (request.method === "PUT") {
+      return handleAiChatJsonMutation(request, parseAiChatUpdateThreadRequest, (input) =>
+        Promise.resolve(aiChatService.updateThread(threadId, input)),
+      );
+    }
+    if (request.method === "DELETE") {
+      return Promise.resolve(aiChatService.deleteThread(threadId))
+        .then(() => new Response(null, { status: 204 }))
+        .catch(aiChatErrorResponse);
+    }
+  }
+
+  if (request.method === "PATCH" && url.pathname === "/api/v1/ai/tool-result") {
+    return handleAiChatJsonMutation(request, parseAiChatUpdateToolResultRequest, (input) =>
+      Promise.resolve(aiChatService.updateToolResult(input)),
+    );
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1679,6 +1768,38 @@ function activityIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function isAiChatPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/v1/ai/chat") ||
+    pathname.startsWith("/api/v1/ai/threads") ||
+    pathname === "/api/v1/ai/tool-result"
+  );
+}
+
+function aiThreadIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/ai\/threads\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function aiThreadMessagesIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/ai\/threads\/([^/]+)\/messages$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function aiThreadTagRouteFromPath(
+  pathname: string,
+): { threadId: string; tag?: string } | undefined {
+  const itemMatch = /^\/api\/v1\/ai\/threads\/([^/]+)\/tags\/([^/]+)$/.exec(pathname);
+  if (itemMatch) {
+    return {
+      threadId: decodeURIComponent(itemMatch[1]),
+      tag: decodeURIComponent(itemMatch[2]),
+    };
+  }
+  const listMatch = /^\/api\/v1\/ai\/threads\/([^/]+)\/tags$/.exec(pathname);
+  return listMatch ? { threadId: decodeURIComponent(listMatch[1]) } : undefined;
+}
+
 function aiProviderModelsIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/ai\/providers\/([^/]+)\/models$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -1910,6 +2031,26 @@ async function handleJsonMutation<TInput, TOutput>(
     return jsonResponse(await mutate(input));
   } catch (error) {
     return domainErrorResponse(error);
+  }
+}
+
+async function handleAiChatJsonMutation<TInput, TOutput>(
+  request: Request,
+  parse: (payload: Record<string, unknown>) => TInput | Response,
+  mutate: (input: TInput) => Promise<TOutput>,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input = parse(payload);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    return jsonResponse(await mutate(input));
+  } catch (error) {
+    return aiChatErrorResponse(error);
   }
 }
 
@@ -2708,6 +2849,226 @@ function parseCheckDuplicatesRequest(
     return idempotencyKeys;
   }
   return { idempotencyKeys };
+}
+
+async function handleAiChatStreamRequest(
+  request: Request,
+  aiChatService: AiChatService,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  try {
+    const events = await aiChatService.sendMessage(payload);
+    return new Response(createAiChatNdjsonStream(events), {
+      status: 200,
+      headers: {
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "content-type": "application/x-ndjson",
+      },
+    });
+  } catch (error) {
+    return aiChatErrorResponse(error);
+  }
+}
+
+function createAiChatNdjsonStream(events: AsyncIterable<unknown>): ReadableStream<Uint8Array> {
+  const iterator = events[Symbol.asyncIterator]();
+  const encoder = new TextEncoder();
+  let done = false;
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (done) {
+        return;
+      }
+      try {
+        const result = await iterator.next();
+        if (result.done) {
+          done = true;
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(`${serializeAiChatStreamEvent(result.value)}\n`));
+      } catch (error) {
+        done = true;
+        controller.enqueue(encoder.encode(`${serializeAiChatStreamErrorEvent(error)}\n`));
+        controller.close();
+      }
+    },
+    async cancel() {
+      done = true;
+      await iterator.return?.();
+    },
+  });
+}
+
+function serializeAiChatStreamEvent(event: unknown): string {
+  try {
+    const serialized = JSON.stringify(event);
+    if (typeof serialized === "string") {
+      return serialized;
+    }
+    return aiChatSerializationErrorEvent("Event serialized to undefined");
+  } catch (error) {
+    return aiChatSerializationErrorEvent(errorMessage(error));
+  }
+}
+
+function aiChatSerializationErrorEvent(message: string): string {
+  return JSON.stringify({
+    type: "error",
+    threadId: "",
+    runId: "",
+    messageId: null,
+    code: "serialization_error",
+    message,
+  });
+}
+
+function serializeAiChatStreamErrorEvent(error: unknown): string {
+  return JSON.stringify({
+    type: "error",
+    threadId: "",
+    runId: "",
+    messageId: null,
+    code: aiChatErrorCode(error, "internal_error"),
+    message: aiChatErrorMessage(error),
+  });
+}
+
+function parseAiChatListThreadsQuery(url: URL): AiChatListThreadsRequest | Response {
+  const limit = parseOptionalU32Query(url, "limit");
+  if (limit instanceof Response) {
+    return limit;
+  }
+  const request: AiChatListThreadsRequest = {};
+  if (url.searchParams.has("cursor")) {
+    request.cursor = url.searchParams.get("cursor") ?? "";
+  }
+  if (limit !== undefined) {
+    request.limit = limit;
+  }
+  if (url.searchParams.has("search")) {
+    request.search = url.searchParams.get("search") ?? "";
+  }
+  return request;
+}
+
+function parseOptionalU32Query(url: URL, field: string): number | undefined | Response {
+  if (!url.searchParams.has(field)) {
+    return undefined;
+  }
+  const value = url.searchParams.get(field) ?? "";
+  if (!/^\d+$/.test(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an unsigned integer` }, 400);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 4_294_967_295) {
+    return jsonResponse({ code: 400, message: `${field} must be a u32 integer` }, 400);
+  }
+  return parsed;
+}
+
+function parseAiChatUpdateThreadRequest(
+  payload: Record<string, unknown>,
+): AiChatUpdateThreadRequest | Response {
+  const title = parseOptionalStringOrNull(payload.title, "title");
+  if (title instanceof Response) {
+    return title;
+  }
+  const isPinned = parseOptionalBooleanOrNull(payload.isPinned, "isPinned");
+  if (isPinned instanceof Response) {
+    return isPinned;
+  }
+  const request: AiChatUpdateThreadRequest = {};
+  if (title !== undefined && title !== null) {
+    request.title = title;
+  }
+  if (isPinned !== undefined && isPinned !== null) {
+    request.isPinned = isPinned;
+  }
+  return request;
+}
+
+function parseAiChatTagRequest(payload: Record<string, unknown>): { tag: string } | Response {
+  const tag = parseRequiredString(payload.tag, "tag");
+  if (tag instanceof Response) {
+    return tag;
+  }
+  return { tag };
+}
+
+function parseAiChatUpdateToolResultRequest(
+  payload: Record<string, unknown>,
+): AiChatUpdateToolResultRequest | Response {
+  const threadId = parseRequiredString(payload.threadId, "threadId");
+  if (threadId instanceof Response) {
+    return threadId;
+  }
+  const toolCallId = parseRequiredString(payload.toolCallId, "toolCallId");
+  if (toolCallId instanceof Response) {
+    return toolCallId;
+  }
+  if (!Object.hasOwn(payload, "resultPatch")) {
+    return jsonResponse({ code: 400, message: "resultPatch is required" }, 400);
+  }
+  return { threadId, toolCallId, resultPatch: payload.resultPatch };
+}
+
+function parseAiThreadTags(thread: Record<string, unknown> | null): string[] {
+  return Array.isArray(thread?.tags) && thread.tags.every((tag) => typeof tag === "string")
+    ? thread.tags
+    : [];
+}
+
+function aiChatErrorResponse(error: unknown): Response {
+  const status = aiChatErrorStatus(error);
+  return jsonResponse(
+    {
+      code: aiChatErrorCode(error, "bad_request"),
+      error: aiChatErrorMessage(error),
+    },
+    status,
+  );
+}
+
+function aiChatErrorStatus(error: unknown): number {
+  const shaped = aiChatErrorShape(error);
+  if (
+    typeof shaped?.status === "number" &&
+    Number.isInteger(shaped.status) &&
+    shaped.status >= 400 &&
+    shaped.status <= 599
+  ) {
+    return shaped.status;
+  }
+  const code = aiChatErrorCode(error, "");
+  return AI_CHAT_ERROR_STATUS_BY_CODE[code] ?? 400;
+}
+
+function aiChatErrorCode(error: unknown, fallback: string): string {
+  const shaped = aiChatErrorShape(error);
+  return typeof shaped?.code === "string" && shaped.code ? shaped.code : fallback;
+}
+
+function aiChatErrorMessage(error: unknown): string {
+  const shaped = aiChatErrorShape(error);
+  if (typeof shaped?.error === "string") {
+    return shaped.error;
+  }
+  if (typeof shaped?.message === "string") {
+    return shaped.message;
+  }
+  return String(error);
+}
+
+function aiChatErrorShape(error: unknown): AiChatServiceErrorShape | undefined {
+  return typeof error === "object" && error !== null
+    ? (error as AiChatServiceErrorShape)
+    : undefined;
 }
 
 function parseAddonZipInstallRequest(

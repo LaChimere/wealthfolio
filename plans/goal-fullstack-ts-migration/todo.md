@@ -67,10 +67,10 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, alternative assets, assets, app utilities, portfolio metrics,
-    holdings, add-ons, market-data, and activities TS repository/service or
-    route config implementations plus guarded route tests in
-    `apps/backend/src/domains/settings.ts`,
+    provider, AI chat, alternative assets, assets, app utilities, portfolio
+    metrics, holdings, add-ons, market-data, and activities TS
+    repository/service or route config implementations plus guarded route tests
+    in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -83,7 +83,8 @@
     `apps/backend/src/domains/holdings.ts`,
     `apps/backend/src/domains/addons.ts`,
     `apps/backend/src/domains/market-data.ts`,
-    `apps/backend/src/domains/activities.ts`, `apps/backend/src/events.ts`, and
+    `apps/backend/src/domains/activities.ts`,
+    `apps/backend/src/domains/ai-chat.ts`, `apps/backend/src/events.ts`, and
     `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
     migration endpoints are deferred to the health/classification service slice;
     custom provider `test-source` is deferred to an external-I/O slice; goals
@@ -110,7 +111,9 @@
     parity slices; activity persistence, import parsing/mapping/template
     storage, duplicate lookups, transfer mutation behavior, asset preview
     resolution, and portfolio recalculation side effects are deferred to
-    activities/import runtime parity slices.
+    activities/import runtime parity slices; AI chat persistence, provider
+    streaming, tool execution, thread storage, tag persistence, and tool-result
+    mutation behavior are deferred to AI runtime parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -453,6 +456,23 @@ contract:
   inertness, multipart parsing, type-safety, error handling, or test coverage.
 - `pr5-activities-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-ai-chat-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable NDJSON chat streaming, pre-stream AI error status
+  mapping, mid-stream terminal error events, serialization fallback events,
+  stream cancellation, thread list/get/messages/update/delete, tag reads and
+  no-op mutations, tool-result updates, guarded HTTP route access, route
+  inertness without injection, `u32` limit validation, encoded-slash path
+  decoding, null thread responses, empty/missing tag defaults, required tag body
+  validation, `resultPatch` presence validation, and deferred real AI runtime
+  behavior.
+- `pr5-ai-chat-route-seam-review`: rubber-duck and code review found no
+  actionable issues after confirming NDJSON streaming parity, AI error
+  status/body mapping, mid-stream and serialization error events, stream
+  cancellation, query/path decoding, thread/tag/tool route semantics, sidecar
+  auth, route inertness, type-safety, and test coverage.
+- `pr5-ai-chat-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -464,9 +484,9 @@ contract:
   plus market-data provider settings, portfolio job trigger, event stream,
   secrets route seam, AI provider route seam, alternative assets route seam,
   assets route seam, app utility route seam, portfolio metrics route seam,
-  holdings route seam, add-ons route seam, market-data route seam, and
-  activities/import route seam slices implemented; broader migration remains
-  active.
+  holdings route seam, add-ons route seam, market-data route seam,
+  activities/import route seam, and AI chat route seam slices implemented;
+  broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -491,4 +511,6 @@ contract:
   with market-data/portfolio parity slices; activity persistence, import
   parsing/mapping/template storage, duplicate lookups, transfer mutation
   behavior, asset preview resolution, and portfolio recalculation side effects
-  move with activities/import runtime parity slices.
+  move with activities/import runtime parity slices; AI chat persistence,
+  provider streaming, tool execution, thread storage, tag persistence, and
+  tool-result mutation behavior move with AI runtime parity slices.

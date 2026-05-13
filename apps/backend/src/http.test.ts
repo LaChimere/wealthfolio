@@ -5,6 +5,7 @@ import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
 import type { ActivityService } from "./domains/activities";
 import type { AddonService } from "./domains/addons";
+import type { AiChatService } from "./domains/ai-chat";
 import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
@@ -2450,6 +2451,301 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(invalidResponse.status).toBe(400);
+  });
+
+  test("routes migrated AI chat seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    let streamCancelled = false;
+    const aiChatService: AiChatService = {
+      async sendMessage(request) {
+        calls.push(["stream", request]);
+        if (request.mode === "reject") {
+          throw Object.assign(new Error("Provider unavailable"), { code: "PROVIDER_ERROR" });
+        }
+        if (request.mode === "throw-mid") {
+          return (async function* () {
+            yield { type: "system", threadId: "thread-1", runId: "run-1", messageId: null };
+            throw Object.assign(new Error("Tool failed"), { code: "TOOL_EXECUTION_FAILED" });
+          })();
+        }
+        if (request.mode === "serialize-error") {
+          return (async function* () {
+            yield { value: BigInt(1) };
+          })();
+        }
+        if (request.mode === "cancel") {
+          return (async function* () {
+            try {
+              yield { type: "system", threadId: "thread-1", runId: "run-1", messageId: null };
+              yield { type: "done", threadId: "thread-1", runId: "run-1", messageId: "msg-1" };
+            } finally {
+              streamCancelled = true;
+            }
+          })();
+        }
+        return (async function* () {
+          yield { type: "system", threadId: "thread-1", runId: "run-1", messageId: null };
+          yield { type: "done", threadId: "thread-1", runId: "run-1", messageId: "msg-1" };
+        })();
+      },
+      listThreads(request) {
+        calls.push(["list-threads", request]);
+        return { threads: [], nextCursor: null, hasMore: false };
+      },
+      getThread(threadId) {
+        calls.push(["get-thread", threadId]);
+        return threadId === "missing" ? null : { id: threadId, tags: ["tag/1"] };
+      },
+      getMessages(threadId) {
+        calls.push(["messages", threadId]);
+        return [{ id: "message-1", threadId }];
+      },
+      updateThread(threadId, request) {
+        calls.push(["update-thread", { threadId, request }]);
+        return { id: threadId, ...request };
+      },
+      deleteThread(threadId) {
+        calls.push(["delete-thread", threadId]);
+      },
+      updateToolResult(request) {
+        calls.push(["tool-result", request]);
+        return { id: "message-1", toolCallId: request.toolCallId };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { aiChatService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    for (const request of [
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ message: "hello" }),
+      }),
+      new Request("http://127.0.0.1/api/v1/ai/threads", { headers: authHeaders }),
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread-1/tags/tag-1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+      new Request("http://127.0.0.1/api/v1/ai/tool-result", {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({ threadId: "thread-1", toolCallId: "tool-1", resultPatch: null }),
+      }),
+    ]) {
+      expect((await createBackendRequestHandler(config)(request)).status).toBe(404);
+    }
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ message: "hello" }),
+          }),
+        )
+      ).status,
+    ).toBe(401);
+    expect((await handler(new Request("http://127.0.0.1/api/v1/ai/threads"))).status).toBe(401);
+
+    const streamResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ message: "hello" }),
+      }),
+    );
+    expect(streamResponse.status).toBe(200);
+    expect(streamResponse.headers.get("content-type")).toBe("application/x-ndjson");
+    expect(streamResponse.headers.get("cache-control")).toBe("no-cache");
+    expect(streamResponse.headers.get("connection")).toBe("keep-alive");
+    await expect(streamResponse.text()).resolves.toBe(
+      '{"type":"system","threadId":"thread-1","runId":"run-1","messageId":null}\n' +
+        '{"type":"done","threadId":"thread-1","runId":"run-1","messageId":"msg-1"}\n',
+    );
+
+    const rejectResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode: "reject" }),
+      }),
+    );
+    expect(rejectResponse.status).toBe(502);
+    await expect(rejectResponse.json()).resolves.toEqual({
+      code: "PROVIDER_ERROR",
+      error: "Provider unavailable",
+    });
+
+    const midStreamResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode: "throw-mid" }),
+      }),
+    );
+    await expect(midStreamResponse.text()).resolves.toBe(
+      '{"type":"system","threadId":"thread-1","runId":"run-1","messageId":null}\n' +
+        '{"type":"error","threadId":"","runId":"","messageId":null,"code":"TOOL_EXECUTION_FAILED","message":"Tool failed"}\n',
+    );
+
+    const serializationResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode: "serialize-error" }),
+      }),
+    );
+    await expect(serializationResponse.text()).resolves.toContain('"code":"serialization_error"');
+
+    const cancelResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/chat/stream", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode: "cancel" }),
+      }),
+    );
+    const cancelReader = cancelResponse.body?.getReader();
+    expect(cancelReader).toBeDefined();
+    await cancelReader?.read();
+    await cancelReader?.cancel();
+    expect(streamCancelled).toBe(true);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads?cursor=&limit=0&search=", {
+        headers: authHeaders,
+      }),
+    );
+    for (const limit of ["", "-1", "1.5", "abc", "4294967296"]) {
+      expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1/api/v1/ai/threads?limit=${limit}`, {
+              headers: authHeaders,
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "thread/1", tags: ["tag/1"] });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/threads/missing", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toBeNull();
+    await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1/messages", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1", {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify({ title: null, isPinned: true }),
+      }),
+    );
+    const deleteThreadResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(deleteThreadResponse.status).toBe(204);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1/tags", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual(["tag/1"]);
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/threads/missing/tags", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual([]);
+    const addTagResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1/tags", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ tag: "tag/1" }),
+      }),
+    );
+    expect(addTagResponse.status).toBe(204);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1/tags", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({}),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    const removeTagResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads/thread%2F1/tags/tag%2F1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(removeTagResponse.status).toBe(204);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/ai/tool-result", {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({ threadId: "thread/1", toolCallId: "tool/1", resultPatch: null }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/ai/tool-result", {
+            method: "PATCH",
+            headers: jsonHeaders,
+            body: JSON.stringify({ threadId: "thread/1", toolCallId: "tool/1" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    expect(calls).toEqual([
+      ["stream", { message: "hello" }],
+      ["stream", { mode: "reject" }],
+      ["stream", { mode: "throw-mid" }],
+      ["stream", { mode: "serialize-error" }],
+      ["stream", { mode: "cancel" }],
+      ["list-threads", { cursor: "", limit: 0, search: "" }],
+      ["get-thread", "thread/1"],
+      ["get-thread", "missing"],
+      ["messages", "thread/1"],
+      ["update-thread", { threadId: "thread/1", request: { isPinned: true } }],
+      ["delete-thread", "thread/1"],
+      ["get-thread", "thread/1"],
+      ["get-thread", "missing"],
+      ["tool-result", { threadId: "thread/1", toolCallId: "tool/1", resultPatch: null }],
+    ]);
   });
 
   test("routes migrated alternative assets seam only when a service is provided", async () => {
