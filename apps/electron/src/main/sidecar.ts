@@ -77,6 +77,11 @@ export function createSidecarEnvironment({
     WF_SIDECAR_TOKEN: token,
   };
   delete env.WF_SECRET_FILE;
+  if (legacyPaths.secretNamespace) {
+    env.WF_SECRET_NAMESPACE = legacyPaths.secretNamespace;
+  } else {
+    delete env.WF_SECRET_NAMESPACE;
+  }
   return env;
 }
 

@@ -14,7 +14,7 @@ import {
 } from "../shared/ipc";
 import { createAiChatStreamManager } from "./ai-chat-stream-manager";
 import { invokeSidecarCommand } from "./commands";
-import { resolveLegacyTauriPaths } from "./data-root";
+import { resolveElectronDesktopPaths } from "./data-root";
 import {
   createSanitizedDeepLinkDescription,
   DEEP_LINK_SCHEME,
@@ -56,7 +56,7 @@ const deepLinkListenerCleanupWebContentsIds = new Set<number>();
 const aiChatStreamManager = createAiChatStreamManager({ getSidecar: getReadySidecarHandle });
 
 function configureAppPaths(): void {
-  const legacyPaths = resolveLegacyTauriPaths();
+  const legacyPaths = resolveCurrentDesktopPaths();
   mkdirSync(legacyPaths.dataRoot, { recursive: true });
   mkdirSync(legacyPaths.logRoot, { recursive: true });
   app.setPath("logs", legacyPaths.logRoot);
@@ -374,7 +374,7 @@ function resolveRendererIndexHtmlPath(): string {
 }
 
 async function createWindow(): Promise<void> {
-  const legacyPaths = resolveLegacyTauriPaths();
+  const legacyPaths = resolveCurrentDesktopPaths();
   const preloadPath = path.join(distRoot, "preload", "index.cjs");
   const rendererUrl = process.env.WF_ELECTRON_RENDERER_URL;
   const indexHtmlPath = resolveRendererIndexHtmlPath();
@@ -389,7 +389,7 @@ async function createWindow(): Promise<void> {
 }
 
 async function startSidecarBridge(): Promise<void> {
-  const legacyPaths = resolveLegacyTauriPaths();
+  const legacyPaths = resolveCurrentDesktopPaths();
   const controller = new AbortController();
   sidecarStartController = controller;
   try {
@@ -439,6 +439,10 @@ async function startSidecarBridge(): Promise<void> {
       sidecarStartController = null;
     }
   }
+}
+
+function resolveCurrentDesktopPaths() {
+  return resolveElectronDesktopPaths({ packaged: app.isPackaged });
 }
 
 async function stopSidecarBridge(): Promise<void> {

@@ -46,7 +46,9 @@ describe("Electron sidecar configuration", () => {
 
   test("uses the legacy Tauri data root and durable keyring secret backend", () => {
     const previousSecretFile = process.env.WF_SECRET_FILE;
+    const previousSecretNamespace = process.env.WF_SECRET_NAMESPACE;
     process.env.WF_SECRET_FILE = "/tmp/wealthfolio-sidecar-secrets.json";
+    process.env.WF_SECRET_NAMESPACE = "shell-dev";
     try {
       const env = createSidecarEnvironment({
         legacyPaths,
@@ -64,6 +66,7 @@ describe("Electron sidecar configuration", () => {
       );
       expect(env.WF_SECRET_BACKEND).toBe("keyring");
       expect(env.WF_SECRET_FILE).toBeUndefined();
+      expect(env.WF_SECRET_NAMESPACE).toBeUndefined();
       expect(env.WF_SIDECAR_TOKEN).toBe("sidecar-token");
     } finally {
       if (previousSecretFile === undefined) {
@@ -71,7 +74,35 @@ describe("Electron sidecar configuration", () => {
       } else {
         process.env.WF_SECRET_FILE = previousSecretFile;
       }
+      if (previousSecretNamespace === undefined) {
+        delete process.env.WF_SECRET_NAMESPACE;
+      } else {
+        process.env.WF_SECRET_NAMESPACE = previousSecretNamespace;
+      }
     }
+  });
+
+  test("sets a separate keyring namespace for Electron development data roots", () => {
+    const env = createSidecarEnvironment({
+      legacyPaths: {
+        ...legacyPaths,
+        dataRoot: "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev",
+        dbPath: "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev/app.db",
+        logRoot: "/Users/alex/Library/Logs/com.teymz.wealthfolio.dev",
+        secretNamespace: "dev",
+      },
+      listenAddr: "127.0.0.1:12000",
+      token: "sidecar-token",
+      secretKey: "secret-key",
+    });
+
+    expect(env.WF_DB_PATH).toBe(
+      "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev/app.db",
+    );
+    expect(env.WF_ADDONS_DIR).toBe(
+      "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev",
+    );
+    expect(env.WF_SECRET_NAMESPACE).toBe("dev");
   });
 
   test("starts the development sidecar with the keyring backend feature", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { resolveLegacyTauriPaths } from "./data-root";
+import { resolveElectronDesktopPaths, resolveLegacyTauriPaths } from "./data-root";
 
 describe("resolveLegacyTauriPaths", () => {
   test("uses the legacy macOS Tauri app data and log roots", () => {
@@ -42,6 +42,37 @@ describe("resolveLegacyTauriPaths", () => {
       dataRoot: "C:\\Users\\Alex\\AppData\\Roaming\\com.teymz.wealthfolio",
       dbPath: "C:\\Users\\Alex\\AppData\\Roaming\\com.teymz.wealthfolio\\app.db",
       logRoot: "C:\\Users\\Alex\\AppData\\Local\\com.teymz.wealthfolio\\logs",
+    });
+  });
+});
+
+describe("resolveElectronDesktopPaths", () => {
+  test("keeps packaged Electron on the legacy desktop data root", () => {
+    expect(
+      resolveElectronDesktopPaths({
+        packaged: true,
+        platform: "darwin",
+        env: { HOME: "/Users/alex" },
+      }),
+    ).toEqual({
+      dataRoot: "/Users/alex/Library/Application Support/com.teymz.wealthfolio",
+      dbPath: "/Users/alex/Library/Application Support/com.teymz.wealthfolio/app.db",
+      logRoot: "/Users/alex/Library/Logs/com.teymz.wealthfolio",
+    });
+  });
+
+  test("uses isolated data, logs, and keyring namespace for Electron dev", () => {
+    expect(
+      resolveElectronDesktopPaths({
+        packaged: false,
+        platform: "darwin",
+        env: { HOME: "/Users/alex" },
+      }),
+    ).toEqual({
+      dataRoot: "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev",
+      dbPath: "/Users/alex/Library/Application Support/com.teymz.wealthfolio.dev/app.db",
+      logRoot: "/Users/alex/Library/Logs/com.teymz.wealthfolio.dev",
+      secretNamespace: "dev",
     });
   });
 });

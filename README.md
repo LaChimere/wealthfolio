@@ -172,6 +172,10 @@ Build and run the desktop application using Electron:
 bun run dev:electron
 ```
 
+Electron development uses an isolated desktop data root
+(`com.teymz.wealthfolio.dev`) and a separate keyring namespace, so it does not
+read or mutate data from an installed production Wealthfolio app.
+
 #### Addon Development Mode
 
 Addon hot reload servers now start only when you explicitly opt in.

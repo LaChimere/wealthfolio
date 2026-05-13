@@ -94,6 +94,10 @@ crates/
 | Electron pkg   | `bun run package:electron` |
 | Git hooks      | `bun run hooks:install`    |
 
+`bun run dev:electron` uses an isolated `.dev` desktop data root and keyring
+namespace. Packaged Electron builds reuse the legacy production desktop data
+root for migration continuity.
+
 ---
 
 ## Agent Playbook

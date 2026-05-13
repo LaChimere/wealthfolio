@@ -38,7 +38,7 @@ desktop startup profile:
 - bind to loopback only, preferably on an ephemeral port;
 - require a per-run secret or token known only to Electron main;
 - restrict CORS to the Electron origin or Vite dev origin;
-- use the legacy desktop data root instead of server defaults;
+- use the resolved desktop data root instead of server defaults;
 - use Rust keyring-backed secrets instead of the server `secrets.json` store;
 - expose domain events through SSE or an equivalent main-mediated event bridge.
 
@@ -55,17 +55,19 @@ development. Packaged Electron builds launch a bundled `wealthfolio-server`
 binary from Electron's `resources/sidecars` directory.
 
 The Electron sidecar sets `WF_SECRET_BACKEND=keyring` and starts the server with
-the `keyring-backend` feature so desktop provider secrets are durable and stay
-in the same OS keyring namespace as earlier desktop releases. Electron still
-generates a per-run `WF_SECRET_KEY` for the sidecar's server profile, but
-provider secret storage no longer uses `WF_SECRET_FILE` in desktop mode.
+the `keyring-backend` feature so desktop provider secrets are durable. Packaged
+Electron builds stay in the same OS keyring namespace as earlier desktop
+releases, while unpackaged Electron development sets `WF_SECRET_NAMESPACE=dev`
+so dev provider credentials remain isolated. Electron still generates a per-run
+`WF_SECRET_KEY` for the sidecar's server profile, but provider secret storage no
+longer uses `WF_SECRET_FILE` in desktop mode.
 
 ## Data root compatibility
 
 The existing Tauri desktop app stores its SQLite database under
 `app_handle.path().app_data_dir()`, and storage code appends `app.db` unless
-`DATABASE_URL` is set. Electron must resolve and reuse that same root before
-starting the sidecar.
+`DATABASE_URL` is set. Packaged Electron builds must resolve and reuse that same
+root before starting the sidecar so installed users keep their existing data.
 
 The Tauri app identifier is `com.teymz.wealthfolio`.
 
@@ -79,10 +81,20 @@ Electron must not silently initialize its default `app.getPath('userData')`
 directory as the Wealthfolio data root unless it is explicitly set to the legacy
 Tauri path or a tested one-shot migration is implemented.
 
+Unpackaged Electron development intentionally uses a separate `.dev` desktop
+root so `bun run dev:electron` cannot read or mutate an installed production
+database:
+
+| Platform | Electron dev app data root                                       | SQLite path                                                             | Log path                                                              |
+| -------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| macOS    | `$HOME/Library/Application Support/com.teymz.wealthfolio.dev`    | `$HOME/Library/Application Support/com.teymz.wealthfolio.dev/app.db`    | `$HOME/Library/Logs/com.teymz.wealthfolio.dev`                        |
+| Linux    | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio.dev` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio.dev/app.db` | `${XDG_DATA_HOME:-$HOME/.local/share}/com.teymz.wealthfolio.dev/logs` |
+| Windows  | `%APPDATA%\\com.teymz.wealthfolio.dev`                           | `%APPDATA%\\com.teymz.wealthfolio.dev\\app.db`                          | `%LOCALAPPDATA%\\com.teymz.wealthfolio.dev\\logs`                     |
+
 ## Secrets and keyring
 
-Desktop secrets continue using the same Rust keyring namespace as earlier
-desktop releases:
+Packaged desktop secrets continue using the same Rust keyring namespace as
+earlier desktop releases:
 
 - service key: `wealthfolio_core::secrets::format_service_id(service)`;
 - username: `default`;
@@ -91,6 +103,9 @@ desktop releases:
 
 This shared namespace is intentional for migration continuity: Electron can read
 the same existing keyring entries written by earlier desktop releases.
+
+Development secrets use `wealthfolio_dev_<service>` keyring service IDs through
+`WF_SECRET_NAMESPACE=dev`.
 
 The server file-backed secret store remains valid for web/self-hosted mode and
 is still the default when `WF_SECRET_BACKEND` is unset or set to `file`.
@@ -193,8 +208,8 @@ dedicated IPC methods, not as renderer Node APIs:
   Electron main owns `nativeTheme` updates and focused-window fullscreen
   toggles.
 - Electron restores and persists the main window's normal bounds/maximized state
-  in `electron-window-state.json` under the legacy Tauri data root. On macOS,
-  the Electron window uses a hidden-inset titlebar and
+  in `electron-window-state.json` under the resolved desktop data root. On
+  macOS, the Electron window uses a hidden-inset titlebar and
   `data-desktop-drag-region` markers map to Electron drag regions through CSS.
 - Wealthfolio deep links are owned by Electron main. The app registers the
   `wealthfolio://` protocol, enforces a single-instance lock before sidecar
@@ -206,9 +221,9 @@ dedicated IPC methods, not as renderer Node APIs:
   Electron `webUtils`, sends them over a dedicated IPC channel, and main
   validates payload shape before forwarding.
 - Renderer and sidecar logs are written through Electron main to
-  `wealthfolio-electron.log` under the legacy Tauri log root. Renderer logging
-  keeps console output for developer tools, but persistent writes cross a typed
-  preload IPC method with level/message validation.
+  `wealthfolio-electron.log` under the resolved desktop log root. Renderer
+  logging keeps console output for developer tools, but persistent writes cross
+  a typed preload IPC method with level/message validation.
 
 The Electron main/preload layer now owns the desktop-native responsibilities
 that were previously provided by Tauri plugins. Mobile-only Tauri features are
