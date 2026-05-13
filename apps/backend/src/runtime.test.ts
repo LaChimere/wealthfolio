@@ -71,6 +71,13 @@ describe("TS backend runtime composition", () => {
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);
 
+      const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
+      expect(aiProvidersResponse.status).toBe(200);
+      await expect(aiProvidersResponse.json()).resolves.toMatchObject({
+        capabilities: { tools: { name: "Tools" } },
+        providers: expect.arrayContaining([expect.objectContaining({ id: "ollama" })]),
+      });
+
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);
       await expect(appInfoResponse.json()).resolves.toMatchObject({

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 35
+turns_used: 36
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T05:47:13+08:00"
+updated_at: "2026-05-14T06:22:41+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -252,6 +252,11 @@ updated_at: "2026-05-14T05:47:13+08:00"
   ChaCha20-Poly1305 encrypted writes, legacy plaintext reads, raw-key migration,
   runtime `/api/v1/secrets` wiring, and explicit startup failure for unsupported
   TS keyring mode.
+- Turn 36: Added AI provider settings/catalog runtime parity for the standalone
+  TS backend: catalog merge and sorting, SQLite settings persistence,
+  secret-backed API-key flags, grouped tool allowlist normalization, tuning
+  validation/sanitization, default-provider updates, model-list parsing with
+  injectable fetch, and runtime `/api/v1/ai/providers` wiring.
 
 ## Deferred items
 
@@ -284,10 +289,10 @@ updated_at: "2026-05-14T05:47:13+08:00"
 - Real keyring integration remains an active follow-up. reason=file-backed
   secret persistence now has TS runtime parity, while OS keyring support must
   move with a dedicated runtime/keyring parity slice.
-- AI provider catalog merging, settings persistence, provider API calls, and
-  secret-backed model listing remain active follow-ups. reason=this slice only
-  adds the guarded route seam, while runtime behavior must move with dedicated
-  AI/secrets parity slices.
+- AI chat provider execution, streaming, thread persistence, and tool runtime
+  behavior remain active follow-ups. reason=AI provider catalog/settings and
+  model listing now have TS runtime parity, while chat execution belongs in a
+  dedicated AI runtime slice.
 - Alternative asset persistence, quote writes, liability metadata merging,
   holdings/net-worth calculations, and portfolio job enqueue behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while

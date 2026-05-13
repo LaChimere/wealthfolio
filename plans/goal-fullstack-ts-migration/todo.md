@@ -101,10 +101,11 @@
     job execution and event production are deferred to portfolio/calculation
     slices; TS file-backed secret persistence is wired into standalone runtime
     while real keyring integration is deferred to a runtime/keyring parity
-    slice; AI provider catalog/settings/model-listing runtime behavior is
-    deferred to AI/secrets parity slices; alternative asset
-    persistence/quotes/holdings/job behavior is deferred to asset/portfolio
-    parity slices; asset persistence/profile/quote-mode behavior is deferred to
+    slice; AI provider catalog/settings/model-listing runtime behavior is wired
+    into standalone runtime while AI chat execution is deferred to AI runtime
+    parity slices; alternative asset persistence/quotes/holdings/job behavior is
+    deferred to asset/portfolio parity slices; asset
+    persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app utility database restore is
     deferred until TS runtime restart/service-rebuild support exists; portfolio
     metric calculations are deferred to portfolio calculation parity slices;
@@ -639,6 +640,20 @@ contract:
   service ID normalization, migration behavior, keyring startup failure, file
   write security, and test coverage.
 - `pr5-secrets-runtime-repo-check`: full repo check passed with `bun run check`.
+- `pr5-ai-provider-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes catalog/settings merge and sorting, secret-backed API-key
+  flags, non-catalog model inclusion, grouped tool allowlist expansion,
+  anthropic tuning sanitization, tuning validation, custom URL/default-provider
+  clearing, model capability override removal, provider-specific model-list
+  request/response parsing with injectable fetch, missing-key validation, and
+  standalone runtime route wiring.
+- `pr5-ai-provider-runtime-review`: code review found no actionable issues after
+  confirming settings persistence shape, catalog sourcing, sorting/merge parity,
+  secret handling, tool/tuning normalization, model-list parsing, runtime
+  wiring, and test coverage.
+- `pr5-ai-provider-runtime-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -656,8 +671,8 @@ contract:
   device-sync enrollment/engine route seam, device-sync device-management route
   seam, device-sync team-key/reset route seam, device-sync pairing route seam,
   standalone TS runtime composition for already-ported SQLite-backed domains,
-  safe app utility runtime, and file-backed secrets runtime slices implemented;
-  broader migration remains active.
+  safe app utility runtime, file-backed secrets runtime, and AI provider
+  settings/catalog runtime slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -666,13 +681,13 @@ contract:
   provider sync plus broader market-data quote/search/import/sync behavior move
   with calculation/market-data slices; actual portfolio job execution and event
   production move with portfolio/calculation slices; OS keyring integration
-  moves with a dedicated runtime parity slice; AI provider
-  catalog/settings/model-listing runtime behavior moves with AI/secrets parity
-  slices; alternative asset persistence/quotes/holdings/job behavior moves with
-  asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
-  moves with asset/market-data/portfolio parity slices; app utility database
-  restore moves with restart-safe runtime parity; portfolio metric calculations
-  move with portfolio calculation parity slices; holdings fan-out, valuations,
+  moves with a dedicated runtime parity slice; AI chat execution and persistence
+  move with AI runtime parity slices; alternative asset
+  persistence/quotes/holdings/job behavior moves with asset/portfolio parity
+  slices; asset persistence/profile/quote-mode behavior moves with
+  asset/market-data/portfolio parity slices; app utility database restore moves
+  with restart-safe runtime parity; portfolio metric calculations move with
+  portfolio calculation parity slices; holdings fan-out, valuations,
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime

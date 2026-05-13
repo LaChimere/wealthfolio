@@ -6,6 +6,7 @@ import {
   createAccountService,
   type AccountService,
 } from "./domains/accounts";
+import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import {
   createContributionLimitRepository,
@@ -40,6 +41,7 @@ export interface SqliteBackedBackendServicesOptions {
   migrationsDir?: string;
   repositoryRoot?: string;
   secretKey?: Uint8Array;
+  aiProviderCatalogJson?: string;
 }
 
 export interface SqliteBackedBackendServices {
@@ -68,6 +70,7 @@ export function createSqliteBackedBackendServices(
       eventBus: options.eventBus,
       repositoryRoot,
       secretKey: options.secretKey,
+      aiProviderCatalogJson: options.aiProviderCatalogJson,
     });
   } catch (error) {
     initialized.db.close();
@@ -122,6 +125,7 @@ function createServicesFromDatabase(
     eventBus?: BackendEventBus;
     repositoryRoot: string;
     secretKey?: Uint8Array;
+    aiProviderCatalogJson?: string;
   },
 ): SqliteBackedBackendServices {
   const eventBus = runtimeOptions.eventBus ?? createEventBus();
@@ -130,9 +134,23 @@ function createServicesFromDatabase(
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const accountService = createRuntimeAccountService(db, eventBus, baseCurrency);
   const appDataDir = runtimeOptions.appDataDir;
+  const secretService = createRuntimeSecretService({
+    appDataDir,
+    env: runtimeOptions.env,
+    secretKey: runtimeOptions.secretKey,
+  });
 
   const options: BackendRequestHandlerOptions = {
     accountService,
+    aiProviderService: secretService
+      ? createAiProviderService({
+          db,
+          secretService,
+          catalogJson:
+            runtimeOptions.aiProviderCatalogJson ??
+            readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
+        })
+      : undefined,
     appUtilityService: createAppUtilityService({
       appDataDir,
       appVersion: readPackageVersion(runtimeOptions.repositoryRoot),
@@ -158,11 +176,7 @@ function createServicesFromDatabase(
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),
-    secretService: createRuntimeSecretService({
-      appDataDir,
-      env: runtimeOptions.env,
-      secretKey: runtimeOptions.secretKey,
-    }),
+    secretService,
     settingsService,
     taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
   };
@@ -239,4 +253,8 @@ function readPackageVersion(repositoryRoot: string): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function readAiProviderCatalogJson(repositoryRoot: string): string {
+  return readFileSync(path.join(repositoryRoot, "crates/ai/src/ai_providers.json"), "utf8");
 }
