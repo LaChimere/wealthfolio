@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 4
+turns_used: 5
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T00:09:41+08:00"
+updated_at: "2026-05-14T00:24:18+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -81,12 +81,16 @@ updated_at: "2026-05-14T00:09:41+08:00"
 - Turn 4: Started the taxonomies TS migration as a smaller atomic sub-slice:
   read repository/service models, guarded `/api/v1/taxonomies` read routes,
   ordering/date/boolean parity coverage, and targeted backend checks.
+- Turn 5: Extended the taxonomies TS slice with taxonomy/category create,
+  update, delete, move-category behavior, custom-taxonomy sync hooks, system
+  delete guards, child/assignment delete guards, guarded mutation routes, and
+  targeted backend tests.
 
 ## Deferred items
 
-- Taxonomy mutation, assignment, import/export, sync bundle, and migration
-  endpoints remain active follow-ups. reason=taxonomy scope split for atomic
-  commits and reviewable parity.
+- Taxonomy assignment, import/export, and migration endpoints remain active
+  follow-ups. reason=taxonomy scope split for atomic commits and reviewable
+  parity.
 
 ## Blockers
 

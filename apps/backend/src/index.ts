@@ -53,12 +53,23 @@ export {
   type SettingsUpdate,
 } from "./domains/settings";
 export {
+  createTaxonomyRepository,
   createTaxonomyReadRepository,
   createTaxonomyReadService,
+  createTaxonomyService,
+  type AssetTaxonomyAssignment,
+  type NewTaxonomy,
+  type NewTaxonomyCategory,
   type Taxonomy,
   type TaxonomyCategory,
+  type TaxonomyRepository,
+  type TaxonomyRepositoryOptions,
   type TaxonomyReadRepository,
   type TaxonomyReadService,
+  type TaxonomyService,
+  type TaxonomySyncEvent,
+  type TaxonomySyncOperation,
+  type TaxonomySyncPayload,
   type TaxonomyWithCategories,
 } from "./domains/taxonomies";
 export {

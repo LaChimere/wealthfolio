@@ -8,7 +8,7 @@ import {
   createContributionLimitService,
 } from "./domains/contribution-limits";
 import { createSettingsService } from "./domains/settings";
-import { createTaxonomyReadRepository, createTaxonomyReadService } from "./domains/taxonomies";
+import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
@@ -332,7 +332,7 @@ describe("TS backend HTTP skeleton", () => {
   test("routes migrated taxonomy read domain only when a service is provided", async () => {
     const db = createTaxonomiesDb();
     const handler = createBackendRequestHandler(config, {
-      taxonomyService: createTaxonomyReadService(createTaxonomyReadRepository(db)),
+      taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
     });
 
     try {
@@ -373,6 +373,117 @@ describe("TS backend HTTP skeleton", () => {
         taxonomy: expect.objectContaining({ id: "strategy" }),
         categories: [expect.objectContaining({ id: "growth", taxonomyId: "strategy" })],
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("routes migrated taxonomy and category mutations only when a service is provided", async () => {
+    const db = createTaxonomiesDb();
+    const handler = createBackendRequestHandler(config, {
+      taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
+    });
+
+    try {
+      const createTaxonomyResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            id: "strategy",
+            name: "Strategy",
+            color: "#4385be",
+            description: null,
+            isSystem: false,
+            isSingleSelect: true,
+            sortOrder: 10,
+          }),
+        }),
+      );
+      const createdTaxonomy = await createTaxonomyResponse.json();
+      expect(createTaxonomyResponse.status).toBe(200);
+      expect(createdTaxonomy).toMatchObject({ id: "strategy", isSingleSelect: true });
+
+      const updateTaxonomyResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            ...createdTaxonomy,
+            name: "Strategies",
+            isSingleSelect: false,
+          }),
+        }),
+      );
+      expect(await updateTaxonomyResponse.json()).toMatchObject({
+        id: "strategy",
+        name: "Strategies",
+        isSingleSelect: false,
+      });
+
+      const createCategoryResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/categories", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            id: "growth",
+            taxonomyId: "strategy",
+            name: "Growth",
+            key: "growth",
+            color: "#4385be",
+            sortOrder: 1,
+          }),
+        }),
+      );
+      const createdCategory = await createCategoryResponse.json();
+      expect(createCategoryResponse.status).toBe(200);
+      expect(createdCategory).toMatchObject({ id: "growth", taxonomyId: "strategy" });
+
+      const moveCategoryResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/categories/move", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            taxonomyId: "strategy",
+            categoryId: "growth",
+            newParentId: null,
+            position: 5,
+          }),
+        }),
+      );
+      expect(await moveCategoryResponse.json()).toMatchObject({
+        id: "growth",
+        parentId: null,
+        sortOrder: 5,
+      });
+
+      const deleteCategoryResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/strategy/categories/growth", {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteCategoryResponse.status).toBe(204);
+
+      const deleteTaxonomyResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/strategy", {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteTaxonomyResponse.status).toBe(204);
     } finally {
       db.close();
     }
@@ -449,6 +560,17 @@ function createTaxonomiesDb(): Database {
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       PRIMARY KEY (taxonomy_id, id)
+    );
+
+    CREATE TABLE asset_taxonomy_assignments (
+      id TEXT NOT NULL PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      taxonomy_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      weight INTEGER NOT NULL DEFAULT 10000,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     );
   `);
   return db;

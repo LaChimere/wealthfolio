@@ -1,9 +1,15 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createTaxonomyReadRepository, createTaxonomyReadService } from "./taxonomies";
+import {
+  createTaxonomyReadRepository,
+  createTaxonomyReadService,
+  createTaxonomyRepository,
+  createTaxonomyService,
+  type TaxonomySyncEvent,
+} from "./taxonomies";
 
-describe("TS taxonomies read domain", () => {
+describe("TS taxonomies domain", () => {
   test("lists taxonomies ordered by sort order with Rust-compatible booleans and dates", () => {
     const db = createTaxonomiesDb();
     const service = createTaxonomyReadService(createTaxonomyReadRepository(db));
@@ -86,6 +92,196 @@ describe("TS taxonomies read domain", () => {
       db.close();
     }
   });
+
+  test("creates, updates, and deletes custom taxonomies with sync hooks", async () => {
+    const db = createTaxonomiesDb();
+    const syncEvents: TaxonomySyncEvent[] = [];
+    const service = createTaxonomyService(
+      createTaxonomyRepository(db, { queueSyncEvent: (event) => syncEvents.push(event) }),
+    );
+
+    try {
+      const created = await service.createTaxonomy({
+        id: "strategy",
+        name: "Strategy",
+        color: "#4385be",
+        description: "Custom strategy taxonomy",
+        isSystem: false,
+        isSingleSelect: true,
+        sortOrder: 10,
+      });
+      expect(created).toMatchObject({
+        id: "strategy",
+        isSystem: false,
+        isSingleSelect: true,
+      });
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          taxonomyId: "strategy",
+          operation: "Create",
+          payload: {
+            taxonomy: expect.objectContaining({ id: "strategy" }),
+            categories: [],
+          },
+        }),
+      ]);
+
+      const updated = await service.updateTaxonomy({
+        ...created,
+        name: "Strategies",
+        createdAt: "2025-01-01T00:00:00Z",
+        isSingleSelect: false,
+        sortOrder: 20,
+      });
+      expect(updated).toMatchObject({
+        id: "strategy",
+        name: "Strategies",
+        createdAt: "2025-01-01T00:00:00Z",
+        isSingleSelect: false,
+        sortOrder: 20,
+      });
+      expect(syncEvents.at(-1)).toEqual(
+        expect.objectContaining({
+          taxonomyId: "strategy",
+          operation: "Update",
+          payload: expect.objectContaining({
+            taxonomy: expect.objectContaining({ name: "Strategies" }),
+          }),
+        }),
+      );
+
+      await expect(service.deleteTaxonomy("strategy")).resolves.toBe(1);
+      expect(syncEvents.at(-1)).toEqual({
+        taxonomyId: "strategy",
+        operation: "Delete",
+        payload: { id: "strategy" },
+      });
+      await expect(service.deleteTaxonomy("missing")).resolves.toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects system taxonomy deletes and skips sync for non-custom system taxonomy changes", async () => {
+    const db = createTaxonomiesDb();
+    const syncEvents: TaxonomySyncEvent[] = [];
+    const service = createTaxonomyService(
+      createTaxonomyRepository(db, { queueSyncEvent: (event) => syncEvents.push(event) }),
+    );
+
+    try {
+      seedTaxonomy(db, {
+        id: "asset_classes",
+        name: "Asset Classes",
+        color: "#879a39",
+        isSystem: true,
+        isSingleSelect: false,
+        sortOrder: 20,
+      });
+
+      await expect(service.deleteTaxonomy("asset_classes")).rejects.toThrow(
+        "Cannot delete system taxonomy",
+      );
+      await service.updateTaxonomy({
+        id: "asset_classes",
+        name: "Asset Classes",
+        color: "#879a39",
+        description: null,
+        isSystem: true,
+        isSingleSelect: false,
+        sortOrder: 20,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      expect(syncEvents).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("creates, updates, moves, and deletes categories with child and assignment guards", async () => {
+    const db = createTaxonomiesDb();
+    const syncEvents: TaxonomySyncEvent[] = [];
+    const service = createTaxonomyService(
+      createTaxonomyRepository(db, { queueSyncEvent: (event) => syncEvents.push(event) }),
+    );
+
+    try {
+      seedTaxonomy(db, {
+        id: "custom_groups",
+        name: "Custom Groups",
+        color: "#878580",
+        isSystem: true,
+        isSingleSelect: false,
+        sortOrder: 100,
+      });
+
+      const parent = await service.createCategory({
+        id: "theme",
+        taxonomyId: "custom_groups",
+        name: "Theme",
+        key: "theme",
+        color: "#878580",
+        sortOrder: 1,
+      });
+      const child = await service.createCategory({
+        id: "ai",
+        taxonomyId: "custom_groups",
+        parentId: "theme",
+        name: "AI",
+        key: "ai",
+        color: "#4385be",
+        sortOrder: 2,
+      });
+
+      expect(syncEvents.at(-1)).toEqual(
+        expect.objectContaining({
+          taxonomyId: "custom_groups",
+          operation: "Update",
+          payload: expect.objectContaining({
+            categories: expect.arrayContaining([expect.objectContaining({ id: "ai" })]),
+          }),
+        }),
+      );
+
+      await expect(service.deleteCategory("custom_groups", "theme")).rejects.toThrow(
+        "Cannot delete category with children",
+      );
+
+      const moved = await service.moveCategory("custom_groups", "ai", null, 5);
+      expect(moved).toMatchObject({ id: "ai", parentId: null, sortOrder: 5 });
+
+      db.prepare(
+        `
+          INSERT INTO asset_taxonomy_assignments (
+            id, asset_id, taxonomy_id, category_id, weight, source
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run("assignment-1", "asset-1", "custom_groups", "ai", 10000, "manual");
+      await expect(service.deleteCategory("custom_groups", "ai")).rejects.toThrow(
+        "Cannot delete category with 1 asset assignments",
+      );
+
+      db.prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?").run("assignment-1");
+      await expect(
+        service.updateCategory({
+          ...parent,
+          createdAt: "2025-01-01T00:00:00Z",
+          name: "Themes",
+          sortOrder: 3,
+        }),
+      ).resolves.toMatchObject({
+        id: "theme",
+        createdAt: "2025-01-01T00:00:00Z",
+        name: "Themes",
+        sortOrder: 3,
+      });
+      await expect(service.deleteCategory("custom_groups", child.id)).resolves.toBe(1);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createTaxonomiesDb(): Database {
@@ -115,6 +311,17 @@ function createTaxonomiesDb(): Database {
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       PRIMARY KEY (taxonomy_id, id)
+    );
+
+    CREATE TABLE asset_taxonomy_assignments (
+      id TEXT NOT NULL PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      taxonomy_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      weight INTEGER NOT NULL DEFAULT 10000,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     );
   `);
   return db;

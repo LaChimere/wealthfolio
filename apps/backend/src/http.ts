@@ -3,7 +3,13 @@ import type { AccountService, AccountUpdate, NewAccount } from "./domains/accoun
 import { parseTrackingMode } from "./domains/accounts";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
-import type { TaxonomyReadService } from "./domains/taxonomies";
+import type {
+  NewTaxonomy,
+  NewTaxonomyCategory,
+  Taxonomy,
+  TaxonomyCategory,
+  TaxonomyService,
+} from "./domains/taxonomies";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
 export interface BackendRequestHandlerOptions {
@@ -12,7 +18,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   contributionLimitService?: ContributionLimitService;
   settingsService?: SettingsService;
-  taxonomyService?: TaxonomyReadService;
+  taxonomyService?: TaxonomyService;
 }
 
 export function createBackendRequestHandler(
@@ -109,8 +115,8 @@ function routeTaxonomyRequest(
   request: Request,
   url: URL,
   config: BackendRuntimeConfig,
-  taxonomyService: TaxonomyReadService,
-): Response {
+  taxonomyService: TaxonomyService,
+): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
   }
@@ -119,9 +125,59 @@ function routeTaxonomyRequest(
     return jsonResponse(taxonomyService.getTaxonomies());
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies") {
+    return handleJsonMutation(request, parseNewTaxonomy, (newTaxonomy) =>
+      taxonomyService.createTaxonomy(newTaxonomy),
+    );
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/taxonomies") {
+    return handleJsonMutation(request, parseTaxonomy, (taxonomy) =>
+      taxonomyService.updateTaxonomy(taxonomy),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/categories") {
+    return handleJsonMutation(request, parseNewTaxonomyCategory, (newCategory) =>
+      taxonomyService.createCategory(newCategory),
+    );
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/taxonomies/categories") {
+    return handleJsonMutation(request, parseTaxonomyCategory, (category) =>
+      taxonomyService.updateCategory(category),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/categories/move") {
+    return handleJsonMutation(request, parseMoveCategoryRequest, (moveRequest) =>
+      taxonomyService.moveCategory(
+        moveRequest.taxonomyId,
+        moveRequest.categoryId,
+        moveRequest.newParentId,
+        moveRequest.position,
+      ),
+    );
+  }
+
+  const categoryIds = taxonomyCategoryIdsFromPath(url.pathname);
+  if (categoryIds && request.method === "DELETE") {
+    return taxonomyService
+      .deleteCategory(categoryIds.taxonomyId, categoryIds.categoryId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
   const taxonomyId = taxonomyIdFromPath(url.pathname);
   if (taxonomyId && request.method === "GET") {
     return jsonResponse(taxonomyService.getTaxonomy(taxonomyId));
+  }
+
+  if (taxonomyId && request.method === "DELETE") {
+    return taxonomyService
+      .deleteTaxonomy(taxonomyId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -325,6 +381,18 @@ function taxonomyIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function taxonomyCategoryIdsFromPath(
+  pathname: string,
+): { taxonomyId: string; categoryId: string } | undefined {
+  const match = /^\/api\/v1\/taxonomies\/([^/]+)\/categories\/([^/]+)$/.exec(pathname);
+  return match
+    ? {
+        taxonomyId: decodeURIComponent(match[1]),
+        categoryId: decodeURIComponent(match[2]),
+      }
+    : undefined;
+}
+
 function applyCors(response: Response, request: Request, config: BackendRuntimeConfig): Response {
   const origin = request.headers.get("origin");
   const allowedOrigin = resolveAllowedOrigin(origin, config.cors.allowOrigins);
@@ -385,6 +453,26 @@ async function parseJsonBody(request: Request): Promise<Record<string, unknown> 
   return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
 }
 
+async function handleJsonMutation<TInput, TOutput>(
+  request: Request,
+  parse: (payload: Record<string, unknown>) => TInput | Response,
+  mutate: (input: TInput) => Promise<TOutput>,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input = parse(payload);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    return jsonResponse(await mutate(input));
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
 function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {
   const update: SettingsUpdate = {};
   const stringFields = ["theme", "font", "baseCurrency", "timezone"] as const;
@@ -418,6 +506,180 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewTaxonomy(payload: Record<string, unknown>): NewTaxonomy | Response {
+  const id = parseOptionalStringOrNull(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const name = parseRequiredString(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const color = parseRequiredString(payload.color, "color");
+  if (color instanceof Response) {
+    return color;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const isSystem = parseRequiredBoolean(payload.isSystem, "isSystem");
+  if (isSystem instanceof Response) {
+    return isSystem;
+  }
+  const isSingleSelect = parseRequiredBoolean(payload.isSingleSelect, "isSingleSelect");
+  if (isSingleSelect instanceof Response) {
+    return isSingleSelect;
+  }
+  const sortOrder = parseRequiredInteger(payload.sortOrder, "sortOrder");
+  if (sortOrder instanceof Response) {
+    return sortOrder;
+  }
+
+  return {
+    id,
+    name,
+    color,
+    description,
+    isSystem,
+    isSingleSelect,
+    sortOrder,
+  };
+}
+
+function parseTaxonomy(payload: Record<string, unknown>): Taxonomy | Response {
+  const taxonomy = parseNewTaxonomy(payload);
+  if (taxonomy instanceof Response) {
+    return taxonomy;
+  }
+  const id = parseRequiredString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const createdAt = parseRequiredString(payload.createdAt, "createdAt");
+  if (createdAt instanceof Response) {
+    return createdAt;
+  }
+  const updatedAt = parseRequiredString(payload.updatedAt, "updatedAt");
+  if (updatedAt instanceof Response) {
+    return updatedAt;
+  }
+  return {
+    ...taxonomy,
+    id,
+    description: taxonomy.description ?? null,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function parseNewTaxonomyCategory(
+  payload: Record<string, unknown>,
+): NewTaxonomyCategory | Response {
+  const id = parseOptionalStringOrNull(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const taxonomyId = parseRequiredString(payload.taxonomyId, "taxonomyId");
+  if (taxonomyId instanceof Response) {
+    return taxonomyId;
+  }
+  const parentId = parseOptionalStringOrNull(payload.parentId, "parentId");
+  if (parentId instanceof Response) {
+    return parentId;
+  }
+  const name = parseRequiredString(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const key = parseRequiredString(payload.key, "key");
+  if (key instanceof Response) {
+    return key;
+  }
+  const color = parseRequiredString(payload.color, "color");
+  if (color instanceof Response) {
+    return color;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const sortOrder = parseRequiredInteger(payload.sortOrder, "sortOrder");
+  if (sortOrder instanceof Response) {
+    return sortOrder;
+  }
+
+  return {
+    id,
+    taxonomyId,
+    parentId,
+    name,
+    key,
+    color,
+    description,
+    sortOrder,
+  };
+}
+
+function parseTaxonomyCategory(payload: Record<string, unknown>): TaxonomyCategory | Response {
+  const category = parseNewTaxonomyCategory(payload);
+  if (category instanceof Response) {
+    return category;
+  }
+  const id = parseRequiredString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const createdAt = parseRequiredString(payload.createdAt, "createdAt");
+  if (createdAt instanceof Response) {
+    return createdAt;
+  }
+  const updatedAt = parseRequiredString(payload.updatedAt, "updatedAt");
+  if (updatedAt instanceof Response) {
+    return updatedAt;
+  }
+  return {
+    ...category,
+    id,
+    parentId: category.parentId ?? null,
+    description: category.description ?? null,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function parseMoveCategoryRequest(payload: Record<string, unknown>):
+  | {
+      taxonomyId: string;
+      categoryId: string;
+      newParentId: string | null;
+      position: number;
+    }
+  | Response {
+  const taxonomyId = parseRequiredString(payload.taxonomyId, "taxonomyId");
+  if (taxonomyId instanceof Response) {
+    return taxonomyId;
+  }
+  const categoryId = parseRequiredString(payload.categoryId, "categoryId");
+  if (categoryId instanceof Response) {
+    return categoryId;
+  }
+  const newParentId = parseOptionalStringOrNull(payload.newParentId, "newParentId");
+  if (newParentId instanceof Response) {
+    return newParentId;
+  }
+  const position = parseRequiredInteger(payload.position, "position");
+  if (position instanceof Response) {
+    return position;
+  }
+  return {
+    taxonomyId,
+    categoryId,
+    newParentId: newParentId ?? null,
+    position,
+  };
 }
 
 function parseNewContributionLimit(
@@ -619,6 +881,13 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
   return value;
 }
 
+function parseRequiredString(value: unknown, field: string): string | Response {
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+  }
+  return value;
+}
+
 function parseOptionalStringOrNull(
   value: unknown,
   field: string,
@@ -631,6 +900,20 @@ function parseOptionalStringOrNull(
   }
   if (typeof value !== "string") {
     return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
+  }
+  return value;
+}
+
+function parseRequiredBoolean(value: unknown, field: string): boolean | Response {
+  if (typeof value !== "boolean") {
+    return jsonResponse({ code: 400, message: `${field} must be a boolean` }, 400);
+  }
+  return value;
+}
+
+function parseRequiredInteger(value: unknown, field: string): number | Response {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
   }
   return value;
 }

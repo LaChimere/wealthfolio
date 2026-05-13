@@ -166,11 +166,23 @@ contract:
 - `pr5-taxonomies-read-review`: code review found no actionable correctness,
   security, route compatibility, type-safety, or test coverage issues.
 - `pr5-taxonomies-read-repo-check`: full repo check passed with `bun run check`.
+- `pr5-taxonomies-crud-mutations`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes supplied/generated taxonomy/category IDs, taxonomy
+  create/update/delete, system taxonomy delete rejection, non-custom system sync
+  suppression, custom taxonomy sync bundle/delete hooks, category child and
+  asset assignment delete guards, move-category behavior, and guarded HTTP
+  mutation routes.
+- `pr5-taxonomies-crud-review`: code review flagged mutable `created_at` fields
+  on update; Rust repository updates from the full submitted Taxonomy/Category
+  structs, so the TS slice kept parity and added explicit tests for that
+  behavior. No remaining actionable issues.
+- `pr5-taxonomies-crud-repo-check`: full repo check passed with `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
-  settings, accounts, contribution limits, and taxonomy read slices implemented;
-  broader migration remains active.
-- Follow-ups: continue taxonomy mutation/assignment/import-export sub-slices.
+  settings, accounts, contribution limits, taxonomy read, and taxonomy/category
+  mutation slices implemented; broader migration remains active.
+- Follow-ups: continue taxonomy assignment/import-export sub-slices.
