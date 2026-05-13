@@ -1,7 +1,13 @@
 import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/electron/shared/ipc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { listenMarketSyncComplete, listenPortfolioUpdateStart } from "./events";
+import {
+  listenNavigateToRoute,
+  listenMarketSyncComplete,
+  listenPortfolioUpdateStart,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
+} from "./events";
 
 function installElectronApi(api: Partial<WealthfolioElectronApi>) {
   window[ELECTRON_API_KEY] = {
@@ -35,6 +41,34 @@ describe("electron event adapter", () => {
       event: "portfolio:update-start",
       id: 1,
       payload: { ok: true },
+    });
+  });
+
+  it("delegates update event listeners through preload", async () => {
+    const listen = vi.fn().mockResolvedValue(vi.fn());
+    installElectronApi({ listen });
+
+    await listenUpdateAvailable(vi.fn());
+    await listenUpdateDownloadProgress(vi.fn());
+
+    expect(listen).toHaveBeenCalledWith("app:update-available", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("app:update-download-progress", expect.any(Function));
+  });
+
+  it("delegates native route navigation listeners through preload", async () => {
+    const listen = vi.fn().mockResolvedValue(vi.fn());
+    installElectronApi({ listen });
+
+    const routeHandler = vi.fn();
+    await listenNavigateToRoute(routeHandler);
+
+    expect(listen).toHaveBeenCalledWith("navigate-to-route", expect.any(Function));
+    const [, bridgeHandler] = listen.mock.calls[0];
+    bridgeHandler({ event: "navigate-to-route", id: 2, payload: { route: "/settings/general" } });
+    expect(routeHandler).toHaveBeenCalledWith({
+      event: "navigate-to-route",
+      id: 2,
+      payload: { route: "/settings/general" },
     });
   });
 

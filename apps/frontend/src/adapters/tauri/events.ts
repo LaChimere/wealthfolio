@@ -108,3 +108,15 @@ export const listenDeepLink = async <T>(handler: EventCallback<T>): Promise<Unli
   const unlisten = await listen<T>("deep-link-received", adaptCallback(handler));
   return adaptUnlisten(unlisten);
 };
+
+export const listenUpdateAvailable = async <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  const unlisten = await listen<T>("app:update-available", adaptCallback(handler));
+  return adaptUnlisten(unlisten);
+};
+
+export const listenUpdateDownloadProgress = async <T>(
+  handler: EventCallback<T>,
+): Promise<UnlistenFn> => {
+  const unlisten = await listen<T>("app:update-download-progress", adaptCallback(handler));
+  return adaptUnlisten(unlisten);
+};

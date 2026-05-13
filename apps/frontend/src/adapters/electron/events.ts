@@ -61,5 +61,13 @@ export const listenBrokerSyncComplete = <T>(handler: EventCallback<T>): Promise<
 export const listenBrokerSyncError = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent("broker:sync-error", handler);
 };
-export const listenNavigateToRoute = listenPendingElectronBridge;
+export const listenNavigateToRoute = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent("navigate-to-route", handler);
+};
 export const listenDeepLink = listenPendingElectronBridge;
+export const listenUpdateAvailable = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent("app:update-available", handler);
+};
+export const listenUpdateDownloadProgress = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent("app:update-download-progress", handler);
+};

@@ -193,6 +193,8 @@ export {
   listenBrokerSyncError,
   listenNavigateToRoute,
   listenDeepLink,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
 } from "./events";
 
 // File Dialogs (Tauri file dialogs)

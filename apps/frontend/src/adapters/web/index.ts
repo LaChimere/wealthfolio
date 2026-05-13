@@ -346,6 +346,8 @@ export {
   listenPortfolioUpdateComplete,
   listenPortfolioUpdateError,
   listenPortfolioUpdateStart,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
 } from "./events";
 
 // File Dialogs (web-specific implementations)

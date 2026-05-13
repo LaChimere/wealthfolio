@@ -231,6 +231,10 @@
   Electron main now owns ZIP file reads through typed IPC, Tauri keeps dialog/fs
   usage inside the Tauri adapter, and the add-on settings hook no longer imports
   Tauri plugins directly.
+- Turn 40: Added an Electron application menu for settings navigation, report
+  issue/about dialogs, fullscreen role, and forced update checks. Menu-driven
+  route and update-available events now use the preload event listener seam, and
+  `use-updater` no longer imports Tauri event APIs directly.
 
 ## Deferred items
 

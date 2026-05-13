@@ -126,6 +126,8 @@ export {
   listenPortfolioUpdateComplete,
   listenPortfolioUpdateError,
   listenPortfolioUpdateStart,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
 } from "./events";
 
 export {

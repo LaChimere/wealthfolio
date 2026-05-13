@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
 import { validateElectronInvokeRequest } from "./ipc-validation";
+import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
@@ -28,6 +29,7 @@ let sidecarStopInProgress = false;
 let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
 let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
+let nextRendererEventId = 0;
 const aiChatStreamManager = createAiChatStreamManager({ getSidecar: getReadySidecarHandle });
 
 function configureAppPaths(): void {
@@ -104,6 +106,54 @@ function sendServerEventToWindows(message: ElectronEventMessage): void {
       window.webContents.send(IPC_CHANNELS.serverEvent, message);
     }
   }
+}
+
+function sendRendererEvent(
+  eventName: string,
+  payload: unknown,
+  targetWindow?: BrowserWindow | null,
+): void {
+  const message: ElectronEventMessage = {
+    event: eventName,
+    id: ++nextRendererEventId,
+    payload,
+  };
+
+  if (targetWindow && !targetWindow.webContents.isDestroyed()) {
+    targetWindow.webContents.send(IPC_CHANNELS.serverEvent, message);
+    return;
+  }
+
+  sendServerEventToWindows(message);
+}
+
+function getTargetWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+}
+
+function configureApplicationMenu(): void {
+  installApplicationMenu({
+    appName: app.getName() || "Wealthfolio",
+    appVersion: app.getVersion(),
+    menu: Menu,
+    getTargetWindow,
+    async showMessageBox(options, parent) {
+      if (parent && !parent.isDestroyed()) {
+        await dialog.showMessageBox(parent, options);
+        return;
+      }
+      await dialog.showMessageBox(options);
+    },
+    async checkForUpdates() {
+      const sidecar = await getReadySidecarHandle();
+      return await invokeSidecarCommand({
+        command: "check_for_updates",
+        payload: { force: true },
+        sidecar,
+      });
+    },
+    sendRendererEvent,
+  });
 }
 
 async function createWindow(): Promise<void> {
@@ -196,6 +246,7 @@ async function start(): Promise<void> {
   await app.whenReady();
   configureSecurityHeaders();
   registerIpcHandlers();
+  configureApplicationMenu();
   await createWindow();
   sidecarStartPromise = startSidecarBridge().finally(() => {
     sidecarStartPromise = null;

@@ -4,6 +4,8 @@ import {
   isAutoUpdateCheckEnabled,
   checkForUpdates,
   installUpdate,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
 } from "@/adapters";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import type { UpdateInfo } from "@/lib/types";
@@ -36,19 +38,30 @@ export function useCheckUpdateOnStartup() {
   useEffect(() => {
     if (!isDesktop) return;
 
-    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    let unlisten: (() => Promise<void>) | undefined;
 
-    // Dynamic import for Tauri-specific functionality
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen<UpdateInfo>("app:update-available", (event) => {
+    listenUpdateAvailable<UpdateInfo>((event) => {
+      if (!cancelled) {
         clearUpdateSnooze();
         queryClient.setQueryData(UPDATE_QUERY_KEY, event.payload);
-      }).then((fn) => {
+      }
+    })
+      .then((fn) => {
+        if (cancelled) {
+          void fn();
+          return;
+        }
         unlisten = fn;
+      })
+      .catch((error) => {
+        logger.error("Failed to set up update listener: " + String(error));
       });
-    });
 
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      void unlisten?.();
+    };
   }, [queryClient]);
 
   return useQuery({
@@ -135,20 +148,34 @@ export function useInstallUpdate() {
   useEffect(() => {
     if (!isDesktop) return;
 
-    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    let unlisten: (() => Promise<void>) | undefined;
 
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen<DownloadProgressEvent>("app:update-download-progress", (event) => {
-        setPhase(event.payload.phase);
-        if (event.payload.phase === "downloading") {
-          setProgress({ downloaded: event.payload.downloaded, total: event.payload.total });
+    listenUpdateDownloadProgress<DownloadProgressEvent>((event) => {
+      if (cancelled) {
+        return;
+      }
+      const { phase: nextPhase, downloaded, total } = event.payload;
+      setPhase(nextPhase);
+      if (nextPhase === "downloading") {
+        setProgress({ downloaded, total });
+      }
+    })
+      .then((fn) => {
+        if (cancelled) {
+          void fn();
+          return;
         }
-      }).then((fn) => {
         unlisten = fn;
+      })
+      .catch((listenError) => {
+        logger.error("Failed to set up update progress listener: " + String(listenError));
       });
-    });
 
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      void unlisten?.();
+    };
   }, []);
 
   const mutation = useMutation({

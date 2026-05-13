@@ -186,16 +186,19 @@ dedicated IPC methods, not as renderer Node APIs:
   the Tauri adapter, and web mode keeps using an `<input type="file">`.
 - External URL opening is owned by Electron main and is limited to `http:`,
   `https:`, and `mailto:` protocols before calling `shell.openExternal`.
+- Application menu actions are owned by Electron main. Menu-triggered route
+  navigation and update-available notifications are forwarded through the typed
+  preload event listener API; renderer code does not import Electron or Tauri
+  event APIs directly for those flows.
 
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
-- menu events and route navigation;
 - file-drop and deep-link events;
 - single-instance behavior;
 - window state and titlebar behavior;
 - app logging;
-- updater progress events;
+- updater install/progress events;
 - OAuth callback handling for Wealthfolio Connect.
 
 Mobile-only Tauri features are not part of the Electron migration.
