@@ -10,20 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded sync crypto HTTP seam after the AI
-chat route seam:
+PR 5 continues vertical slices with a guarded health runtime and classification
+migration HTTP seam after the sync crypto route seam:
 
-- Add a `SyncCryptoService` interface and guarded `/sync/crypto/*` route tests
-  for root key, DEK derivation, keypair, shared/session key derivation,
-  encrypt/decrypt, pairing-code/hash, HMAC, SAS, and device-id commands.
-- Preserve Rust HTTP semantics for POST-only routes, no-body endpoints ignoring
-  invalid request bodies, exact camelCase body fields, empty-string
-  pass-through, `u32` version validation, direct `{ value }` and
-  `{ publicKey, secretKey }` response shapes, 400 crypto operation errors, route
+- Extend the existing `HealthService` and `TaxonomyService` seams with optional
+  runtime methods for `/health/status`, `/health/check`, `/health/fix`, and
+  `/taxonomies/migration/{status,run}` while preserving existing local-only
+  health/config behavior when those methods are absent.
+- Preserve Rust HTTP semantics for client-timezone header trimming, no-body
+  health checks and migration runs, fix-action body validation with nullable
+  payloads, JSON status/result responses, empty 200 fix responses, method/path
   inertness, and sidecar bearer-token checks.
-- Defer real TypeScript cryptographic implementation, key material handling,
-  WebCrypto/libsodium selection, and device-sync integration to dedicated
-  sync-crypto/runtime parity slices.
+- Defer real health checks, classification migration, market sync fix execution,
+  health cache behavior, and taxonomy/asset side effects to dedicated
+  health/classification runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -32,7 +32,8 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, or AI chat runtime
-deletion, or real sync crypto runtime implementation is in scope for this slice.
+deletion, real sync crypto runtime implementation, or real health/classification
+runtime implementation is in scope for this slice.
 
 ## Next slices
 

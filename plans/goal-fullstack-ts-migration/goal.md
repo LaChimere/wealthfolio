@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 26
+turns_used: 27
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T04:57:16+08:00"
+updated_at: "2026-05-14T05:08:46+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -187,6 +187,14 @@ updated_at: "2026-05-14T04:57:16+08:00"
   behavior, exact camelCase request fields, empty-string pass-through, u32
   version validation, keypair response shape, 400 crypto errors, sidecar-auth
   route semantics, and targeted backend tests.
+- Turn 27: Implemented the guarded health runtime and classification migration
+  HTTP seam TS slice: optional `HealthService` and `TaxonomyService` runtime
+  methods for `/api/v1/health/status`, `/api/v1/health/check`,
+  `/api/v1/health/fix`, and `/api/v1/taxonomies/migration/{status,run}`;
+  preserved deferred behavior when optional methods are absent, client-timezone
+  header parsing, no-body route behavior, fix-action payload validation,
+  200/JSON response parity, sidecar-auth route semantics, and targeted backend
+  tests.
 
 ## Deferred items
 
@@ -252,6 +260,11 @@ updated_at: "2026-05-14T04:57:16+08:00"
   selection, and device-sync integration remain active follow-ups. reason=this
   slice only adds the guarded HTTP seam, while runtime behavior must move with a
   dedicated sync-crypto/device-sync parity slice.
+- Real health checks, classification migration, market sync fix execution,
+  health cache behavior, and taxonomy/asset side effects remain active
+  follow-ups. reason=this slice only adds optional guarded HTTP seams, while
+  runtime behavior must move with a dedicated health/classification parity
+  slice.
 - Holdings fan-out, valuation history/latest calculations, allocation
   calculations, snapshot persistence/reconciliation, import symbol lookup, and
   portfolio recalculation side effects remain active follow-ups. reason=this

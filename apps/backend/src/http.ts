@@ -46,7 +46,7 @@ import type {
 } from "./domains/custom-providers";
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
-import type { HealthConfig, HealthService } from "./domains/health";
+import type { HealthConfig, HealthFixAction, HealthService } from "./domains/health";
 import type {
   HoldingsImportRequest,
   HoldingsService,
@@ -1379,6 +1379,24 @@ function routeHealthRequest(
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
   }
 
+  if (request.method === "GET" && url.pathname === "/api/v1/health/status") {
+    if (!healthService.getHealthStatus) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    return Promise.resolve(healthService.getHealthStatus(extractClientTimezone(request.headers)))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/health/check") {
+    if (!healthService.runHealthChecks) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    return Promise.resolve(healthService.runHealthChecks(extractClientTimezone(request.headers)))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/v1/health/dismissed") {
     return healthService.getDismissedIds().then(jsonResponse).catch(domainErrorResponse);
   }
@@ -1405,7 +1423,21 @@ function routeHealthRequest(
     );
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/health/fix") {
+    if (!healthService.executeFix) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    return handleJsonMutationEmpty(request, parseHealthFixAction, async (action) => {
+      await healthService.executeFix?.(action);
+    });
+  }
+
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function extractClientTimezone(headers: Headers): string | undefined {
+  const timezone = headers.get("x-client-timezone")?.trim();
+  return timezone ? timezone : undefined;
 }
 
 function routeExchangeRateRequest(
@@ -1611,6 +1643,24 @@ function routeTaxonomyRequest(
     } catch (error) {
       return domainErrorResponse(error);
     }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/taxonomies/migration/status") {
+    if (!taxonomyService.getMigrationStatus) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    return Promise.resolve(taxonomyService.getMigrationStatus())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/migration/run") {
+    if (!taxonomyService.migrateLegacyClassifications) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    return Promise.resolve(taxonomyService.migrateLegacyClassifications())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   const assignmentId = taxonomyAssignmentIdFromPath(url.pathname);
@@ -2219,6 +2269,21 @@ function parseHealthRestoreRequest(
     return issueId;
   }
   return { issueId };
+}
+
+function parseHealthFixAction(payload: Record<string, unknown>): HealthFixAction | Response {
+  const id = parseRequiredString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const label = parseRequiredString(payload.label, "label");
+  if (label instanceof Response) {
+    return label;
+  }
+  if (!Object.hasOwn(payload, "payload")) {
+    return jsonResponse({ code: 400, message: "payload is required" }, 400);
+  }
+  return { id, label, payload: payload.payload };
 }
 
 function parseHealthConfig(payload: Record<string, unknown>): HealthConfig | Response {

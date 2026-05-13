@@ -169,6 +169,8 @@ export interface TaxonomyService extends TaxonomyReadService {
   removeAssetAssignment(id: string): Promise<number>;
   importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
   exportTaxonomyJson(id: string): string;
+  getMigrationStatus?(): Promise<unknown> | unknown;
+  migrateLegacyClassifications?(): Promise<unknown> | unknown;
 }
 
 interface TaxonomyRow {

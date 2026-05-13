@@ -15,6 +15,12 @@ export interface HealthConfig {
   classificationWarnThreshold: number;
 }
 
+export interface HealthFixAction {
+  id: string;
+  label: string;
+  payload: unknown;
+}
+
 export interface HealthRepository {
   saveDismissal(issueId: string, dataHash: string): IssueDismissal;
   removeDismissal(issueId: string): void;
@@ -28,6 +34,9 @@ export interface HealthService {
   getDismissedIds(): Promise<string[]>;
   getConfig(): Promise<HealthConfig>;
   updateConfig(config: HealthConfig): Promise<void>;
+  getHealthStatus?(clientTimezone?: string): Promise<unknown> | unknown;
+  runHealthChecks?(clientTimezone?: string): Promise<unknown> | unknown;
+  executeFix?(action: HealthFixAction): Promise<void> | void;
 }
 
 interface DismissalRow {

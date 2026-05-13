@@ -117,7 +117,9 @@
     mutation behavior are deferred to AI runtime parity slices; real sync crypto
     implementation, key material handling, WebCrypto/libsodium selection, and
     device-sync integration are deferred to sync-crypto/device-sync parity
-    slices.
+    slices; real health checks, classification migration, market sync fix
+    execution, health cache behavior, and taxonomy/asset side effects are
+    deferred to health/classification parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -493,6 +495,21 @@ contract:
   data handling, and test coverage.
 - `pr5-sync-crypto-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-health-classification-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes optional injectable health status/check/fix and taxonomy
+  migration status/run methods, guarded HTTP route access, route inertness
+  without injection or optional methods, client-timezone header trimming,
+  no-body check/migration behavior, fix-action nullable payload validation,
+  JSON/empty response shapes, sidecar auth, and deferred real
+  health/classification runtime behavior.
+- `pr5-health-classification-route-seam-review`: code review found and the slice
+  fixed one `executeFix` method-binding issue; targeted checks and a focused
+  re-review then found no remaining actionable issues across optional-method
+  inertness, no-body route handling, timezone parsing, fix-action validation,
+  sidecar auth, type-safety, and test coverage.
+- `pr5-health-classification-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -505,8 +522,9 @@ contract:
   secrets route seam, AI provider route seam, alternative assets route seam,
   assets route seam, app utility route seam, portfolio metrics route seam,
   holdings route seam, add-ons route seam, market-data route seam,
-  activities/import route seam, AI chat route seam, and sync crypto route seam
-  slices implemented; broader migration remains active.
+  activities/import route seam, AI chat route seam, sync crypto route seam, and
+  health/classification route seam slices implemented; broader migration remains
+  active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -535,4 +553,7 @@ contract:
   provider streaming, tool execution, thread storage, tag persistence, and
   tool-result mutation behavior move with AI runtime parity slices; real sync
   crypto implementation, key material handling, WebCrypto/libsodium selection,
-  and device-sync integration move with sync-crypto/device-sync parity slices.
+  and device-sync integration move with sync-crypto/device-sync parity slices;
+  real health checks, classification migration, market sync fix execution,
+  health cache behavior, and taxonomy/asset side effects move with
+  health/classification parity slices.

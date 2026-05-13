@@ -20,7 +20,7 @@ import {
 } from "./domains/custom-providers";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
-import { createHealthRepository, createHealthService } from "./domains/health";
+import { createHealthRepository, createHealthService, type HealthService } from "./domains/health";
 import type { HoldingsService } from "./domains/holdings";
 import type { MarketDataService } from "./domains/market-data";
 import {
@@ -32,7 +32,11 @@ import type { PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import type { SyncCryptoService } from "./domains/sync-crypto";
-import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
+import {
+  createTaxonomyRepository,
+  createTaxonomyService,
+  type TaxonomyService,
+} from "./domains/taxonomies";
 import { createEventBus } from "./events";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
@@ -1496,6 +1500,179 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("routes migrated health runtime and classification migration seams when service methods are provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const healthService: HealthService = {
+      dismissIssue() {
+        throw new Error("not used");
+      },
+      restoreIssue() {
+        throw new Error("not used");
+      },
+      getDismissedIds() {
+        return Promise.resolve([]);
+      },
+      getConfig() {
+        return Promise.resolve({
+          priceStaleWarningHours: 24,
+          priceStaleCriticalHours: 72,
+          fxStaleWarningHours: 24,
+          fxStaleCriticalHours: 72,
+          mvEscalationThreshold: 0.3,
+          classificationWarnThreshold: 0.05,
+        });
+      },
+      updateConfig() {
+        return Promise.resolve();
+      },
+      getHealthStatus(clientTimezone) {
+        calls.push(["health-status", clientTimezone]);
+        return { isStale: false, issues: [] };
+      },
+      runHealthChecks(clientTimezone) {
+        calls.push(["health-check", clientTimezone]);
+        return { isStale: false, checked: true };
+      },
+      executeFix(action) {
+        calls.push(["health-fix", action]);
+        return Promise.resolve();
+      },
+    };
+    const taxonomyService: TaxonomyService = {
+      getTaxonomies() {
+        return [];
+      },
+      getTaxonomy() {
+        return null;
+      },
+      createTaxonomy() {
+        throw new Error("not used");
+      },
+      updateTaxonomy() {
+        throw new Error("not used");
+      },
+      deleteTaxonomy() {
+        throw new Error("not used");
+      },
+      createCategory() {
+        throw new Error("not used");
+      },
+      updateCategory() {
+        throw new Error("not used");
+      },
+      deleteCategory() {
+        throw new Error("not used");
+      },
+      moveCategory() {
+        throw new Error("not used");
+      },
+      getAssetAssignments() {
+        return [];
+      },
+      assignAssetToCategory() {
+        throw new Error("not used");
+      },
+      removeAssetAssignment() {
+        throw new Error("not used");
+      },
+      importTaxonomyJson() {
+        throw new Error("not used");
+      },
+      exportTaxonomyJson() {
+        throw new Error("not used");
+      },
+      getMigrationStatus() {
+        calls.push(["migration-status", undefined]);
+        return { needed: true };
+      },
+      migrateLegacyClassifications() {
+        calls.push(["migration-run", undefined]);
+        return { migrated: 2 };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { healthService, taxonomyService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/health/status"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/health/status", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/health/status", {
+            headers: { ...authHeaders, "x-client-timezone": " America/Toronto " },
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ isStale: false, issues: [] });
+    await handler(
+      new Request("http://127.0.0.1/api/v1/health/check", {
+        method: "POST",
+        headers: { ...authHeaders, "content-type": "application/json" },
+        body: "not json",
+      }),
+    );
+    const fixResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/health/fix", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          id: "migrate_legacy_classifications",
+          label: "Migrate",
+          payload: null,
+        }),
+      }),
+    );
+    expect(fixResponse.status).toBe(200);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/health/fix", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ id: "bad", label: "Bad" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/taxonomies/migration/status", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ needed: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/taxonomies/migration/run", {
+            method: "POST",
+            headers: { ...authHeaders, "content-type": "application/json" },
+            body: "not json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ migrated: 2 });
+
+    expect(calls).toEqual([
+      ["health-status", "America/Toronto"],
+      ["health-check", undefined],
+      ["health-fix", { id: "migrate_legacy_classifications", label: "Migrate", payload: null }],
+      ["migration-status", undefined],
+      ["migration-run", undefined],
+    ]);
   });
 
   test("routes migrated market data provider settings only when a service is provided", async () => {
