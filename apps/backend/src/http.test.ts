@@ -11,6 +11,7 @@ import {
   createCustomProviderRepository,
   createCustomProviderService,
 } from "./domains/custom-providers";
+import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -675,6 +676,105 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
+    const db = createGoalsDb();
+    const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });
+    const handler = createBackendRequestHandler(config, { goalService });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/goals"))).status).toBe(401);
+
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            goalType: "custom_save_up",
+            title: "Emergency Fund",
+            targetAmount: 5000,
+          }),
+        }),
+      );
+      const created = await createResponse.json();
+      expect(createResponse.status).toBe(200);
+      expect(created).toMatchObject({
+        goalType: "custom_save_up",
+        title: "Emergency Fund",
+        currency: "USD",
+        statusLifecycle: "active",
+      });
+
+      const planResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/goals/${created.id}/plan`, {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await planResponse.json()).toBeNull();
+
+      const fundingResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/goals/${created.id}/funding`, {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify([{ accountId: "cash", sharePercent: 100, taxBucket: "taxable" }]),
+        }),
+      );
+      expect(await fundingResponse.json()).toEqual([
+        expect.objectContaining({ accountId: "cash", sharePercent: 100, taxBucket: null }),
+      ]);
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ...created, title: "Emergency Fund Updated" }),
+        }),
+      );
+      expect(await updateResponse.json()).toMatchObject({
+        id: created.id,
+        title: "Emergency Fund Updated",
+        currency: "USD",
+      });
+
+      const listResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await listResponse.json()).toEqual([expect.objectContaining({ id: created.id })]);
+
+      const deferredPlanWrite = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/plan", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ goalId: created.id }),
+        }),
+      );
+      expect(deferredPlanWrite.status).toBe(404);
+
+      const deleteResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/goals/${created.id}`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteResponse.status).toBe(204);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {
@@ -738,6 +838,55 @@ function createCustomProvidersDb(): Database {
     CREATE TABLE assets (
       id TEXT NOT NULL PRIMARY KEY,
       provider_config TEXT
+    );
+  `);
+  return db;
+}
+
+function createGoalsDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE goals (
+      id TEXT NOT NULL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      target_amount REAL NOT NULL DEFAULT 0,
+      goal_type TEXT NOT NULL DEFAULT 'custom_save_up',
+      status_lifecycle TEXT NOT NULL DEFAULT 'active',
+      status_health TEXT NOT NULL DEFAULT 'not_applicable',
+      priority INTEGER NOT NULL DEFAULT 0,
+      cover_image_key TEXT,
+      currency TEXT,
+      start_date TEXT,
+      target_date TEXT,
+      summary_current_value REAL,
+      summary_progress REAL,
+      projected_completion_date TEXT,
+      projected_value_at_target_date REAL,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      summary_target_amount REAL
+    );
+
+    CREATE TABLE goals_allocation (
+      id TEXT NOT NULL PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      share_percent REAL NOT NULL DEFAULT 0,
+      tax_bucket TEXT,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE goal_plans (
+      goal_id TEXT NOT NULL PRIMARY KEY,
+      plan_kind TEXT NOT NULL,
+      planner_mode TEXT,
+      settings_json TEXT NOT NULL DEFAULT '{}',
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT ''
     );
   `);
   return db;

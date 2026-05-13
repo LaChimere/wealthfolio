@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 8
+turns_used: 9
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T01:06:24+08:00"
+updated_at: "2026-05-14T01:24:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -97,6 +97,11 @@ updated_at: "2026-05-14T01:06:24+08:00"
   list/create/update/delete behavior, source config parsing, reserved-code and
   source validation, asset-reference delete guards, sync hooks keyed by provider
   UUID, guarded HTTP routes, and targeted backend tests.
+- Turn 9: Implemented the scoped goals TS slice for base persistence: goal
+  list/get/create/update/delete behavior, funding rule reads/replacement,
+  read-only goal plan access, base-currency forcing at the HTTP seam, retirement
+  seed funding, lifecycle/retirement uniqueness/capacity/DC-link guards, sync
+  hooks, guarded HTTP routes, and targeted backend tests.
 
 ## Deferred items
 
@@ -106,6 +111,10 @@ updated_at: "2026-05-14T01:06:24+08:00"
 - Custom provider `test-source` remains an active follow-up. reason=it depends
   on external HTTP fetches, secrets, parser/extractor behavior, and response
   safety limits that belong in a dedicated external-I/O slice.
+- Goals plan write/delete, summary refresh, save-up overview, and retirement
+  simulation endpoints remain active follow-ups. reason=they require retirement
+  plan validation/calculation parity and should move in dedicated
+  calculation-heavy slices.
 
 ## Blockers
 

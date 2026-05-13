@@ -64,16 +64,18 @@
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
     inert for production until TS cutover.
-  - Evidence: settings, accounts, contribution limits, taxonomy, and custom
-    provider TS repository/service implementations plus guarded route tests in
-    `apps/backend/src/domains/settings.ts`,
+  - Evidence: settings, accounts, contribution limits, taxonomy, custom
+    provider, and scoped goals TS repository/service implementations plus
+    guarded route tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
-    `apps/backend/src/domains/custom-providers.ts`, and
-    `apps/backend/src/http.test.ts`. Taxonomy migration/health endpoints are
-    deferred to the health/classification service slice; custom provider
-    `test-source` is deferred to an external-I/O slice.
+    `apps/backend/src/domains/custom-providers.ts`,
+    `apps/backend/src/domains/goals.ts`, and `apps/backend/src/http.test.ts`.
+    Taxonomy migration/health endpoints are deferred to the
+    health/classification service slice; custom provider `test-source` is
+    deferred to an external-I/O slice; goals plan writes and calculation
+    endpoints are deferred to calculation-heavy slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -214,14 +216,29 @@ contract:
   coverage.
 - `pr5-custom-providers-crud-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-goals-crud-funding`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes priority-desc goal reads, zero-target null mapping,
+  generated IDs/defaults/base currency, lifecycle and goal-type guards,
+  retirement single goal guard, seeded retirement funding, funding
+  duplicate/range/capacity/tax bucket/DC-link guards, non-retirement tax bucket
+  clearing, funding replacement sync hooks, idempotent goal delete sync
+  behavior, read-only plan access, guarded HTTP CRUD/funding routes, and
+  deferred plan-write behavior.
+- `pr5-goals-crud-funding-review`: code review found no actionable issues across
+  Rust parity, route compatibility/security, type-safety, or test coverage.
+- `pr5-goals-crud-funding-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
-  mutation, assignment, import/export, and custom provider CRUD slices
-  implemented; broader migration remains active.
+  mutation, assignment, import/export, custom provider CRUD, and scoped goals
+  CRUD/funding slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
-  `test-source` moves with external-I/O services.
+  `test-source` moves with external-I/O services; goals plan write/delete,
+  summary refresh, save-up overview, and retirement simulation endpoints move
+  with calculation-heavy goal slices.

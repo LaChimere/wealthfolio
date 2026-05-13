@@ -8,6 +8,7 @@ import type {
   NewCustomProviderSource,
   UpdateCustomProvider,
 } from "./domains/custom-providers";
+import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -25,6 +26,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
+  goalService?: GoalService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -104,6 +106,10 @@ async function routeRequest(
     return routeCustomProviderRequest(request, url, config, options.customProviderService);
   }
 
+  if (options.goalService && url.pathname.startsWith("/api/v1/goals")) {
+    return routeGoalRequest(request, url, config, options.goalService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -118,6 +124,62 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeGoalRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  goalService: GoalService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  const fundingGoalId = goalFundingIdFromPath(url.pathname);
+  if (fundingGoalId && request.method === "GET") {
+    return jsonResponse(goalService.getGoalFunding(fundingGoalId));
+  }
+  if (fundingGoalId && request.method === "PUT") {
+    return handleJsonArrayMutation(request, parseGoalFundingRuleInput, (rules) =>
+      goalService.saveGoalFunding(fundingGoalId, rules),
+    );
+  }
+
+  const planGoalId = goalPlanIdFromPath(url.pathname);
+  if (planGoalId && request.method === "GET") {
+    return jsonResponse(goalService.getGoalPlan(planGoalId));
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/goals") {
+    return jsonResponse(goalService.getGoals());
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/goals") {
+    return handleJsonMutation(request, parseNewGoal, (newGoal) =>
+      goalService.createGoal(forceGoalCurrency(newGoal, goalService)),
+    );
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/goals") {
+    return handleJsonMutation(request, parseGoal, (goal) =>
+      goalService.updateGoal(forceGoalCurrency(goal, goalService)),
+    );
+  }
+
+  const goalId = goalIdFromPath(url.pathname);
+  if (goalId && request.method === "GET") {
+    return jsonResponse(goalService.getGoal(goalId));
+  }
+
+  if (goalId && request.method === "DELETE") {
+    return goalService
+      .deleteGoal(goalId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -469,6 +531,21 @@ function customProviderIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function goalIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function goalFundingIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)\/funding$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function goalPlanIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)\/plan$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function taxonomyCategoryIdsFromPath(
   pathname: string,
 ): { taxonomyId: string; categoryId: string } | undefined {
@@ -556,6 +633,18 @@ async function parseJsonBody(request: Request): Promise<Record<string, unknown> 
   return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
 }
 
+async function parseJsonArrayBody(request: Request): Promise<unknown[] | Response> {
+  try {
+    const payload = await request.json();
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+  } catch {
+    // Fall through to the explicit bad-request response below.
+  }
+  return jsonResponse({ code: 400, message: "Invalid JSON array body" }, 400);
+}
+
 async function handleJsonMutation<TInput, TOutput>(
   request: Request,
   parse: (payload: Record<string, unknown>) => TInput | Response,
@@ -568,6 +657,33 @@ async function handleJsonMutation<TInput, TOutput>(
   const input = parse(payload);
   if (input instanceof Response) {
     return input;
+  }
+  try {
+    return jsonResponse(await mutate(input));
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleJsonArrayMutation<TInput, TOutput>(
+  request: Request,
+  parseItem: (payload: Record<string, unknown>, index: number) => TInput | Response,
+  mutate: (input: TInput[]) => Promise<TOutput>,
+): Promise<Response> {
+  const payload = await parseJsonArrayBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input: TInput[] = [];
+  for (const [index, item] of payload.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return jsonResponse({ code: 400, message: `body[${index}] must be an object` }, 400);
+    }
+    const parsed = parseItem(item as Record<string, unknown>, index);
+    if (parsed instanceof Response) {
+      return parsed;
+    }
+    input.push(parsed);
   }
   try {
     return jsonResponse(await mutate(input));
@@ -609,6 +725,255 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewGoal(payload: Record<string, unknown>): NewGoal | Response {
+  const goalType = parseRequiredString(payload.goalType, "goalType");
+  if (goalType instanceof Response) {
+    return goalType;
+  }
+  const title = parseRequiredString(payload.title, "title");
+  if (title instanceof Response) {
+    return title;
+  }
+  const optionals = parseGoalOptionals(payload);
+  if (optionals instanceof Response) {
+    return optionals;
+  }
+  return {
+    id: optionals.id,
+    goalType,
+    title,
+    description: optionals.description,
+    targetAmount: optionals.targetAmount,
+    statusLifecycle: optionals.statusLifecycle,
+    statusHealth: optionals.statusHealth,
+    priority: optionals.priority,
+    coverImageKey: optionals.coverImageKey,
+    currency: optionals.currency,
+    startDate: optionals.startDate,
+    targetDate: optionals.targetDate,
+    createdAt: optionals.createdAt,
+    updatedAt: optionals.updatedAt,
+  };
+}
+
+function parseGoal(payload: Record<string, unknown>): Goal | Response {
+  const goalType = parseRequiredString(payload.goalType, "goalType");
+  if (goalType instanceof Response) {
+    return goalType;
+  }
+  const title = parseRequiredString(payload.title, "title");
+  if (title instanceof Response) {
+    return title;
+  }
+  const optionals = parseGoalOptionals(payload);
+  if (optionals instanceof Response) {
+    return optionals;
+  }
+  const id = parseRequiredString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const statusLifecycle = parseRequiredString(payload.statusLifecycle, "statusLifecycle");
+  if (statusLifecycle instanceof Response) {
+    return statusLifecycle;
+  }
+  const statusHealth = parseRequiredString(payload.statusHealth, "statusHealth");
+  if (statusHealth instanceof Response) {
+    return statusHealth;
+  }
+  const priority = parseRequiredInteger(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  const createdAt = parseRequiredString(payload.createdAt, "createdAt");
+  if (createdAt instanceof Response) {
+    return createdAt;
+  }
+  const updatedAt = parseRequiredString(payload.updatedAt, "updatedAt");
+  if (updatedAt instanceof Response) {
+    return updatedAt;
+  }
+
+  return {
+    id,
+    goalType,
+    title,
+    description: optionals.description ?? null,
+    targetAmount: optionals.targetAmount ?? null,
+    statusLifecycle,
+    statusHealth,
+    priority,
+    coverImageKey: optionals.coverImageKey ?? null,
+    currency: optionals.currency ?? null,
+    startDate: optionals.startDate ?? null,
+    targetDate: optionals.targetDate ?? null,
+    summaryCurrentValue: optionals.summaryCurrentValue ?? null,
+    summaryProgress: optionals.summaryProgress ?? null,
+    projectedCompletionDate: optionals.projectedCompletionDate ?? null,
+    projectedValueAtTargetDate: optionals.projectedValueAtTargetDate ?? null,
+    createdAt,
+    updatedAt,
+    summaryTargetAmount: optionals.summaryTargetAmount ?? null,
+  };
+}
+
+function parseGoalOptionals(payload: Record<string, unknown>):
+  | {
+      id?: string | null;
+      description?: string | null;
+      targetAmount?: number | null;
+      statusLifecycle?: string | null;
+      statusHealth?: string | null;
+      priority?: number | null;
+      coverImageKey?: string | null;
+      currency?: string | null;
+      startDate?: string | null;
+      targetDate?: string | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+      summaryCurrentValue?: number | null;
+      summaryProgress?: number | null;
+      projectedCompletionDate?: string | null;
+      projectedValueAtTargetDate?: number | null;
+      summaryTargetAmount?: number | null;
+    }
+  | Response {
+  const id = parseOptionalStringOrNull(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const targetAmount = parseOptionalNumberOrNull(payload.targetAmount, "targetAmount");
+  if (targetAmount instanceof Response) {
+    return targetAmount;
+  }
+  const statusLifecycle = parseOptionalStringOrNull(payload.statusLifecycle, "statusLifecycle");
+  if (statusLifecycle instanceof Response) {
+    return statusLifecycle;
+  }
+  const statusHealth = parseOptionalStringOrNull(payload.statusHealth, "statusHealth");
+  if (statusHealth instanceof Response) {
+    return statusHealth;
+  }
+  const priority = parseOptionalIntegerOrNull(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  const coverImageKey = parseOptionalStringOrNull(payload.coverImageKey, "coverImageKey");
+  if (coverImageKey instanceof Response) {
+    return coverImageKey;
+  }
+  const currency = parseOptionalStringOrNull(payload.currency, "currency");
+  if (currency instanceof Response) {
+    return currency;
+  }
+  const startDate = parseOptionalStringOrNull(payload.startDate, "startDate");
+  if (startDate instanceof Response) {
+    return startDate;
+  }
+  const targetDate = parseOptionalStringOrNull(payload.targetDate, "targetDate");
+  if (targetDate instanceof Response) {
+    return targetDate;
+  }
+  const createdAt = parseOptionalStringOrNull(payload.createdAt, "createdAt");
+  if (createdAt instanceof Response) {
+    return createdAt;
+  }
+  const updatedAt = parseOptionalStringOrNull(payload.updatedAt, "updatedAt");
+  if (updatedAt instanceof Response) {
+    return updatedAt;
+  }
+  const summaryCurrentValue = parseOptionalNumberOrNull(
+    payload.summaryCurrentValue,
+    "summaryCurrentValue",
+  );
+  if (summaryCurrentValue instanceof Response) {
+    return summaryCurrentValue;
+  }
+  const summaryProgress = parseOptionalNumberOrNull(payload.summaryProgress, "summaryProgress");
+  if (summaryProgress instanceof Response) {
+    return summaryProgress;
+  }
+  const projectedCompletionDate = parseOptionalStringOrNull(
+    payload.projectedCompletionDate,
+    "projectedCompletionDate",
+  );
+  if (projectedCompletionDate instanceof Response) {
+    return projectedCompletionDate;
+  }
+  const projectedValueAtTargetDate = parseOptionalNumberOrNull(
+    payload.projectedValueAtTargetDate,
+    "projectedValueAtTargetDate",
+  );
+  if (projectedValueAtTargetDate instanceof Response) {
+    return projectedValueAtTargetDate;
+  }
+  const summaryTargetAmount = parseOptionalNumberOrNull(
+    payload.summaryTargetAmount,
+    "summaryTargetAmount",
+  );
+  if (summaryTargetAmount instanceof Response) {
+    return summaryTargetAmount;
+  }
+
+  return {
+    id,
+    description,
+    targetAmount,
+    statusLifecycle,
+    statusHealth,
+    priority,
+    coverImageKey,
+    currency,
+    startDate,
+    targetDate,
+    createdAt,
+    updatedAt,
+    summaryCurrentValue,
+    summaryProgress,
+    projectedCompletionDate,
+    projectedValueAtTargetDate,
+    summaryTargetAmount,
+  };
+}
+
+function parseGoalFundingRuleInput(
+  payload: Record<string, unknown>,
+  index: number,
+): GoalFundingRuleInput | Response {
+  const accountId = parseRequiredString(payload.accountId, `body[${index}].accountId`);
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const sharePercent = parseRequiredNumber(payload.sharePercent, `body[${index}].sharePercent`);
+  if (sharePercent instanceof Response) {
+    return sharePercent;
+  }
+  const taxBucket = parseOptionalStringOrNull(payload.taxBucket, `body[${index}].taxBucket`);
+  if (taxBucket instanceof Response) {
+    return taxBucket;
+  }
+  return {
+    accountId,
+    sharePercent,
+    taxBucket,
+  };
+}
+
+function forceGoalCurrency<TGoal extends NewGoal | Goal>(
+  goal: TGoal,
+  goalService: GoalService,
+): TGoal {
+  const baseCurrency = goalService.getBaseCurrency();
+  if (!baseCurrency) {
+    return goal;
+  }
+  return { ...goal, currency: baseCurrency };
 }
 
 function parseNewCustomProvider(payload: Record<string, unknown>): NewCustomProvider | Response {
@@ -1277,6 +1642,29 @@ function parseOptionalBooleanOrNull(
 function parseRequiredInteger(value: unknown, field: string): number | Response {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
+  }
+  return value;
+}
+
+function parseRequiredNumber(value: unknown, field: string): number | Response {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be a finite number` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalIntegerOrNull(
+  value: unknown,
+  field: string,
+): number | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an integer or null` }, 400);
   }
   return value;
 }

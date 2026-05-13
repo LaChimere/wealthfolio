@@ -58,6 +58,24 @@ export {
   type UpdateCustomProvider,
 } from "./domains/custom-providers";
 export {
+  createGoalRepository,
+  createGoalService,
+  type Goal,
+  type GoalAccount,
+  type GoalAccountProvider,
+  type GoalFundingRule,
+  type GoalFundingRuleInput,
+  type GoalPlan,
+  type GoalRepository,
+  type GoalRepositoryOptions,
+  type GoalService,
+  type GoalServiceOptions,
+  type GoalSyncEntity,
+  type GoalSyncEvent,
+  type GoalSyncOperation,
+  type NewGoal,
+} from "./domains/goals";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,
