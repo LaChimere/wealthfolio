@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 33
+turns_used: 34
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -242,6 +242,11 @@ updated_at: "2026-05-14T05:18:49+08:00"
   settings, and event-stream services into the TS request handler; `WF_DB_PATH`
   now takes precedence over `DATABASE_URL`, with explicit app-data and
   migration-dir resolution tests.
+- Turn 34: Added safe app utility runtime parity for the standalone TS backend:
+  app info, update-check mapping/cache with injectable fetch, base64 backup, and
+  backup-to-path now have a real TS service wired into runtime composition;
+  restore remains explicit `501` until the TS backend can safely restart or
+  rebuild services after replacing the active database.
 
 ## Deferred items
 
@@ -286,10 +291,10 @@ updated_at: "2026-05-14T05:18:49+08:00"
   interactions, activity guards, and portfolio recalculation behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/market-data/portfolio parity slices.
-- App runtime metadata, update HTTP requests/cache, backup/restore file I/O, and
-  path normalization remain active follow-ups. reason=this slice only adds the
-  guarded HTTP seam, while runtime behavior must move with dedicated app utility
-  parity slices.
+- App utility database restore runtime remains an active follow-up. reason=app
+  info, update-check cache/HTTP, backup file I/O, and path normalization now
+  have safe TS runtime parity, but restore must wait for a restart or
+  service-rebuild strategy after replacing the active database.
 - Net-worth, performance, income, holdings, FX, and valuation calculations
   remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
   while runtime behavior must move with dedicated portfolio calculation parity

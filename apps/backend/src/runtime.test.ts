@@ -24,6 +24,9 @@ describe("TS backend runtime composition", () => {
   test("resolves runtime data and migration roots from explicit options and env", () => {
     expect(resolveBackendAppDataDir({}, "/tmp/app-data")).toBe("/tmp/app-data");
     expect(resolveBackendAppDataDir({ WF_APP_DATA_DIR: "/tmp/env-data" })).toBe("/tmp/env-data");
+    expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db/app.db" })).toBe(
+      "/tmp/custom-db",
+    );
     expect(resolveBackendMigrationsDir({}, { repositoryRoot })).toBe(
       path.join(repositoryRoot, "crates/storage-sqlite/migrations"),
     );
@@ -63,6 +66,21 @@ describe("TS backend runtime composition", () => {
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);
+
+      const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
+      expect(appInfoResponse.status).toBe(200);
+      await expect(appInfoResponse.json()).resolves.toMatchObject({
+        dbPath: path.join(appDataDir, "app.db"),
+        logsDir: path.join(appDataDir, "logs"),
+        version: "3.4.0",
+      });
+
+      const restoreResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backupFilePath: "file:///tmp/backup.db" }),
+      });
+      expect(restoreResponse.status).toBe(501);
     } finally {
       server.stop();
       runtime.close();

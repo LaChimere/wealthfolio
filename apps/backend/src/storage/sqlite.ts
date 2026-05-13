@@ -122,8 +122,12 @@ export function getAppliedMigrationVersions(db: Database): Set<string> {
   return new Set(rows.map((row) => row.version));
 }
 
-export function backupDatabaseToFile(appDataDir: string, backupPath: string): void {
-  const dbPath = getSqliteDbPath(appDataDir);
+export function backupDatabaseToFile(
+  appDataDir: string,
+  backupPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const dbPath = getSqliteDbPath(appDataDir, env);
   mkdirSync(path.dirname(backupPath), { recursive: true });
   rmSync(backupPath, { force: true });
 
@@ -136,12 +140,16 @@ export function backupDatabaseToFile(appDataDir: string, backupPath: string): vo
   }
 }
 
-export function restoreDatabase(appDataDir: string, backupFilePath: string): void {
+export function restoreDatabase(
+  appDataDir: string,
+  backupFilePath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
   if (!existsSync(backupFilePath)) {
     throw new Error("Backup file not found");
   }
 
-  const dbPath = getSqliteDbPath(appDataDir);
+  const dbPath = getSqliteDbPath(appDataDir, env);
   mkdirSync(path.dirname(dbPath), { recursive: true });
   createPreRestoreBackup(dbPath);
   rmSync(`${dbPath}-wal`, { force: true });

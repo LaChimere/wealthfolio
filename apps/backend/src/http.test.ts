@@ -3424,6 +3424,20 @@ describe("TS backend HTTP skeleton", () => {
     );
     expect(restoreResponse.status).toBe(204);
 
+    const restoreUnavailableResponse = await createBackendRequestHandler(config, {
+      appUtilityService: { ...appUtilityService, restoreDatabase: undefined },
+    })(
+      new Request("http://127.0.0.1/api/v1/utilities/database/restore", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ backupFilePath: "/tmp/backups/wealthfolio_backup.db" }),
+      }),
+    );
+    expect(restoreUnavailableResponse.status).toBe(501);
+
     const invalidResponse = await handler(
       new Request("http://127.0.0.1/api/v1/utilities/database/backup-to-path", {
         method: "POST",

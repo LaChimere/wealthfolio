@@ -81,12 +81,14 @@ export type {
   UpdateAlternativeAssetValuationRequest,
   UpdateAlternativeAssetValuationResponse,
 } from "./domains/alternative-assets";
-export type {
-  AppInfoResponse,
-  AppUtilityService,
-  BackupDatabaseResponse,
-  BackupToPathResponse,
-  UpdateCheckResponse,
+export {
+  createAppUtilityService,
+  type AppInfoResponse,
+  type AppUtilityService,
+  type AppUtilityServiceOptions,
+  type BackupDatabaseResponse,
+  type BackupToPathResponse,
+  type UpdateCheckResponse,
 } from "./domains/app-utilities";
 export type { Asset, AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 export type {
