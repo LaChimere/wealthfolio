@@ -18,6 +18,7 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
+import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -910,6 +911,91 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("routes migrated portfolio job triggers only when a service is provided", async () => {
+    const enqueued: PortfolioJobConfig[] = [];
+    const handler = createBackendRequestHandler(config, {
+      portfolioJobService: {
+        enqueuePortfolioJob(config) {
+          enqueued.push(config);
+        },
+      },
+    });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/portfolio/update"))).status).toBe(
+      401,
+    );
+
+    const updateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolio/update", {
+        method: "POST",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(updateResponse.status).toBe(202);
+    expect(enqueued[0]).toEqual({
+      accountIds: null,
+      marketSyncMode: { type: "incremental", asset_ids: null },
+      snapshotMode: "incremental_from_last",
+      valuationMode: "incremental_from_last",
+      sinceDate: null,
+    });
+
+    const explicitIncrementalResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolio/update", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ marketSyncMode: { type: "incremental" } }),
+      }),
+    );
+    expect(explicitIncrementalResponse.status).toBe(202);
+    expect(enqueued[1]?.marketSyncMode).toEqual({ type: "incremental", asset_ids: null });
+
+    const emptyRecalculateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolio/recalculate", {
+        method: "POST",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(emptyRecalculateResponse.status).toBe(202);
+    expect(enqueued[2]?.marketSyncMode).toEqual({
+      type: "backfill_history",
+      asset_ids: null,
+      days: 1_825,
+    });
+
+    const recalculateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolio/recalculate", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          accountIds: ["acc-1"],
+          marketSyncMode: { type: "refetch_recent", asset_ids: ["asset-1"], days: 7 },
+        }),
+      }),
+    );
+    expect(recalculateResponse.status).toBe(202);
+    expect(enqueued[3]).toEqual({
+      accountIds: ["acc-1"],
+      marketSyncMode: { type: "refetch_recent", asset_ids: ["asset-1"], days: 7 },
+      snapshotMode: "full",
+      valuationMode: "full",
+      sinceDate: null,
+    });
+
+    const deferredEventsResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/events/stream", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(deferredEventsResponse.status).toBe(404);
   });
 
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {

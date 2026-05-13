@@ -110,6 +110,17 @@ export {
   type ProviderUpdate,
 } from "./domains/market-data-providers";
 export {
+  DEFAULT_HISTORY_DAYS,
+  buildPortfolioRecalculateConfig,
+  buildPortfolioUpdateConfig,
+  type MarketSyncMode,
+  type PortfolioJobConfig,
+  type PortfolioJobService,
+  type PortfolioRequestBody,
+  type SnapshotRecalcMode,
+  type ValuationRecalcMode,
+} from "./domains/portfolio-jobs";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,

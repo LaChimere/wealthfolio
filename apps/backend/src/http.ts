@@ -12,6 +12,13 @@ import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domai
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { HealthConfig, HealthService } from "./domains/health";
 import type { MarketDataProviderService, ProviderUpdate } from "./domains/market-data-providers";
+import {
+  buildPortfolioRecalculateConfig,
+  buildPortfolioUpdateConfig,
+  type MarketSyncMode,
+  type PortfolioJobService,
+  type PortfolioRequestBody,
+} from "./domains/portfolio-jobs";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -33,6 +40,7 @@ export interface BackendRequestHandlerOptions {
   goalService?: GoalService;
   healthService?: HealthService;
   marketDataProviderService?: MarketDataProviderService;
+  portfolioJobService?: PortfolioJobService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -131,6 +139,10 @@ async function routeRequest(
     return routeMarketDataProviderRequest(request, url, config, options.marketDataProviderService);
   }
 
+  if (options.portfolioJobService && url.pathname.startsWith("/api/v1/portfolio")) {
+    return await routePortfolioJobRequest(request, url, config, options.portfolioJobService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -144,6 +156,45 @@ async function routeRequest(
         return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
       }
       return jsonResponse({ ok: true });
+    }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function routePortfolioJobRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  portfolioJobService: PortfolioJobService,
+): Promise<Response> {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/portfolio/update") {
+    const body = await parseOptionalPortfolioRequestBody(request);
+    if (body instanceof Response) {
+      return body;
+    }
+    try {
+      await portfolioJobService.enqueuePortfolioJob(buildPortfolioUpdateConfig(body));
+      return new Response(null, { status: 202 });
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/portfolio/recalculate") {
+    const body = await parseOptionalPortfolioRequestBody(request);
+    if (body instanceof Response) {
+      return body;
+    }
+    try {
+      await portfolioJobService.enqueuePortfolioJob(buildPortfolioRecalculateConfig(body));
+      return new Response(null, { status: 202 });
+    } catch (error) {
+      return domainErrorResponse(error);
     }
   }
 
@@ -773,6 +824,31 @@ async function parseJsonArrayBody(request: Request): Promise<unknown[] | Respons
   return jsonResponse({ code: 400, message: "Invalid JSON array body" }, 400);
 }
 
+async function parseOptionalPortfolioRequestBody(
+  request: Request,
+): Promise<PortfolioRequestBody | Response> {
+  let text = "";
+  try {
+    text = await request.text();
+  } catch {
+    return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
+  }
+  if (text.trim() === "") {
+    return {};
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
+  }
+  return parsePortfolioRequestBody(payload as Record<string, unknown>);
+}
+
 async function handleJsonMutation<TInput, TOutput>(
   request: Request,
   parse: (payload: Record<string, unknown>) => TInput | Response,
@@ -955,6 +1031,72 @@ function parseProviderUpdate(payload: Record<string, unknown>): ProviderUpdate |
   }
 
   return { providerId, priority, enabled };
+}
+
+function parsePortfolioRequestBody(
+  payload: Record<string, unknown>,
+): PortfolioRequestBody | Response {
+  const accountIds = parseOptionalStringArrayOrNull(payload.accountIds, "accountIds");
+  if (accountIds instanceof Response) {
+    return accountIds;
+  }
+  const parsed: PortfolioRequestBody = {};
+  if (accountIds !== undefined) {
+    parsed.accountIds = accountIds;
+  }
+  if (payload.marketSyncMode !== undefined) {
+    if (
+      typeof payload.marketSyncMode !== "object" ||
+      payload.marketSyncMode === null ||
+      Array.isArray(payload.marketSyncMode)
+    ) {
+      return jsonResponse({ code: 400, message: "marketSyncMode must be an object" }, 400);
+    }
+    const marketSyncMode = parseMarketSyncMode(
+      payload.marketSyncMode as Record<string, unknown>,
+      "marketSyncMode",
+    );
+    if (marketSyncMode instanceof Response) {
+      return marketSyncMode;
+    }
+    parsed.marketSyncMode = marketSyncMode;
+  }
+  return parsed;
+}
+
+function parseMarketSyncMode(
+  payload: Record<string, unknown>,
+  field: string,
+): MarketSyncMode | Response {
+  const type = parseRequiredString(payload.type, `${field}.type`);
+  if (type instanceof Response) {
+    return type;
+  }
+  switch (type) {
+    case "none":
+      return { type };
+    case "incremental": {
+      const assetIds = parseOptionalStringArrayOrNull(payload.asset_ids, `${field}.asset_ids`);
+      if (assetIds instanceof Response) {
+        return assetIds;
+      }
+      return { type, asset_ids: assetIds ?? null };
+    }
+    case "refetch_recent":
+    case "backfill_history": {
+      const assetIds = parseOptionalStringArrayOrNull(payload.asset_ids, `${field}.asset_ids`);
+      if (assetIds instanceof Response) {
+        return assetIds;
+      }
+      const days = parseRequiredInteger(payload.days, `${field}.days`);
+      if (days instanceof Response) {
+        return days;
+      }
+      return { type, asset_ids: assetIds ?? null, days };
+    }
+    default:
+      return jsonResponse({ code: 400, message: `${field}.type is not supported` }, 400);
+  }
 }
 
 function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {
@@ -1922,6 +2064,25 @@ function parseOptionalStringOrNull(
   }
   if (typeof value !== "string") {
     return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalStringArrayOrNull(
+  value: unknown,
+  field: string,
+): string[] | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    return jsonResponse(
+      { code: 400, message: `${field} must be an array of strings or null` },
+      400,
+    );
   }
   return value;
 }

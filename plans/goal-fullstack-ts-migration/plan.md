@@ -10,26 +10,23 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with market-data provider settings after the
-local health-state slice:
+PR 5 continues vertical slices with portfolio job trigger routes after the
+market-data provider settings slice:
 
-- Add TS market-data provider settings repository/service behavior and guarded
-  route tests for provider info reads plus priority/enabled updates.
-- Preserve Rust provider-settings semantics: providers load from
-  `market_data_providers`, capabilities are static by provider ID, API-key flags
-  honor enabled/required-provider rules, quote sync stats and error attribution
-  come from `quote_sync_state`, and update refreshes the injectable quote
-  client.
-- Defer market-data search, quote history/latest/update/delete/import, Yahoo
-  dividends, symbol resolution, exchange list, and sync endpoints to later
-  market-data/calculation slices because those paths require provider HTTP
-  clients, quote import parsing, portfolio recalculation jobs, exchange
-  metadata, and market sync parity.
+- Add TS portfolio job route config behavior and guarded route tests for
+  `/portfolio/update` and `/portfolio/recalculate`.
+- Preserve Rust route semantics: empty or `none` update requests default to
+  incremental market sync, empty or `none` recalculation requests default to
+  five-year backfill history, update jobs use incremental snapshot/valuation
+  modes, and recalculation jobs use full snapshot/valuation modes.
+- Defer SSE event streaming and actual portfolio job execution to later
+  portfolio/calculation slices because those paths require market sync,
+  holdings, snapshots, valuations, accounts, health, and FX service parity.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings
+accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job
 deletion is in scope for this slice.
 
 ## Next slices
