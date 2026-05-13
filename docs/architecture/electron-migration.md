@@ -170,7 +170,9 @@ recursively redacted for loopback URLs and token-shaped strings before they
 reach the renderer. Native desktop-only events also use this boundary: menu
 route navigation emits existing route events, and deep links are validated by
 Electron main before they are forwarded as `deep-link-received` events. File
-drop remains pending until its Electron-native replacement is implemented.
+drop events are captured by the sandboxed preload, converted to Tauri-compatible
+event names, validated by Electron main, and sent back only to the originating
+renderer.
 
 ## Native desktop features
 
@@ -198,11 +200,15 @@ dedicated IPC methods, not as renderer Node APIs:
   `wealthfolio://` protocol, enforces a single-instance lock before sidecar
   startup, queues callback URLs until the renderer's dedicated deep-link
   listener drains them, and only forwards validated URLs to the main window.
+- File-drop import events preserve the Tauri add-on API names
+  (`tauri://file-drop-hover`, `tauri://file-drop`, and
+  `tauri://file-drop-cancelled`). Preload extracts dropped file paths through
+  Electron `webUtils`, sends them over a dedicated IPC channel, and main
+  validates payload shape before forwarding.
 
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
-- file-drop events;
 - window state persistence and titlebar behavior;
 - app logging;
 - updater install/progress events;

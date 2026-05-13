@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   listenDeepLink,
+  listenFileDrop,
+  listenFileDropCancelled,
+  listenFileDropHover,
   listenNavigateToRoute,
   listenMarketSyncComplete,
   listenPortfolioUpdateStart,
@@ -71,6 +74,34 @@ describe("electron event adapter", () => {
       event: "navigate-to-route",
       id: 2,
       payload: { route: "/settings/general" },
+    });
+  });
+
+  it("delegates Electron file-drop listeners using Tauri-compatible event names", async () => {
+    const listen = vi.fn().mockResolvedValue(vi.fn());
+    installElectronApi({ listen });
+
+    const hoverHandler = vi.fn();
+    const dropHandler = vi.fn();
+    const cancelledHandler = vi.fn();
+    await listenFileDropHover(hoverHandler);
+    await listenFileDrop(dropHandler);
+    await listenFileDropCancelled(cancelledHandler);
+
+    expect(listen).toHaveBeenCalledWith("tauri://file-drop-hover", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("tauri://file-drop", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("tauri://file-drop-cancelled", expect.any(Function));
+
+    const [, dropBridgeHandler] = listen.mock.calls[1];
+    dropBridgeHandler({
+      event: "tauri://file-drop",
+      id: 4,
+      payload: { paths: ["/tmp/import.csv"], position: { x: 1, y: 2 } },
+    });
+    expect(dropHandler).toHaveBeenCalledWith({
+      event: "tauri://file-drop",
+      id: 4,
+      payload: { paths: ["/tmp/import.csv"], position: { x: 1, y: 2 } },
     });
   });
 

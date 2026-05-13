@@ -17,7 +17,30 @@ export const IPC_CHANNELS = {
   toggleWindowFullscreen: "wealthfolio:native:toggle-window-fullscreen",
   startDeepLinkListener: "wealthfolio:native:deep-link-listener-start",
   stopDeepLinkListener: "wealthfolio:native:deep-link-listener-stop",
+  fileDropEvent: "wealthfolio:native:file-drop-event",
 } as const;
+
+export const ELECTRON_FILE_DROP_EVENTS = {
+  hover: "tauri://file-drop-hover",
+  drop: "tauri://file-drop",
+  cancelled: "tauri://file-drop-cancelled",
+} as const;
+
+export type ElectronFileDropEventName =
+  (typeof ELECTRON_FILE_DROP_EVENTS)[keyof typeof ELECTRON_FILE_DROP_EVENTS];
+
+export interface ElectronFileDropPayload {
+  paths: string[];
+  position: {
+    x: number;
+    y: number;
+  };
+}
+
+export interface ElectronFileDropEventMessage {
+  event: ElectronFileDropEventName;
+  payload: ElectronFileDropPayload | null;
+}
 
 export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
 

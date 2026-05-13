@@ -1,5 +1,9 @@
 import type { EventCallback, UnlistenFn } from "../types";
-import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/electron/shared/ipc";
+import {
+  ELECTRON_API_KEY,
+  ELECTRON_FILE_DROP_EVENTS,
+  type WealthfolioElectronApi,
+} from "@wealthfolio/electron/shared/ipc";
 
 const noopUnlisten: UnlistenFn = () => Promise.resolve();
 
@@ -28,9 +32,15 @@ const listenPendingElectronBridge = <T>(_handler: EventCallback<T>): Promise<Unl
   return Promise.resolve(noopUnlisten);
 };
 
-export const listenFileDropHover = listenPendingElectronBridge;
-export const listenFileDrop = listenPendingElectronBridge;
-export const listenFileDropCancelled = listenPendingElectronBridge;
+export const listenFileDropHover = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent(ELECTRON_FILE_DROP_EVENTS.hover, handler);
+};
+export const listenFileDrop = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent(ELECTRON_FILE_DROP_EVENTS.drop, handler);
+};
+export const listenFileDropCancelled = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent(ELECTRON_FILE_DROP_EVENTS.cancelled, handler);
+};
 export const listenPortfolioUpdateStart = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent("portfolio:update-start", handler);
 };

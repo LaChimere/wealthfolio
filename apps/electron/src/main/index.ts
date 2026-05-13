@@ -21,6 +21,7 @@ import {
   isDeepLinkUrl,
 } from "./deep-links";
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
+import { validateFileDropEventMessage } from "./file-drop";
 import { validateElectronInvokeRequest } from "./ipc-validation";
 import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
@@ -109,6 +110,22 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.stopDeepLinkListener, (event): void => {
     deepLinkListenerWebContentsIds.delete(event.sender.id);
+  });
+  ipcMain.on(IPC_CHANNELS.fileDropEvent, (event, message: unknown): void => {
+    try {
+      const fileDropEvent = validateFileDropEventMessage(message);
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(
+          IPC_CHANNELS.serverEvent,
+          createRendererEventMessage(fileDropEvent.event, fileDropEvent.payload),
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Rejected invalid Electron file-drop event:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   });
   registerNativeIpcHandlers({ ipcMain, dialog, shell, nativeTheme, getTargetWindow });
 }
