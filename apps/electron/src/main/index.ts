@@ -8,6 +8,7 @@ import {
   IPC_CHANNELS,
   type ElectronEventMessage,
   type ElectronInvokeRequest,
+  type ElectronLogLevel,
   type RuntimeInfo,
 } from "../shared/ipc";
 import { createAiChatStreamManager } from "./ai-chat-stream-manager";
@@ -23,6 +24,7 @@ import {
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
 import { validateFileDropEventMessage } from "./file-drop";
 import { validateElectronInvokeRequest } from "./ipc-validation";
+import { createElectronLogWriter, type ElectronLogWriter, validateLogMessage } from "./logging";
 import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
@@ -38,6 +40,7 @@ let sidecarStopInProgress = false;
 let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
 let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
+let electronLogWriter: ElectronLogWriter | null = null;
 let nextRendererEventId = 0;
 const pendingDeepLinkUrls: string[] = [];
 const deepLinkListenerWebContentsIds = new Set<number>();
@@ -48,6 +51,9 @@ function configureAppPaths(): void {
   const legacyPaths = resolveLegacyTauriPaths();
   mkdirSync(legacyPaths.logRoot, { recursive: true });
   app.setPath("logs", legacyPaths.logRoot);
+  electronLogWriter = createElectronLogWriter(
+    path.join(legacyPaths.logRoot, "wealthfolio-electron.log"),
+  );
 }
 
 function configureSecurityHeaders(): void {
@@ -104,6 +110,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.cancelAiChatStream, (_event, request: unknown): void => {
     aiChatStreamManager.cancel(request);
   });
+  ipcMain.handle(IPC_CHANNELS.writeLog, async (_event, message: unknown): Promise<void> => {
+    const { level, message: logMessage } = validateLogMessage(message);
+    await writeElectronLog(level, logMessage);
+  });
   ipcMain.handle(IPC_CHANNELS.startDeepLinkListener, (event): ElectronEventMessage<string>[] => {
     markDeepLinkListenerReady(event.sender);
     return drainPendingDeepLinkMessages();
@@ -133,6 +143,28 @@ function registerIpcHandlers(): void {
 function handleFatal(error: unknown): void {
   console.error("Electron startup failed:", error);
   app.quit();
+}
+
+async function writeElectronLog(level: ElectronLogLevel, message: string): Promise<void> {
+  if (!electronLogWriter) {
+    throw new Error("Electron log writer is not configured.");
+  }
+  await electronLogWriter.write(level, message);
+}
+
+function recordElectronLog(level: ElectronLogLevel, message: string): void {
+  void writeElectronLog(level, message).catch((error) => {
+    console.warn("Failed to write Electron log:", error);
+  });
+}
+
+function recordSidecarLog(level: "info" | "error", message: string): void {
+  if (level === "error") {
+    console.error(message);
+  } else {
+    console.info(message);
+  }
+  recordElectronLog(level, message);
 }
 
 function sendServerEventToWindows(message: ElectronEventMessage): void {
@@ -323,6 +355,7 @@ async function startSidecarBridge(): Promise<void> {
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       signal: controller.signal,
+      log: recordSidecarLog,
     });
     const handle = sidecarHandle;
     sidecarEventBridge?.stop();

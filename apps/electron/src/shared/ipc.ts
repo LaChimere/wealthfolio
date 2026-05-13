@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   setWindowTheme: "wealthfolio:native:set-window-theme",
   getWindowTheme: "wealthfolio:native:get-window-theme",
   toggleWindowFullscreen: "wealthfolio:native:toggle-window-fullscreen",
+  writeLog: "wealthfolio:native:write-log",
   startDeepLinkListener: "wealthfolio:native:deep-link-listener-start",
   stopDeepLinkListener: "wealthfolio:native:deep-link-listener-stop",
   fileDropEvent: "wealthfolio:native:file-drop-event",
@@ -41,6 +42,10 @@ export interface ElectronFileDropEventMessage {
   event: ElectronFileDropEventName;
   payload: ElectronFileDropPayload | null;
 }
+
+export const ELECTRON_LOG_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
+
+export type ElectronLogLevel = (typeof ELECTRON_LOG_LEVELS)[number];
 
 export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
 
@@ -1058,6 +1063,7 @@ export interface WealthfolioElectronApi {
   setWindowTheme(theme: ElectronWindowThemePreference): Promise<void>;
   getWindowTheme(): Promise<ElectronWindowTheme>;
   toggleWindowFullscreen(): Promise<void>;
+  writeLog(level: ElectronLogLevel, message: string): Promise<void>;
   listenDeepLink(
     handler: (event: ElectronEventMessage<string>) => void,
   ): Promise<() => Promise<void>>;

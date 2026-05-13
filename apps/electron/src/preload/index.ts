@@ -129,6 +129,7 @@ const api: WealthfolioElectronApi = {
   setWindowTheme: (theme) => ipcRenderer.invoke(IPC_CHANNELS.setWindowTheme, theme),
   getWindowTheme: () => ipcRenderer.invoke(IPC_CHANNELS.getWindowTheme),
   toggleWindowFullscreen: () => ipcRenderer.invoke(IPC_CHANNELS.toggleWindowFullscreen),
+  writeLog: (level, message) => ipcRenderer.invoke(IPC_CHANNELS.writeLog, { level, message }),
   listenDeepLink: async (handler) => {
     if (typeof handler !== "function") {
       throw new Error("Invalid Electron deep-link listener request.");

@@ -1,6 +1,7 @@
 import {
   ELECTRON_API_KEY,
   type ElectronEventMessage,
+  type ElectronLogLevel,
   type WealthfolioElectronApi,
 } from "@wealthfolio/electron/shared/ipc";
 
@@ -11,12 +12,37 @@ export const isWeb = false;
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 300_000;
 
+function formatLogArgs(args: unknown[]): string {
+  return args.map(String).join(" ");
+}
+
+function writeLog(level: ElectronLogLevel, message: string): void {
+  try {
+    void getElectronApi()
+      .writeLog(level, message)
+      .catch((error) => {
+        console.warn("Failed to write Electron log:", error);
+      });
+  } catch (error) {
+    console.warn("Failed to access Electron preload logger:", error);
+  }
+}
+
+function log(
+  level: ElectronLogLevel,
+  consoleWriter: (...args: unknown[]) => void,
+  args: unknown[],
+): void {
+  consoleWriter(...args);
+  writeLog(level, formatLogArgs(args));
+}
+
 export const logger: Logger = {
-  error: (...args: unknown[]) => console.error(...args),
-  warn: (...args: unknown[]) => console.warn(...args),
-  info: (...args: unknown[]) => console.info(...args),
-  debug: (...args: unknown[]) => console.debug(...args),
-  trace: (...args: unknown[]) => console.trace(...args),
+  error: (...args: unknown[]) => log("error", console.error, args),
+  warn: (...args: unknown[]) => log("warn", console.warn, args),
+  info: (...args: unknown[]) => log("info", console.info, args),
+  debug: (...args: unknown[]) => log("debug", console.debug, args),
+  trace: (...args: unknown[]) => log("trace", console.trace, args),
 };
 
 export function getElectronApi(): WealthfolioElectronApi {

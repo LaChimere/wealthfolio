@@ -205,12 +205,15 @@ dedicated IPC methods, not as renderer Node APIs:
   `tauri://file-drop-cancelled`). Preload extracts dropped file paths through
   Electron `webUtils`, sends them over a dedicated IPC channel, and main
   validates payload shape before forwarding.
+- Renderer and sidecar logs are written through Electron main to
+  `wealthfolio-electron.log` under the legacy Tauri log root. Renderer logging
+  keeps console output for developer tools, but persistent writes cross a typed
+  preload IPC method with level/message validation.
 
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
 - window state persistence and titlebar behavior;
-- app logging;
 - updater install/progress events;
 
 Mobile-only Tauri features are not part of the Electron migration.

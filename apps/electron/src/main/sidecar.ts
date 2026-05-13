@@ -35,6 +35,7 @@ export interface StartSidecarOptions {
   timeoutMs?: number;
   command?: SidecarCommand;
   signal?: AbortSignal;
+  log?: (level: "info" | "error", message: string) => void;
 }
 
 interface SidecarEnvironmentOptions {
@@ -124,9 +125,15 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  child.stdout.on("data", (chunk) => console.info(`[sidecar] ${String(chunk).trimEnd()}`));
-  child.stderr.on("data", (chunk) => console.error(`[sidecar] ${String(chunk).trimEnd()}`));
-  child.on("error", (error) => console.error("Electron sidecar process error:", error));
+  child.stdout.on("data", (chunk) =>
+    recordSidecarLog(options, "info", `[sidecar] ${String(chunk).trimEnd()}`),
+  );
+  child.stderr.on("data", (chunk) =>
+    recordSidecarLog(options, "error", `[sidecar] ${String(chunk).trimEnd()}`),
+  );
+  child.on("error", (error) =>
+    recordSidecarLog(options, "error", `Electron sidecar process error: ${error.message}`),
+  );
 
   const abort = watchAbort(options.signal);
   try {
@@ -176,6 +183,23 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
       return () => exitListeners.delete(listener);
     },
   };
+}
+
+function recordSidecarLog(
+  options: StartSidecarOptions,
+  level: "info" | "error",
+  message: string,
+): void {
+  if (options.log) {
+    options.log(level, message);
+    return;
+  }
+
+  if (level === "error") {
+    console.error(message);
+  } else {
+    console.info(message);
+  }
 }
 
 async function waitForReady(
