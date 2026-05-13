@@ -53,11 +53,13 @@
   - Evidence: `apps/backend/src/storage/sqlite.ts` uses `bun:sqlite`, existing
     Rust migration files, Diesel-compatible migration history, Rust-aligned
     PRAGMAs, and backup/restore fixtures.
-- [ ] PR 4: Cross-cutting compatibility preflights.
+- [x] PR 4: Cross-cutting compatibility preflights.
   - Acceptance criteria: keyring service IDs, addon canary, command registry
     classification, and mixed-version sync fixture requirements are documented
     and tested without runtime behavior changes.
-  - Evidence: pending.
+  - Evidence: `packages/backend-contracts/src/compatibility-preflights.ts`
+    defines and tests keyring service IDs, command deltas, addon host canary
+    requirements, and mixed-version sync command visibility.
 - [ ] PR 5+: Domain vertical slices.
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
@@ -123,9 +125,14 @@ contract:
 - `pr3-review-fix`: code review requested whitespace-only `DATABASE_URL`
   coverage; added the edge-case test and re-ran backend checks plus
   `bun run check`.
+- `pr4-compat-preflights`: targeted checks passed:
+  `bun run --cwd packages/backend-contracts test` and
+  `bun run --cwd packages/backend-contracts type-check`.
+- `pr4-repo-check`: full repo check passed with `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
-  and PR 3 TS SQLite foundation implemented; broader migration remains active.
-- Follow-ups: continue with PR 4 compatibility preflights.
+  PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented;
+  broader migration remains active.
+- Follow-ups: begin domain vertical slices.
