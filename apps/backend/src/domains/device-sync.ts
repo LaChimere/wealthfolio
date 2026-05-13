@@ -34,6 +34,48 @@ export interface ResetTeamSyncRequest {
   reason?: string;
 }
 
+export interface CreatePairingRequest {
+  codeHash: string;
+  ephemeralPublicKey: string;
+}
+
+export interface CompletePairingRequest {
+  encryptedKeyBundle: string;
+  sasProof: unknown;
+  signature: string;
+}
+
+export interface ClaimPairingRequest {
+  code: string;
+  ephemeralPublicKey: string;
+}
+
+export interface ConfirmPairingRequest {
+  proof: string;
+  minSnapshotCreatedAt?: string;
+}
+
+export interface CompletePairingWithTransferRequest extends CompletePairingRequest {
+  pairingId: string;
+}
+
+export interface ConfirmPairingWithBootstrapRequest {
+  pairingId: string;
+  proof?: string;
+  minSnapshotCreatedAt?: string;
+  allowOverwrite: boolean;
+}
+
+export interface BeginPairingConfirmRequest {
+  pairingId: string;
+  proof: string;
+  minSnapshotCreatedAt?: string;
+}
+
+export interface PairingFlowIdRequest {
+  flowId: string;
+}
+
 export interface DeviceSyncService {
   /**
    * Response shapes should mirror Rust/device-sync serde output verbatim. The
@@ -51,4 +93,22 @@ export interface DeviceSyncService {
   rotateTeamKeys?(): Promise<unknown> | unknown;
   commitRotateTeamKeys?(request: CommitRotateTeamKeysRequest): Promise<unknown> | unknown;
   resetTeamSync?(request: ResetTeamSyncRequest): Promise<unknown> | unknown;
+  createPairing?(request: CreatePairingRequest): Promise<unknown> | unknown;
+  getPairing?(pairingId: string): Promise<unknown> | unknown;
+  approvePairing?(pairingId: string): Promise<unknown> | unknown;
+  completePairing?(pairingId: string, request: CompletePairingRequest): Promise<unknown> | unknown;
+  cancelPairing?(pairingId: string): Promise<unknown> | unknown;
+  claimPairing?(request: ClaimPairingRequest): Promise<unknown> | unknown;
+  getPairingMessages?(pairingId: string): Promise<unknown> | unknown;
+  confirmPairing?(pairingId: string, request: ConfirmPairingRequest): Promise<unknown> | unknown;
+  completePairingWithTransfer?(
+    request: CompletePairingWithTransferRequest,
+  ): Promise<unknown> | unknown;
+  confirmPairingWithBootstrap?(
+    request: ConfirmPairingWithBootstrapRequest,
+  ): Promise<unknown> | unknown;
+  beginPairingConfirm?(request: BeginPairingConfirmRequest): Promise<unknown> | unknown;
+  getPairingFlowState?(request: PairingFlowIdRequest): Promise<unknown> | unknown;
+  approvePairingOverwrite?(request: PairingFlowIdRequest): Promise<unknown> | unknown;
+  cancelPairingFlow?(request: PairingFlowIdRequest): Promise<unknown> | unknown;
 }

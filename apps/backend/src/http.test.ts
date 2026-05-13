@@ -4774,6 +4774,377 @@ describe("TS backend HTTP skeleton", () => {
     ]);
   });
 
+  test("routes migrated device sync pairing seam only when service methods are provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const deviceSyncService: DeviceSyncService = {
+      registerDevice() {
+        throw new Error("not used");
+      },
+      getCurrentDevice() {
+        throw new Error("not used");
+      },
+      getDevice() {
+        throw new Error("not used");
+      },
+      listDevices() {
+        throw new Error("not used");
+      },
+      updateDevice() {
+        throw new Error("not used");
+      },
+      deleteDevice() {
+        throw new Error("not used");
+      },
+      revokeDevice() {
+        throw new Error("not used");
+      },
+      createPairing(request) {
+        calls.push(["create-pairing", request]);
+        return { id: "pairing-1" };
+      },
+      getPairing(pairingId) {
+        calls.push(["get-pairing", pairingId]);
+        return { id: pairingId };
+      },
+      approvePairing(pairingId) {
+        calls.push(["approve-pairing", pairingId]);
+        return { success: true };
+      },
+      completePairing(pairingId, request) {
+        calls.push(["complete-pairing", { pairingId, request }]);
+        return { success: true };
+      },
+      cancelPairing(pairingId) {
+        calls.push(["cancel-pairing", pairingId]);
+        return { success: true };
+      },
+      claimPairing(request) {
+        calls.push(["claim-pairing", request]);
+        return { id: "claimed" };
+      },
+      getPairingMessages(pairingId) {
+        calls.push(["pairing-messages", pairingId]);
+        return { messages: [] };
+      },
+      confirmPairing(pairingId, request) {
+        calls.push(["confirm-pairing", { pairingId, request }]);
+        return { success: true };
+      },
+      completePairingWithTransfer(request) {
+        calls.push(["complete-pairing-with-transfer", request]);
+        return { success: true };
+      },
+      confirmPairingWithBootstrap(request) {
+        calls.push(["confirm-pairing-with-bootstrap", request]);
+        return { status: "ready" };
+      },
+      beginPairingConfirm(request) {
+        calls.push(["begin-pairing-confirm", request]);
+        return { flowId: "flow-1" };
+      },
+      getPairingFlowState(request) {
+        calls.push(["pairing-flow-state", request]);
+        return { status: "waiting" };
+      },
+      approvePairingOverwrite(request) {
+        calls.push(["approve-pairing-overwrite", request]);
+        return { status: "approved" };
+      },
+      cancelPairingFlow(request) {
+        calls.push(["cancel-pairing-flow", request]);
+        return { status: "cancelled" };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { deviceSyncService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/sync/pairing"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/sync/pairing", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ codeHash: "hash", ephemeralPublicKey: "public-key" }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "pairing-1" });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ code_hash: "hash", ephemeralPublicKey: "public-key" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1%2Ftwo", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "pair:1/two" });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/%E0%A4%A", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/approve", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/complete", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              encryptedKeyBundle: "bundle",
+              sasProof: null,
+              signature: "signature",
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/complete", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ encryptedKeyBundle: "bundle", signature: "signature" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/cancel", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/claim", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ code: "123456", ephemeralPublicKey: "claimer-key" }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "claimed" });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/messages", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ messages: [] });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/confirm", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ proof: "proof", minSnapshotCreatedAt: null }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/pair%3A1/confirm", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ minSnapshotCreatedAt: "2026-05-14T00:00:00Z" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/complete-with-transfer", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              pairingId: "pairing-1",
+              encryptedKeyBundle: "bundle",
+              sasProof: { ok: true },
+              signature: "signature",
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/confirm-with-bootstrap", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              pairingId: "pairing-1",
+              proof: null,
+              minSnapshotCreatedAt: "2026-05-14T00:00:00Z",
+              allowOverwrite: true,
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "ready" });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/confirm-with-bootstrap", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ pairingId: "pairing-1" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/flow/begin", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              pairingId: "pairing-1",
+              proof: "proof",
+              minSnapshotCreatedAt: undefined,
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ flowId: "flow-1" });
+    for (const [path, expected] of [
+      ["/api/v1/sync/pairing/flow/state", { status: "waiting" }],
+      ["/api/v1/sync/pairing/flow/approve-overwrite", { status: "approved" }],
+      ["/api/v1/sync/pairing/flow/cancel", { status: "cancelled" }],
+    ] as const) {
+      await expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1${path}`, {
+              method: "POST",
+              headers: jsonHeaders,
+              body: JSON.stringify({ flowId: "flow-1" }),
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual(expected);
+    }
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/flow/state", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ flow_id: "flow-1" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing/flow", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    expect(calls).toEqual([
+      ["create-pairing", { codeHash: "hash", ephemeralPublicKey: "public-key" }],
+      ["get-pairing", "pair:1/two"],
+      ["approve-pairing", "pair:1"],
+      [
+        "complete-pairing",
+        {
+          pairingId: "pair:1",
+          request: { encryptedKeyBundle: "bundle", sasProof: null, signature: "signature" },
+        },
+      ],
+      ["cancel-pairing", "pair:1"],
+      ["claim-pairing", { code: "123456", ephemeralPublicKey: "claimer-key" }],
+      ["pairing-messages", "pair:1"],
+      [
+        "confirm-pairing",
+        { pairingId: "pair:1", request: { proof: "proof", minSnapshotCreatedAt: undefined } },
+      ],
+      [
+        "complete-pairing-with-transfer",
+        {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        },
+      ],
+      [
+        "confirm-pairing-with-bootstrap",
+        {
+          pairingId: "pairing-1",
+          proof: undefined,
+          minSnapshotCreatedAt: "2026-05-14T00:00:00Z",
+          allowOverwrite: true,
+        },
+      ],
+      [
+        "begin-pairing-confirm",
+        { pairingId: "pairing-1", proof: "proof", minSnapshotCreatedAt: undefined },
+      ],
+      ["pairing-flow-state", { flowId: "flow-1" }],
+      ["approve-pairing-overwrite", { flowId: "flow-1" }],
+      ["cancel-pairing-flow", { flowId: "flow-1" }],
+    ]);
+  });
+
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });

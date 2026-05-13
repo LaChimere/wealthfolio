@@ -119,10 +119,18 @@ export {
   type UpdateCustomProvider,
 } from "./domains/custom-providers";
 export type {
+  BeginPairingConfirmRequest,
+  ClaimPairingRequest,
   CommitInitializeTeamKeysRequest,
   CommitRotateTeamKeysEnvelope,
   CommitRotateTeamKeysRequest,
+  CompletePairingRequest,
+  CompletePairingWithTransferRequest,
+  ConfirmPairingRequest,
+  ConfirmPairingWithBootstrapRequest,
+  CreatePairingRequest,
   DeviceSyncService,
+  PairingFlowIdRequest,
   RegisterDeviceRequest,
   ResetTeamSyncRequest,
   UpdateDeviceRequest,

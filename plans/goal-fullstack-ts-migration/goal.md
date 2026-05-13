@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 31
+turns_used: 32
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -228,6 +228,13 @@ updated_at: "2026-05-14T05:18:49+08:00"
   challenge/recovery/reason field handling, envelope validation, sidecar-auth
   route semantics, route inertness when optional methods are absent, and
   targeted backend tests.
+- Turn 32: Implemented the guarded device-sync pairing HTTP seam TS slice:
+  optional `DeviceSyncService` methods for issuer, claimer, composite, and
+  pairing-flow `/api/v1/sync/pairing*` routes; preserved required camelCase body
+  validation, body-ignoring approve/cancel routes, `sasProof` JSON-value
+  presence, optional snapshot/proof fields, decoded pairing IDs, reserved static
+  route boundaries, malformed path encoding errors, sidecar-auth route
+  semantics, and targeted backend tests.
 
 ## Deferred items
 
@@ -318,6 +325,11 @@ updated_at: "2026-05-14T05:18:49+08:00"
   runtime remain active follow-ups. reason=this slice only adds the guarded
   team-key/reset HTTP seam, while runtime behavior must move with dedicated
   device-sync parity slices.
+- Real device-sync pairing cloud calls, E2EE key exchange, freshness gate
+  persistence, bootstrap transfer, background engine startup, feature-flag
+  errors, and pairing-flow runtime remain active follow-ups. reason=this slice
+  only adds the guarded pairing HTTP seam, while runtime behavior must move with
+  dedicated device-sync parity slices.
 - Holdings fan-out, valuation history/latest calculations, allocation
   calculations, snapshot persistence/reconciliation, import symbol lookup, and
   portfolio recalculation side effects remain active follow-ups. reason=this

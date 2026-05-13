@@ -68,10 +68,10 @@
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
     provider, AI chat, sync crypto, Connect broker/session and device-sync
-    enrollment/engine, device-sync device management and team-key/reset,
-    alternative assets, assets, app utilities, portfolio metrics, holdings,
-    add-ons, market-data, and activities TS repository/service or route config
-    implementations plus guarded route tests in
+    enrollment/engine, device-sync device management, team-key/reset, and
+    pairing, alternative assets, assets, app utilities, portfolio metrics,
+    holdings, add-ons, market-data, and activities TS repository/service or
+    route config implementations plus guarded route tests in
     `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
@@ -128,8 +128,9 @@
     repositories, subscription entitlement checks, event production, E2EE
     enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
     background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, and secret side effects
-    are deferred to Connect/device-sync parity slices.
+    operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -584,6 +585,22 @@ contract:
   route boundaries, type exports, docs accuracy, and test coverage.
 - `pr5-device-sync-team-key-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-device-sync-pairing-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes optional injectable pairing issuer, claimer, composite, and
+  flow-coordinator routes, guarded HTTP route access, route inertness without
+  optional methods, required camelCase body validation, body-ignoring
+  approve/cancel routes, `sasProof` JSON-value presence, optional snapshot/proof
+  fields, decoded pairing IDs, malformed path encoding errors, reserved static
+  route boundaries, sidecar auth, and deferred real device-sync pairing runtime
+  behavior.
+- `pr5-device-sync-pairing-route-seam-review`: code review found no actionable
+  issues after confirming route parity, static-vs-dynamic route ordering,
+  reserved path segments, malformed path decoding, body/no-body behavior,
+  `sasProof` validation, optional-method inertness, sidecar auth, type-safety,
+  and test coverage.
+- `pr5-device-sync-pairing-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -599,8 +616,8 @@ contract:
   activities/import route seam, AI chat route seam, sync crypto route seam, and
   health/classification route seam, Connect broker/session route seam, Connect
   device-sync enrollment/engine route seam, device-sync device-management route
-  seam, and device-sync team-key/reset route seam slices implemented; broader
-  migration remains active.
+  seam, device-sync team-key/reset route seam, and device-sync pairing route
+  seam slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -637,5 +654,5 @@ contract:
   entitlement checks, event production, E2EE enrollment, sync engine,
   snapshot/upload runtime, feature-flag errors, background workers, device-sync
   cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, and secret side effects move with Connect/device-sync parity
-  slices.
+  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
+  effects move with Connect/device-sync parity slices.

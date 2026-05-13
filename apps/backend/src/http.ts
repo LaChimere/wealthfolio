@@ -52,9 +52,17 @@ import type {
   UpdateCustomProvider,
 } from "./domains/custom-providers";
 import type {
+  BeginPairingConfirmRequest,
+  ClaimPairingRequest,
   CommitInitializeTeamKeysRequest,
   CommitRotateTeamKeysRequest,
+  CompletePairingRequest,
+  CompletePairingWithTransferRequest,
+  ConfirmPairingRequest,
+  ConfirmPairingWithBootstrapRequest,
+  CreatePairingRequest,
   DeviceSyncService,
+  PairingFlowIdRequest,
   RegisterDeviceRequest,
   ResetTeamSyncRequest,
   UpdateDeviceRequest,
@@ -271,6 +279,16 @@ async function routeRequest(
     }
     if (options.deviceSyncService) {
       return routeDeviceSyncTeamKeyRequest(request, url, options.deviceSyncService);
+    }
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (isDeviceSyncPairingPath(url.pathname)) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    if (options.deviceSyncService) {
+      return routeDeviceSyncPairingRequest(request, url, options.deviceSyncService);
     }
     return jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
@@ -814,6 +832,142 @@ function routeDeviceSyncTeamKeyRequest(
       ? handleJsonMutation(request, parseResetTeamSyncRequest, (input) =>
           Promise.resolve(deviceSyncService.resetTeamSync?.(input)),
         )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeDeviceSyncPairingRequest(
+  request: Request,
+  url: URL,
+  deviceSyncService: DeviceSyncService,
+): Promise<Response> | Response {
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing") {
+    return deviceSyncService.createPairing
+      ? handleJsonMutation(request, parseCreatePairingRequest, (input) =>
+          Promise.resolve(deviceSyncService.createPairing?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/claim") {
+    return deviceSyncService.claimPairing
+      ? handleJsonMutation(request, parseClaimPairingRequest, (input) =>
+          Promise.resolve(deviceSyncService.claimPairing?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/complete-with-transfer") {
+    return deviceSyncService.completePairingWithTransfer
+      ? handleJsonMutation(request, parseCompletePairingWithTransferRequest, (input) =>
+          Promise.resolve(deviceSyncService.completePairingWithTransfer?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/confirm-with-bootstrap") {
+    return deviceSyncService.confirmPairingWithBootstrap
+      ? handleJsonMutation(request, parseConfirmPairingWithBootstrapRequest, (input) =>
+          Promise.resolve(deviceSyncService.confirmPairingWithBootstrap?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/flow/begin") {
+    return deviceSyncService.beginPairingConfirm
+      ? handleJsonMutation(request, parseBeginPairingConfirmRequest, (input) =>
+          Promise.resolve(deviceSyncService.beginPairingConfirm?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/flow/state") {
+    return deviceSyncService.getPairingFlowState
+      ? handleJsonMutation(request, parsePairingFlowIdRequest, (input) =>
+          Promise.resolve(deviceSyncService.getPairingFlowState?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/flow/approve-overwrite") {
+    return deviceSyncService.approvePairingOverwrite
+      ? handleJsonMutation(request, parsePairingFlowIdRequest, (input) =>
+          Promise.resolve(deviceSyncService.approvePairingOverwrite?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/pairing/flow/cancel") {
+    return deviceSyncService.cancelPairingFlow
+      ? handleJsonMutation(request, parsePairingFlowIdRequest, (input) =>
+          Promise.resolve(deviceSyncService.cancelPairingFlow?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const messagesPairingId = deviceSyncPairingMessagesIdFromPath(url.pathname);
+  if (request.method === "GET" && messagesPairingId !== undefined) {
+    if (messagesPairingId instanceof Response) {
+      return messagesPairingId;
+    }
+    return deviceSyncService.getPairingMessages
+      ? handleServiceJsonResponse(() => deviceSyncService.getPairingMessages?.(messagesPairingId))
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const approvePairingId = deviceSyncPairingApproveIdFromPath(url.pathname);
+  if (request.method === "POST" && approvePairingId !== undefined) {
+    if (approvePairingId instanceof Response) {
+      return approvePairingId;
+    }
+    return deviceSyncService.approvePairing
+      ? handleServiceJsonResponse(() => deviceSyncService.approvePairing?.(approvePairingId))
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const completePairingId = deviceSyncPairingCompleteIdFromPath(url.pathname);
+  if (request.method === "POST" && completePairingId !== undefined) {
+    if (completePairingId instanceof Response) {
+      return completePairingId;
+    }
+    return deviceSyncService.completePairing
+      ? handleJsonMutation(request, parseCompletePairingRequest, (input) =>
+          Promise.resolve(deviceSyncService.completePairing?.(completePairingId, input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const cancelPairingId = deviceSyncPairingCancelIdFromPath(url.pathname);
+  if (request.method === "POST" && cancelPairingId !== undefined) {
+    if (cancelPairingId instanceof Response) {
+      return cancelPairingId;
+    }
+    return deviceSyncService.cancelPairing
+      ? handleServiceJsonResponse(() => deviceSyncService.cancelPairing?.(cancelPairingId))
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const confirmPairingId = deviceSyncPairingConfirmIdFromPath(url.pathname);
+  if (request.method === "POST" && confirmPairingId !== undefined) {
+    if (confirmPairingId instanceof Response) {
+      return confirmPairingId;
+    }
+    return deviceSyncService.confirmPairing
+      ? handleJsonMutation(request, parseConfirmPairingRequest, (input) =>
+          Promise.resolve(deviceSyncService.confirmPairing?.(confirmPairingId, input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const pairingId = deviceSyncPairingIdFromPath(url.pathname);
+  if (request.method === "GET" && pairingId !== undefined) {
+    if (pairingId instanceof Response) {
+      return pairingId;
+    }
+    return deviceSyncService.getPairing
+      ? handleServiceJsonResponse(() => deviceSyncService.getPairing?.(pairingId))
       : jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
 
@@ -3361,6 +3515,10 @@ function isDeviceSyncTeamKeyPath(pathname: string): boolean {
   );
 }
 
+function isDeviceSyncPairingPath(pathname: string): boolean {
+  return pathname === "/api/v1/sync/pairing" || pathname.startsWith("/api/v1/sync/pairing/");
+}
+
 function deviceSyncDeviceIdFromPath(pathname: string): string | Response | undefined {
   const match = /^\/api\/v1\/sync\/device\/([^/]+)$/.exec(pathname);
   if (!match || isReservedDeviceSyncDeviceId(match[1])) {
@@ -3379,6 +3537,54 @@ function deviceSyncRevokeDeviceIdFromPath(pathname: string): string | Response |
 
 function isReservedDeviceSyncDeviceId(value: string): boolean {
   return value === "register" || value === "current";
+}
+
+function deviceSyncPairingIdFromPath(pathname: string): string | Response | undefined {
+  const match = /^\/api\/v1\/sync\/pairing\/([^/]+)$/.exec(pathname);
+  if (!match || isReservedDeviceSyncPairingId(match[1])) {
+    return undefined;
+  }
+  return decodePathSegment(match[1]);
+}
+
+function deviceSyncPairingMessagesIdFromPath(pathname: string): string | Response | undefined {
+  return deviceSyncPairingSubrouteIdFromPath(pathname, "messages");
+}
+
+function deviceSyncPairingApproveIdFromPath(pathname: string): string | Response | undefined {
+  return deviceSyncPairingSubrouteIdFromPath(pathname, "approve");
+}
+
+function deviceSyncPairingCompleteIdFromPath(pathname: string): string | Response | undefined {
+  return deviceSyncPairingSubrouteIdFromPath(pathname, "complete");
+}
+
+function deviceSyncPairingCancelIdFromPath(pathname: string): string | Response | undefined {
+  return deviceSyncPairingSubrouteIdFromPath(pathname, "cancel");
+}
+
+function deviceSyncPairingConfirmIdFromPath(pathname: string): string | Response | undefined {
+  return deviceSyncPairingSubrouteIdFromPath(pathname, "confirm");
+}
+
+function deviceSyncPairingSubrouteIdFromPath(
+  pathname: string,
+  subroute: string,
+): string | Response | undefined {
+  const match = new RegExp(`^/api/v1/sync/pairing/([^/]+)/${subroute}$`).exec(pathname);
+  if (!match || isReservedDeviceSyncPairingId(match[1])) {
+    return undefined;
+  }
+  return decodePathSegment(match[1]);
+}
+
+function isReservedDeviceSyncPairingId(value: string): boolean {
+  return (
+    value === "claim" ||
+    value === "complete-with-transfer" ||
+    value === "confirm-with-bootstrap" ||
+    value === "flow"
+  );
 }
 
 function decodePathSegment(value: string): string | Response {
@@ -3613,6 +3819,154 @@ function parseResetTeamSyncRequest(
     return reason;
   }
   return { reason: reason ?? undefined };
+}
+
+function parseCreatePairingRequest(
+  payload: Record<string, unknown>,
+): CreatePairingRequest | Response {
+  const codeHash = parseRequiredString(payload.codeHash, "codeHash");
+  if (codeHash instanceof Response) {
+    return codeHash;
+  }
+  const ephemeralPublicKey = parseRequiredString(payload.ephemeralPublicKey, "ephemeralPublicKey");
+  if (ephemeralPublicKey instanceof Response) {
+    return ephemeralPublicKey;
+  }
+  return { codeHash, ephemeralPublicKey };
+}
+
+function parseCompletePairingRequest(
+  payload: Record<string, unknown>,
+): CompletePairingRequest | Response {
+  const encryptedKeyBundle = parseRequiredString(payload.encryptedKeyBundle, "encryptedKeyBundle");
+  if (encryptedKeyBundle instanceof Response) {
+    return encryptedKeyBundle;
+  }
+  const sasProof = parseRequiredJsonValue(payload, "sasProof");
+  if (sasProof instanceof Response) {
+    return sasProof;
+  }
+  const signature = parseRequiredString(payload.signature, "signature");
+  if (signature instanceof Response) {
+    return signature;
+  }
+  return { encryptedKeyBundle, sasProof, signature };
+}
+
+function parseClaimPairingRequest(
+  payload: Record<string, unknown>,
+): ClaimPairingRequest | Response {
+  const code = parseRequiredString(payload.code, "code");
+  if (code instanceof Response) {
+    return code;
+  }
+  const ephemeralPublicKey = parseRequiredString(payload.ephemeralPublicKey, "ephemeralPublicKey");
+  if (ephemeralPublicKey instanceof Response) {
+    return ephemeralPublicKey;
+  }
+  return { code, ephemeralPublicKey };
+}
+
+function parseConfirmPairingRequest(
+  payload: Record<string, unknown>,
+): ConfirmPairingRequest | Response {
+  const proof = parseRequiredString(payload.proof, "proof");
+  if (proof instanceof Response) {
+    return proof;
+  }
+  const minSnapshotCreatedAt = parseOptionalStringOrNull(
+    payload.minSnapshotCreatedAt,
+    "minSnapshotCreatedAt",
+  );
+  if (minSnapshotCreatedAt instanceof Response) {
+    return minSnapshotCreatedAt;
+  }
+  return { proof, minSnapshotCreatedAt: minSnapshotCreatedAt ?? undefined };
+}
+
+function parseCompletePairingWithTransferRequest(
+  payload: Record<string, unknown>,
+): CompletePairingWithTransferRequest | Response {
+  const pairingId = parseRequiredString(payload.pairingId, "pairingId");
+  if (pairingId instanceof Response) {
+    return pairingId;
+  }
+  const complete = parseCompletePairingRequest(payload);
+  if (complete instanceof Response) {
+    return complete;
+  }
+  return { pairingId, ...complete };
+}
+
+function parseConfirmPairingWithBootstrapRequest(
+  payload: Record<string, unknown>,
+): ConfirmPairingWithBootstrapRequest | Response {
+  const pairingId = parseRequiredString(payload.pairingId, "pairingId");
+  if (pairingId instanceof Response) {
+    return pairingId;
+  }
+  const proof = parseOptionalStringOrNull(payload.proof, "proof");
+  if (proof instanceof Response) {
+    return proof;
+  }
+  const minSnapshotCreatedAt = parseOptionalStringOrNull(
+    payload.minSnapshotCreatedAt,
+    "minSnapshotCreatedAt",
+  );
+  if (minSnapshotCreatedAt instanceof Response) {
+    return minSnapshotCreatedAt;
+  }
+  const allowOverwrite = parseRequiredBoolean(payload.allowOverwrite, "allowOverwrite");
+  if (allowOverwrite instanceof Response) {
+    return allowOverwrite;
+  }
+  return {
+    pairingId,
+    proof: proof ?? undefined,
+    minSnapshotCreatedAt: minSnapshotCreatedAt ?? undefined,
+    allowOverwrite,
+  };
+}
+
+function parseBeginPairingConfirmRequest(
+  payload: Record<string, unknown>,
+): BeginPairingConfirmRequest | Response {
+  const pairingId = parseRequiredString(payload.pairingId, "pairingId");
+  if (pairingId instanceof Response) {
+    return pairingId;
+  }
+  const proof = parseRequiredString(payload.proof, "proof");
+  if (proof instanceof Response) {
+    return proof;
+  }
+  const minSnapshotCreatedAt = parseOptionalStringOrNull(
+    payload.minSnapshotCreatedAt,
+    "minSnapshotCreatedAt",
+  );
+  if (minSnapshotCreatedAt instanceof Response) {
+    return minSnapshotCreatedAt;
+  }
+  return { pairingId, proof, minSnapshotCreatedAt: minSnapshotCreatedAt ?? undefined };
+}
+
+function parsePairingFlowIdRequest(
+  payload: Record<string, unknown>,
+): PairingFlowIdRequest | Response {
+  const flowId = parseRequiredString(payload.flowId, "flowId");
+  if (flowId instanceof Response) {
+    return flowId;
+  }
+  return { flowId };
+}
+
+function parseRequiredJsonValue(
+  payload: Record<string, unknown>,
+  field: string,
+): unknown | Response {
+  if (!Object.hasOwn(payload, field)) {
+    return jsonResponse({ code: 400, message: `${field} is required` }, 400);
+  }
+  return payload[field];
 }
 
 function parseWrappedObject<TField extends string>(
