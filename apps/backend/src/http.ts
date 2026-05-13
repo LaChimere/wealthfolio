@@ -6,6 +6,14 @@ import type {
   AiProviderSettingsUpdate,
   SetDefaultAiProviderRequest,
 } from "./domains/ai-providers";
+import type {
+  AlternativeAssetKindApi,
+  AlternativeAssetService,
+  CreateAlternativeAssetRequest,
+  LinkLiabilityRequest,
+  UpdateAlternativeAssetDetailsRequest,
+  UpdateAlternativeAssetValuationRequest,
+} from "./domains/alternative-assets";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type {
   CustomProviderService,
@@ -42,6 +50,7 @@ export interface BackendRequestHandlerOptions {
   debugDelayMs?: number;
   accountService?: AccountService;
   aiProviderService?: AiProviderService;
+  alternativeAssetService?: AlternativeAssetService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
@@ -115,6 +124,14 @@ async function routeRequest(
 
   if (options.aiProviderService && url.pathname.startsWith("/api/v1/ai/providers")) {
     return routeAiProviderRequest(request, url, config, options.aiProviderService);
+  }
+
+  if (
+    options.alternativeAssetService &&
+    (url.pathname.startsWith("/api/v1/alternative-assets") ||
+      url.pathname === "/api/v1/alternative-holdings")
+  ) {
+    return routeAlternativeAssetRequest(request, url, config, options.alternativeAssetService);
   }
 
   if (options.contributionLimitService && url.pathname.startsWith("/api/v1/limits")) {
@@ -217,6 +234,70 @@ function routeAiProviderRequest(
   const providerId = aiProviderModelsIdFromPath(url.pathname);
   if (request.method === "GET" && providerId !== undefined) {
     return Promise.resolve(aiProviderService.listModels(providerId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAlternativeAssetRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  alternativeAssetService: AlternativeAssetService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/alternative-assets") {
+    return handleJsonMutation(request, parseCreateAlternativeAssetRequest, (input) =>
+      Promise.resolve(alternativeAssetService.createAlternativeAsset(input)),
+    );
+  }
+
+  const valuationAssetId = alternativeAssetValuationIdFromPath(url.pathname);
+  if (request.method === "PUT" && valuationAssetId !== undefined) {
+    return handleJsonMutation(request, parseUpdateAlternativeAssetValuationRequest, (input) =>
+      Promise.resolve(alternativeAssetService.updateValuation(valuationAssetId, input)),
+    );
+  }
+
+  const linkLiabilityId = alternativeAssetLinkLiabilityIdFromPath(url.pathname);
+  if (linkLiabilityId !== undefined) {
+    if (request.method === "POST") {
+      return handleJsonMutationNoContent(request, parseLinkLiabilityRequest, async (input) => {
+        await alternativeAssetService.linkLiability(linkLiabilityId, input);
+      });
+    }
+    if (request.method === "DELETE") {
+      return Promise.resolve(alternativeAssetService.unlinkLiability(linkLiabilityId))
+        .then(() => new Response(null, { status: 204 }))
+        .catch(domainErrorResponse);
+    }
+  }
+
+  const metadataAssetId = alternativeAssetMetadataIdFromPath(url.pathname);
+  if (request.method === "PUT" && metadataAssetId !== undefined) {
+    return handleJsonMutationNoContent(
+      request,
+      parseUpdateAlternativeAssetDetailsRequest,
+      async (input) => {
+        await alternativeAssetService.updateAssetDetails({ ...input, assetId: metadataAssetId });
+      },
+    );
+  }
+
+  const assetId = alternativeAssetIdFromPath(url.pathname);
+  if (request.method === "DELETE" && assetId !== undefined) {
+    return Promise.resolve(alternativeAssetService.deleteAlternativeAsset(assetId))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/alternative-holdings") {
+    return Promise.resolve(alternativeAssetService.getAlternativeHoldings())
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
@@ -812,6 +893,26 @@ function aiProviderModelsIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function alternativeAssetIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/alternative-assets\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function alternativeAssetValuationIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/alternative-assets\/([^/]+)\/valuation$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function alternativeAssetLinkLiabilityIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/alternative-assets\/([^/]+)\/link-liability$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function alternativeAssetMetadataIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/alternative-assets\/([^/]+)\/metadata$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function contributionLimitIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/limits\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -1247,6 +1348,148 @@ function parseSetDefaultAiProviderRequest(
     return providerId;
   }
   return providerId === undefined ? {} : { providerId };
+}
+
+const alternativeAssetKinds = new Set<AlternativeAssetKindApi>([
+  "property",
+  "vehicle",
+  "collectible",
+  "precious",
+  "liability",
+  "other",
+]);
+
+function parseCreateAlternativeAssetRequest(
+  payload: Record<string, unknown>,
+): CreateAlternativeAssetRequest | Response {
+  const kind = parseAlternativeAssetKind(payload.kind, "kind");
+  if (kind instanceof Response) {
+    return kind;
+  }
+  const name = parseRequiredString(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const currency = parseRequiredString(payload.currency, "currency");
+  if (currency instanceof Response) {
+    return currency;
+  }
+  const currentValue = parseRequiredString(payload.currentValue, "currentValue");
+  if (currentValue instanceof Response) {
+    return currentValue;
+  }
+  const valueDate = parseRequiredString(payload.valueDate, "valueDate");
+  if (valueDate instanceof Response) {
+    return valueDate;
+  }
+  const purchasePrice = parseOptionalStringOrNull(payload.purchasePrice, "purchasePrice");
+  if (purchasePrice instanceof Response) {
+    return purchasePrice;
+  }
+  const purchaseDate = parseOptionalStringOrNull(payload.purchaseDate, "purchaseDate");
+  if (purchaseDate instanceof Response) {
+    return purchaseDate;
+  }
+  const metadata = parseOptionalRecordOrNull(payload.metadata, "metadata");
+  if (metadata instanceof Response) {
+    return metadata;
+  }
+  const linkedAssetId = parseOptionalStringOrNull(payload.linkedAssetId, "linkedAssetId");
+  if (linkedAssetId instanceof Response) {
+    return linkedAssetId;
+  }
+
+  const parsed: CreateAlternativeAssetRequest = {
+    kind,
+    name,
+    currency,
+    currentValue,
+    valueDate,
+  };
+  if (purchasePrice !== undefined && purchasePrice !== null) {
+    parsed.purchasePrice = purchasePrice;
+  }
+  if (purchaseDate !== undefined && purchaseDate !== null) {
+    parsed.purchaseDate = purchaseDate;
+  }
+  if (metadata !== undefined && metadata !== null) {
+    parsed.metadata = metadata;
+  }
+  if (linkedAssetId !== undefined && linkedAssetId !== null) {
+    parsed.linkedAssetId = linkedAssetId;
+  }
+  return parsed;
+}
+
+function parseUpdateAlternativeAssetValuationRequest(
+  payload: Record<string, unknown>,
+): UpdateAlternativeAssetValuationRequest | Response {
+  const value = parseRequiredString(payload.value, "value");
+  if (value instanceof Response) {
+    return value;
+  }
+  const date = parseRequiredString(payload.date, "date");
+  if (date instanceof Response) {
+    return date;
+  }
+  const notes = parseOptionalStringOrNull(payload.notes, "notes");
+  if (notes instanceof Response) {
+    return notes;
+  }
+  return notes === undefined || notes === null ? { value, date } : { value, date, notes };
+}
+
+function parseLinkLiabilityRequest(
+  payload: Record<string, unknown>,
+): LinkLiabilityRequest | Response {
+  const targetAssetId = parseRequiredString(payload.targetAssetId, "targetAssetId");
+  if (targetAssetId instanceof Response) {
+    return targetAssetId;
+  }
+  return { targetAssetId };
+}
+
+function parseUpdateAlternativeAssetDetailsRequest(
+  payload: Record<string, unknown>,
+): Omit<UpdateAlternativeAssetDetailsRequest, "assetId"> | Response {
+  const name = parseOptionalStringOrNull(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const metadata = parseRequiredStringRecord(payload.metadata, "metadata");
+  if (metadata instanceof Response) {
+    return metadata;
+  }
+  const notes = parseOptionalStringOrNull(payload.notes, "notes");
+  if (notes instanceof Response) {
+    return notes;
+  }
+
+  const parsed: Omit<UpdateAlternativeAssetDetailsRequest, "assetId"> = {
+    metadata: Object.fromEntries(
+      Object.entries(metadata).map(([key, value]) => [key, value === "" ? null : value]),
+    ),
+  };
+  if (name !== undefined && name !== null) {
+    parsed.name = name;
+  }
+  if (notes !== undefined && notes !== null) {
+    parsed.notes = notes;
+  }
+  return parsed;
+}
+
+function parseAlternativeAssetKind(
+  value: unknown,
+  field: string,
+): AlternativeAssetKindApi | Response {
+  if (typeof value !== "string" || !alternativeAssetKinds.has(value as AlternativeAssetKindApi)) {
+    return jsonResponse(
+      { code: 400, message: `${field} must be a valid alternative asset kind` },
+      400,
+    );
+  }
+  return value as AlternativeAssetKindApi;
 }
 
 function parseSecretSetRequest(
@@ -2320,6 +2563,21 @@ function parseOptionalRecordOrNull(
     return jsonResponse({ code: 400, message: `${field} must be an object or null` }, 400);
   }
   return value as Record<string, unknown>;
+}
+
+function parseRequiredStringRecord(
+  value: unknown,
+  field: string,
+): Record<string, string> | Response {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.values(value).some((item) => typeof item !== "string")
+  ) {
+    return jsonResponse({ code: 400, message: `${field} must be an object of strings` }, 400);
+  }
+  return value as Record<string, string>;
 }
 
 function parseOptionalStringArrayOrNull(

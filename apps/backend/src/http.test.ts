@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
 import type { AiProviderService } from "./domains/ai-providers";
+import type { AlternativeAssetService } from "./domains/alternative-assets";
 import {
   createContributionLimitRepository,
   createContributionLimitService,
@@ -1146,6 +1147,200 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(invalidResponse.status).toBe(400);
+  });
+
+  test("routes migrated alternative assets seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const alternativeAssetService: AlternativeAssetService = {
+      createAlternativeAsset(request) {
+        calls.push(["create", request]);
+        return { assetId: "asset-1", quoteId: "quote-1" };
+      },
+      updateValuation(assetId, request) {
+        calls.push(["valuation", { assetId, request }]);
+        return { quoteId: "quote-2", valuationDate: "2026-05-14", value: "125000.00" };
+      },
+      deleteAlternativeAsset(assetId) {
+        calls.push(["delete", assetId]);
+      },
+      linkLiability(liabilityId, request) {
+        calls.push(["link", { liabilityId, request }]);
+      },
+      unlinkLiability(liabilityId) {
+        calls.push(["unlink", liabilityId]);
+      },
+      updateAssetDetails(request) {
+        calls.push(["metadata", request]);
+      },
+      getAlternativeHoldings() {
+        calls.push(["holdings", null]);
+        return [
+          {
+            id: "asset-1",
+            kind: "property",
+            name: "Cabin",
+            symbol: "Property",
+            currency: "USD",
+            marketValue: "125000.00",
+            valuationDate: "2026-05-14T00:00:00Z",
+            metadata: { city: "Paris" },
+            notes: null,
+          },
+        ];
+      },
+    };
+    const handler = createBackendRequestHandler(config, { alternativeAssetService });
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/alternative-holdings"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/alternative-holdings", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const createResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          kind: "property",
+          name: "Cabin",
+          currency: "USD",
+          currentValue: "125000.00",
+          valueDate: "2026-05-14",
+          purchasePrice: "100000.00",
+          purchaseDate: "2024-01-01",
+          metadata: { city: "Paris" },
+          linkedAssetId: "liability-1",
+        }),
+      }),
+    );
+    expect(createResponse.status).toBe(200);
+    expect(await createResponse.json()).toEqual({ assetId: "asset-1", quoteId: "quote-1" });
+
+    const valuationResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets/asset%2F1/valuation", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ value: "125000.00", date: "2026-05-14", notes: "Appraisal" }),
+      }),
+    );
+    expect(await valuationResponse.json()).toEqual({
+      quoteId: "quote-2",
+      valuationDate: "2026-05-14",
+      value: "125000.00",
+    });
+
+    const linkResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets/liability%2F1/link-liability", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ targetAssetId: "asset-1" }),
+      }),
+    );
+    expect(linkResponse.status).toBe(204);
+
+    const unlinkResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets/liability%2F1/link-liability", {
+        method: "DELETE",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(unlinkResponse.status).toBe(204);
+
+    const metadataResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets/asset%2F1/metadata", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ metadata: { city: "" }, name: "Cabin 2", notes: null }),
+      }),
+    );
+    expect(metadataResponse.status).toBe(204);
+
+    const deleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets/asset%2F1", {
+        method: "DELETE",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const holdingsResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-holdings", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await holdingsResponse.json()).toEqual([
+      {
+        id: "asset-1",
+        kind: "property",
+        name: "Cabin",
+        symbol: "Property",
+        currency: "USD",
+        marketValue: "125000.00",
+        valuationDate: "2026-05-14T00:00:00Z",
+        metadata: { city: "Paris" },
+        notes: null,
+      },
+    ]);
+
+    const invalidResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/alternative-assets", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ kind: "stock" }),
+      }),
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(calls).toEqual([
+      [
+        "create",
+        {
+          kind: "property",
+          name: "Cabin",
+          currency: "USD",
+          currentValue: "125000.00",
+          valueDate: "2026-05-14",
+          purchasePrice: "100000.00",
+          purchaseDate: "2024-01-01",
+          metadata: { city: "Paris" },
+          linkedAssetId: "liability-1",
+        },
+      ],
+      [
+        "valuation",
+        {
+          assetId: "asset/1",
+          request: { value: "125000.00", date: "2026-05-14", notes: "Appraisal" },
+        },
+      ],
+      ["link", { liabilityId: "liability/1", request: { targetAssetId: "asset-1" } }],
+      ["unlink", "liability/1"],
+      ["metadata", { assetId: "asset/1", metadata: { city: null }, name: "Cabin 2" }],
+      ["delete", "asset/1"],
+      ["holdings", null],
+    ]);
   });
 
   test("routes migrated secrets seam only when a service is provided", async () => {

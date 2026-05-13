@@ -131,6 +131,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `AiProviderService`, guarded `/api/v1/ai/providers` read/update/default/model
   routes, request validation, JSON `null` mutation responses, and targeted
   backend tests.
+- Turn 17: Implemented the low-risk alternative assets HTTP seam TS slice:
+  injectable `AlternativeAssetService`, guarded
+  `/api/v1/alternative-assets`/`/api/v1/alternative-holdings` routes, request
+  validation, decoded path IDs, 204 mutation responses, and targeted backend
+  tests.
 
 ## Deferred items
 
@@ -167,6 +172,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   secret-backed model listing remain active follow-ups. reason=this slice only
   adds the guarded route seam, while runtime behavior must move with dedicated
   AI/secrets parity slices.
+- Alternative asset persistence, quote writes, liability metadata merging,
+  holdings/net-worth calculations, and portfolio job enqueue behavior remain
+  active follow-ups. reason=this slice only adds the guarded HTTP seam, while
+  runtime behavior must move with asset/portfolio calculation parity slices.
 
 ## Blockers
 

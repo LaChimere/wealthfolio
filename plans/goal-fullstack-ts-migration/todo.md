@@ -66,9 +66,10 @@
     inert for production until TS cutover.
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
-    provider settings, portfolio job trigger, event stream, secrets, and AI
-    provider TS repository/service or route config implementations plus guarded
-    route tests in `apps/backend/src/domains/settings.ts`,
+    provider settings, portfolio job trigger, event stream, secrets, AI
+    provider, and alternative assets TS repository/service or route config
+    implementations plus guarded route tests in
+    `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -88,7 +89,9 @@
     job execution and event production are deferred to portfolio/calculation
     slices; real secret persistence/keyring integration is deferred to a
     runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior is deferred to AI/secrets parity slices.
+    runtime behavior is deferred to AI/secrets parity slices; alternative asset
+    persistence/quotes/holdings/job behavior is deferred to asset/portfolio
+    parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -317,6 +320,18 @@ contract:
   coverage.
 - `pr5-ai-provider-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-alternative-assets-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable create/valuation/delete/link/unlink/metadata and
+  holdings behavior, guarded HTTP route access, decoded path IDs, request
+  validation, 204 mutation responses, route inertness without injection, and
+  deferred real asset/quote/portfolio-job behavior.
+- `pr5-alternative-assets-route-seam-review`: first review found metadata
+  removal and `notes: null` parity gaps; fixed empty-string metadata removal to
+  null, omitted null notes like Rust `Option<String>`, re-ran targeted backend
+  checks, and final review found no actionable issues.
+- `pr5-alternative-assets-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -326,8 +341,8 @@ contract:
   mutation, assignment, import/export, custom provider CRUD, and scoped goals
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
   plus market-data provider settings, portfolio job trigger, event stream,
-  secrets route seam, and AI provider route seam slices implemented; broader
-  migration remains active.
+  secrets route seam, AI provider route seam, and alternative assets route seam
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -338,4 +353,5 @@ contract:
   production move with portfolio/calculation slices; real secret persistence and
   keyring integration move with a dedicated runtime parity slice; AI provider
   catalog/settings/model-listing runtime behavior moves with AI/secrets parity
-  slices.
+  slices; alternative asset persistence/quotes/holdings/job behavior moves with
+  asset/portfolio parity slices.

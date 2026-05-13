@@ -42,6 +42,17 @@ export type {
   ListAiModelsResponse,
   SetDefaultAiProviderRequest,
 } from "./domains/ai-providers";
+export type {
+  AlternativeAssetHolding,
+  AlternativeAssetKindApi,
+  AlternativeAssetService,
+  CreateAlternativeAssetRequest,
+  CreateAlternativeAssetResponse,
+  LinkLiabilityRequest,
+  UpdateAlternativeAssetDetailsRequest,
+  UpdateAlternativeAssetValuationRequest,
+  UpdateAlternativeAssetValuationResponse,
+} from "./domains/alternative-assets";
 export {
   createContributionLimitRepository,
   createContributionLimitService,
