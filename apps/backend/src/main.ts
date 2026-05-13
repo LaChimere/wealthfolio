@@ -4,7 +4,7 @@ import { startBackendServer } from "./server";
 
 if (import.meta.main) {
   const config = loadBackendConfigFromEnv();
-  const runtime = createSqliteBackedBackendServices();
+  const runtime = createSqliteBackedBackendServices({ secretKey: config.secretKey });
   let server: ReturnType<typeof startBackendServer>;
   try {
     server = startBackendServer(config, runtime.options);

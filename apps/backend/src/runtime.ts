@@ -22,6 +22,7 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
+import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createEventBus, type BackendEventBus } from "./events";
@@ -38,6 +39,7 @@ export interface SqliteBackedBackendServicesOptions {
   eventBus?: BackendEventBus;
   migrationsDir?: string;
   repositoryRoot?: string;
+  secretKey?: Uint8Array;
 }
 
 export interface SqliteBackedBackendServices {
@@ -65,6 +67,7 @@ export function createSqliteBackedBackendServices(
       env,
       eventBus: options.eventBus,
       repositoryRoot,
+      secretKey: options.secretKey,
     });
   } catch (error) {
     initialized.db.close();
@@ -118,6 +121,7 @@ function createServicesFromDatabase(
     env: NodeJS.ProcessEnv;
     eventBus?: BackendEventBus;
     repositoryRoot: string;
+    secretKey?: Uint8Array;
   },
 ): SqliteBackedBackendServices {
   const eventBus = runtimeOptions.eventBus ?? createEventBus();
@@ -154,6 +158,11 @@ function createServicesFromDatabase(
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),
+    secretService: createRuntimeSecretService({
+      appDataDir,
+      env: runtimeOptions.env,
+      secretKey: runtimeOptions.secretKey,
+    }),
     settingsService,
     taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
   };
@@ -170,6 +179,40 @@ function createServicesFromDatabase(
       }
     },
   };
+}
+
+function createRuntimeSecretService(runtimeOptions: {
+  appDataDir: string;
+  env: NodeJS.ProcessEnv;
+  secretKey?: Uint8Array;
+}): BackendRequestHandlerOptions["secretService"] {
+  const backend = parseSecretBackend(runtimeOptions.env.WF_SECRET_BACKEND);
+  if (backend === "keyring") {
+    throw new Error("WF_SECRET_BACKEND=keyring is not yet available in the TS backend runtime");
+  }
+  if (!runtimeOptions.secretKey) {
+    return undefined;
+  }
+
+  return createFileSecretService({
+    secretsFilePath:
+      runtimeOptions.env.WF_SECRET_FILE?.trim() ||
+      path.join(runtimeOptions.appDataDir, "secrets.json"),
+    encryptionKey: deriveSecretsEncryptionKey(runtimeOptions.secretKey),
+    rawKeyForMigration: runtimeOptions.secretKey,
+  });
+}
+
+function parseSecretBackend(raw: string | undefined): "file" | "keyring" {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return "file";
+  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "file" || normalized === "keyring") {
+    return normalized;
+  }
+  throw new Error(`Invalid WF_SECRET_BACKEND value '${trimmed}'. Expected 'file' or 'keyring'.`);
 }
 
 function createRuntimeAccountService(

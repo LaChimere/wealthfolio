@@ -37,7 +37,11 @@ describe("TS backend runtime composition", () => {
 
   test("starts a TS server with SQLite-backed low-risk services", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-"));
-    const runtime = createSqliteBackedBackendServices({ appDataDir, repositoryRoot });
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
     const server = startBackendServer(config, runtime.options);
 
     try {
@@ -81,11 +85,36 @@ describe("TS backend runtime composition", () => {
         body: JSON.stringify({ backupFilePath: "file:///tmp/backup.db" }),
       });
       expect(restoreResponse.status).toBe(501);
+
+      const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secretKey: "Provider/ApiKey", secret: "secret-value" }),
+      });
+      expect(secretSetResponse.status).toBe(204);
+      const secretGetResponse = await fetch(
+        `${server.baseUrl}/api/v1/secrets?secretKey=provider%2Fapikey`,
+      );
+      expect(secretGetResponse.status).toBe(200);
+      await expect(secretGetResponse.json()).resolves.toBe("secret-value");
     } finally {
       server.stop();
       runtime.close();
     }
 
     expect(() => runtime.close()).not.toThrow();
+  });
+
+  test("fails startup explicitly when TS runtime keyring secrets are requested", () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
+
+    expect(() =>
+      createSqliteBackedBackendServices({
+        appDataDir,
+        env: { WF_SECRET_BACKEND: "keyring" },
+        repositoryRoot,
+        secretKey: config.secretKey,
+      }),
+    ).toThrow("WF_SECRET_BACKEND=keyring is not yet available in the TS backend runtime");
   });
 });

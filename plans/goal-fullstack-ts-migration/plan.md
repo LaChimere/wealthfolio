@@ -10,24 +10,24 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding safe app utility runtime parity to the
-standalone TS backend:
+PR 5 continues vertical slices by adding file-backed secrets runtime parity to
+the standalone TS backend:
 
-- Implement `createAppUtilityService` for app info, update checks with cache and
-  injectable fetch, base64 backup, and backup-to-path using the TS SQLite backup
-  helpers.
-- Wire the app utility service into the TS runtime with the same resolved
-  app-data root/env used for DB initialization, root package version, logs dir,
-  and a live instance-id getter from settings.
-- Keep database restore explicitly unavailable in the TS runtime (`501`) until a
-  safe restart/service-rebuild strategy exists after replacing the active DB.
+- Implement `createFileSecretService` with Rust-compatible service ID
+  normalization, plaintext legacy-file reads, ChaCha20-Poly1305 encrypted
+  writes, HKDF-derived secrets keys, and raw-key migration.
+- Wire the secrets service into TS runtime composition when the backend config
+  provides `WF_SECRET_KEY`, using `WF_SECRET_FILE` or
+  `<appDataDir>/secrets.json` like Rust.
+- Fail startup explicitly for `WF_SECRET_BACKEND=keyring` until TS can safely
+  use the OS keyring backend.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-secret storage, AI provider runtime, alternative asset runtime, asset runtime,
+keyring storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility restore runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, or AI chat runtime
 deletion, real sync crypto runtime implementation, real health/classification

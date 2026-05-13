@@ -99,9 +99,10 @@
     provider sync behavior plus broader market-data quote/search/import/sync
     behavior are deferred to calculation/market-data slices; actual portfolio
     job execution and event production are deferred to portfolio/calculation
-    slices; real secret persistence/keyring integration is deferred to a
-    runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior is deferred to AI/secrets parity slices; alternative asset
+    slices; TS file-backed secret persistence is wired into standalone runtime
+    while real keyring integration is deferred to a runtime/keyring parity
+    slice; AI provider catalog/settings/model-listing runtime behavior is
+    deferred to AI/secrets parity slices; alternative asset
     persistence/quotes/holdings/job behavior is deferred to asset/portfolio
     parity slices; asset persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app utility database restore is
@@ -626,6 +627,18 @@ contract:
   backup resource lifecycle, type-safety, and test coverage.
 - `pr5-app-utility-runtime-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-secrets-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes Rust-compatible service ID formatting, encrypted
+  set/get/delete behavior, plaintext legacy-file reads, raw-key to HKDF-derived
+  key migration, no-key encrypted-store errors, file permission checks,
+  standalone runtime route wiring, and explicit TS runtime startup failure for
+  `WF_SECRET_BACKEND=keyring`.
+- `pr5-secrets-runtime-review`: code review found no actionable issues after
+  confirming ChaCha20-Poly1305 format compatibility, HKDF key derivation,
+  service ID normalization, migration behavior, keyring startup failure, file
+  write security, and test coverage.
+- `pr5-secrets-runtime-repo-check`: full repo check passed with `bun run check`.
 
 ## Result
 
@@ -643,8 +656,8 @@ contract:
   device-sync enrollment/engine route seam, device-sync device-management route
   seam, device-sync team-key/reset route seam, device-sync pairing route seam,
   standalone TS runtime composition for already-ported SQLite-backed domains,
-  and safe app utility runtime slices implemented; broader migration remains
-  active.
+  safe app utility runtime, and file-backed secrets runtime slices implemented;
+  broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -652,8 +665,8 @@ contract:
   with calculation-heavy goal slices; FX converter/history/register-pair and
   provider sync plus broader market-data quote/search/import/sync behavior move
   with calculation/market-data slices; actual portfolio job execution and event
-  production move with portfolio/calculation slices; real secret persistence and
-  keyring integration move with a dedicated runtime parity slice; AI provider
+  production move with portfolio/calculation slices; OS keyring integration
+  moves with a dedicated runtime parity slice; AI provider
   catalog/settings/model-listing runtime behavior moves with AI/secrets parity
   slices; alternative asset persistence/quotes/holdings/job behavior moves with
   asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
