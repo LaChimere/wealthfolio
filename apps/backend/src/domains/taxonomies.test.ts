@@ -415,6 +415,146 @@ describe("TS taxonomies domain", () => {
       db.close();
     }
   });
+
+  test("imports taxonomy JSON by flattening category trees", async () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      const imported = await service.importTaxonomyJson(
+        JSON.stringify({
+          name: "Portfolio Performance Taxonomy",
+          color: "#4385be",
+          categories: [
+            {
+              name: "Equity",
+              key: "equity",
+              color: "#4385be",
+              children: [
+                {
+                  name: "US Equity",
+                  key: "us-equity",
+                  color: "#8b7ec8",
+                  description: "United States",
+                },
+              ],
+            },
+            {
+              name: "Cash",
+              key: "cash",
+              color: "#879a39",
+            },
+          ],
+          instruments: [
+            {
+              identifiers: { ticker: "IGNORED" },
+              categories: [{ key: "equity", path: ["Equity"], weight: 1 }],
+            },
+          ],
+        }),
+      );
+      const withCategories = service.getTaxonomy(imported.id);
+
+      expect(imported).toMatchObject({
+        name: "Portfolio Performance Taxonomy",
+        color: "#4385be",
+        isSystem: false,
+        isSingleSelect: false,
+        sortOrder: 0,
+      });
+      expect(withCategories?.categories).toEqual([
+        expect.objectContaining({ parentId: null, name: "Equity", key: "equity", sortOrder: 0 }),
+        expect.objectContaining({
+          name: "US Equity",
+          key: "us-equity",
+          description: "United States",
+          sortOrder: 1,
+        }),
+        expect.objectContaining({ parentId: null, name: "Cash", key: "cash", sortOrder: 2 }),
+      ]);
+      const equity = withCategories?.categories.find((category) => category.key === "equity");
+      const usEquity = withCategories?.categories.find((category) => category.key === "us-equity");
+      expect(usEquity?.parentId).toBe(equity?.id);
+      await expect(service.importTaxonomyJson("{bad")).rejects.toThrow("Invalid JSON");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("exports taxonomy JSON as a sorted tree without instrument mappings", () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      seedTaxonomy(db, {
+        id: "asset_classes",
+        name: "Asset Classes",
+        color: "#879a39",
+        isSystem: true,
+        isSingleSelect: false,
+        sortOrder: 20,
+      });
+      seedCategory(db, {
+        id: "EQUITY",
+        taxonomyId: "asset_classes",
+        name: "Equity",
+        key: "equity",
+        color: "#4385be",
+        sortOrder: 2,
+      });
+      seedCategory(db, {
+        id: "US_EQUITY",
+        taxonomyId: "asset_classes",
+        parentId: "EQUITY",
+        name: "US Equity",
+        key: "us-equity",
+        color: "#8b7ec8",
+        description: "United States",
+        sortOrder: 1,
+      });
+      seedCategory(db, {
+        id: "CASH",
+        taxonomyId: "asset_classes",
+        name: "Cash",
+        key: "cash",
+        color: "#879a39",
+        sortOrder: 1,
+      });
+
+      expect(JSON.parse(service.exportTaxonomyJson("asset_classes"))).toEqual({
+        name: "Asset Classes",
+        color: "#879a39",
+        categories: [
+          {
+            name: "Cash",
+            key: "cash",
+            color: "#879a39",
+            description: null,
+            children: [],
+          },
+          {
+            name: "Equity",
+            key: "equity",
+            color: "#4385be",
+            description: null,
+            children: [
+              {
+                name: "US Equity",
+                key: "us-equity",
+                color: "#8b7ec8",
+                description: "United States",
+                children: [],
+              },
+            ],
+          },
+        ],
+        instruments: [],
+      });
+      expect(() => service.exportTaxonomyJson("missing")).toThrow("Taxonomy not found");
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createTaxonomiesDb(): Database {
@@ -493,25 +633,29 @@ function seedCategory(
   category: {
     id: string;
     taxonomyId: string;
+    parentId?: string | null;
     name: string;
     key: string;
     color: string;
+    description?: string | null;
     sortOrder: number;
   },
 ): void {
   db.prepare(
     `
       INSERT INTO taxonomy_categories (
-        id, taxonomy_id, name, key, color, sort_order
+        id, taxonomy_id, parent_id, name, key, color, description, sort_order
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     category.id,
     category.taxonomyId,
+    category.parentId ?? null,
     category.name,
     category.key,
     category.color,
+    category.description ?? null,
     category.sortOrder,
   );
 }

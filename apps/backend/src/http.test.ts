@@ -528,6 +528,60 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated taxonomy import and export only when a service is provided", async () => {
+    const db = createTaxonomiesDb();
+    const handler = createBackendRequestHandler(config, {
+      taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
+    });
+
+    try {
+      const importResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/import", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonStr: JSON.stringify({
+              name: "Imported",
+              color: "#4385be",
+              categories: [
+                {
+                  name: "Equity",
+                  key: "equity",
+                  color: "#4385be",
+                  children: [{ name: "US", key: "us", color: "#8b7ec8" }],
+                },
+              ],
+            }),
+          }),
+        }),
+      );
+      const imported = await importResponse.json();
+      expect(importResponse.status).toBe(200);
+      expect(imported).toMatchObject({ name: "Imported", isSystem: false });
+
+      const exportResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/taxonomies/${imported.id}/export`, {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      const exported = JSON.parse(await exportResponse.json());
+      expect(exported).toMatchObject({
+        name: "Imported",
+        color: "#4385be",
+        instruments: [],
+      });
+      expect(exported.categories[0]).toMatchObject({
+        name: "Equity",
+        children: [expect.objectContaining({ name: "US" })],
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {

@@ -172,6 +172,21 @@ function routeTaxonomyRequest(
     );
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/import") {
+    return handleJsonMutation(request, parseImportTaxonomyRequest, (importRequest) =>
+      taxonomyService.importTaxonomyJson(importRequest.jsonStr),
+    );
+  }
+
+  const exportTaxonomyId = exportTaxonomyIdFromPath(url.pathname);
+  if (exportTaxonomyId && request.method === "GET") {
+    try {
+      return jsonResponse(taxonomyService.exportTaxonomyJson(exportTaxonomyId));
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
   const assignmentId = taxonomyAssignmentIdFromPath(url.pathname);
   if (assignmentId && request.method === "DELETE") {
     return taxonomyService
@@ -420,6 +435,11 @@ function taxonomyAssignmentAssetIdFromPath(pathname: string): string | undefined
 
 function taxonomyAssignmentIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/taxonomies\/assignments\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function exportTaxonomyIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/taxonomies\/([^/]+)\/export$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
@@ -747,6 +767,18 @@ function parseNewAssetTaxonomyAssignment(
     weight,
     source,
   };
+}
+
+function parseImportTaxonomyRequest(payload: Record<string, unknown>):
+  | {
+      jsonStr: string;
+    }
+  | Response {
+  const jsonStr = parseRequiredString(payload.jsonStr, "jsonStr");
+  if (jsonStr instanceof Response) {
+    return jsonStr;
+  }
+  return { jsonStr };
 }
 
 function parseNewContributionLimit(

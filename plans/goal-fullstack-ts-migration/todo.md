@@ -64,14 +64,14 @@
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
     inert for production until TS cutover.
-  - Evidence: settings, accounts, contribution limits, and taxonomy read TS
+  - Evidence: settings, accounts, contribution limits, and taxonomy TS
     repository/service implementations plus guarded route tests in
     `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`, and
     `apps/backend/src/domains/taxonomies.ts`, and
-    `apps/backend/src/http.test.ts`. Taxonomy mutation/assignment/import-export
-    parity remains in progress.
+    `apps/backend/src/http.test.ts`. Taxonomy migration/health endpoints are
+    deferred to the health/classification service slice.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -189,11 +189,24 @@ contract:
   focused second review found no remaining actionable issues.
 - `pr5-taxonomies-assignments-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-taxonomies-import-export`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes JSON validation, recursive import flattening, pre-order sort
+  values, parent links, export tree sorting, ignored instrument mappings parity,
+  missing taxonomy errors, and guarded HTTP import/export routes.
+- `pr5-taxonomies-import-export-review`: first review raised transaction
+  atomicity as a concern; Rust uses separate create and bulk-category writes, so
+  the TS slice kept parity. Focused second review found no remaining actionable
+  issues.
+- `pr5-taxonomies-import-export-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
-  mutation and assignment slices implemented; broader migration remains active.
-- Follow-ups: continue taxonomy import/export sub-slice.
+  mutation, assignment, and import/export slices implemented; broader migration
+  remains active.
+- Follow-ups: continue other low-risk domain slices; taxonomy migration/health
+  endpoints move with the health/classification services.

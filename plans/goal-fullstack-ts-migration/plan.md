@@ -10,18 +10,16 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues low-risk domain vertical slices with taxonomy assignment parity
-after the settings, accounts, contribution limits, taxonomy read, and
-taxonomy/category mutation slices:
+PR 5 completes the low-risk taxonomy vertical slice with import/export parity
+after taxonomy reads, taxonomy/category mutations, and assignments:
 
-- Add TS asset taxonomy assignment reads, upserts, deletes, and guarded route
-  tests.
-- Preserve Rust assignment semantics: natural-key upsert by
-  `assetId/taxonomyId/categoryId`, original row identity/timestamps on conflict,
-  single-select taxonomy replacement, idempotent missing deletes, and optional
-  assignment sync hooks.
-- Keep taxonomy import/export work in a follow-up atomic sub-slice because it
-  adds recursive JSON tree behavior.
+- Add TS taxonomy JSON import/export service behavior and guarded route tests.
+- Preserve Rust import/export semantics: user-imported taxonomies are custom,
+  imported categories flatten recursively with pre-order sort values, exported
+  categories rebuild a sorted JSON tree, and instrument mappings are ignored on
+  export for now.
+- Defer taxonomy migration/health endpoints to the later health/classification
+  slice because those paths depend on asset and health services.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -30,12 +28,13 @@ accounts/settings/limits/taxonomies deletion is in scope for this slice.
 
 ## Next slices
 
-1. Continue taxonomy sub-slices: import/export JSON, then migration/health
-   endpoints.
-2. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
-3. Cut over Electron/web to the TS backend by default after parity and rollback
+1. Continue other low-risk domain slices before calculation-heavy work.
+2. Migrate taxonomy migration/health endpoints with the health/classification
+   services.
+3. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
+4. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.
-4. Remove Rust backend/runtime artifacts only after the TS-only architecture is
+5. Remove Rust backend/runtime artifacts only after the TS-only architecture is
    proven and documented.
 
 ## Verification

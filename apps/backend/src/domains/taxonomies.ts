@@ -71,6 +71,34 @@ export interface NewAssetTaxonomyAssignment {
   source: string;
 }
 
+export interface TaxonomyJson {
+  name: string;
+  color: string;
+  categories: TaxonomyCategoryJson[];
+  instruments?: InstrumentMappingJson[];
+}
+
+export interface TaxonomyCategoryJson {
+  name: string;
+  key: string;
+  color: string;
+  description?: string | null;
+  children?: TaxonomyCategoryJson[];
+}
+
+export interface InstrumentMappingJson {
+  identifiers: {
+    name?: string | null;
+    ticker?: string | null;
+    isin?: string | null;
+  };
+  categories: {
+    key: string;
+    path: string[];
+    weight: number;
+  }[];
+}
+
 export type TaxonomySyncOperation = "Create" | "Update" | "Delete";
 
 export interface TaxonomySyncEvent {
@@ -112,6 +140,7 @@ export interface TaxonomyRepository extends TaxonomyReadRepository {
   upsertAssignment(assignment: NewAssetTaxonomyAssignment): AssetTaxonomyAssignment;
   deleteAssignment(id: string): number;
   deleteAssetAssignments(assetId: string, taxonomyId: string): number;
+  bulkCreateCategories(categories: NewTaxonomyCategory[]): number;
   createCategory(newCategory: NewTaxonomyCategory): TaxonomyCategory;
   updateCategory(category: TaxonomyCategory): TaxonomyCategory;
   deleteCategory(taxonomyId: string, categoryId: string): number;
@@ -138,6 +167,8 @@ export interface TaxonomyService extends TaxonomyReadService {
   getAssetAssignments(assetId: string): AssetTaxonomyAssignment[];
   assignAssetToCategory(assignment: NewAssetTaxonomyAssignment): Promise<AssetTaxonomyAssignment>;
   removeAssetAssignment(id: string): Promise<number>;
+  importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
+  exportTaxonomyJson(id: string): string;
 }
 
 interface TaxonomyRow {
@@ -421,6 +452,43 @@ export function createTaxonomyRepository(
       })();
       return affected;
     },
+    bulkCreateCategories(categories) {
+      if (categories.length === 0) {
+        return 0;
+      }
+      let count = 0;
+      const taxonomyId = categories[0]?.taxonomyId;
+      db.transaction(() => {
+        for (const category of categories) {
+          const id = category.id || crypto.randomUUID();
+          const now = timestampNow();
+          db.prepare(
+            `
+              INSERT INTO taxonomy_categories (
+                id, taxonomy_id, parent_id, name, key, color, description, sort_order, created_at, updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+          ).run(
+            id,
+            category.taxonomyId,
+            category.parentId ?? null,
+            category.name,
+            category.key,
+            category.color,
+            category.description ?? null,
+            category.sortOrder,
+            now,
+            now,
+          );
+          count += 1;
+        }
+        if (taxonomyId) {
+          queueCustomTaxonomyBundle(db, options, taxonomyId, "Update");
+        }
+      })();
+      return count;
+    },
     createCategory(newCategory) {
       const id = newCategory.id || crypto.randomUUID();
       const now = timestampNow();
@@ -569,6 +637,36 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
     },
     async removeAssetAssignment(id) {
       return repository.deleteAssignment(id);
+    },
+    async importTaxonomyJson(jsonStr) {
+      const taxonomyJson = parseTaxonomyJson(jsonStr);
+      const taxonomy = repository.createTaxonomy({
+        name: taxonomyJson.name,
+        color: taxonomyJson.color,
+        description: null,
+        isSystem: false,
+        isSingleSelect: false,
+        sortOrder: 0,
+      });
+      const categories = flattenTaxonomyJsonCategories(taxonomy.id, taxonomyJson.categories);
+      repository.bulkCreateCategories(categories);
+      return taxonomy;
+    },
+    exportTaxonomyJson(id) {
+      const taxonomyWithCategories = repository.getTaxonomyWithCategories(id);
+      if (!taxonomyWithCategories) {
+        throw new Error("Record not found: Taxonomy not found");
+      }
+      return JSON.stringify(
+        {
+          name: taxonomyWithCategories.taxonomy.name,
+          color: taxonomyWithCategories.taxonomy.color,
+          categories: taxonomyCategoriesToJson(taxonomyWithCategories.categories),
+          instruments: [],
+        } satisfies Required<TaxonomyJson>,
+        null,
+        2,
+      );
     },
   };
 }
@@ -721,6 +819,128 @@ function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetT
     createdAt: toApiDate(row.created_at),
     updatedAt: toApiDate(row.updated_at),
   };
+}
+
+function parseTaxonomyJson(jsonStr: string): TaxonomyJson {
+  try {
+    const parsed = JSON.parse(jsonStr) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error("expected an object");
+    }
+    const name = parsed.name;
+    const color = parsed.color;
+    const categories = parsed.categories;
+    if (typeof name !== "string") {
+      throw new Error("name must be a string");
+    }
+    if (typeof color !== "string") {
+      throw new Error("color must be a string");
+    }
+    if (!Array.isArray(categories)) {
+      throw new Error("categories must be an array");
+    }
+    return {
+      name,
+      color,
+      categories: categories.map(parseTaxonomyCategoryJson),
+      instruments: Array.isArray(parsed.instruments)
+        ? (parsed.instruments as InstrumentMappingJson[])
+        : [],
+    };
+  } catch (error) {
+    throw new Error(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function parseTaxonomyCategoryJson(value: unknown): TaxonomyCategoryJson {
+  if (!isRecord(value)) {
+    throw new Error("category must be an object");
+  }
+  const name = value.name;
+  const key = value.key;
+  const color = value.color;
+  const description = value.description;
+  const children = value.children;
+  if (typeof name !== "string") {
+    throw new Error("category.name must be a string");
+  }
+  if (typeof key !== "string") {
+    throw new Error("category.key must be a string");
+  }
+  if (typeof color !== "string") {
+    throw new Error("category.color must be a string");
+  }
+  if (description !== undefined && description !== null && typeof description !== "string") {
+    throw new Error("category.description must be a string or null");
+  }
+  if (children !== undefined && !Array.isArray(children)) {
+    throw new Error("category.children must be an array");
+  }
+  return {
+    name,
+    key,
+    color,
+    description: description ?? null,
+    children: children?.map(parseTaxonomyCategoryJson) ?? [],
+  };
+}
+
+function flattenTaxonomyJsonCategories(
+  taxonomyId: string,
+  categories: TaxonomyCategoryJson[],
+): NewTaxonomyCategory[] {
+  const flattened: NewTaxonomyCategory[] = [];
+  let sortOrder = 0;
+
+  const visit = (items: TaxonomyCategoryJson[], parentId: string | null): void => {
+    for (const category of items) {
+      const id = crypto.randomUUID();
+      flattened.push({
+        id,
+        taxonomyId,
+        parentId,
+        name: category.name,
+        key: category.key,
+        color: category.color,
+        description: category.description ?? null,
+        sortOrder,
+      });
+      sortOrder += 1;
+      visit(category.children ?? [], id);
+    }
+  };
+
+  visit(categories, null);
+  return flattened;
+}
+
+function taxonomyCategoriesToJson(categories: TaxonomyCategory[]): TaxonomyCategoryJson[] {
+  const childrenByParentId = new Map<string | null, TaxonomyCategory[]>();
+  for (const category of categories) {
+    const children = childrenByParentId.get(category.parentId) ?? [];
+    children.push(category);
+    childrenByParentId.set(category.parentId, children);
+  }
+  for (const children of childrenByParentId.values()) {
+    children.sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+
+  const build = (parentId: string | null): TaxonomyCategoryJson[] => {
+    const children = childrenByParentId.get(parentId) ?? [];
+    return children.map((category) => ({
+      name: category.name,
+      key: category.key,
+      color: category.color,
+      description: category.description,
+      children: build(category.id),
+    }));
+  };
+
+  return build(null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function queueAssignmentUpdate(
