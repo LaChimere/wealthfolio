@@ -53,6 +53,7 @@ export type {
   UpdateAlternativeAssetValuationRequest,
   UpdateAlternativeAssetValuationResponse,
 } from "./domains/alternative-assets";
+export type { Asset, AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 export {
   createContributionLimitRepository,
   createContributionLimitService,

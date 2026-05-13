@@ -10,25 +10,24 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk alternative assets HTTP seam
-after the AI provider route seam:
+PR 5 continues vertical slices with a low-risk assets HTTP seam after the
+alternative assets route seam:
 
-- Add an `AlternativeAssetService` interface and guarded
-  `/alternative-assets`/`/alternative-holdings` route tests for create,
-  valuation update, delete, liability link/unlink, metadata update, and holdings
-  reads.
-- Preserve Rust HTTP semantics for route methods, path parameters, 204 mutation
-  responses, kind/required-field validation, and sidecar bearer-token checks.
-- Defer real asset/quote persistence, net-worth/holding calculations, liability
-  metadata merging, and portfolio job enqueue behavior to dedicated
-  asset/portfolio calculation slices.
+- Add an `AssetService` interface and guarded `/assets` route tests for list,
+  profile read, create, profile update, quote-mode update, and delete behavior.
+- Preserve Rust HTTP semantics for route methods, query/path parameters,
+  quoteMode/pricingMode aliases, required notes on profile updates, 204 deletes,
+  null-as-omitted option handling, and sidecar bearer-token checks.
+- Defer real asset repository writes, profile/quote-mode side effects, quote
+  provider interactions, activity guards, and portfolio recalculation behavior
+  to dedicated asset/market-data/portfolio slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-secret storage, AI provider runtime, or alternative asset runtime deletion is in
-scope for this slice.
+secret storage, AI provider runtime, alternative asset runtime, or asset runtime
+deletion is in scope for this slice.
 
 ## Next slices
 

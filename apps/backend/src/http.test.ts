@@ -5,6 +5,7 @@ import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
 import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
+import type { AssetService } from "./domains/assets";
 import {
   createContributionLimitRepository,
   createContributionLimitService,
@@ -1340,6 +1341,197 @@ describe("TS backend HTTP skeleton", () => {
       ["metadata", { assetId: "asset/1", metadata: { city: null }, name: "Cabin 2" }],
       ["delete", "asset/1"],
       ["holdings", null],
+    ]);
+  });
+
+  test("routes migrated assets seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const asset = {
+      id: "asset-1",
+      kind: "INVESTMENT",
+      name: "Apple",
+      quoteMode: "MARKET",
+      quoteCcy: "USD",
+      createdAt: "2026-05-14T00:00:00",
+      updatedAt: "2026-05-14T00:00:00",
+    };
+    const assetService: AssetService = {
+      listAssets() {
+        calls.push(["list", null]);
+        return [asset];
+      },
+      getAssetProfile(assetId) {
+        calls.push(["profile", assetId]);
+        return { ...asset, id: assetId };
+      },
+      createAsset(request) {
+        calls.push(["create", request]);
+        return { ...asset, id: request.id ?? "asset-2" };
+      },
+      updateAssetProfile(assetId, profile) {
+        calls.push(["update", { assetId, profile }]);
+        return { ...asset, id: assetId, ...profile };
+      },
+      updateQuoteMode(assetId, quoteMode) {
+        calls.push(["quote-mode", { assetId, quoteMode }]);
+        return { ...asset, id: assetId, quoteMode };
+      },
+      deleteAsset(assetId) {
+        calls.push(["delete", assetId]);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { assetService });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/assets"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/assets", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const listResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await listResponse.json()).toEqual([asset]);
+
+    const createResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "asset/2",
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          name: "Apple",
+          providerConfig: { source: "manual" },
+          metadata: { sector: "Tech" },
+        }),
+      }),
+    );
+    expect((await createResponse.json()).id).toBe("asset/2");
+
+    const profileResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/profile?assetId=asset%2F2", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect((await profileResponse.json()).id).toBe("asset/2");
+
+    const updateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/profile/asset%2F2", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          notes: "",
+          name: null,
+          displayCode: "AAPL",
+          quoteMode: null,
+          providerConfig: null,
+          metadata: { logo: "apple" },
+        }),
+      }),
+    );
+    expect(updateResponse.status).toBe(200);
+
+    const quoteModeResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/pricing-mode/asset%2F2", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ pricingMode: "MANUAL" }),
+      }),
+    );
+    expect((await quoteModeResponse.json()).quoteMode).toBe("MANUAL");
+
+    const deleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/asset%2F2", {
+        method: "DELETE",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const reservedDeleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/profile", {
+        method: "DELETE",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(reservedDeleteResponse.status).toBe(404);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/assets/pricing-mode", {
+            method: "DELETE",
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const missingQueryResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets/profile", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(missingQueryResponse.status).toBe(400);
+
+    const invalidCreateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/assets", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          isActive: null,
+        }),
+      }),
+    );
+    expect(invalidCreateResponse.status).toBe(400);
+    expect(calls).toEqual([
+      ["list", null],
+      [
+        "create",
+        {
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          id: "asset/2",
+          name: "Apple",
+          isActive: true,
+          providerConfig: { source: "manual" },
+          metadata: { sector: "Tech" },
+        },
+      ],
+      ["profile", "asset/2"],
+      [
+        "update",
+        {
+          assetId: "asset/2",
+          profile: { notes: "", displayCode: "AAPL", metadata: { logo: "apple" } },
+        },
+      ],
+      ["quote-mode", { assetId: "asset/2", quoteMode: "MANUAL" }],
+      ["delete", "asset/2"],
     ]);
   });
 

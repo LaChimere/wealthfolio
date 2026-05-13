@@ -14,6 +14,7 @@ import type {
   UpdateAlternativeAssetDetailsRequest,
   UpdateAlternativeAssetValuationRequest,
 } from "./domains/alternative-assets";
+import type { AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type {
   CustomProviderService,
@@ -51,6 +52,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
+  assetService?: AssetService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
@@ -132,6 +134,10 @@ async function routeRequest(
       url.pathname === "/api/v1/alternative-holdings")
   ) {
     return routeAlternativeAssetRequest(request, url, config, options.alternativeAssetService);
+  }
+
+  if (options.assetService && url.pathname.startsWith("/api/v1/assets")) {
+    return routeAssetRequest(request, url, config, options.assetService);
   }
 
   if (options.contributionLimitService && url.pathname.startsWith("/api/v1/limits")) {
@@ -299,6 +305,67 @@ function routeAlternativeAssetRequest(
   if (request.method === "GET" && url.pathname === "/api/v1/alternative-holdings") {
     return Promise.resolve(alternativeAssetService.getAlternativeHoldings())
       .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAssetRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  assetService: AssetService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/assets") {
+    return Promise.resolve(assetService.listAssets()).then(jsonResponse).catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/assets") {
+    return handleJsonMutation(request, parseNewAsset, (input) =>
+      Promise.resolve(assetService.createAsset(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/assets/profile") {
+    const assetId = parseRequiredQueryString(url, "assetId");
+    if (assetId instanceof Response) {
+      return assetId;
+    }
+    return Promise.resolve(assetService.getAssetProfile(assetId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  const profileAssetId = assetProfileIdFromPath(url.pathname);
+  if (request.method === "PUT" && profileAssetId !== undefined) {
+    return handleJsonMutation(request, parseUpdateAssetProfile, (input) =>
+      Promise.resolve(assetService.updateAssetProfile(profileAssetId, input)),
+    );
+  }
+
+  const pricingModeAssetId = assetPricingModeIdFromPath(url.pathname);
+  if (request.method === "PUT" && pricingModeAssetId !== undefined) {
+    return handleJsonMutation(request, parseQuoteModeBody, (input) =>
+      Promise.resolve(assetService.updateQuoteMode(pricingModeAssetId, input.quoteMode)),
+    );
+  }
+
+  if (
+    request.method === "DELETE" &&
+    (url.pathname === "/api/v1/assets/profile" || url.pathname === "/api/v1/assets/pricing-mode")
+  ) {
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  const assetId = assetIdFromPath(url.pathname);
+  if (request.method === "DELETE" && assetId !== undefined) {
+    return Promise.resolve(assetService.deleteAsset(assetId))
+      .then(() => new Response(null, { status: 204 }))
       .catch(domainErrorResponse);
   }
 
@@ -913,6 +980,21 @@ function alternativeAssetMetadataIdFromPath(pathname: string): string | undefine
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function assetIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/assets\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function assetProfileIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/assets\/profile\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function assetPricingModeIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/assets\/pricing-mode\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function contributionLimitIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/limits\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -1490,6 +1572,103 @@ function parseAlternativeAssetKind(
     );
   }
   return value as AlternativeAssetKindApi;
+}
+
+function parseNewAsset(payload: Record<string, unknown>): NewAsset | Response {
+  const kind = parseRequiredString(payload.kind, "kind");
+  if (kind instanceof Response) {
+    return kind;
+  }
+  const quoteMode = parseRequiredString(payload.quoteMode, "quoteMode");
+  if (quoteMode instanceof Response) {
+    return quoteMode;
+  }
+  const quoteCcy = parseRequiredString(payload.quoteCcy, "quoteCcy");
+  if (quoteCcy instanceof Response) {
+    return quoteCcy;
+  }
+
+  const parsed: NewAsset = { kind, quoteMode, quoteCcy };
+  const stringFieldError = copyOptionalStringOrNullFields(payload, parsed, [
+    "id",
+    "name",
+    "displayCode",
+    "instrumentType",
+    "instrumentSymbol",
+    "instrumentExchangeMic",
+    "notes",
+  ]);
+  if (stringFieldError) {
+    return stringFieldError;
+  }
+  const booleanFieldError = copyOptionalBooleanFields(payload, parsed, ["isActive"]);
+  if (booleanFieldError) {
+    return booleanFieldError;
+  }
+  if (parsed.isActive === undefined) {
+    parsed.isActive = true;
+  }
+  const providerConfig = parseOptionalRecordOrNull(payload.providerConfig, "providerConfig");
+  if (providerConfig instanceof Response) {
+    return providerConfig;
+  }
+  if (providerConfig !== undefined && providerConfig !== null) {
+    parsed.providerConfig = providerConfig;
+  }
+  const metadata = parseOptionalRecordOrNull(payload.metadata, "metadata");
+  if (metadata instanceof Response) {
+    return metadata;
+  }
+  if (metadata !== undefined && metadata !== null) {
+    parsed.metadata = metadata;
+  }
+  return parsed;
+}
+
+function parseUpdateAssetProfile(payload: Record<string, unknown>): UpdateAssetProfile | Response {
+  const notes = parseRequiredString(payload.notes, "notes");
+  if (notes instanceof Response) {
+    return notes;
+  }
+
+  const parsed: UpdateAssetProfile = { notes };
+  const stringFieldError = copyOptionalStringOrNullFields(payload, parsed, [
+    "name",
+    "displayCode",
+    "kind",
+    "quoteMode",
+    "quoteCcy",
+    "instrumentType",
+    "instrumentSymbol",
+    "instrumentExchangeMic",
+  ]);
+  if (stringFieldError) {
+    return stringFieldError;
+  }
+  const providerConfig = parseOptionalRecordOrNull(payload.providerConfig, "providerConfig");
+  if (providerConfig instanceof Response) {
+    return providerConfig;
+  }
+  if (providerConfig !== undefined && providerConfig !== null) {
+    parsed.providerConfig = providerConfig;
+  }
+  const metadata = parseOptionalRecordOrNull(payload.metadata, "metadata");
+  if (metadata instanceof Response) {
+    return metadata;
+  }
+  if (metadata !== undefined && metadata !== null) {
+    parsed.metadata = metadata;
+  }
+  return parsed;
+}
+
+function parseQuoteModeBody(payload: Record<string, unknown>): { quoteMode: string } | Response {
+  const value = payload.quoteMode ?? payload.pricingMode;
+  const quoteMode = parseRequiredString(value, "quoteMode");
+  if (quoteMode instanceof Response) {
+    return quoteMode;
+  }
+  return { quoteMode };
 }
 
 function parseSecretSetRequest(
@@ -2578,6 +2757,40 @@ function parseRequiredStringRecord(
     return jsonResponse({ code: 400, message: `${field} must be an object of strings` }, 400);
   }
   return value as Record<string, string>;
+}
+
+function copyOptionalStringOrNullFields(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+  fields: string[],
+): Response | undefined {
+  for (const field of fields) {
+    const value = parseOptionalStringOrNull(source[field], field);
+    if (value instanceof Response) {
+      return value;
+    }
+    if (value !== undefined && value !== null) {
+      target[field] = value;
+    }
+  }
+  return undefined;
+}
+
+function copyOptionalBooleanFields(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+  fields: string[],
+): Response | undefined {
+  for (const field of fields) {
+    const value = parseOptionalBoolean(source[field], field);
+    if (value instanceof Response) {
+      return value;
+    }
+    if (value !== undefined) {
+      target[field] = value;
+    }
+  }
+  return undefined;
 }
 
 function parseOptionalStringArrayOrNull(

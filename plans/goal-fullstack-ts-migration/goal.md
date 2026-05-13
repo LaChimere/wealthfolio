@@ -136,6 +136,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `/api/v1/alternative-assets`/`/api/v1/alternative-holdings` routes, request
   validation, decoded path IDs, 204 mutation responses, and targeted backend
   tests.
+- Turn 18: Implemented the low-risk assets HTTP seam TS slice: injectable
+  `AssetService`, guarded `/api/v1/assets` list/profile/create/update/quote-mode
+  and delete routes, query/path decoding, quoteMode/pricingMode alias handling,
+  null-as-omitted option behavior, and targeted backend tests.
 
 ## Deferred items
 
@@ -176,6 +180,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   holdings/net-worth calculations, and portfolio job enqueue behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/portfolio calculation parity slices.
+- Asset repository persistence, profile/quote-mode side effects, quote-provider
+  interactions, activity guards, and portfolio recalculation behavior remain
+  active follow-ups. reason=this slice only adds the guarded HTTP seam, while
+  runtime behavior must move with asset/market-data/portfolio parity slices.
 
 ## Blockers
 
