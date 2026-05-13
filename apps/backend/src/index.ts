@@ -82,6 +82,12 @@ export type {
   UpdateCheckResponse,
 } from "./domains/app-utilities";
 export type { Asset, AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
+export type {
+  ConnectImportRunsRequest,
+  ConnectService,
+  ConnectSyncBrokerDataResult,
+  ConnectSyncBrokerDataStatus,
+} from "./domains/connect";
 export {
   createContributionLimitRepository,
   createContributionLimitService,

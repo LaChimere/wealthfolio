@@ -10,20 +10,22 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded health runtime and classification
-migration HTTP seam after the sync crypto route seam:
+PR 5 continues vertical slices with a guarded Connect broker/session HTTP seam
+after the health/classification route seam:
 
-- Extend the existing `HealthService` and `TaxonomyService` seams with optional
-  runtime methods for `/health/status`, `/health/check`, `/health/fix`, and
-  `/taxonomies/migration/{status,run}` while preserving existing local-only
-  health/config behavior when those methods are absent.
-- Preserve Rust HTTP semantics for client-timezone header trimming, no-body
-  health checks and migration runs, fix-action body validation with nullable
-  payloads, JSON status/result responses, empty 200 fix responses, method/path
+- Add an injectable `ConnectService` seam for non-device `/api/v1/connect/*`
+  routes covering session storage/status/restore, broker list/sync operations,
+  local synced data reads, import-run queries, broker sync profiles,
+  subscription plans, public plans, and user info.
+- Preserve Rust HTTP semantics for JSON `null` session mutations, body-ignoring
+  sync POST routes, 202/403/501 broker-sync trigger status, import-run query
+  defaults/validation, direct broker-profile body pass-through, method/path
   inertness, and sidecar bearer-token checks.
-- Defer real health checks, classification migration, market sync fix execution,
-  health cache behavior, and taxonomy/asset side effects to dedicated
-  health/classification runtime parity slices.
+- Keep `/api/v1/connect/device/*` out of scope for the dedicated device-sync
+  runtime parity slice.
+- Defer real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, local sync repositories, entitlement checks, and event
+  production to dedicated Connect runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -32,14 +34,15 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, or AI chat runtime
-deletion, real sync crypto runtime implementation, or real health/classification
+deletion, real sync crypto runtime implementation, real health/classification
+runtime implementation, real Connect runtime implementation, or device-sync
 runtime implementation is in scope for this slice.
 
 ## Next slices
 
-1. Continue other low-risk domain slices before calculation-heavy work.
-2. Migrate taxonomy migration/health endpoints with the health/classification
-   services.
+1. Continue other low-risk/high-risk route seams before calculation-heavy work.
+2. Migrate Connect/device-sync runtime behavior with dedicated service parity
+   gates.
 3. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
 4. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.

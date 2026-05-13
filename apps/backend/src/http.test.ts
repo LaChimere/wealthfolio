@@ -10,6 +10,7 @@ import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService } from "./domains/assets";
+import type { ConnectService, ConnectSyncBrokerDataStatus } from "./domains/connect";
 import {
   createContributionLimitRepository,
   createContributionLimitService,
@@ -3710,6 +3711,345 @@ describe("TS backend HTTP skeleton", () => {
       ["hmac-sha256", { key: "", data: "" }],
       ["compute-sas", ""],
       ["generate-device-id", undefined],
+    ]);
+  });
+
+  test("routes migrated Connect broker and session seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    let syncBrokerDataStatus: ConnectSyncBrokerDataStatus = "accepted";
+    const connectService: ConnectService = {
+      storeSyncSession(refreshToken) {
+        calls.push(["store-session", refreshToken]);
+      },
+      clearSyncSession() {
+        calls.push(["clear-session", undefined]);
+      },
+      getSyncSessionStatus() {
+        calls.push(["session-status", undefined]);
+        return { isConfigured: true };
+      },
+      restoreSyncSession() {
+        calls.push(["restore-session", undefined]);
+        return { accessToken: "access-token", refreshToken: "refresh-token" };
+      },
+      listBrokerConnections() {
+        calls.push(["list-connections", undefined]);
+        return [{ id: "connection-1" }];
+      },
+      listBrokerAccounts() {
+        calls.push(["list-accounts", undefined]);
+        return [{ id: "account-1" }];
+      },
+      syncBrokerData() {
+        calls.push(["sync-data", undefined]);
+        return { status: syncBrokerDataStatus };
+      },
+      syncBrokerConnections() {
+        calls.push(["sync-connections", undefined]);
+        return { created: 1 };
+      },
+      syncBrokerAccounts() {
+        calls.push(["sync-accounts", undefined]);
+        return { created: 2 };
+      },
+      syncBrokerActivities() {
+        calls.push(["sync-activities", undefined]);
+        return { activitiesUpserted: 3 };
+      },
+      getSyncedAccounts() {
+        calls.push(["synced-accounts", undefined]);
+        return [{ id: "local-account" }];
+      },
+      getPlatforms() {
+        calls.push(["platforms", undefined]);
+        return [{ id: "platform-1" }];
+      },
+      getBrokerSyncStates() {
+        calls.push(["sync-states", undefined]);
+        return [{ sourceSystem: "snaptrade" }];
+      },
+      getImportRuns(request) {
+        calls.push(["import-runs", request]);
+        return [{ id: "run-1" }];
+      },
+      getBrokerSyncProfile(accountId, sourceSystem) {
+        calls.push(["broker-sync-profile", { accountId, sourceSystem }]);
+        return { accountId, sourceSystem, rules: [] };
+      },
+      saveBrokerSyncProfileRules(request) {
+        calls.push(["save-broker-sync-profile", request]);
+        return { rules: request.rules };
+      },
+      getSubscriptionPlans() {
+        calls.push(["plans", undefined]);
+        return { plans: [{ id: "pro" }] };
+      },
+      getSubscriptionPlansPublic() {
+        calls.push(["plans-public", undefined]);
+        return { plans: [{ id: "free" }] };
+      },
+      getUserInfo() {
+        calls.push(["user-info", undefined]);
+        return { id: "user-1" };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { connectService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/connect/session/status"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/connect/session/status", {
+            headers: { authorization: "Bearer wrong-token" },
+          }),
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/connect/session/status", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const storeResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/connect/session", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      }),
+    );
+    expect(storeResponse.status).toBe(200);
+    expect(await storeResponse.text()).toBe("null");
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/session", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ refresh_token: "refresh-token" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    const clearResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/connect/session", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(clearResponse.status).toBe(200);
+    expect(await clearResponse.text()).toBe("null");
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/session/status", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ isConfigured: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/session/restore", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ accessToken: "access-token", refreshToken: "refresh-token" });
+
+    for (const [path, expected] of [
+      ["/api/v1/connect/connections", [{ id: "connection-1" }]],
+      ["/api/v1/connect/accounts", [{ id: "account-1" }]],
+      ["/api/v1/connect/synced-accounts", [{ id: "local-account" }]],
+      ["/api/v1/connect/platforms", [{ id: "platform-1" }]],
+      ["/api/v1/connect/sync-states", [{ sourceSystem: "snaptrade" }]],
+      ["/api/v1/connect/plans", { plans: [{ id: "pro" }] }],
+      ["/api/v1/connect/plans/public", { plans: [{ id: "free" }] }],
+      ["/api/v1/connect/user", { id: "user-1" }],
+    ] as const) {
+      await expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1${path}`, {
+              headers: authHeaders,
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual(expected);
+    }
+
+    const syncResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/connect/sync", {
+        method: "POST",
+        headers: authHeaders,
+        body: "not-json",
+      }),
+    );
+    expect(syncResponse.status).toBe(202);
+    expect(await syncResponse.text()).toBe("");
+    syncBrokerDataStatus = "forbidden";
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/sync", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    syncBrokerDataStatus = "not_implemented";
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/sync", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(501);
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/sync/connections", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ created: 1 });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/sync/accounts", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ created: 2 });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/sync/activities", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ activitiesUpserted: 3 });
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/connect/import-runs", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/connect/import-runs?runType=broker&limit=10&offset=-1", {
+        headers: authHeaders,
+      }),
+    );
+    for (const query of ["limit=", "limit=1.5", "limit=9007199254740992"]) {
+      expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1/api/v1/connect/import-runs?${query}`, {
+              headers: authHeaders,
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/broker-sync-profile?accountId=acct-1", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await expect(
+      (
+        await handler(
+          new Request(
+            "http://127.0.0.1/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade",
+            { headers: authHeaders },
+          ),
+        )
+      ).json(),
+    ).resolves.toEqual({ accountId: "acct-1", sourceSystem: "snaptrade", rules: [] });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/broker-sync-profile", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ rules: [{ id: "rule-1" }] }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ rules: [{ id: "rule-1" }] });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/broker-sync-profile", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify([]),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/sync-state", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+    expect((await handler(new Request("http://127.0.0.1/api/v1/connect/device-foo"))).status).toBe(
+      401,
+    );
+
+    expect(calls).toEqual([
+      ["store-session", "refresh-token"],
+      ["clear-session", undefined],
+      ["session-status", undefined],
+      ["restore-session", undefined],
+      ["list-connections", undefined],
+      ["list-accounts", undefined],
+      ["synced-accounts", undefined],
+      ["platforms", undefined],
+      ["sync-states", undefined],
+      ["plans", undefined],
+      ["plans-public", undefined],
+      ["user-info", undefined],
+      ["sync-data", undefined],
+      ["sync-data", undefined],
+      ["sync-data", undefined],
+      ["sync-connections", undefined],
+      ["sync-accounts", undefined],
+      ["sync-activities", undefined],
+      ["import-runs", { limit: 50, offset: 0, runType: undefined }],
+      ["import-runs", { limit: 10, offset: -1, runType: "broker" }],
+      ["broker-sync-profile", { accountId: "acct-1", sourceSystem: "snaptrade" }],
+      ["save-broker-sync-profile", { rules: [{ id: "rule-1" }] }],
     ]);
   });
 

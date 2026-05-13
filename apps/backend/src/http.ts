@@ -37,6 +37,11 @@ import type {
 } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
+import type {
+  ConnectImportRunsRequest,
+  ConnectService,
+  ConnectSyncBrokerDataResult,
+} from "./domains/connect";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type {
   CustomProviderService,
@@ -89,6 +94,7 @@ export interface BackendRequestHandlerOptions {
   alternativeAssetService?: AlternativeAssetService;
   appUtilityService?: AppUtilityService;
   assetService?: AssetService;
+  connectService?: ConnectService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
@@ -198,6 +204,16 @@ async function routeRequest(
 
   if (options.assetService && url.pathname.startsWith("/api/v1/assets")) {
     return routeAssetRequest(request, url, config, options.assetService);
+  }
+
+  if (isConnectBrokerPath(url.pathname)) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    if (options.connectService) {
+      return routeConnectRequest(request, url, options.connectService);
+    }
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
 
   if (options.contributionLimitService && url.pathname.startsWith("/api/v1/limits")) {
@@ -435,6 +451,134 @@ function routeActivityRequest(
   const activityId = activityIdFromPath(url.pathname);
   if (request.method === "DELETE" && activityId !== undefined) {
     return Promise.resolve(activityService.deleteActivity(activityId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeConnectRequest(
+  request: Request,
+  url: URL,
+  connectService: ConnectService,
+): Promise<Response> | Response {
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/session") {
+    return handleConnectStoreSessionRequest(request, connectService);
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/v1/connect/session") {
+    return Promise.resolve(connectService.clearSyncSession())
+      .then(() => jsonResponse(null))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/session/status") {
+    return Promise.resolve(connectService.getSyncSessionStatus())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/session/restore") {
+    return Promise.resolve(connectService.restoreSyncSession())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/connections") {
+    return Promise.resolve(connectService.listBrokerConnections())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/accounts") {
+    return Promise.resolve(connectService.listBrokerAccounts())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/sync") {
+    return Promise.resolve(connectService.syncBrokerData())
+      .then(connectSyncBrokerDataResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/sync/connections") {
+    return Promise.resolve(connectService.syncBrokerConnections())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/sync/accounts") {
+    return Promise.resolve(connectService.syncBrokerAccounts())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/sync/activities") {
+    return Promise.resolve(connectService.syncBrokerActivities())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/synced-accounts") {
+    return Promise.resolve(connectService.getSyncedAccounts())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/platforms") {
+    return Promise.resolve(connectService.getPlatforms())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/sync-states") {
+    return Promise.resolve(connectService.getBrokerSyncStates())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/import-runs") {
+    const input = parseConnectImportRunsQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(connectService.getImportRuns(input))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/broker-sync-profile") {
+    const input = parseConnectBrokerSyncProfileQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(connectService.getBrokerSyncProfile(input.accountId, input.sourceSystem))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/broker-sync-profile") {
+    return handleJsonMutation(request, passThroughObject, (input) =>
+      Promise.resolve(connectService.saveBrokerSyncProfileRules(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/plans") {
+    return Promise.resolve(connectService.getSubscriptionPlans())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/plans/public") {
+    return Promise.resolve(connectService.getSubscriptionPlansPublic())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/user") {
+    return Promise.resolve(connectService.getUserInfo())
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
@@ -2948,6 +3092,96 @@ function parseActivityImportMappingQuery(
     accountId,
     contextKind: url.searchParams.get("contextKind") ?? ACTIVITY_IMPORT_CONTEXT_KIND,
   };
+}
+
+function isConnectBrokerPath(pathname: string): boolean {
+  const connectPath = pathname === "/api/v1/connect" || pathname.startsWith("/api/v1/connect/");
+  return connectPath && !isConnectDevicePath(pathname);
+}
+
+function isConnectDevicePath(pathname: string): boolean {
+  return pathname === "/api/v1/connect/device" || pathname.startsWith("/api/v1/connect/device/");
+}
+
+async function handleConnectStoreSessionRequest(
+  request: Request,
+  connectService: ConnectService,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const refreshToken = parseRequiredString(payload.refreshToken, "refreshToken");
+  if (refreshToken instanceof Response) {
+    return refreshToken;
+  }
+  try {
+    await connectService.storeSyncSession(refreshToken);
+    return jsonResponse(null);
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+function connectSyncBrokerDataResponse(result: ConnectSyncBrokerDataResult): Response {
+  const status = result.status;
+  switch (status) {
+    case "accepted":
+      return new Response(null, { status: 202 });
+    case "forbidden":
+      return new Response(null, { status: 403 });
+    case "not_implemented":
+      return new Response(null, { status: 501 });
+  }
+  return jsonResponse(
+    { code: 400, message: `Unsupported Connect sync status: ${String(status)}` },
+    400,
+  );
+}
+
+function parseConnectImportRunsQuery(url: URL): ConnectImportRunsRequest | Response {
+  const limit = parseOptionalIntegerQuery(url, "limit");
+  if (limit instanceof Response) {
+    return limit;
+  }
+  const offset = parseOptionalIntegerQuery(url, "offset");
+  if (offset instanceof Response) {
+    return offset;
+  }
+  return {
+    runType: url.searchParams.get("runType") ?? undefined,
+    limit: limit ?? 50,
+    offset: offset ?? 0,
+  };
+}
+
+function parseOptionalIntegerQuery(url: URL, field: string): number | undefined | Response {
+  const value = url.searchParams.get(field);
+  if (value === null) {
+    return undefined;
+  }
+  if (!/^[-+]?\d+$/.test(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
+  }
+  return parsed;
+}
+
+function parseConnectBrokerSyncProfileQuery(
+  url: URL,
+): { accountId: string; sourceSystem: string } | Response {
+  const accountId = parseRequiredQueryString(url, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const sourceSystem = parseRequiredQueryString(url, "sourceSystem");
+  if (sourceSystem instanceof Response) {
+    return sourceSystem;
+  }
+  return { accountId, sourceSystem };
 }
 
 function parseWrappedObject<TField extends string>(
