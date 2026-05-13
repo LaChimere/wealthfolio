@@ -14,6 +14,17 @@ export { startBackendServer, type BackendServerHandle } from "./server";
 export { createEventBus, type BackendEvent, type BackendEventBus } from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
 export {
+  DEFAULT_SETTINGS,
+  canonicalizeTimezone,
+  createSettingsService,
+  getSetting,
+  readSettings,
+  writeSettingsUpdate,
+  type Settings,
+  type SettingsService,
+  type SettingsUpdate,
+} from "./domains/settings";
+export {
   DEFAULT_MIGRATIONS_RELATIVE_PATH,
   DIESEL_SCHEMA_MIGRATIONS_TABLE,
   applyConnectionPragmas,

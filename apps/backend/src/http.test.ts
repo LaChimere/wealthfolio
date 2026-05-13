@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
+import { createSettingsService } from "./domains/settings";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
@@ -92,5 +94,50 @@ describe("TS backend HTTP skeleton", () => {
 
     expect(response.status).toBe(408);
     await expect(response.json()).resolves.toEqual({ code: 408, message: "Request timeout" });
+  });
+
+  test("routes migrated settings domain only when a service is provided", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE app_settings (
+        setting_key TEXT NOT NULL PRIMARY KEY,
+        setting_value TEXT NOT NULL
+      );
+    `);
+    const handler = createBackendRequestHandler(config, {
+      settingsService: createSettingsService(db),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/settings"))).status).toBe(401);
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/settings", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ theme: "dark", timezone: "America/Toronto" }),
+        }),
+      );
+      const updatedSettings = await updateResponse.json();
+
+      expect(updateResponse.status).toBe(200);
+      expect(updatedSettings).toMatchObject({
+        theme: "dark",
+        timezone: "America/Toronto",
+      });
+      await expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/settings/auto-update", {
+              headers: { authorization: "Bearer sidecar-token" },
+            }),
+          )
+        ).json(),
+      ).resolves.toBe(true);
+    } finally {
+      db.close();
+    }
   });
 });

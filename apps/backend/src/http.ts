@@ -1,9 +1,11 @@
 import type { BackendRuntimeConfig } from "./config";
+import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
 export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
+  settingsService?: SettingsService;
 }
 
 export function createBackendRequestHandler(
@@ -60,6 +62,10 @@ async function routeRequest(
     return jsonResponse({ requiresPassword: Boolean(config.authPasswordHash) });
   }
 
+  if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
+    return await routeSettingsRequest(request, url, config, options.settingsService);
+  }
+
   if (options.includeDebugRoutes) {
     if (options.debugDelayMs) {
       await Bun.sleep(options.debugDelayMs);
@@ -72,6 +78,42 @@ async function routeRequest(
     }
   }
 
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function routeSettingsRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  settingsService: SettingsService,
+): Promise<Response> {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/settings") {
+    return jsonResponse(settingsService.getSettings());
+  }
+  if (request.method === "POST" && url.pathname === "/api/v1/settings") {
+    const payload = await parseJsonBody(request);
+    if (payload instanceof Response) {
+      return payload;
+    }
+    const update = parseSettingsUpdate(payload);
+    if (update instanceof Response) {
+      return update;
+    }
+    try {
+      return jsonResponse(settingsService.updateSettings(update));
+    } catch (error) {
+      return jsonResponse(
+        { code: 400, message: error instanceof Error ? error.message : String(error) },
+        400,
+      );
+    }
+  }
+  if (request.method === "GET" && url.pathname === "/api/v1/settings/auto-update") {
+    return jsonResponse(settingsService.isAutoUpdateCheckEnabled());
+  }
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
@@ -114,4 +156,51 @@ function jsonResponse(body: unknown, status = 200): Response {
       "content-type": "application/json",
     },
   });
+}
+
+async function parseJsonBody(request: Request): Promise<Record<string, unknown> | Response> {
+  try {
+    const payload = await request.json();
+    if (typeof payload === "object" && payload !== null && !Array.isArray(payload)) {
+      return payload as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to the explicit bad-request response below.
+  }
+  return jsonResponse({ code: 400, message: "Invalid JSON body" }, 400);
+}
+
+function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {
+  const update: SettingsUpdate = {};
+  const stringFields = ["theme", "font", "baseCurrency", "timezone"] as const;
+  const booleanFields = [
+    "onboardingCompleted",
+    "autoUpdateCheckEnabled",
+    "menuBarVisible",
+    "syncEnabled",
+  ] as const;
+
+  for (const field of stringFields) {
+    const value = payload[field];
+    if (value === undefined) {
+      continue;
+    }
+    if (typeof value !== "string") {
+      return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+    }
+    update[field] = value;
+  }
+
+  for (const field of booleanFields) {
+    const value = payload[field];
+    if (value === undefined) {
+      continue;
+    }
+    if (typeof value !== "boolean") {
+      return jsonResponse({ code: 400, message: `${field} must be a boolean` }, 400);
+    }
+    update[field] = value;
+  }
+
+  return update;
 }
