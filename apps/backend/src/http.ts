@@ -26,6 +26,12 @@ import type {
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { HealthConfig, HealthService } from "./domains/health";
+import type {
+  HoldingsImportRequest,
+  HoldingsService,
+  HoldingsSnapshotInput,
+  SaveManualHoldingsRequest,
+} from "./domains/holdings";
 import type { MarketDataProviderService, ProviderUpdate } from "./domains/market-data-providers";
 import {
   buildPortfolioRecalculateConfig,
@@ -62,6 +68,7 @@ export interface BackendRequestHandlerOptions {
   exchangeRateService?: ExchangeRateService;
   goalService?: GoalService;
   healthService?: HealthService;
+  holdingsService?: HoldingsService;
   marketDataProviderService?: MarketDataProviderService;
   portfolioMetricsService?: PortfolioMetricsService;
   portfolioJobService?: PortfolioJobService;
@@ -179,6 +186,16 @@ async function routeRequest(
 
   if (options.healthService && url.pathname.startsWith("/api/v1/health")) {
     return routeHealthRequest(request, url, config, options.healthService);
+  }
+
+  if (
+    options.holdingsService &&
+    (url.pathname.startsWith("/api/v1/holdings") ||
+      url.pathname.startsWith("/api/v1/valuations") ||
+      url.pathname.startsWith("/api/v1/allocations") ||
+      url.pathname.startsWith("/api/v1/snapshots"))
+  ) {
+    return routeHoldingsRequest(request, url, config, options.holdingsService);
   }
 
   if (options.eventBus && url.pathname === "/api/v1/events/stream") {
@@ -498,6 +515,169 @@ function routePortfolioMetricsRequest(
     return Promise.resolve(portfolioMetricsService.getIncomeSummary(accountId))
       .then(jsonResponse)
       .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeHoldingsRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  holdingsService: HoldingsService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/holdings") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    return Promise.resolve(holdingsService.getHoldings(accountId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/holdings/item") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    const assetId = parseRequiredQueryString(url, "assetId");
+    if (assetId instanceof Response) {
+      return assetId;
+    }
+    return Promise.resolve(holdingsService.getHolding(accountId, assetId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/holdings/by-asset") {
+    const assetId = parseRequiredQueryString(url, "assetId");
+    if (assetId instanceof Response) {
+      return assetId;
+    }
+    return Promise.resolve(holdingsService.getAssetHoldings(assetId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/valuations/history") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    const startDate = parseOptionalDateQuery(url, "startDate");
+    if (startDate instanceof Response) {
+      return startDate;
+    }
+    const endDate = parseOptionalDateQuery(url, "endDate");
+    if (endDate instanceof Response) {
+      return endDate;
+    }
+    return Promise.resolve(holdingsService.getHistoricalValuations(accountId, startDate, endDate))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/valuations/latest") {
+    return Promise.resolve(
+      holdingsService.getLatestValuations(
+        parseRepeatedQueryStrings(url, ["accountIds", "accountIds[]"]),
+      ),
+    )
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/allocations") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    return Promise.resolve(holdingsService.getPortfolioAllocations(accountId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/allocations/holdings") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    const taxonomyId = parseRequiredQueryString(url, "taxonomyId");
+    if (taxonomyId instanceof Response) {
+      return taxonomyId;
+    }
+    const categoryId = parseRequiredQueryString(url, "categoryId");
+    if (categoryId instanceof Response) {
+      return categoryId;
+    }
+    return Promise.resolve(
+      holdingsService.getHoldingsByAllocation(accountId, taxonomyId, categoryId),
+    )
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/snapshots") {
+    const input = parseSnapshotsQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(
+      holdingsService.getSnapshots(input.accountId, input.dateFrom, input.dateTo),
+    )
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/snapshots/holdings") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    const date = parseRequiredDateQuery(url, "date");
+    if (date instanceof Response) {
+      return date;
+    }
+    return Promise.resolve(holdingsService.getSnapshotByDate(accountId, date))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/v1/snapshots") {
+    const accountId = parseRequiredQueryString(url, "accountId");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    const date = parseRequiredDateQuery(url, "date");
+    if (date instanceof Response) {
+      return date;
+    }
+    return Promise.resolve(holdingsService.deleteSnapshot(accountId, date))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/snapshots") {
+    return handleJsonMutationEmpty(request, parseSaveManualHoldingsRequest, (input) =>
+      Promise.resolve(holdingsService.saveManualHoldings(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/snapshots/import") {
+    return handleJsonMutation(request, parseHoldingsImportRequest, (input) =>
+      Promise.resolve(holdingsService.importHoldingsCsv(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/snapshots/import/check") {
+    return handleJsonMutation(request, parseHoldingsImportRequest, (input) =>
+      Promise.resolve(holdingsService.checkHoldingsImport(input)),
+    );
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1867,6 +2047,72 @@ function parsePerformanceRequest(payload: Record<string, unknown>): PerformanceR
   return parsed;
 }
 
+function parseSnapshotsQuery(
+  url: URL,
+): { accountId: string; dateFrom?: string; dateTo?: string } | Response {
+  const accountId = parseRequiredQueryString(url, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const dateFrom = parseOptionalDateQuery(url, "dateFrom");
+  if (dateFrom instanceof Response) {
+    return dateFrom;
+  }
+  const dateTo = parseOptionalDateQuery(url, "dateTo");
+  if (dateTo instanceof Response) {
+    return dateTo;
+  }
+  const parsed: { accountId: string; dateFrom?: string; dateTo?: string } = { accountId };
+  if (dateFrom !== undefined) {
+    parsed.dateFrom = dateFrom;
+  }
+  if (dateTo !== undefined) {
+    parsed.dateTo = dateTo;
+  }
+  return parsed;
+}
+
+function parseSaveManualHoldingsRequest(
+  payload: Record<string, unknown>,
+): SaveManualHoldingsRequest | Response {
+  const accountId = parseRequiredString(payload.accountId, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const holdings = parseHoldingInputArray(payload.holdings, "holdings");
+  if (holdings instanceof Response) {
+    return holdings;
+  }
+  const cashBalances = parseRequiredStringRecord(payload.cashBalances, "cashBalances");
+  if (cashBalances instanceof Response) {
+    return cashBalances;
+  }
+  const snapshotDate = parseOptionalDateBody(payload.snapshotDate, "snapshotDate");
+  if (snapshotDate instanceof Response) {
+    return snapshotDate;
+  }
+
+  const parsed: SaveManualHoldingsRequest = { accountId, holdings, cashBalances };
+  if (snapshotDate !== undefined) {
+    parsed.snapshotDate = snapshotDate;
+  }
+  return parsed;
+}
+
+function parseHoldingsImportRequest(
+  payload: Record<string, unknown>,
+): HoldingsImportRequest | Response {
+  const accountId = parseRequiredString(payload.accountId, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const snapshots = parseHoldingsSnapshotArray(payload.snapshots, "snapshots");
+  if (snapshots instanceof Response) {
+    return snapshots;
+  }
+  return { accountId, snapshots };
+}
+
 function parseSecretSetRequest(
   payload: Record<string, unknown>,
 ): { secretKey: string; secret: string } | Response {
@@ -2901,6 +3147,17 @@ function parseRequiredQueryString(url: URL, field: string): string | Response {
   return value;
 }
 
+function parseRepeatedQueryStrings(url: URL, fields: string[]): string[] | undefined {
+  const acceptedFields = new Set(fields);
+  const values: string[] = [];
+  for (const [field, value] of url.searchParams) {
+    if (acceptedFields.has(field)) {
+      values.push(value);
+    }
+  }
+  return values.length === 0 ? undefined : values;
+}
+
 function parseRequiredDateQuery(url: URL, field: string): string | Response {
   const value = parseRequiredQueryString(url, field);
   if (value instanceof Response) {
@@ -2967,6 +3224,181 @@ function parseIsoDate(value: string, field: string): string | Response {
     return jsonResponse({ code: 400, message: `${field} must be a valid date` }, 400);
   }
   return value;
+}
+
+function parseHoldingInputArray(
+  value: unknown,
+  field: string,
+): SaveManualHoldingsRequest["holdings"] | Response {
+  if (!Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an array` }, 400);
+  }
+  const parsed: SaveManualHoldingsRequest["holdings"] = [];
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return jsonResponse({ code: 400, message: `${field}[${index}] must be an object` }, 400);
+    }
+    const holding = parseHoldingInput(item as Record<string, unknown>, `${field}[${index}]`);
+    if (holding instanceof Response) {
+      return holding;
+    }
+    parsed.push(holding);
+  }
+  return parsed;
+}
+
+function parseHoldingInput(
+  payload: Record<string, unknown>,
+  field: string,
+): SaveManualHoldingsRequest["holdings"][number] | Response {
+  const symbol = parseRequiredString(payload.symbol, `${field}.symbol`);
+  if (symbol instanceof Response) {
+    return symbol;
+  }
+  const quantity = parseRequiredString(payload.quantity, `${field}.quantity`);
+  if (quantity instanceof Response) {
+    return quantity;
+  }
+  const currency = parseRequiredString(payload.currency, `${field}.currency`);
+  if (currency instanceof Response) {
+    return currency;
+  }
+
+  const parsed: SaveManualHoldingsRequest["holdings"][number] = { symbol, quantity, currency };
+  const optionalFields = copyManualHoldingOptionalStrings(payload, parsed, field);
+  if (optionalFields instanceof Response) {
+    return optionalFields;
+  }
+  return parsed;
+}
+
+function parseHoldingsSnapshotArray(
+  value: unknown,
+  field: string,
+): HoldingsSnapshotInput[] | Response {
+  if (!Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an array` }, 400);
+  }
+  const parsed: HoldingsSnapshotInput[] = [];
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return jsonResponse({ code: 400, message: `${field}[${index}] must be an object` }, 400);
+    }
+    const snapshot = parseHoldingsSnapshot(item as Record<string, unknown>, `${field}[${index}]`);
+    if (snapshot instanceof Response) {
+      return snapshot;
+    }
+    parsed.push(snapshot);
+  }
+  return parsed;
+}
+
+function parseHoldingsSnapshot(
+  payload: Record<string, unknown>,
+  field: string,
+): HoldingsSnapshotInput | Response {
+  const date = parseRequiredString(payload.date, `${field}.date`);
+  if (date instanceof Response) {
+    return date;
+  }
+  const positions = parseHoldingsPositionArray(payload.positions, `${field}.positions`);
+  if (positions instanceof Response) {
+    return positions;
+  }
+  const cashBalances = parseRequiredStringRecord(payload.cashBalances, `${field}.cashBalances`);
+  if (cashBalances instanceof Response) {
+    return cashBalances;
+  }
+  return { date, positions, cashBalances };
+}
+
+function parseHoldingsPositionArray(
+  value: unknown,
+  field: string,
+): HoldingsSnapshotInput["positions"] | Response {
+  if (!Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an array` }, 400);
+  }
+  const parsed: HoldingsSnapshotInput["positions"] = [];
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return jsonResponse({ code: 400, message: `${field}[${index}] must be an object` }, 400);
+    }
+    const position = parseHoldingsPosition(item as Record<string, unknown>, `${field}[${index}]`);
+    if (position instanceof Response) {
+      return position;
+    }
+    parsed.push(position);
+  }
+  return parsed;
+}
+
+function parseHoldingsPosition(
+  payload: Record<string, unknown>,
+  field: string,
+): HoldingsSnapshotInput["positions"][number] | Response {
+  const symbol = parseRequiredString(payload.symbol, `${field}.symbol`);
+  if (symbol instanceof Response) {
+    return symbol;
+  }
+  const quantity = parseRequiredString(payload.quantity, `${field}.quantity`);
+  if (quantity instanceof Response) {
+    return quantity;
+  }
+  const currency = parseRequiredString(payload.currency, `${field}.currency`);
+  if (currency instanceof Response) {
+    return currency;
+  }
+
+  const parsed: HoldingsSnapshotInput["positions"][number] = { symbol, quantity, currency };
+  const optionalFields = copyHoldingsPositionOptionalStrings(payload, parsed, field);
+  if (optionalFields instanceof Response) {
+    return optionalFields;
+  }
+  return parsed;
+}
+
+function copyManualHoldingOptionalStrings(
+  source: Record<string, unknown>,
+  target: SaveManualHoldingsRequest["holdings"][number],
+  field: string,
+): Response | undefined {
+  const optionalFields = [
+    "assetId",
+    "averageCost",
+    "exchangeMic",
+    "name",
+    "dataSource",
+    "assetKind",
+  ] as const;
+  for (const optionalField of optionalFields) {
+    const value = parseOptionalStringOrNull(source[optionalField], `${field}.${optionalField}`);
+    if (value instanceof Response) {
+      return value;
+    }
+    if (value !== undefined && value !== null) {
+      target[optionalField] = value;
+    }
+  }
+  return undefined;
+}
+
+function copyHoldingsPositionOptionalStrings(
+  source: Record<string, unknown>,
+  target: HoldingsSnapshotInput["positions"][number],
+  field: string,
+): Response | undefined {
+  const optionalFields = ["assetId", "avgCost", "exchangeMic"] as const;
+  for (const optionalField of optionalFields) {
+    const value = parseOptionalStringOrNull(source[optionalField], `${field}.${optionalField}`);
+    if (value instanceof Response) {
+      return value;
+    }
+    if (value !== undefined && value !== null) {
+      target[optionalField] = value;
+    }
+  }
+  return undefined;
 }
 
 function parseOptionalRecordOrNull(

@@ -67,9 +67,9 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, alternative assets, assets, app utilities, and portfolio metrics
-    TS repository/service or route config implementations plus guarded route
-    tests in `apps/backend/src/domains/settings.ts`,
+    provider, alternative assets, assets, app utilities, portfolio metrics, and
+    holdings TS repository/service or route config implementations plus guarded
+    route tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -78,24 +78,27 @@
     `apps/backend/src/domains/exchange-rates.ts`,
     `apps/backend/src/domains/health.ts`,
     `apps/backend/src/domains/market-data-providers.ts`,
-    `apps/backend/src/domains/portfolio-jobs.ts`, and
-    `apps/backend/src/events.ts`, and `apps/backend/src/http.test.ts`. Health
-    status/check/fix and taxonomy migration endpoints are deferred to the
-    health/classification service slice; custom provider `test-source` is
-    deferred to an external-I/O slice; goals plan writes and calculation
-    endpoints are deferred to calculation-heavy slices; FX converter/history and
-    provider sync behavior plus broader market-data quote/search/import/sync
-    behavior are deferred to calculation/market-data slices; actual portfolio
-    job execution and event production are deferred to portfolio/calculation
-    slices; real secret persistence/keyring integration is deferred to a
-    runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior is deferred to AI/secrets parity slices; alternative asset
+    `apps/backend/src/domains/portfolio-jobs.ts`,
+    `apps/backend/src/domains/holdings.ts`, `apps/backend/src/events.ts`, and
+    `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
+    migration endpoints are deferred to the health/classification service slice;
+    custom provider `test-source` is deferred to an external-I/O slice; goals
+    plan writes and calculation endpoints are deferred to calculation-heavy
+    slices; FX converter/history and provider sync behavior plus broader
+    market-data quote/search/import/sync behavior are deferred to
+    calculation/market-data slices; actual portfolio job execution and event
+    production are deferred to portfolio/calculation slices; real secret
+    persistence/keyring integration is deferred to a runtime/keyring parity
+    slice; AI provider catalog/settings/model-listing runtime behavior is
+    deferred to AI/secrets parity slices; alternative asset
     persistence/quotes/holdings/job behavior is deferred to asset/portfolio
     parity slices; asset persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app runtime metadata,
     update-check HTTP/cache, backup/restore I/O, and path normalization are
     deferred to app utility parity slices; portfolio metric calculations are
-    deferred to portfolio calculation parity slices.
+    deferred to portfolio calculation parity slices; holdings fan-out,
+    valuations, allocations, snapshots, imports, and portfolio recalculation
+    side effects are deferred to holdings/portfolio parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -373,6 +376,21 @@ contract:
   error handling, or test coverage.
 - `pr5-portfolio-metrics-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-holdings-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable holdings reads, holding item null responses,
+  asset-holdings reads, valuation history/latest reads, allocation reads,
+  snapshot reads/deletes/saves, holdings import/check behavior, guarded HTTP
+  route access, missing-vs-empty query handling, ordered repeated `accountIds`,
+  snapshot date validation, JSON `null` option normalization, 200/204 mutation
+  statuses, route inertness without injection, and deferred real
+  holdings/valuation/allocation/snapshot runtime behavior.
+- `pr5-holdings-route-seam-review`: rubber-duck and code review found no
+  actionable issues after confirming snapshot date validation, import/check
+  invalid-date pass-through, holding null responses, ordered repeated query
+  parsing, sidecar auth, route inertness, type-safety, and test coverage.
+- `pr5-holdings-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -383,8 +401,8 @@ contract:
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
   plus market-data provider settings, portfolio job trigger, event stream,
   secrets route seam, AI provider route seam, alternative assets route seam,
-  assets route seam, app utility route seam, and portfolio metrics route seam
-  slices implemented; broader migration remains active.
+  assets route seam, app utility route seam, portfolio metrics route seam, and
+  holdings route seam slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -400,4 +418,6 @@ contract:
   moves with asset/market-data/portfolio parity slices; app runtime metadata,
   update-check HTTP/cache, backup/restore I/O, and path normalization move with
   app utility parity slices; portfolio metric calculations move with portfolio
-  calculation parity slices.
+  calculation parity slices; holdings fan-out, valuations, allocations,
+  snapshots, imports, and portfolio recalculation side effects move with
+  holdings/portfolio parity slices.

@@ -10,26 +10,28 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk portfolio metrics HTTP seam after
-the app utility route seam:
+PR 5 continues vertical slices with a low-risk holdings HTTP seam after the
+portfolio metrics route seam:
 
-- Add a `PortfolioMetricsService` interface and guarded `/net-worth`,
-  `/performance`, and `/income/summary` route tests for net worth, net worth
-  history, simple account performance, performance history/summary, and income
-  summary.
-- Preserve Rust HTTP semantics for route methods, required/optional date
-  parsing, optional/unknown tracking-mode handling, empty account-list
-  short-circuiting, and sidecar bearer-token checks.
-- Defer real net-worth, performance, income, holdings, FX, and valuation
-  calculations to dedicated portfolio calculation parity slices.
+- Add a `HoldingsService` interface and guarded `/holdings`, `/valuations`,
+  `/allocations`, and `/snapshots` route tests for holdings reads, valuation
+  reads, allocation reads, manual snapshots, and holdings CSV import/check.
+- Preserve Rust HTTP semantics for route methods, required/optional query
+  parsing, ordered repeated `accountIds` query handling, snapshot date
+  validation, JSON `null` option normalization, 200/204 mutation statuses,
+  `Holding | null` responses, and sidecar bearer-token checks.
+- Defer real holdings fan-out, valuation history/latest calculations, allocation
+  calculations, snapshot persistence/reconciliation, import symbol lookup, and
+  portfolio recalculation side effects to dedicated portfolio
+  calculation/runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
-app utility runtime, or portfolio metrics runtime deletion is in scope for this
-slice.
+app utility runtime, portfolio metrics runtime, or holdings runtime deletion is
+in scope for this slice.
 
 ## Next slices
 

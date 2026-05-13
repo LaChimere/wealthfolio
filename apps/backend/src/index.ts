@@ -128,6 +128,14 @@ export {
   type HealthService,
   type IssueDismissal,
 } from "./domains/health";
+export type {
+  HoldingInput,
+  HoldingsImportRequest,
+  HoldingsPositionInput,
+  HoldingsService,
+  HoldingsSnapshotInput,
+  SaveManualHoldingsRequest,
+} from "./domains/holdings";
 export {
   createMarketDataProviderRepository,
   createMarketDataProviderService,

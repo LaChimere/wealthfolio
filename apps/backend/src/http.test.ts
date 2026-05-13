@@ -18,6 +18,7 @@ import {
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
+import type { HoldingsService } from "./domains/holdings";
 import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
@@ -1150,6 +1151,294 @@ describe("TS backend HTTP skeleton", () => {
       ],
       ["performance-summary", { itemType: "account", itemId: "acc-1" }],
       ["income-summary", "acc-1"],
+    ]);
+  });
+
+  test("routes migrated holdings seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const holdingsService: HoldingsService = {
+      getHoldings(accountId) {
+        calls.push(["holdings", accountId]);
+        return [{ accountId }];
+      },
+      getHolding(accountId, assetId) {
+        calls.push(["holding", { accountId, assetId }]);
+        return assetId === "missing" ? null : { accountId, assetId };
+      },
+      getAssetHoldings(assetId) {
+        calls.push(["asset-holdings", assetId]);
+        return [{ assetId }];
+      },
+      getHistoricalValuations(accountId, startDate, endDate) {
+        calls.push(["historical-valuations", { accountId, startDate, endDate }]);
+        return [{ accountId, date: startDate }];
+      },
+      getLatestValuations(accountIds) {
+        calls.push(["latest-valuations", accountIds]);
+        return [{ accountIds }];
+      },
+      getPortfolioAllocations(accountId) {
+        calls.push(["allocations", accountId]);
+        return { accountId, byAssetClass: [] };
+      },
+      getHoldingsByAllocation(accountId, taxonomyId, categoryId) {
+        calls.push(["allocation-holdings", { accountId, taxonomyId, categoryId }]);
+        return { categoryId, holdings: [] };
+      },
+      getSnapshots(accountId, dateFrom, dateTo) {
+        calls.push(["snapshots", { accountId, dateFrom, dateTo }]);
+        return [{ accountId, snapshotDate: dateFrom }];
+      },
+      getSnapshotByDate(accountId, date) {
+        calls.push(["snapshot-holdings", { accountId, date }]);
+        return [{ accountId, date }];
+      },
+      deleteSnapshot(accountId, date) {
+        calls.push(["delete-snapshot", { accountId, date }]);
+      },
+      saveManualHoldings(request) {
+        calls.push(["save-manual-holdings", request]);
+      },
+      checkHoldingsImport(request) {
+        calls.push(["check-holdings-import", request]);
+        return { existingDates: [], symbols: [], validationErrors: [] };
+      },
+      importHoldingsCsv(request) {
+        calls.push(["import-holdings-csv", request]);
+        return { snapshotsImported: request.snapshots.length, snapshotsFailed: 0, errors: [] };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { holdingsService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/holdings?accountId=acc-1"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/holdings?accountId=acc-1", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/holdings?accountId=", { headers: authHeaders }),
+        )
+      ).json(),
+    ).resolves.toEqual([{ accountId: "" }]);
+    const missingHoldingResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/holdings/item?accountId=acc-1&assetId=missing", {
+        headers: authHeaders,
+      }),
+    );
+    expect(missingHoldingResponse.status).toBe(200);
+    await expect(missingHoldingResponse.json()).resolves.toBeNull();
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/holdings/by-asset?assetId=asset-1", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/valuations/history?accountId=acc-1&startDate=2026-05-01&endDate=2026-05-14",
+        { headers: authHeaders },
+      ),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/valuations/latest?accountIds[]=acc-1&accountIds=acc-2", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/valuations/latest?accountIds=acc-1,acc-2", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/valuations/latest", { headers: authHeaders }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/allocations?accountId=acc-1", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/allocations/holdings?accountId=acc-1&taxonomyId=tax-1&categoryId=cat-1",
+        { headers: authHeaders },
+      ),
+    );
+    await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/snapshots?accountId=acc-1&dateFrom=2026-05-01&dateTo=2026-05-14",
+        { headers: authHeaders },
+      ),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/snapshots/holdings?accountId=acc-1&date=2026-05-14", {
+        headers: authHeaders,
+      }),
+    );
+    const deleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/snapshots?accountId=acc-1&date=2026-05-14", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const saveResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/snapshots", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          accountId: "acc-1",
+          holdings: [
+            {
+              assetId: "asset-1",
+              symbol: "AAPL",
+              quantity: "2",
+              currency: "USD",
+              averageCost: null,
+            },
+          ],
+          cashBalances: { USD: "100.00" },
+          snapshotDate: "2026-05-14",
+        }),
+      }),
+    );
+    expect(saveResponse.status).toBe(200);
+    await expect(saveResponse.text()).resolves.toBe("");
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/snapshots/import/check", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          accountId: "acc-1",
+          snapshots: [
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "MSFT", quantity: "1", currency: "USD", avgCost: null }],
+              cashBalances: { USD: "50.00" },
+            },
+          ],
+        }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/snapshots/import", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          accountId: "acc-1",
+          snapshots: [
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "MSFT", quantity: "1", currency: "USD" }],
+              cashBalances: { USD: "50.00" },
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(
+      (
+        await handler(
+          new Request(
+            "http://127.0.0.1/api/v1/valuations/history?accountId=acc-1&startDate=2026-02-31",
+            { headers: authHeaders },
+          ),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/snapshots", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              accountId: "acc-1",
+              holdings: [],
+              cashBalances: {},
+              snapshotDate: "2026-02-31",
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/snapshots", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ accountId: "acc-1", holdings: [] }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    expect(calls).toEqual([
+      ["holdings", ""],
+      ["holding", { accountId: "acc-1", assetId: "missing" }],
+      ["asset-holdings", "asset-1"],
+      [
+        "historical-valuations",
+        { accountId: "acc-1", startDate: "2026-05-01", endDate: "2026-05-14" },
+      ],
+      ["latest-valuations", ["acc-1", "acc-2"]],
+      ["latest-valuations", ["acc-1,acc-2"]],
+      ["latest-valuations", undefined],
+      ["allocations", "acc-1"],
+      ["allocation-holdings", { accountId: "acc-1", taxonomyId: "tax-1", categoryId: "cat-1" }],
+      ["snapshots", { accountId: "acc-1", dateFrom: "2026-05-01", dateTo: "2026-05-14" }],
+      ["snapshot-holdings", { accountId: "acc-1", date: "2026-05-14" }],
+      ["delete-snapshot", { accountId: "acc-1", date: "2026-05-14" }],
+      [
+        "save-manual-holdings",
+        {
+          accountId: "acc-1",
+          holdings: [{ assetId: "asset-1", symbol: "AAPL", quantity: "2", currency: "USD" }],
+          cashBalances: { USD: "100.00" },
+          snapshotDate: "2026-05-14",
+        },
+      ],
+      [
+        "check-holdings-import",
+        {
+          accountId: "acc-1",
+          snapshots: [
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "MSFT", quantity: "1", currency: "USD" }],
+              cashBalances: { USD: "50.00" },
+            },
+          ],
+        },
+      ],
+      [
+        "import-holdings-csv",
+        {
+          accountId: "acc-1",
+          snapshots: [
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "MSFT", quantity: "1", currency: "USD" }],
+              cashBalances: { USD: "50.00" },
+            },
+          ],
+        },
+      ],
     ]);
   });
 

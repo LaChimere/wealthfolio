@@ -150,6 +150,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `/api/v1/performance/*`, and `/api/v1/income/summary` routes, date validation,
   empty account-list short-circuiting, tracking-mode parsing, and targeted
   backend tests.
+- Turn 21: Implemented the low-risk holdings HTTP seam TS slice: injectable
+  `HoldingsService`, guarded `/api/v1/holdings`, `/api/v1/valuations`,
+  `/api/v1/allocations`, and `/api/v1/snapshots` routes, query/body/date
+  validation, ordered repeated account ID parsing, null option normalization,
+  200/204 mutation status parity, and targeted backend tests.
 
 ## Deferred items
 
@@ -202,6 +207,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
   while runtime behavior must move with dedicated portfolio calculation parity
   slices.
+- Holdings fan-out, valuation history/latest calculations, allocation
+  calculations, snapshot persistence/reconciliation, import symbol lookup, and
+  portfolio recalculation side effects remain active follow-ups. reason=this
+  slice only adds the guarded HTTP seam, while runtime behavior must move with
+  dedicated holdings/portfolio parity slices.
 
 ## Blockers
 
