@@ -10,24 +10,26 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues low-risk domain vertical slices with accounts after the settings
-slice:
+PR 5 continues low-risk domain vertical slices with contribution limits after
+the settings and accounts slices:
 
-- Add TS accounts models, repository/service behavior, and route tests.
-- Preserve Rust account create/list/update/delete semantics, including generated
-  IDs, immutable currency, broker-managed fields, archive/tracking-mode
-  handling, group `Option` behavior, domain events, and orphaned asset cleanup
-  hooks.
+- Add TS contribution limits models, repository/service behavior, and route
+  tests.
+- Preserve Rust contribution limits CRUD semantics, including generated IDs,
+  optional-field nulling on update, idempotent deletes, and lightweight
+  portfolio update triggers.
+- Keep deposit calculation injectable for the later calculation-heavy migration
+  while preserving Rust-compatible zero results for empty account selections.
 - Keep the route guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-accounts/settings deletion is in scope for this slice.
+accounts/settings/limits deletion is in scope for this slice.
 
 ## Next slices
 
-1. Continue low-risk domain slices: contribution limits, taxonomies, and other
-   CRUD/read-heavy domains.
+1. Continue low-risk domain slices: taxonomies and other CRUD/read-heavy
+   domains.
 2. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
 3. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.

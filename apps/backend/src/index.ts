@@ -30,6 +30,18 @@ export {
   type TrackingMode,
 } from "./domains/accounts";
 export {
+  createContributionLimitRepository,
+  createContributionLimitService,
+  parseContributionLimitAccountIds,
+  type AccountDeposit,
+  type ContributionLimit,
+  type ContributionLimitRepository,
+  type ContributionLimitService,
+  type ContributionLimitServiceOptions,
+  type DepositsCalculation,
+  type NewContributionLimit,
+} from "./domains/contribution-limits";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,

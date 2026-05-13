@@ -3,6 +3,10 @@ import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
+import {
+  createContributionLimitRepository,
+  createContributionLimitService,
+} from "./domains/contribution-limits";
 import { createSettingsService } from "./domains/settings";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
@@ -229,6 +233,100 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated contribution limits domain only when a service is provided", async () => {
+    const db = createContributionLimitsDb();
+    const notifications: string[] = [];
+    const handler = createBackendRequestHandler(config, {
+      contributionLimitService: createContributionLimitService(
+        createContributionLimitRepository(db),
+        {
+          baseCurrency: "CAD",
+          notifyPortfolioUpdate: () => notifications.push("updated"),
+        },
+      ),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/limits"))).status).toBe(401);
+
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/limits", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            groupName: "TFSA",
+            contributionYear: 2026,
+            limitAmount: 7_000,
+            accountIds: "account-1",
+          }),
+        }),
+      );
+      const createdLimit = await createResponse.json();
+      expect(createResponse.status).toBe(200);
+      expect(createdLimit).toMatchObject({
+        groupName: "TFSA",
+        contributionYear: 2026,
+        limitAmount: 7_000,
+        accountIds: "account-1",
+      });
+
+      const updateResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/limits/${createdLimit.id}`, {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            groupName: "TFSA",
+            contributionYear: 2027,
+            limitAmount: 7_500,
+          }),
+        }),
+      );
+      const updatedLimit = await updateResponse.json();
+      expect(updateResponse.status).toBe(200);
+      expect(updatedLimit).toMatchObject({
+        id: createdLimit.id,
+        contributionYear: 2027,
+        limitAmount: 7_500,
+        accountIds: null,
+      });
+
+      const depositsResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/limits/${createdLimit.id}/deposits`, {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      await expect(depositsResponse.json()).resolves.toEqual({
+        total: 0,
+        baseCurrency: "CAD",
+        byAccount: {},
+      });
+
+      const listResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/limits", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await listResponse.json()).toHaveLength(1);
+
+      const deleteResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/limits/${createdLimit.id}`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteResponse.status).toBe(204);
+      expect(notifications).toEqual(["updated", "updated", "updated"]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {
@@ -251,6 +349,24 @@ function createAccountsDb(): Database {
       provider_account_id TEXT,
       is_archived INTEGER NOT NULL DEFAULT 0,
       tracking_mode TEXT NOT NULL DEFAULT 'NOT_SET'
+    );
+  `);
+  return db;
+}
+
+function createContributionLimitsDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE contribution_limits (
+      id TEXT PRIMARY KEY NOT NULL,
+      group_name TEXT NOT NULL,
+      contribution_year INTEGER NOT NULL,
+      limit_amount NUMERIC NOT NULL,
+      account_ids TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      start_date TIMESTAMP NULL,
+      end_date TIMESTAMP NULL
     );
   `);
   return db;

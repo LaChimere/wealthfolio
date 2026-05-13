@@ -1,6 +1,7 @@
 import type { BackendRuntimeConfig } from "./config";
 import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
 import { parseTrackingMode } from "./domains/accounts";
+import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
@@ -8,6 +9,7 @@ export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
   accountService?: AccountService;
+  contributionLimitService?: ContributionLimitService;
   settingsService?: SettingsService;
 }
 
@@ -69,6 +71,15 @@ async function routeRequest(
     return await routeAccountRequest(request, url, config, options.accountService);
   }
 
+  if (options.contributionLimitService && url.pathname.startsWith("/api/v1/limits")) {
+    return await routeContributionLimitRequest(
+      request,
+      url,
+      config,
+      options.contributionLimitService,
+    );
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -82,6 +93,82 @@ async function routeRequest(
         return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
       }
       return jsonResponse({ ok: true });
+    }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function routeContributionLimitRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  contributionLimitService: ContributionLimitService,
+): Promise<Response> {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/limits") {
+    return jsonResponse(contributionLimitService.getContributionLimits());
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/limits") {
+    const payload = await parseJsonBody(request);
+    if (payload instanceof Response) {
+      return payload;
+    }
+    const newLimit = parseNewContributionLimit(payload);
+    if (newLimit instanceof Response) {
+      return newLimit;
+    }
+    try {
+      return jsonResponse(await contributionLimitService.createContributionLimit(newLimit));
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  const depositsLimitId = contributionLimitDepositsIdFromPath(url.pathname);
+  if (depositsLimitId && request.method === "GET") {
+    try {
+      return jsonResponse(
+        await contributionLimitService.calculateDepositsForContributionLimit(depositsLimitId),
+      );
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  const limitId = contributionLimitIdFromPath(url.pathname);
+  if (!limitId) {
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "PUT") {
+    const payload = await parseJsonBody(request);
+    if (payload instanceof Response) {
+      return payload;
+    }
+    const updatedLimit = parseNewContributionLimit(payload);
+    if (updatedLimit instanceof Response) {
+      return updatedLimit;
+    }
+    try {
+      return jsonResponse(
+        await contributionLimitService.updateContributionLimit(limitId, updatedLimit),
+      );
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  if (request.method === "DELETE") {
+    try {
+      await contributionLimitService.deleteContributionLimit(limitId);
+      return new Response(null, { status: 204 });
+    } catch (error) {
+      return domainErrorResponse(error);
     }
   }
 
@@ -195,6 +282,16 @@ function accountIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function contributionLimitIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/limits\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function contributionLimitDepositsIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/limits\/([^/]+)\/deposits$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function applyCors(response: Response, request: Request, config: BackendRuntimeConfig): Response {
   const origin = request.headers.get("origin");
   const allowedOrigin = resolveAllowedOrigin(origin, config.cors.allowOrigins);
@@ -288,6 +385,49 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewContributionLimit(
+  payload: Record<string, unknown>,
+): NewContributionLimit | Response {
+  const id = parseOptionalString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const groupName = payload.groupName;
+  if (typeof groupName !== "string") {
+    return jsonResponse({ code: 400, message: "groupName must be a string" }, 400);
+  }
+  const contributionYear = payload.contributionYear;
+  if (typeof contributionYear !== "number" || !Number.isInteger(contributionYear)) {
+    return jsonResponse({ code: 400, message: "contributionYear must be an integer" }, 400);
+  }
+  const limitAmount = payload.limitAmount;
+  if (typeof limitAmount !== "number" || !Number.isFinite(limitAmount)) {
+    return jsonResponse({ code: 400, message: "limitAmount must be a finite number" }, 400);
+  }
+  const accountIds = parseOptionalStringOrNull(payload.accountIds, "accountIds");
+  if (accountIds instanceof Response) {
+    return accountIds;
+  }
+  const startDate = parseOptionalStringOrNull(payload.startDate, "startDate");
+  if (startDate instanceof Response) {
+    return startDate;
+  }
+  const endDate = parseOptionalStringOrNull(payload.endDate, "endDate");
+  if (endDate instanceof Response) {
+    return endDate;
+  }
+
+  return {
+    id,
+    groupName,
+    contributionYear,
+    limitAmount,
+    accountIds,
+    startDate,
+    endDate,
+  };
 }
 
 function parseNewAccount(payload: Record<string, unknown>): NewAccount | Response {
@@ -442,6 +582,22 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
   }
   if (typeof value !== "string") {
     return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalStringOrNull(
+  value: unknown,
+  field: string,
+): string | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
   }
   return value;
 }

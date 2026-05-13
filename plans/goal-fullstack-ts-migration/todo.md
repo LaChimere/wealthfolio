@@ -64,9 +64,12 @@
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
     inert for production until TS cutover.
-  - Evidence: settings and accounts domain TS repository/service implementations
-    plus guarded route tests in `apps/backend/src/domains/settings.ts`,
-    `apps/backend/src/domains/accounts.ts`, and `apps/backend/src/http.test.ts`.
+  - Evidence: settings, accounts, and contribution limits TS repository/service
+    implementations plus guarded route tests in
+    `apps/backend/src/domains/settings.ts`,
+    `apps/backend/src/domains/accounts.ts`,
+    `apps/backend/src/domains/contribution-limits.ts`, and
+    `apps/backend/src/http.test.ts`.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -145,11 +148,20 @@ contract:
   transaction boundaries and update events use transaction-captured before/after
   snapshots. Final review found no remaining actionable issues.
 - `pr5-accounts-repo-check`: full repo check passed with `bun run check`.
+- `pr5-contribution-limits-domain`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes generated IDs, update optional-field nulling, idempotent
+  deletes, lightweight portfolio update hooks, empty-account deposit zero
+  results, injectable deposit calculation, and guarded HTTP routes.
+- `pr5-contribution-limits-review`: code review found no remaining actionable
+  issues.
+- `pr5-contribution-limits-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
-  settings and accounts domain slices implemented; broader migration remains
-  active.
+  settings, accounts, and contribution limits domain slices implemented; broader
+  migration remains active.
 - Follow-ups: continue low-risk domain slices.
