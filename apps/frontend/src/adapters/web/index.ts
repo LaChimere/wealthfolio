@@ -380,6 +380,13 @@ export {
 } from "./settings";
 export type { DatabaseBackup } from "./settings";
 
+export {
+  getWindowTheme,
+  listenWindowThemeChanged,
+  setWindowTheme,
+  toggleWindowFullscreen,
+} from "./window";
+
 // Addon Commands (web-specific implementations)
 export {
   checkAddonUpdate,

@@ -235,6 +235,10 @@
   issue/about dialogs, fullscreen role, and forced update checks. Menu-driven
   route and update-available events now use the preload event listener seam, and
   `use-updater` no longer imports Tauri event APIs directly.
+- Turn 41: Moved window theme and fullscreen operations behind runtime adapters.
+  Electron main now owns `nativeTheme` and fullscreen IPC, Tauri window API
+  usage is confined to the Tauri adapter, and desktop system-theme listener
+  cleanup is guarded against stale async subscriptions.
 
 ## Deferred items
 

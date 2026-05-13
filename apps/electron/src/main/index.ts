@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,7 +92,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.cancelAiChatStream, (_event, request: unknown): void => {
     aiChatStreamManager.cancel(request);
   });
-  registerNativeIpcHandlers({ ipcMain, dialog, shell });
+  registerNativeIpcHandlers({ ipcMain, dialog, shell, nativeTheme, getTargetWindow });
 }
 
 function handleFatal(error: unknown): void {
@@ -153,6 +153,12 @@ function configureApplicationMenu(): void {
       });
     },
     sendRendererEvent,
+  });
+}
+
+function configureWindowThemeEvents(): void {
+  nativeTheme.on("updated", () => {
+    sendRendererEvent("window:theme-changed", nativeTheme.shouldUseDarkColors ? "dark" : "light");
   });
 }
 
@@ -246,6 +252,7 @@ async function start(): Promise<void> {
   await app.whenReady();
   configureSecurityHeaders();
   registerIpcHandlers();
+  configureWindowThemeEvents();
   configureApplicationMenu();
   await createWindow();
   sidecarStartPromise = startSidecarBridge().finally(() => {

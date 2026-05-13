@@ -12,6 +12,9 @@ export const IPC_CHANNELS = {
   openAddonPackageDialog: "wealthfolio:native:open-addon-package-dialog",
   saveFileDialog: "wealthfolio:native:save-file-dialog",
   openExternalUrl: "wealthfolio:native:open-external-url",
+  setWindowTheme: "wealthfolio:native:set-window-theme",
+  getWindowTheme: "wealthfolio:native:get-window-theme",
+  toggleWindowFullscreen: "wealthfolio:native:toggle-window-fullscreen",
 } as const;
 
 export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
@@ -1013,6 +1016,9 @@ export interface ElectronOpenFileResult {
   fileName: string;
 }
 
+export type ElectronWindowTheme = "light" | "dark";
+export type ElectronWindowThemePreference = ElectronWindowTheme | null;
+
 export interface WealthfolioElectronApi {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
@@ -1024,6 +1030,9 @@ export interface WealthfolioElectronApi {
   openAddonPackageDialog(): Promise<ElectronOpenFileResult | null>;
   saveFileDialog(request: ElectronSaveFileRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
+  setWindowTheme(theme: ElectronWindowThemePreference): Promise<void>;
+  getWindowTheme(): Promise<ElectronWindowTheme>;
+  toggleWindowFullscreen(): Promise<void>;
   listen<T>(
     eventName: string,
     handler: (event: ElectronEventMessage<T>) => void,

@@ -6,7 +6,10 @@ import {
   openDatabaseFileDialog,
   openExternalUrl,
   openFolderDialog,
+  getWindowTheme,
   saveFileDialog,
+  setWindowTheme,
+  toggleWindowFullscreen,
 } from "./native";
 
 function createDialog(openResult: { canceled: boolean; filePaths: string[] }) {
@@ -176,5 +179,35 @@ describe("Electron native bridge", () => {
     await expect(openExternalUrl("not a url", shell)).rejects.toThrow();
 
     expect(opened).toEqual(["https://wealthfolio.app/docs", "mailto:support@wealthfolio.app"]);
+  });
+
+  test("sets and resolves Electron window theme through native theme", () => {
+    const nativeTheme: {
+      shouldUseDarkColors: boolean;
+      themeSource: "system" | "light" | "dark";
+    } = { shouldUseDarkColors: true, themeSource: "system" };
+
+    expect(getWindowTheme(nativeTheme)).toBe("dark");
+    setWindowTheme("light", nativeTheme);
+    expect(nativeTheme.themeSource).toBe("light");
+    setWindowTheme(null, nativeTheme);
+    expect(nativeTheme.themeSource).toBe("system");
+    expect(() => setWindowTheme("sepia", nativeTheme)).toThrow("Invalid window theme.");
+  });
+
+  test("toggles fullscreen on the target Electron window", () => {
+    let fullscreen = false;
+    const window = {
+      isFullScreen: () => fullscreen,
+      setFullScreen(next: boolean) {
+        fullscreen = next;
+      },
+    };
+
+    toggleWindowFullscreen(() => window);
+    expect(fullscreen).toBe(true);
+    toggleWindowFullscreen(() => window);
+    expect(fullscreen).toBe(false);
+    expect(() => toggleWindowFullscreen(() => null)).toThrow("No Electron window is available.");
   });
 });

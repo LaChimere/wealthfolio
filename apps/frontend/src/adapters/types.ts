@@ -24,6 +24,9 @@ export type EventCallback<T> = (event: { event: string; payload: T; id: number }
  */
 export type UnlistenFn = () => Promise<void>;
 
+export type WindowTheme = "light" | "dark";
+export type WindowThemePreference = WindowTheme | null;
+
 /**
  * Logger interface with standard logging methods
  */

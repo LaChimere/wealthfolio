@@ -23,8 +23,6 @@ const ALLOWED_NON_ADAPTER_TAURI_IMPORTS: Record<string, string[]> = {
     "tauri-plugin-web-auth-api",
   ],
   "apps/frontend/src/hooks/use-haptic-feedback.ts": ["@tauri-apps/plugin-haptics"],
-  "apps/frontend/src/lib/settings-provider.tsx": ["@tauri-apps/api/window"],
-  "apps/frontend/src/lockdown.ts": ["@tauri-apps/api/window"],
 };
 
 const ALLOWED_NON_ADAPTER_ELECTRON_IMPORTS: Record<string, string[]> = {

@@ -20,6 +20,9 @@ const api: WealthfolioElectronApi = {
   openAddonPackageDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openAddonPackageDialog),
   saveFileDialog: (request) => ipcRenderer.invoke(IPC_CHANNELS.saveFileDialog, request),
   openExternalUrl: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternalUrl, url),
+  setWindowTheme: (theme) => ipcRenderer.invoke(IPC_CHANNELS.setWindowTheme, theme),
+  getWindowTheme: () => ipcRenderer.invoke(IPC_CHANNELS.getWindowTheme),
+  toggleWindowFullscreen: () => ipcRenderer.invoke(IPC_CHANNELS.toggleWindowFullscreen),
   listen: async (eventName, handler) => {
     if (typeof eventName !== "string" || typeof handler !== "function") {
       throw new Error("Invalid Electron event listener request.");

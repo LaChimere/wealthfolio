@@ -190,13 +190,16 @@ dedicated IPC methods, not as renderer Node APIs:
   navigation and update-available notifications are forwarded through the typed
   preload event listener API; renderer code does not import Electron or Tauri
   event APIs directly for those flows.
+- Window theme and fullscreen operations are behind the runtime adapter seam.
+  Electron main owns `nativeTheme` updates and focused-window fullscreen
+  toggles; Tauri keeps using `getCurrentWindow()` only inside the Tauri adapter.
 
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
 - file-drop and deep-link events;
 - single-instance behavior;
-- window state and titlebar behavior;
+- window state persistence and titlebar behavior;
 - app logging;
 - updater install/progress events;
 - OAuth callback handling for Wealthfolio Connect.

@@ -6,6 +6,7 @@ import {
   IPC_CHANNELS,
   type ElectronOpenFileResult,
   type ElectronSaveFileRequest,
+  type ElectronWindowTheme,
 } from "../shared/ipc";
 
 interface DialogResult {
@@ -27,10 +28,22 @@ interface NativeShell {
   openExternal(url: string): Promise<void>;
 }
 
+interface NativeTheme {
+  shouldUseDarkColors: boolean;
+  themeSource: "system" | "light" | "dark";
+}
+
+interface FullscreenWindow {
+  isFullScreen(): boolean;
+  setFullScreen(fullscreen: boolean): void;
+}
+
 export interface NativeIpcDependencies {
   ipcMain: Pick<IpcMain, "handle">;
   dialog: NativeDialog;
   shell: NativeShell;
+  nativeTheme: NativeTheme;
+  getTargetWindow(): FullscreenWindow | null;
   readFile?: (filePath: string) => Promise<Uint8Array>;
   writeFile?: (filePath: string, content: Uint8Array) => Promise<void>;
 }
@@ -53,6 +66,15 @@ export function registerNativeIpcHandlers(deps: NativeIpcDependencies): void {
   });
   deps.ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, url: unknown) => {
     await openExternalUrl(url, deps.shell);
+  });
+  deps.ipcMain.handle(IPC_CHANNELS.setWindowTheme, (_event, theme: unknown) => {
+    setWindowTheme(theme, deps.nativeTheme);
+  });
+  deps.ipcMain.handle(IPC_CHANNELS.getWindowTheme, () => {
+    return getWindowTheme(deps.nativeTheme);
+  });
+  deps.ipcMain.handle(IPC_CHANNELS.toggleWindowFullscreen, () => {
+    toggleWindowFullscreen(deps.getTargetWindow);
   });
 }
 
@@ -131,6 +153,33 @@ export async function openExternalUrl(url: unknown, shell: NativeShell): Promise
   }
 
   await shell.openExternal(parsed.toString());
+}
+
+export function setWindowTheme(theme: unknown, nativeTheme: NativeTheme): void {
+  nativeTheme.themeSource = parseWindowThemePreference(theme);
+}
+
+export function getWindowTheme(nativeTheme: NativeTheme): ElectronWindowTheme {
+  return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+}
+
+export function toggleWindowFullscreen(getTargetWindow: () => FullscreenWindow | null): void {
+  const window = getTargetWindow();
+  if (!window) {
+    throw new Error("No Electron window is available.");
+  }
+
+  window.setFullScreen(!window.isFullScreen());
+}
+
+function parseWindowThemePreference(theme: unknown): NativeTheme["themeSource"] {
+  if (theme === null) {
+    return "system";
+  }
+  if (theme === "light" || theme === "dark") {
+    return theme;
+  }
+  throw new Error("Invalid window theme.");
 }
 
 function firstSelectedPath(result: DialogResult): string | null {

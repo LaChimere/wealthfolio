@@ -147,6 +147,13 @@ export {
 } from "./settings";
 export type { DatabaseBackup } from "./settings";
 
+export {
+  getWindowTheme,
+  listenWindowThemeChanged,
+  setWindowTheme,
+  toggleWindowFullscreen,
+} from "./window";
+
 // Addon Commands (platform-specific)
 export {
   extractAddonZip,

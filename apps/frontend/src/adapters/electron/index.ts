@@ -84,6 +84,13 @@ export {
 } from "./settings";
 
 export {
+  getWindowTheme,
+  listenWindowThemeChanged,
+  setWindowTheme,
+  toggleWindowFullscreen,
+} from "./window";
+
+export {
   checkAddonUpdate,
   checkAllAddonUpdates,
   clearAddonStaging,
