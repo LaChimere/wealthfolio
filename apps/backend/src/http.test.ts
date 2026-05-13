@@ -4518,6 +4518,262 @@ describe("TS backend HTTP skeleton", () => {
     ]);
   });
 
+  test("routes migrated device sync team key seam only when service methods are provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const deviceSyncService: DeviceSyncService = {
+      registerDevice() {
+        throw new Error("not used");
+      },
+      getCurrentDevice() {
+        throw new Error("not used");
+      },
+      getDevice() {
+        throw new Error("not used");
+      },
+      listDevices() {
+        throw new Error("not used");
+      },
+      updateDevice() {
+        throw new Error("not used");
+      },
+      deleteDevice() {
+        throw new Error("not used");
+      },
+      revokeDevice() {
+        throw new Error("not used");
+      },
+      initializeTeamKeys() {
+        calls.push(["initialize-team-keys", undefined]);
+        return { status: "initialized" };
+      },
+      commitInitializeTeamKeys(request) {
+        calls.push(["commit-initialize-team-keys", request]);
+        return { success: true };
+      },
+      rotateTeamKeys() {
+        calls.push(["rotate-team-keys", undefined]);
+        return { status: "rotating" };
+      },
+      commitRotateTeamKeys(request) {
+        calls.push(["commit-rotate-team-keys", request]);
+        return { success: true };
+      },
+      resetTeamSync(request) {
+        calls.push(["reset-team-sync", request]);
+        return { success: true };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { deviceSyncService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/sync/keys/initialize"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/sync/keys/initialize", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await createBackendRequestHandler(config, {
+          deviceSyncService: {
+            registerDevice() {
+              throw new Error("not used");
+            },
+            getCurrentDevice() {
+              throw new Error("not used");
+            },
+            getDevice() {
+              throw new Error("not used");
+            },
+            listDevices() {
+              return [];
+            },
+            updateDevice() {
+              throw new Error("not used");
+            },
+            deleteDevice() {
+              throw new Error("not used");
+            },
+            revokeDevice() {
+              throw new Error("not used");
+            },
+          },
+        })(new Request("http://127.0.0.1/api/v1/sync/keys/initialize", { headers: authHeaders }))
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/keys/initialize", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "initialized" });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/keys/rotate", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "rotating" });
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/keys/initialize/commit", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              keyVersion: 2_147_483_647,
+              deviceKeyEnvelope: "envelope",
+              signature: "signature",
+              challengeResponse: null,
+              recoveryEnvelope: "recovery",
+              ignored: true,
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    for (const body of [
+      { key_version: 1, deviceKeyEnvelope: "envelope", signature: "signature" },
+      { keyVersion: 2_147_483_648, deviceKeyEnvelope: "envelope", signature: "signature" },
+      { keyVersion: 1, deviceKeyEnvelope: 123, signature: "signature" },
+    ]) {
+      expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/sync/keys/initialize/commit", {
+              method: "POST",
+              headers: jsonHeaders,
+              body: JSON.stringify(body),
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/keys/rotate/commit", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              newKeyVersion: -2_147_483_648,
+              envelopes: [{ deviceId: "device-1", deviceKeyEnvelope: "envelope-1" }],
+              signature: "signature",
+              challengeResponse: "challenge",
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    for (const body of [
+      { newKeyVersion: 1, envelopes: "not-array", signature: "signature" },
+      { newKeyVersion: 1, envelopes: [{ device_id: "device-1" }], signature: "signature" },
+      { newKeyVersion: 1, envelopes: [], signature: 123 },
+    ]) {
+      expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/sync/keys/rotate/commit", {
+              method: "POST",
+              headers: jsonHeaders,
+              body: JSON.stringify(body),
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    for (const body of [{}, { reason: null }, { reason: "user-request" }]) {
+      await expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/sync/team/reset", {
+              method: "POST",
+              headers: jsonHeaders,
+              body: JSON.stringify(body),
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual({ success: true });
+    }
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/team/reset", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/team/reset", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ reason: 123 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/pairing", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ codeHash: "hash", ephemeralPublicKey: "key" }),
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    expect(calls).toEqual([
+      ["initialize-team-keys", undefined],
+      ["rotate-team-keys", undefined],
+      [
+        "commit-initialize-team-keys",
+        {
+          keyVersion: 2_147_483_647,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+          challengeResponse: undefined,
+          recoveryEnvelope: "recovery",
+        },
+      ],
+      [
+        "commit-rotate-team-keys",
+        {
+          newKeyVersion: -2_147_483_648,
+          envelopes: [{ deviceId: "device-1", deviceKeyEnvelope: "envelope-1" }],
+          signature: "signature",
+          challengeResponse: "challenge",
+        },
+      ],
+      ["reset-team-sync", { reason: undefined }],
+      ["reset-team-sync", { reason: undefined }],
+      ["reset-team-sync", { reason: "user-request" }],
+    ]);
+  });
+
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });

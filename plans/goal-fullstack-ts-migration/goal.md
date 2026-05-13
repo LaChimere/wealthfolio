@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 30
+turns_used: 31
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -220,6 +220,14 @@ updated_at: "2026-05-14T05:18:49+08:00"
   malformed path encoding errors, decoded path IDs, sidecar-auth route
   semantics, synchronous/asynchronous service error mapping, and targeted
   backend tests.
+- Turn 31: Implemented the guarded device-sync team-key/reset HTTP seam TS
+  slice: optional `DeviceSyncService` methods for
+  `/api/v1/sync/keys/initialize`, `/initialize/commit`, `/rotate`,
+  `/rotate/commit`, and `/api/v1/sync/team/reset`; preserved no-body start-route
+  behavior, commit/reset JSON validation, i32 key version bounds, optional
+  challenge/recovery/reason field handling, envelope validation, sidecar-auth
+  route semantics, route inertness when optional methods are absent, and
+  targeted backend tests.
 
 ## Deferred items
 
@@ -305,6 +313,11 @@ updated_at: "2026-05-14T05:18:49+08:00"
   errors, and E2EE runtime remain active follow-ups. reason=this slice only adds
   the guarded device-management HTTP seam, while runtime behavior must move with
   dedicated device-sync parity slices.
+- Real device-sync team-key cloud calls, key material handling, device identity
+  lookup, reset side effects, pairing flows, feature-flag errors, and E2EE
+  runtime remain active follow-ups. reason=this slice only adds the guarded
+  team-key/reset HTTP seam, while runtime behavior must move with dedicated
+  device-sync parity slices.
 - Holdings fan-out, valuation history/latest calculations, allocation
   calculations, snapshot persistence/reconciliation, import symbol lookup, and
   portfolio recalculation side effects remain active follow-ups. reason=this

@@ -52,8 +52,11 @@ import type {
   UpdateCustomProvider,
 } from "./domains/custom-providers";
 import type {
+  CommitInitializeTeamKeysRequest,
+  CommitRotateTeamKeysRequest,
   DeviceSyncService,
   RegisterDeviceRequest,
+  ResetTeamSyncRequest,
   UpdateDeviceRequest,
 } from "./domains/device-sync";
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
@@ -258,6 +261,16 @@ async function routeRequest(
     }
     if (options.deviceSyncService) {
       return routeDeviceSyncDeviceManagementRequest(request, url, options.deviceSyncService);
+    }
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (isDeviceSyncTeamKeyPath(url.pathname)) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    if (options.deviceSyncService) {
+      return routeDeviceSyncTeamKeyRequest(request, url, options.deviceSyncService);
     }
     return jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
@@ -758,6 +771,50 @@ function routeDeviceSyncDeviceManagementRequest(
     if (request.method === "DELETE") {
       return handleServiceJsonResponse(() => deviceSyncService.deleteDevice(deviceId));
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeDeviceSyncTeamKeyRequest(
+  request: Request,
+  url: URL,
+  deviceSyncService: DeviceSyncService,
+): Promise<Response> | Response {
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/keys/initialize") {
+    return deviceSyncService.initializeTeamKeys
+      ? handleServiceJsonResponse(() => deviceSyncService.initializeTeamKeys?.())
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/keys/initialize/commit") {
+    return deviceSyncService.commitInitializeTeamKeys
+      ? handleJsonMutation(request, parseCommitInitializeTeamKeysRequest, (input) =>
+          Promise.resolve(deviceSyncService.commitInitializeTeamKeys?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/keys/rotate") {
+    return deviceSyncService.rotateTeamKeys
+      ? handleServiceJsonResponse(() => deviceSyncService.rotateTeamKeys?.())
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/keys/rotate/commit") {
+    return deviceSyncService.commitRotateTeamKeys
+      ? handleJsonMutation(request, parseCommitRotateTeamKeysRequest, (input) =>
+          Promise.resolve(deviceSyncService.commitRotateTeamKeys?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/team/reset") {
+    return deviceSyncService.resetTeamSync
+      ? handleJsonMutation(request, parseResetTeamSyncRequest, (input) =>
+          Promise.resolve(deviceSyncService.resetTeamSync?.(input)),
+        )
+      : jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -3294,6 +3351,16 @@ function isDeviceSyncDeviceManagementPath(pathname: string): boolean {
   return pathname === "/api/v1/sync/devices" || pathname.startsWith("/api/v1/sync/device/");
 }
 
+function isDeviceSyncTeamKeyPath(pathname: string): boolean {
+  return (
+    pathname === "/api/v1/sync/keys/initialize" ||
+    pathname === "/api/v1/sync/keys/initialize/commit" ||
+    pathname === "/api/v1/sync/keys/rotate" ||
+    pathname === "/api/v1/sync/keys/rotate/commit" ||
+    pathname === "/api/v1/sync/team/reset"
+  );
+}
+
 function deviceSyncDeviceIdFromPath(pathname: string): string | Response | undefined {
   const match = /^\/api\/v1\/sync\/device\/([^/]+)$/.exec(pathname);
   if (!match || isReservedDeviceSyncDeviceId(match[1])) {
@@ -3453,6 +3520,99 @@ function parseUpdateDeviceRequest(
     return displayName;
   }
   return { displayName: displayName ?? undefined };
+}
+
+function parseCommitInitializeTeamKeysRequest(
+  payload: Record<string, unknown>,
+): CommitInitializeTeamKeysRequest | Response {
+  const keyVersion = parseRequiredI32(payload.keyVersion, "keyVersion");
+  if (keyVersion instanceof Response) {
+    return keyVersion;
+  }
+  const deviceKeyEnvelope = parseRequiredString(payload.deviceKeyEnvelope, "deviceKeyEnvelope");
+  if (deviceKeyEnvelope instanceof Response) {
+    return deviceKeyEnvelope;
+  }
+  const signature = parseRequiredString(payload.signature, "signature");
+  if (signature instanceof Response) {
+    return signature;
+  }
+  const challengeResponse = parseOptionalStringOrNull(
+    payload.challengeResponse,
+    "challengeResponse",
+  );
+  if (challengeResponse instanceof Response) {
+    return challengeResponse;
+  }
+  const recoveryEnvelope = parseOptionalStringOrNull(payload.recoveryEnvelope, "recoveryEnvelope");
+  if (recoveryEnvelope instanceof Response) {
+    return recoveryEnvelope;
+  }
+  return {
+    keyVersion,
+    deviceKeyEnvelope,
+    signature,
+    challengeResponse: challengeResponse ?? undefined,
+    recoveryEnvelope: recoveryEnvelope ?? undefined,
+  };
+}
+
+function parseCommitRotateTeamKeysRequest(
+  payload: Record<string, unknown>,
+): CommitRotateTeamKeysRequest | Response {
+  const newKeyVersion = parseRequiredI32(payload.newKeyVersion, "newKeyVersion");
+  if (newKeyVersion instanceof Response) {
+    return newKeyVersion;
+  }
+  if (!Array.isArray(payload.envelopes)) {
+    return jsonResponse({ code: 400, message: "envelopes must be an array" }, 400);
+  }
+  const envelopes: CommitRotateTeamKeysRequest["envelopes"] = [];
+  for (const [index, value] of payload.envelopes.entries()) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return jsonResponse({ code: 400, message: `envelopes[${index}] must be an object` }, 400);
+    }
+    const envelope = value as Record<string, unknown>;
+    const deviceId = parseRequiredString(envelope.deviceId, `envelopes[${index}].deviceId`);
+    if (deviceId instanceof Response) {
+      return deviceId;
+    }
+    const deviceKeyEnvelope = parseRequiredString(
+      envelope.deviceKeyEnvelope,
+      `envelopes[${index}].deviceKeyEnvelope`,
+    );
+    if (deviceKeyEnvelope instanceof Response) {
+      return deviceKeyEnvelope;
+    }
+    envelopes.push({ deviceId, deviceKeyEnvelope });
+  }
+  const signature = parseRequiredString(payload.signature, "signature");
+  if (signature instanceof Response) {
+    return signature;
+  }
+  const challengeResponse = parseOptionalStringOrNull(
+    payload.challengeResponse,
+    "challengeResponse",
+  );
+  if (challengeResponse instanceof Response) {
+    return challengeResponse;
+  }
+  return {
+    newKeyVersion,
+    envelopes,
+    signature,
+    challengeResponse: challengeResponse ?? undefined,
+  };
+}
+
+function parseResetTeamSyncRequest(
+  payload: Record<string, unknown>,
+): ResetTeamSyncRequest | Response {
+  const reason = parseOptionalStringOrNull(payload.reason, "reason");
+  if (reason instanceof Response) {
+    return reason;
+  }
+  return { reason: reason ?? undefined };
 }
 
 function parseWrappedObject<TField extends string>(
@@ -5560,6 +5720,17 @@ function parseRequiredU32(value: unknown, field: string): number | Response {
   }
   if (parsed < 0 || parsed > 4_294_967_295) {
     return jsonResponse({ code: 400, message: `${field} must be a u32 integer` }, 400);
+  }
+  return parsed;
+}
+
+function parseRequiredI32(value: unknown, field: string): number | Response {
+  const parsed = parseRequiredInteger(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed < -2_147_483_648 || parsed > 2_147_483_647) {
+    return jsonResponse({ code: 400, message: `${field} must be an i32 integer` }, 400);
   }
   return parsed;
 }

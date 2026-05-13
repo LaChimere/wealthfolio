@@ -10,19 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded device-sync device-management HTTP
-seam after the Connect device-sync route seam:
+PR 5 continues vertical slices with a guarded device-sync team-key/reset HTTP
+seam after the device-management route seam:
 
-- Add an injectable `DeviceSyncService` seam for `/api/v1/sync/device/*` and
-  `/api/v1/sync/devices` routes covering register, current-device lookup, device
-  lookup, list, update, delete, and revoke.
-- Preserve Rust HTTP semantics for required camelCase register fields, optional
-  update display names, empty-string scope passthrough, static-vs-dynamic route
-  boundaries, decoded path IDs, malformed path encoding errors, method/path
-  inertness, and sidecar bearer-token checks.
+- Extend the injectable `DeviceSyncService` seam with optional team-key/reset
+  methods for
+  `/api/v1/sync/keys/{initialize,initialize/commit,rotate,rotate/commit}` and
+  `/api/v1/sync/team/reset`.
+- Preserve Rust HTTP semantics for body-ignoring initialize/rotate start routes,
+  JSON body validation on commit/reset routes, i32 key-version bounds, optional
+  challenge/recovery/reason fields, envelope validation, method/path inertness,
+  and sidecar bearer-token checks.
 - Keep service implementations responsible for Rust-equivalent token, cloud,
-  device-id secret, and enrollment side effects.
-- Defer team keys, pairing, E2EE, token lifecycle, feature-flag errors, and
+  device-id lookup, E2EE, key material, and reset side effects.
+- Defer pairing flows, real key crypto/cloud runtime, feature-flag errors, and
   broader device-sync runtime behavior to dedicated follow-up slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.

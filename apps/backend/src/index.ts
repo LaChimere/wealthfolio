@@ -119,8 +119,12 @@ export {
   type UpdateCustomProvider,
 } from "./domains/custom-providers";
 export type {
+  CommitInitializeTeamKeysRequest,
+  CommitRotateTeamKeysEnvelope,
+  CommitRotateTeamKeysRequest,
   DeviceSyncService,
   RegisterDeviceRequest,
+  ResetTeamSyncRequest,
   UpdateDeviceRequest,
 } from "./domains/device-sync";
 export {
