@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
+import type { AiProviderService } from "./domains/ai-providers";
 import {
   createContributionLimitRepository,
   createContributionLimitService,
@@ -1022,6 +1023,129 @@ describe("TS backend HTTP skeleton", () => {
       'event: portfolio_update_start\ndata: {"accountId":"acc-1"}\n\n',
     );
     await reader?.cancel();
+  });
+
+  test("routes migrated AI provider seam only when a service is provided", async () => {
+    const updates: unknown[] = [];
+    const defaults: unknown[] = [];
+    const listedModels: string[] = [];
+    const aiProviderService: AiProviderService = {
+      getAiProviders() {
+        return {
+          providers: [{ id: "openai", enabled: true }],
+          capabilities: { tools: { name: "Tools" } },
+          defaultProvider: "openai",
+        };
+      },
+      updateProviderSettings(request) {
+        updates.push(request);
+      },
+      setDefaultProvider(request) {
+        defaults.push(request);
+      },
+      listModels(providerId) {
+        listedModels.push(providerId);
+        return { models: [{ id: "gpt-4.1", name: "GPT-4.1" }], supportsListing: true };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { aiProviderService });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/ai/providers"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/ai/providers", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const providersResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await providersResponse.json()).toEqual({
+      providers: [{ id: "openai", enabled: true }],
+      capabilities: { tools: { name: "Tools" } },
+      defaultProvider: "openai",
+    });
+
+    const updateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers/settings", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providerId: "openai",
+          enabled: true,
+          favorite: false,
+          selectedModel: "gpt-4.1",
+          customUrl: "",
+          priority: 10,
+          favoriteModels: ["gpt-4.1"],
+          toolsAllowlist: null,
+          modelCapabilityOverride: { modelId: "gpt-4.1", overrides: { tools: true } },
+          tuningOverrides: null,
+        }),
+      }),
+    );
+    expect(updateResponse.status).toBe(200);
+    expect(await updateResponse.json()).toBeNull();
+    expect(updates).toEqual([
+      {
+        providerId: "openai",
+        enabled: true,
+        favorite: false,
+        selectedModel: "gpt-4.1",
+        customUrl: "",
+        priority: 10,
+        favoriteModels: ["gpt-4.1"],
+        toolsAllowlist: null,
+        modelCapabilityOverride: { modelId: "gpt-4.1", overrides: { tools: true } },
+        tuningOverrides: null,
+      },
+    ]);
+
+    const defaultResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers/default", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ providerId: null }),
+      }),
+    );
+    expect(defaultResponse.status).toBe(200);
+    expect(await defaultResponse.json()).toBeNull();
+    expect(defaults).toEqual([{ providerId: null }]);
+
+    const modelsResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers/openai%2Fcompatible/models", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await modelsResponse.json()).toEqual({
+      models: [{ id: "gpt-4.1", name: "GPT-4.1" }],
+      supportsListing: true,
+    });
+    expect(listedModels).toEqual(["openai/compatible"]);
+
+    const invalidResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers/settings", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ enabled: true }),
+      }),
+    );
+    expect(invalidResponse.status).toBe(400);
   });
 
   test("routes migrated secrets seam only when a service is provided", async () => {

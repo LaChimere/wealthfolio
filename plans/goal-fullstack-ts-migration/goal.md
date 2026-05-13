@@ -127,6 +127,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
 - Turn 15: Implemented the low-risk secrets HTTP seam TS slice: injectable
   `SecretService`, guarded `/api/v1/secrets` set/get/delete route, validation
   for secret body/query input, and targeted backend tests.
+- Turn 16: Implemented the low-risk AI provider HTTP seam TS slice: injectable
+  `AiProviderService`, guarded `/api/v1/ai/providers` read/update/default/model
+  routes, request validation, JSON `null` mutation responses, and targeted
+  backend tests.
 
 ## Deferred items
 
@@ -159,6 +163,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
 - Real secret persistence/keyring integration remains an active follow-up.
   reason=this slice only adds the guarded HTTP seam, while production secrets
   must move with a dedicated runtime/keyring parity slice.
+- AI provider catalog merging, settings persistence, provider API calls, and
+  secret-backed model listing remain active follow-ups. reason=this slice only
+  adds the guarded route seam, while runtime behavior must move with dedicated
+  AI/secrets parity slices.
 
 ## Blockers
 

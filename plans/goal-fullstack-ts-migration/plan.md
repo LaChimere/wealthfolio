@@ -10,22 +10,22 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk secrets HTTP seam after the event
-stream transport slice:
+PR 5 continues vertical slices with a low-risk AI provider HTTP seam after the
+secrets route seam:
 
-- Add a `SecretService` interface and guarded `/secrets` route tests for set,
-  get, and delete behavior.
-- Preserve Rust API semantics: `POST` body `{ secretKey, secret }`, query-based
-  `GET`/`DELETE`, `204` mutations, JSON string-or-null reads, 400 validation
-  errors, and sidecar bearer-token checks.
-- Defer real OS keyring integration to a dedicated secrets/runtime slice so no
-  production secret backend changes land before broader runtime cutover.
+- Add an `AiProviderService` interface and guarded `/ai/providers` route tests
+  for provider reads, settings updates, default-provider updates, and model-list
+  requests.
+- Preserve Rust HTTP semantics for route methods, path parameters, JSON `null`
+  mutation responses, providerId validation, and sidecar bearer-token checks.
+- Defer catalog merging, app-settings persistence, real secret/keyring access,
+  and provider HTTP model-listing to dedicated AI/secrets runtime slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-or secret storage deletion is in scope for this slice.
+secret storage, or AI provider runtime deletion is in scope for this slice.
 
 ## Next slices
 

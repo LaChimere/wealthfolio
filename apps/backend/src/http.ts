@@ -1,6 +1,11 @@
 import type { BackendRuntimeConfig } from "./config";
 import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
 import { parseTrackingMode } from "./domains/accounts";
+import type {
+  AiProviderService,
+  AiProviderSettingsUpdate,
+  SetDefaultAiProviderRequest,
+} from "./domains/ai-providers";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type {
   CustomProviderService,
@@ -36,6 +41,7 @@ export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
   accountService?: AccountService;
+  aiProviderService?: AiProviderService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
@@ -107,6 +113,10 @@ async function routeRequest(
     return await routeAccountRequest(request, url, config, options.accountService);
   }
 
+  if (options.aiProviderService && url.pathname.startsWith("/api/v1/ai/providers")) {
+    return routeAiProviderRequest(request, url, config, options.aiProviderService);
+  }
+
   if (options.contributionLimitService && url.pathname.startsWith("/api/v1/limits")) {
     return await routeContributionLimitRequest(
       request,
@@ -169,6 +179,46 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAiProviderRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  aiProviderService: AiProviderService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/ai/providers") {
+    return Promise.resolve(aiProviderService.getAiProviders())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/ai/providers/settings") {
+    return handleJsonMutation(request, parseAiProviderSettingsUpdate, async (input) => {
+      await aiProviderService.updateProviderSettings(input);
+      return null;
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/ai/providers/default") {
+    return handleJsonMutation(request, parseSetDefaultAiProviderRequest, async (input) => {
+      await aiProviderService.setDefaultProvider(input);
+      return null;
+    });
+  }
+
+  const providerId = aiProviderModelsIdFromPath(url.pathname);
+  if (request.method === "GET" && providerId !== undefined) {
+    return Promise.resolve(aiProviderService.listModels(providerId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -757,6 +807,11 @@ function accountIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function aiProviderModelsIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/ai\/providers\/([^/]+)\/models$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function contributionLimitIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/limits\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -1103,6 +1158,95 @@ function parseProviderUpdate(payload: Record<string, unknown>): ProviderUpdate |
   }
 
   return { providerId, priority, enabled };
+}
+
+function parseAiProviderSettingsUpdate(
+  payload: Record<string, unknown>,
+): AiProviderSettingsUpdate | Response {
+  const providerId = parseRequiredString(payload.providerId, "providerId");
+  if (providerId instanceof Response) {
+    return providerId;
+  }
+
+  const parsed: AiProviderSettingsUpdate = { providerId };
+  const enabled = parseOptionalBooleanOrNull(payload.enabled, "enabled");
+  if (enabled instanceof Response) {
+    return enabled;
+  }
+  if (enabled !== undefined && enabled !== null) {
+    parsed.enabled = enabled;
+  }
+  const favorite = parseOptionalBooleanOrNull(payload.favorite, "favorite");
+  if (favorite instanceof Response) {
+    return favorite;
+  }
+  if (favorite !== undefined && favorite !== null) {
+    parsed.favorite = favorite;
+  }
+  const selectedModel = parseOptionalStringOrNull(payload.selectedModel, "selectedModel");
+  if (selectedModel instanceof Response) {
+    return selectedModel;
+  }
+  if (selectedModel !== undefined && selectedModel !== null) {
+    parsed.selectedModel = selectedModel;
+  }
+  const customUrl = parseOptionalStringOrNull(payload.customUrl, "customUrl");
+  if (customUrl instanceof Response) {
+    return customUrl;
+  }
+  if (customUrl !== undefined && customUrl !== null) {
+    parsed.customUrl = customUrl;
+  }
+  const priority = parseOptionalIntegerOrNull(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  if (priority !== undefined && priority !== null) {
+    parsed.priority = priority;
+  }
+  const favoriteModels = parseOptionalStringArrayOrNull(payload.favoriteModels, "favoriteModels");
+  if (favoriteModels instanceof Response) {
+    return favoriteModels;
+  }
+  if (favoriteModels !== undefined && favoriteModels !== null) {
+    parsed.favoriteModels = favoriteModels;
+  }
+  const toolsAllowlist = parseOptionalStringArrayOrNull(payload.toolsAllowlist, "toolsAllowlist");
+  if (toolsAllowlist instanceof Response) {
+    return toolsAllowlist;
+  }
+  if (toolsAllowlist !== undefined) {
+    parsed.toolsAllowlist = toolsAllowlist;
+  }
+  const modelCapabilityOverride = parseOptionalRecordOrNull(
+    payload.modelCapabilityOverride,
+    "modelCapabilityOverride",
+  );
+  if (modelCapabilityOverride instanceof Response) {
+    return modelCapabilityOverride;
+  }
+  if (modelCapabilityOverride !== undefined && modelCapabilityOverride !== null) {
+    parsed.modelCapabilityOverride = modelCapabilityOverride;
+  }
+  const tuningOverrides = parseOptionalRecordOrNull(payload.tuningOverrides, "tuningOverrides");
+  if (tuningOverrides instanceof Response) {
+    return tuningOverrides;
+  }
+  if (tuningOverrides !== undefined) {
+    parsed.tuningOverrides = tuningOverrides;
+  }
+
+  return parsed;
+}
+
+function parseSetDefaultAiProviderRequest(
+  payload: Record<string, unknown>,
+): SetDefaultAiProviderRequest | Response {
+  const providerId = parseOptionalStringOrNull(payload.providerId, "providerId");
+  if (providerId instanceof Response) {
+    return providerId;
+  }
+  return providerId === undefined ? {} : { providerId };
 }
 
 function parseSecretSetRequest(
@@ -2160,6 +2304,22 @@ function parseOptionalStringOrNull(
     return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
   }
   return value;
+}
+
+function parseOptionalRecordOrNull(
+  value: unknown,
+  field: string,
+): Record<string, unknown> | null | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an object or null` }, 400);
+  }
+  return value as Record<string, unknown>;
 }
 
 function parseOptionalStringArrayOrNull(

@@ -35,6 +35,13 @@ export {
   type NewAccount,
   type TrackingMode,
 } from "./domains/accounts";
+export type {
+  AiProviderService,
+  AiProviderSettingsUpdate,
+  AiProvidersResponse,
+  ListAiModelsResponse,
+  SetDefaultAiProviderRequest,
+} from "./domains/ai-providers";
 export {
   createContributionLimitRepository,
   createContributionLimitService,
