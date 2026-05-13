@@ -71,6 +71,10 @@ packages/addon-sdk/package-lock.json
 # Tauri generated
 apps/tauri/gen/schemas/
 
+# Electron packaging staging
+apps/electron/resources/sidecars/*
+!apps/electron/resources/sidecars/.gitkeep
+
 # OS generated files
 .DS_Store
 .DS_Store?

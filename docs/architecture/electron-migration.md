@@ -53,7 +53,8 @@ fail-closed bearer-token middleware on protected API routes. When that variable
 is set, the server refuses non-loopback `WF_LISTEN_ADDR` values and rejects
 empty tokens. Electron main generates the token per run, keeps the base URL and
 token out of the renderer, and starts the server through `cargo run` only in
-development until release packaging provides a bundled sidecar binary.
+development. Packaged Electron builds launch a bundled `wealthfolio-server`
+binary from Electron's `resources/sidecars` directory.
 
 The Electron sidecar sets `WF_SECRET_BACKEND=keyring` and starts the server with
 the `keyring-backend` feature so desktop provider secrets are durable and stay
@@ -227,6 +228,14 @@ Mobile-only Tauri features are not part of the Electron migration.
 Use Electron-native release tooling for desktop artifacts. The intended stack is
 `electron-builder` for packaging/signing and `electron-updater` for update
 metadata and install flow, unless later platform testing disproves that choice.
+
+The initial Electron packaging path stages the Vite renderer into
+`apps/electron/dist/renderer`, builds the Rust sidecar with the server
+`keyring-backend` feature, stages it in `apps/electron/resources/sidecars`, and
+packages the app with `electron-builder`. The packaged main process resolves the
+renderer from the asar app path and resolves the sidecar from
+`process.resourcesPath`, so it no longer depends on the repository checkout at
+runtime. Use `bun run package:electron` for the full local packaging flow.
 
 Tauri updater metadata and signing are not compatible with Electron updater
 metadata. The release migration must define the new update feed, metadata

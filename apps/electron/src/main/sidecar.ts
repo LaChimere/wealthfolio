@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -93,16 +94,19 @@ export function createRustSidecarCommand(repositoryRoot: string): SidecarCommand
   };
 }
 
-export async function startRustSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
-  if (options.packaged) {
-    throw new Error(
-      `Electron sidecar binary is not bundled yet. Expected a packaged sidecar under ${path.join(
-        options.resourcesPath,
-        "sidecars",
-      )}.`,
-    );
+export function createPackagedSidecarCommand(
+  resourcesPath: string,
+  platform: NodeJS.Platform = process.platform,
+): SidecarCommand {
+  const binaryName = platform === "win32" ? "wealthfolio-server.exe" : "wealthfolio-server";
+  const command = path.join(resourcesPath, "sidecars", binaryName);
+  if (!existsSync(command)) {
+    throw new Error(`Electron sidecar binary is not bundled at ${command}.`);
   }
+  return { command, args: [] };
+}
 
+export async function startRustSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
   assertNotAborted(options.signal);
 
   const port = await findAvailablePort();
@@ -117,10 +121,14 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
     secretKey,
   });
 
-  const sidecarCommand = options.command ?? createRustSidecarCommand(options.repositoryRoot);
+  const sidecarCommand =
+    options.command ??
+    (options.packaged
+      ? createPackagedSidecarCommand(options.resourcesPath)
+      : createRustSidecarCommand(options.repositoryRoot));
 
   const child = spawn(sidecarCommand.command, sidecarCommand.args, {
-    cwd: options.repositoryRoot,
+    cwd: options.packaged ? path.dirname(sidecarCommand.command) : options.repositoryRoot,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });

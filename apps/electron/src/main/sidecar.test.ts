@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, spyOn, test } from "bun:test";
 
 import {
+  createPackagedSidecarCommand,
   createRustSidecarCommand,
   createSidecarEnvironment,
   startRustSidecar,
@@ -79,6 +80,39 @@ describe("Electron sidecar configuration", () => {
     expect(command.command).toBe("cargo");
     expect(command.args).toContain("keyring-backend");
     expect(command.args).toContain(path.join("/repo", "apps/server/Cargo.toml"));
+  });
+
+  test("resolves the packaged sidecar from Electron resources", () => {
+    const tempRoot = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-electron-sidecar-resource-test-"),
+    );
+    const sidecarDir = path.join(tempRoot, "sidecars");
+    const sidecarPath = path.join(
+      sidecarDir,
+      process.platform === "win32" ? "wealthfolio-server.exe" : "wealthfolio-server",
+    );
+    mkdirSync(sidecarDir, { recursive: true });
+    writeFileSync(sidecarPath, "");
+
+    try {
+      const command = createPackagedSidecarCommand(tempRoot);
+
+      expect(command).toEqual({ command: sidecarPath, args: [] });
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("reports missing packaged sidecar binaries explicitly", () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-missing-test-"));
+
+    try {
+      expect(() => createPackagedSidecarCommand(tempRoot)).toThrow(
+        /Electron sidecar binary is not bundled/,
+      );
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
   });
 
   test("starts and stops with keyring-backed sidecar environment", async () => {

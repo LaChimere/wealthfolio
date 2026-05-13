@@ -339,11 +339,19 @@ function configureWindowThemeEvents(): void {
   });
 }
 
+function resolveRendererIndexHtmlPath(): string {
+  if (app.isPackaged) {
+    return path.join(app.getAppPath(), "dist", "renderer", "index.html");
+  }
+
+  return path.join(repositoryRoot, "dist", "index.html");
+}
+
 async function createWindow(): Promise<void> {
   const legacyPaths = resolveLegacyTauriPaths();
   const preloadPath = path.join(distRoot, "preload", "index.cjs");
   const rendererUrl = process.env.WF_ELECTRON_RENDERER_URL;
-  const indexHtmlPath = path.join(repositoryRoot, "dist", "index.html");
+  const indexHtmlPath = resolveRendererIndexHtmlPath();
   await createMainWindow({
     preloadPath,
     rendererUrl,

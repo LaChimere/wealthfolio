@@ -84,18 +84,19 @@ crates/
 
 ## Run Targets
 
-| Task           | Command                  |
-| -------------- | ------------------------ |
-| Desktop dev    | `bun tauri dev`          |
-| Electron dev   | `bun run dev:electron`   |
-| Web dev        | `bun run dev:web`        |
-| Tests (TS)     | `bun run test`           |
-| Tests (Rust)   | `cargo test`             |
-| Type check     | `bun run type-check`     |
-| Lint           | `bun run lint`           |
-| All checks     | `bun run check`          |
-| Electron build | `bun run build:electron` |
-| Git hooks      | `bun run hooks:install`  |
+| Task           | Command                    |
+| -------------- | -------------------------- |
+| Desktop dev    | `bun tauri dev`            |
+| Electron dev   | `bun run dev:electron`     |
+| Web dev        | `bun run dev:web`          |
+| Tests (TS)     | `bun run test`             |
+| Tests (Rust)   | `cargo test`               |
+| Type check     | `bun run type-check`       |
+| Lint           | `bun run lint`             |
+| All checks     | `bun run check`            |
+| Electron build | `bun run build:electron`   |
+| Electron pkg   | `bun run package:electron` |
+| Git hooks      | `bun run hooks:install`    |
 
 ---
 
@@ -123,9 +124,9 @@ crates/
 ### Architecture pattern
 
 ```
-Frontend → Adapter (tauri/web) → Command wrapper
+Frontend → Adapter (Tauri/Electron/Web) → Command wrapper
                 ↓
-        Tauri IPC  |  Axum HTTP
+   Tauri IPC | Electron IPC + Rust sidecar | Axum HTTP
                 ↓
            crates/core (business logic)
                 ↓

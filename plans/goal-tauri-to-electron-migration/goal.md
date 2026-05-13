@@ -256,6 +256,9 @@
   restores/saves normal bounds and maximized state in the legacy data root, uses
   macOS hidden-inset titlebar chrome, and maps existing Tauri drag-region
   markers to Electron drag/no-drag CSS.
+- Turn 46: Started Electron release packaging. The Electron app now has
+  `electron-builder` configuration, renderer staging, a Bun-managed Rust sidecar
+  build/stage script, and packaged sidecar resolution from Electron resources.
 
 ## Deferred items
 
