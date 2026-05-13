@@ -263,6 +263,10 @@
   `electron-updater`. Electron main now handles update commands before sidecar
   proxying, emits download/install progress to the renderer, and uses
   electron-builder GitHub update metadata instead of the legacy Tauri manifest.
+- Turn 48: Replaced the Tauri desktop release job with Electron artifact builds.
+  The workflow now builds per-platform/arch Electron artifacts, stages matching
+  sidecar binaries through an `afterPack` hook, merges updater metadata in a
+  single publish job, and keeps the standalone Linux server prebuild release.
 
 ## Deferred items
 

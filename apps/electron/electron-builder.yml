@@ -2,6 +2,7 @@ appId: com.teymz.wealthfolio
 productName: Wealthfolio
 copyright: Copyright 2026 Teymz Inc.
 asar: true
+afterPack: ../../scripts/electron-after-pack.cjs
 
 directories:
   output: ../../target/electron
@@ -10,14 +11,11 @@ files:
   - package.json
   - dist/**
 
-extraResources:
-  - from: resources/sidecars
-    to: sidecars
-
 publish:
   provider: github
   owner: wealthfolio
   repo: wealthfolio
+  releaseType: draft
 
 protocols:
   - name: Wealthfolio deep links

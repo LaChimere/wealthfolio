@@ -230,11 +230,14 @@ metadata and install flow, unless later platform testing disproves that choice.
 
 The initial Electron packaging path stages the Vite renderer into
 `apps/electron/dist/renderer`, builds the Rust sidecar with the server
-`keyring-backend` feature, stages it in `apps/electron/resources/sidecars`, and
-packages the app with `electron-builder`. The packaged main process resolves the
-renderer from the asar app path and resolves the sidecar from
-`process.resourcesPath`, so it no longer depends on the repository checkout at
-runtime. Use `bun run package:electron` for the full local packaging flow.
+`keyring-backend` feature, stages it in
+`apps/electron/resources/sidecars/<platform>-<arch>`, and packages the app with
+`electron-builder`. The `afterPack` hook copies the matching staged sidecar into
+the packaged app's `resources/sidecars` directory for each Electron target
+architecture. The packaged main process resolves the renderer from the asar app
+path and resolves the sidecar from `process.resourcesPath`, so it no longer
+depends on the repository checkout at runtime. Use `bun run package:electron`
+for the full local packaging flow.
 
 Electron update checks and installs are main-process only. The renderer invokes
 the existing `check_for_updates` and `install_app_update` command names through
@@ -248,10 +251,13 @@ manual checks and installs fail explicitly unless the app is packaged and
 Tauri updater metadata and signing are not compatible with Electron updater
 metadata. Electron packaging is configured for a GitHub provider
 (`wealthfolio/wealthfolio`) so `electron-builder` can generate
-electron-updater-compatible metadata. The release migration still needs to
-replace the Tauri GitHub Actions release flow, including platform signing,
-notarization, publish behavior, and rollback strategy, before removing the Tauri
-release workflow.
+electron-updater-compatible metadata. The release workflow builds Electron
+artifacts per platform/architecture, uploads them as workflow artifacts, then a
+single publish job merges `latest*.yml` metadata before uploading to a draft
+GitHub release. That merge step prevents per-architecture jobs from overwriting
+each other's updater metadata. Platform signing/notarization and rollback policy
+still need production-secret validation before removing all Tauri release
+fallbacks.
 
 ## OAuth and deep links
 

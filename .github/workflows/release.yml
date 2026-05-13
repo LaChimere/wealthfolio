@@ -13,18 +13,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: "macos-latest"
-            args: "--target x86_64-apple-darwin"
-          - platform: "macos-latest"
-            args: "--target aarch64-apple-darwin"
-          - platform: "windows-latest"
-            args: "--target x86_64-pc-windows-msvc"
-          - platform: "windows-latest"
-            args: "--target aarch64-pc-windows-msvc"
-          - platform: "ubuntu-24.04"
-            args: ""
-          - platform: "ubuntu-24.04-arm"
-            args: ""
+          - id: "macos-x64"
+            platform: "macos-latest"
+            rust_target: "x86_64-apple-darwin"
+            electron_args: "--mac --x64"
+          - id: "macos-arm64"
+            platform: "macos-latest"
+            rust_target: "aarch64-apple-darwin"
+            electron_args: "--mac --arm64"
+          - id: "windows-x64"
+            platform: "windows-latest"
+            rust_target: "x86_64-pc-windows-msvc"
+            electron_args: "--win --x64"
+          - id: "windows-arm64"
+            platform: "windows-latest"
+            rust_target: "aarch64-pc-windows-msvc"
+            electron_args: "--win --arm64"
+          - id: "linux-x64"
+            platform: "ubuntu-24.04"
+            rust_target: ""
+            electron_args: "--linux --x64"
+          - id: "linux-arm64"
+            platform: "ubuntu-24.04-arm"
+            rust_target: ""
+            electron_args: "--linux --arm64"
 
     runs-on: ${{ matrix.platform }}
 
@@ -36,18 +48,20 @@ jobs:
         if: contains(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config libssl-dev libsoup2.4-dev javascriptcoregtk-4.0 webkit2gtk-4.0 xdg-utils
+          sudo apt-get install -y build-essential fakeroot libarchive-tools libssl-dev libsqlite3-dev patchelf pkg-config rpm
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets:
-            ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' ||
-            '' }}
 
-      - name: Install macOS Rust targets
-        if: contains(matrix.platform, 'macos')
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install Rust target
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Configure Windows ARM64 MSVC tools
+        if: matrix.rust_target == 'aarch64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -65,53 +79,96 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install Rust targets
-        if: matrix.platform == 'windows-latest'
-        run: rustup target add aarch64-pc-windows-msvc x86_64-pc-windows-msvc
-
-      - name: Determine Windows bundle targets
-        if: contains(matrix.platform, 'windows')
-        id: win-bundles
-        shell: bash
-        run: |
-          # If version has a non-numeric pre-release (e.g. beta), skip MSI (WiX requires numeric-only)
-          ARGS=$(node -e "
-            const v = require('./apps/tauri/tauri.conf.json').version;
-            console.log(/\-.*[a-zA-Z]/.test(v) ? '--bundles nsis' : '');
-          ")
-          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
-
-      - name: Build the app
-        uses: tauri-apps/tauri-action@v0
-
+      - name: Build Electron renderer and shell
         env:
-          # Wealthfolio Connect (set variables to enable; omit to build without Connect)
+          CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
+          CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
+        run: bun run build:electron
+
+      - name: Build Electron sidecar
+        shell: bash
+        env:
           CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
           CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
           CONNECT_API_URL: ${{ vars.CONNECT_API_URL }}
-          CONNECT_OAUTH_CALLBACK_URL: ${{ vars.CONNECT_OAUTH_CALLBACK_URL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          WF_ELECTRON_SIDECAR_TARGET: ${{ matrix.rust_target }}
+        run: bun run build:electron:sidecar
+
+      - name: Package Electron artifacts
+        shell: bash
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_NAME: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run --cwd apps/electron dist -- ${{ matrix.electron_args }} --publish never
+
+      - name: Stage Electron release files
+        shell: bash
+        run: |
+          mkdir -p target/electron-upload
+          find target/electron -maxdepth 1 -type f ! -name '*.yaml' -print -exec cp {} target/electron-upload/ \;
+
+      - name: Upload Electron release files
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_name }} # This only works if the workflow triggers on new tags.
-          releaseName: "Wealthfolio v__VERSION__" # tauri-action replaces \_\_VERSION\_\_ with the app version.
-          releaseBody: "See the assets to download and install this version."
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }} ${{ steps.win-bundles.outputs.args }}
+          name: electron-${{ matrix.id }}
+          path: target/electron-upload/*
+          if-no-files-found: error
+
+  publish-electron-release:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Download Electron release files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: electron-*
+          path: target/electron-release-assets
+          merge-multiple: false
+
+      - name: Merge Electron update metadata
+        run: |
+          bun run scripts/merge-electron-update-metadata.mjs target/electron-release-assets
+          find target/electron-release-assets -mindepth 2 -name 'latest*.yml' -delete
+
+      - name: Publish draft GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+            TAG="v${VERSION}"
+          fi
+          TITLE="Wealthfolio ${TAG}"
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" --draft --title "${TITLE}" --notes "See the assets to download and install this version."
+          fi
+          shopt -s globstar nullglob
+          gh release upload "${TAG}" target/electron-release-assets/**/* --clobber
 
   prebuild-server-linux:
     # Standalone server tarball for self-hosters (Proxmox LXC, bare metal, systemd).
     # Tracks: https://github.com/wealthfolio/wealthfolio/issues/563
     # Built on ubuntu-22.04 (glibc 2.35) for forward compatibility with Debian 12+/Ubuntu 22.04+.
-    needs: release
+    needs: publish-electron-release
     # Run even if some matrix entries in `release` failed (fail-fast is off).
     # Only skip on explicit cancellation.
     if: ${{ !cancelled() }}
