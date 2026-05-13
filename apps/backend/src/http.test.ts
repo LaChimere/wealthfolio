@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
+import type { AddonService } from "./domains/addons";
 import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
@@ -253,6 +254,261 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("routes migrated addons seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const addonService: AddonService = {
+      listInstalledAddons() {
+        calls.push(["list-installed", undefined]);
+        return [{ id: "addon-1" }];
+      },
+      installAddonZip(request) {
+        calls.push([
+          "install-zip",
+          { zipData: Array.from(request.zipData), enableAfterInstall: request.enableAfterInstall },
+        ]);
+        return { id: "installed" };
+      },
+      toggleAddon(addonId, enabled) {
+        calls.push(["toggle", { addonId, enabled }]);
+      },
+      uninstallAddon(addonId) {
+        calls.push(["uninstall", addonId]);
+      },
+      loadAddonForRuntime(addonId) {
+        calls.push(["runtime", addonId]);
+        return { id: addonId, files: [] };
+      },
+      getEnabledAddonsOnStartup() {
+        calls.push(["enabled-on-startup", undefined]);
+        return [{ id: "enabled" }];
+      },
+      extractAddonZip(request) {
+        calls.push(["extract", Array.from(request.zipData)]);
+        return { manifest: { id: "extracted" } };
+      },
+      fetchStoreListings() {
+        calls.push(["store-listings", undefined]);
+        return [{ id: "store-addon" }];
+      },
+      submitRating(request) {
+        calls.push(["submit-rating", request]);
+        return { ok: true };
+      },
+      checkAddonUpdate(addonId) {
+        calls.push(["check-update", addonId]);
+        return { addonId, updateAvailable: false };
+      },
+      checkAllAddonUpdates() {
+        calls.push(["check-all", undefined]);
+        return [];
+      },
+      updateAddonFromStore(addonId) {
+        calls.push(["store-update", addonId]);
+        return { id: addonId };
+      },
+      downloadAddonToStaging(addonId) {
+        calls.push(["staging-download", addonId]);
+        return { id: addonId };
+      },
+      installAddonFromStaging(request) {
+        calls.push(["staging-install", request]);
+        return { id: request.addonId };
+      },
+      clearAddonStaging(addonId) {
+        calls.push(["staging-clear", addonId]);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { addonService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/addons/installed"))).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/addons/installed", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/installed", { headers: authHeaders }),
+        )
+      ).json(),
+    ).resolves.toEqual([{ id: "addon-1" }]);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/install-zip", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ zipData: [9], zipDataB64: "AQID", enableAfterInstall: null }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/install-zip", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ zipData: [9], zipDataB64: "not-base64" }),
+          }),
+        )
+      ).status,
+    ).toBe(500);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/install-zip", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ zipData: [256] }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/install-zip", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ enableAfterInstall: false }),
+          }),
+        )
+      ).status,
+    ).toBe(500);
+
+    const toggleResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/addons/toggle", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1", enabled: false }),
+      }),
+    );
+    expect(toggleResponse.status).toBe(204);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/runtime/addon%2Fid", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/enabled-on-startup", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/extract", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ zipData: [4, 5], enableAfterInstall: false }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/listings", {
+        headers: authHeaders,
+      }),
+    );
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/store/ratings?addonId=addon-1", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual([]);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/ratings", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1", rating: 255, review: null }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/store/ratings", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ addonId: "addon-1", rating: 256 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/check-update", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/check-all", {
+        method: "POST",
+        headers: authHeaders,
+        body: "not json",
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/update", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/staging/download", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/install-from-staging", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ addonId: "addon-1", enableAfterInstall: null }),
+      }),
+    );
+    const clearResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/addons/store/staging?addonId=", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(clearResponse.status).toBe(204);
+    const uninstallResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/addons/addon%20id", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(uninstallResponse.status).toBe(204);
+
+    expect(calls).toEqual([
+      ["list-installed", undefined],
+      ["install-zip", { zipData: [1, 2, 3], enableAfterInstall: true }],
+      ["toggle", { addonId: "addon-1", enabled: false }],
+      ["runtime", "addon/id"],
+      ["enabled-on-startup", undefined],
+      ["extract", [4, 5]],
+      ["store-listings", undefined],
+      ["submit-rating", { addonId: "addon-1", rating: 255 }],
+      ["check-update", "addon-1"],
+      ["check-all", undefined],
+      ["store-update", "addon-1"],
+      ["staging-download", "addon-1"],
+      ["staging-install", { addonId: "addon-1", enableAfterInstall: true }],
+      ["staging-clear", ""],
+      ["uninstall", "addon id"],
+    ]);
   });
 
   test("routes migrated contribution limits domain only when a service is provided", async () => {

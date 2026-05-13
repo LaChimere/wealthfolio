@@ -155,6 +155,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `/api/v1/allocations`, and `/api/v1/snapshots` routes, query/body/date
   validation, ordered repeated account ID parsing, null option normalization,
   200/204 mutation status parity, and targeted backend tests.
+- Turn 22: Implemented the low-risk add-ons HTTP seam TS slice: injectable
+  `AddonService`, guarded `/api/v1/addons/*` routes for installed/runtime/store
+  and staging operations, zip payload decoding/validation, path decoding,
+  default/null option handling, rating validation, 204 mutation parity, and
+  targeted backend tests.
 
 ## Deferred items
 
@@ -212,6 +217,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   portfolio recalculation side effects remain active follow-ups. reason=this
   slice only adds the guarded HTTP seam, while runtime behavior must move with
   dedicated holdings/portfolio parity slices.
+- Add-on filesystem extraction, manifest validation, sandbox/runtime loading,
+  store HTTP requests, staging I/O, and update behavior remain active
+  follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
+  behavior must move with dedicated add-on parity slices.
 
 ## Blockers
 

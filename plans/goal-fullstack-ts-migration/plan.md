@@ -10,28 +10,28 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk holdings HTTP seam after the
-portfolio metrics route seam:
+PR 5 continues vertical slices with a low-risk add-ons HTTP seam after the
+holdings route seam:
 
-- Add a `HoldingsService` interface and guarded `/holdings`, `/valuations`,
-  `/allocations`, and `/snapshots` route tests for holdings reads, valuation
-  reads, allocation reads, manual snapshots, and holdings CSV import/check.
-- Preserve Rust HTTP semantics for route methods, required/optional query
-  parsing, ordered repeated `accountIds` query handling, snapshot date
-  validation, JSON `null` option normalization, 200/204 mutation statuses,
-  `Holding | null` responses, and sidecar bearer-token checks.
-- Defer real holdings fan-out, valuation history/latest calculations, allocation
-  calculations, snapshot persistence/reconciliation, import symbol lookup, and
-  portfolio recalculation side effects to dedicated portfolio
-  calculation/runtime parity slices.
+- Add an `AddonService` interface and guarded `/addons` route tests for
+  installed add-ons, zip install/extract, toggle/uninstall/runtime loading,
+  startup loading, store listings/ratings/update checks, staging
+  download/install, and staging cleanup.
+- Preserve Rust HTTP semantics for route methods, path decoding, zipDataB64
+  precedence over zipData, byte-array validation, enable-after-install defaults,
+  `u8` rating validation, `Option<String>` null normalization, unconditional
+  empty rating reads, 204 mutation statuses, and sidecar bearer-token checks.
+- Defer real add-on filesystem extraction, manifest validation, sandbox/runtime
+  loading, store HTTP requests, staging I/O, and add-on update behavior to
+  dedicated add-on runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
-app utility runtime, portfolio metrics runtime, or holdings runtime deletion is
-in scope for this slice.
+app utility runtime, portfolio metrics runtime, holdings runtime, or add-on
+runtime deletion is in scope for this slice.
 
 ## Next slices
 

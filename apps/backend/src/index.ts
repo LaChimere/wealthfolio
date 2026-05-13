@@ -36,6 +36,13 @@ export {
   type TrackingMode,
 } from "./domains/accounts";
 export type {
+  AddonRatingRequest,
+  AddonService,
+  AddonStagingInstallRequest,
+  AddonZipExtractRequest,
+  AddonZipInstallRequest,
+} from "./domains/addons";
+export type {
   AiProviderService,
   AiProviderSettingsUpdate,
   AiProvidersResponse,

@@ -1,5 +1,12 @@
 import type { BackendRuntimeConfig } from "./config";
 import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
+import type {
+  AddonRatingRequest,
+  AddonService,
+  AddonStagingInstallRequest,
+  AddonZipExtractRequest,
+  AddonZipInstallRequest,
+} from "./domains/addons";
 import { parseTrackingMode } from "./domains/accounts";
 import type {
   AiProviderService,
@@ -58,6 +65,7 @@ export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
   accountService?: AccountService;
+  addonService?: AddonService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
   appUtilityService?: AppUtilityService;
@@ -133,6 +141,10 @@ async function routeRequest(
 
   if (options.accountService && url.pathname.startsWith("/api/v1/accounts")) {
     return await routeAccountRequest(request, url, config, options.accountService);
+  }
+
+  if (options.addonService && url.pathname.startsWith("/api/v1/addons")) {
+    return routeAddonRequest(request, url, config, options.addonService);
   }
 
   if (options.aiProviderService && url.pathname.startsWith("/api/v1/ai/providers")) {
@@ -240,6 +252,117 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAddonRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  addonService: AddonService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/addons/installed") {
+    return Promise.resolve(addonService.listInstalledAddons())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/install-zip") {
+    return handleJsonMutation(request, parseAddonZipInstallRequest, (input) =>
+      Promise.resolve(addonService.installAddonZip(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/toggle") {
+    return handleJsonMutationNoContent(request, parseAddonToggleRequest, async (input) => {
+      await addonService.toggleAddon(input.addonId, input.enabled);
+    });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/addons/enabled-on-startup") {
+    return Promise.resolve(addonService.getEnabledAddonsOnStartup())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/extract") {
+    return handleJsonMutation(request, parseAddonZipExtractRequest, (input) =>
+      Promise.resolve(addonService.extractAddonZip(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/addons/store/listings") {
+    return Promise.resolve(addonService.fetchStoreListings())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/ratings") {
+    return handleJsonMutation(request, parseAddonRatingRequest, (input) =>
+      Promise.resolve(addonService.submitRating(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/addons/store/ratings") {
+    return jsonResponse([]);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/check-update") {
+    return handleJsonMutation(request, parseAddonIdRequest, (input) =>
+      Promise.resolve(addonService.checkAddonUpdate(input.addonId)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/check-all") {
+    return Promise.resolve(addonService.checkAllAddonUpdates())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/update") {
+    return handleJsonMutation(request, parseAddonIdRequest, (input) =>
+      Promise.resolve(addonService.updateAddonFromStore(input.addonId)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/staging/download") {
+    return handleJsonMutation(request, parseAddonIdRequest, (input) =>
+      Promise.resolve(addonService.downloadAddonToStaging(input.addonId)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/addons/store/install-from-staging") {
+    return handleJsonMutation(request, parseAddonStagingInstallRequest, (input) =>
+      Promise.resolve(addonService.installAddonFromStaging(input)),
+    );
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/v1/addons/store/staging") {
+    return Promise.resolve(
+      addonService.clearAddonStaging(url.searchParams.get("addonId") ?? undefined),
+    )
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  const runtimeAddonId = addonRuntimeIdFromPath(url.pathname);
+  if (request.method === "GET" && runtimeAddonId !== undefined) {
+    return Promise.resolve(addonService.loadAddonForRuntime(runtimeAddonId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  const addonId = addonIdFromPath(url.pathname);
+  if (request.method === "DELETE" && addonId !== undefined) {
+    return Promise.resolve(addonService.uninstallAddon(addonId))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1266,6 +1389,16 @@ function accountIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function addonIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/addons\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function addonRuntimeIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/addons\/runtime\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function aiProviderModelsIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/ai\/providers\/([^/]+)\/models$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -2000,6 +2133,132 @@ function parseRestoreDatabaseRequest(
     return backupFilePath;
   }
   return { backupFilePath };
+}
+
+function parseAddonZipInstallRequest(
+  payload: Record<string, unknown>,
+): AddonZipInstallRequest | Response {
+  const zipData = parseAddonZipData(payload);
+  if (zipData instanceof Response) {
+    return zipData;
+  }
+  const enableAfterInstall = parseOptionalBooleanOrNull(
+    payload.enableAfterInstall,
+    "enableAfterInstall",
+  );
+  if (enableAfterInstall instanceof Response) {
+    return enableAfterInstall;
+  }
+  return { zipData, enableAfterInstall: enableAfterInstall ?? true };
+}
+
+function parseAddonZipExtractRequest(
+  payload: Record<string, unknown>,
+): AddonZipExtractRequest | Response {
+  const zipData = parseAddonZipData(payload);
+  if (zipData instanceof Response) {
+    return zipData;
+  }
+  return { zipData };
+}
+
+function parseAddonZipData(payload: Record<string, unknown>): Uint8Array | Response {
+  if (payload.zipDataB64 !== undefined && payload.zipDataB64 !== null) {
+    const zipDataB64 = parseRequiredString(payload.zipDataB64, "zipDataB64");
+    if (zipDataB64 instanceof Response) {
+      return zipDataB64;
+    }
+    return decodeAddonZipDataB64(zipDataB64);
+  }
+  if (payload.zipData !== undefined && payload.zipData !== null) {
+    if (
+      !Array.isArray(payload.zipData) ||
+      payload.zipData.some(
+        (byte) => typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 255,
+      )
+    ) {
+      return jsonResponse({ code: 400, message: "zipData must be an array of bytes" }, 400);
+    }
+    return new Uint8Array(payload.zipData);
+  }
+  return addonZipErrorResponse("Missing zip data");
+}
+
+function decodeAddonZipDataB64(value: string): Uint8Array | Response {
+  if (!isStandardBase64(value)) {
+    return addonZipErrorResponse("Invalid base64 zipDataB64");
+  }
+  return new Uint8Array(Buffer.from(value, "base64"));
+}
+
+function isStandardBase64(value: string): boolean {
+  return (
+    value.length % 4 === 0 &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  );
+}
+
+function addonZipErrorResponse(message: string): Response {
+  return jsonResponse({ code: 500, message }, 500);
+}
+
+function parseAddonToggleRequest(
+  payload: Record<string, unknown>,
+): { addonId: string; enabled: boolean } | Response {
+  const addonId = parseRequiredString(payload.addonId, "addonId");
+  if (addonId instanceof Response) {
+    return addonId;
+  }
+  const enabled = parseRequiredBoolean(payload.enabled, "enabled");
+  if (enabled instanceof Response) {
+    return enabled;
+  }
+  return { addonId, enabled };
+}
+
+function parseAddonIdRequest(payload: Record<string, unknown>): { addonId: string } | Response {
+  const addonId = parseRequiredString(payload.addonId, "addonId");
+  if (addonId instanceof Response) {
+    return addonId;
+  }
+  return { addonId };
+}
+
+function parseAddonRatingRequest(payload: Record<string, unknown>): AddonRatingRequest | Response {
+  const addonId = parseRequiredString(payload.addonId, "addonId");
+  if (addonId instanceof Response) {
+    return addonId;
+  }
+  const rating = parseRequiredU8(payload.rating, "rating");
+  if (rating instanceof Response) {
+    return rating;
+  }
+  const review = parseOptionalStringOrNull(payload.review, "review");
+  if (review instanceof Response) {
+    return review;
+  }
+  const parsed: AddonRatingRequest = { addonId, rating };
+  if (review !== undefined && review !== null) {
+    parsed.review = review;
+  }
+  return parsed;
+}
+
+function parseAddonStagingInstallRequest(
+  payload: Record<string, unknown>,
+): AddonStagingInstallRequest | Response {
+  const addonId = parseRequiredString(payload.addonId, "addonId");
+  if (addonId instanceof Response) {
+    return addonId;
+  }
+  const enableAfterInstall = parseOptionalBooleanOrNull(
+    payload.enableAfterInstall,
+    "enableAfterInstall",
+  );
+  if (enableAfterInstall instanceof Response) {
+    return enableAfterInstall;
+  }
+  return { addonId, enableAfterInstall: enableAfterInstall ?? true };
 }
 
 function parseAccountsSimplePerformanceRequest(
@@ -3513,6 +3772,17 @@ function parseRequiredInteger(value: unknown, field: string): number | Response 
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
   }
   return value;
+}
+
+function parseRequiredU8(value: unknown, field: string): number | Response {
+  const parsed = parseRequiredInteger(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed < 0 || parsed > 255) {
+    return jsonResponse({ code: 400, message: `${field} must be between 0 and 255` }, 400);
+  }
+  return parsed;
 }
 
 function parseRequiredNumber(value: unknown, field: string): number | Response {

@@ -67,9 +67,9 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, alternative assets, assets, app utilities, portfolio metrics, and
-    holdings TS repository/service or route config implementations plus guarded
-    route tests in `apps/backend/src/domains/settings.ts`,
+    provider, alternative assets, assets, app utilities, portfolio metrics,
+    holdings, and add-ons TS repository/service or route config implementations
+    plus guarded route tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -79,7 +79,8 @@
     `apps/backend/src/domains/health.ts`,
     `apps/backend/src/domains/market-data-providers.ts`,
     `apps/backend/src/domains/portfolio-jobs.ts`,
-    `apps/backend/src/domains/holdings.ts`, `apps/backend/src/events.ts`, and
+    `apps/backend/src/domains/holdings.ts`,
+    `apps/backend/src/domains/addons.ts`, `apps/backend/src/events.ts`, and
     `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
     migration endpoints are deferred to the health/classification service slice;
     custom provider `test-source` is deferred to an external-I/O slice; goals
@@ -98,7 +99,9 @@
     deferred to app utility parity slices; portfolio metric calculations are
     deferred to portfolio calculation parity slices; holdings fan-out,
     valuations, allocations, snapshots, imports, and portfolio recalculation
-    side effects are deferred to holdings/portfolio parity slices.
+    side effects are deferred to holdings/portfolio parity slices; add-on
+    filesystem extraction, runtime loading, store HTTP, staging I/O, and update
+    behavior are deferred to add-on runtime parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -391,6 +394,23 @@ contract:
   parsing, sidecar auth, route inertness, type-safety, and test coverage.
 - `pr5-holdings-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-addons-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable installed add-ons, zip install/extract,
+  toggle/uninstall/runtime loading, startup loading, store
+  listings/ratings/check operations, staging download/install/cleanup, guarded
+  HTTP route access, route inertness without injection, zipDataB64 precedence,
+  invalid/missing zip payload errors, byte-array validation, path decoding,
+  default/null option handling, unconditional empty rating reads, `u8` rating
+  validation, 204 mutation statuses, and deferred real add-on
+  runtime/store/staging behavior.
+- `pr5-addons-route-seam-review`: rubber-duck and code review found no
+  actionable issues after confirming route coverage, ratings read parity,
+  zipDataB64 precedence/no fallback, byte validation, Rust-style zip error
+  status, option defaults/null handling, path decoding, sidecar auth, route
+  inertness, type-safety, and test coverage.
+- `pr5-addons-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -401,8 +421,9 @@ contract:
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
   plus market-data provider settings, portfolio job trigger, event stream,
   secrets route seam, AI provider route seam, alternative assets route seam,
-  assets route seam, app utility route seam, portfolio metrics route seam, and
-  holdings route seam slices implemented; broader migration remains active.
+  assets route seam, app utility route seam, portfolio metrics route seam,
+  holdings route seam, and add-ons route seam slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -420,4 +441,6 @@ contract:
   app utility parity slices; portfolio metric calculations move with portfolio
   calculation parity slices; holdings fan-out, valuations, allocations,
   snapshots, imports, and portfolio recalculation side effects move with
-  holdings/portfolio parity slices.
+  holdings/portfolio parity slices; add-on filesystem extraction, runtime
+  loading, store HTTP, staging I/O, and update behavior move with add-on runtime
+  parity slices.
