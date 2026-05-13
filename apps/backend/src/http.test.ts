@@ -23,6 +23,7 @@ import {
   createCustomProviderRepository,
   createCustomProviderService,
 } from "./domains/custom-providers";
+import type { DeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService, type HealthService } from "./domains/health";
@@ -4281,6 +4282,239 @@ describe("TS backend HTTP skeleton", () => {
       ["reconcile-ready-state", { allowOverwrite: false }],
       ["reconcile-ready-state", { allowOverwrite: true }],
       ["reconcile-ready-state", { allowOverwrite: false }],
+    ]);
+  });
+
+  test("routes migrated device sync device management seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const deviceSyncService: DeviceSyncService = {
+      registerDevice(request) {
+        calls.push(["register", request]);
+        return { kind: "ready", deviceId: "device-1" };
+      },
+      getCurrentDevice() {
+        calls.push(["get-current", undefined]);
+        return { id: "current-device" };
+      },
+      getDevice(deviceId) {
+        calls.push(["get-device", deviceId]);
+        if (deviceId === "missing") {
+          throw new Error("No device ID configured");
+        }
+        return { id: deviceId };
+      },
+      listDevices(scope) {
+        calls.push(["list-devices", scope]);
+        return [{ id: "device-1" }];
+      },
+      updateDevice(deviceId, request) {
+        calls.push(["update-device", { deviceId, request }]);
+        return { success: true };
+      },
+      deleteDevice(deviceId) {
+        calls.push(["delete-device", deviceId]);
+        return { success: true };
+      },
+      revokeDevice(deviceId) {
+        calls.push(["revoke-device", deviceId]);
+        return { success: true };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { deviceSyncService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/sync/devices"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/sync/devices", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/sync/devices", {
+            headers: { authorization: "Bearer wrong-token" },
+          }),
+        )
+      ).status,
+    ).toBe(401);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/register", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              displayName: "MacBook",
+              platform: "macos",
+              osVersion: null,
+              appVersion: "3.4.0",
+              instanceId: "instance-1",
+              ignored: true,
+            }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ kind: "ready", deviceId: "device-1" });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/register", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              display_name: "MacBook",
+              platform: "macos",
+              instanceId: "instance-1",
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/current", { headers: authHeaders }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "current-device" });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/device%3A1%2Ftwo", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ id: "device:1/two" });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/%E0%A4%A", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    const missingDeviceResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/sync/device/missing", {
+        headers: authHeaders,
+      }),
+    );
+    expect(missingDeviceResponse.status).toBe(400);
+    await expect(missingDeviceResponse.json()).resolves.toEqual({
+      code: 400,
+      message: "No device ID configured",
+    });
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/devices", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/devices?scope=", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/devices?scope=team", {
+        headers: authHeaders,
+      }),
+    );
+
+    for (const body of [
+      {},
+      { displayName: null },
+      { displayName: "" },
+      { displayName: "Renamed Device" },
+    ]) {
+      await expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/sync/device/device%3A1", {
+              method: "PATCH",
+              headers: jsonHeaders,
+              body: JSON.stringify(body),
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual({ success: true });
+    }
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/device%3A1", {
+            method: "PATCH",
+            headers: jsonHeaders,
+            body: JSON.stringify({ displayName: 123 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/device%3A1", {
+            method: "DELETE",
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/device/device%3A1/revoke", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ success: true });
+
+    for (const request of [
+      new Request("http://127.0.0.1/api/v1/sync/device/register", { headers: authHeaders }),
+      new Request("http://127.0.0.1/api/v1/sync/device/current", {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({ displayName: "blocked" }),
+      }),
+      new Request("http://127.0.0.1/api/v1/sync/device", { headers: authHeaders }),
+      new Request("http://127.0.0.1/api/v1/sync/device-foo", { headers: authHeaders }),
+      new Request("http://127.0.0.1/api/v1/sync/keys/initialize", { headers: authHeaders }),
+    ]) {
+      expect((await handler(request)).status).toBe(404);
+    }
+
+    expect(calls).toEqual([
+      [
+        "register",
+        {
+          displayName: "MacBook",
+          platform: "macos",
+          osVersion: undefined,
+          appVersion: "3.4.0",
+          instanceId: "instance-1",
+        },
+      ],
+      ["get-current", undefined],
+      ["get-device", "device:1/two"],
+      ["get-device", "missing"],
+      ["list-devices", undefined],
+      ["list-devices", ""],
+      ["list-devices", "team"],
+      ["update-device", { deviceId: "device:1", request: { displayName: undefined } }],
+      ["update-device", { deviceId: "device:1", request: { displayName: undefined } }],
+      ["update-device", { deviceId: "device:1", request: { displayName: "" } }],
+      ["update-device", { deviceId: "device:1", request: { displayName: "Renamed Device" } }],
+      ["delete-device", "device:1"],
+      ["revoke-device", "device:1"],
     ]);
   });
 

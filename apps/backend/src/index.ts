@@ -118,6 +118,11 @@ export {
   type NewCustomProviderSource,
   type UpdateCustomProvider,
 } from "./domains/custom-providers";
+export type {
+  DeviceSyncService,
+  RegisterDeviceRequest,
+  UpdateDeviceRequest,
+} from "./domains/device-sync";
 export {
   createExchangeRateRepository,
   createExchangeRateService,

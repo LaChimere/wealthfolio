@@ -51,6 +51,11 @@ import type {
   NewCustomProviderSource,
   UpdateCustomProvider,
 } from "./domains/custom-providers";
+import type {
+  DeviceSyncService,
+  RegisterDeviceRequest,
+  UpdateDeviceRequest,
+} from "./domains/device-sync";
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { HealthConfig, HealthFixAction, HealthService } from "./domains/health";
@@ -98,6 +103,7 @@ export interface BackendRequestHandlerOptions {
   assetService?: AssetService;
   connectDeviceSyncService?: ConnectDeviceSyncService;
   connectService?: ConnectService;
+  deviceSyncService?: DeviceSyncService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
@@ -244,6 +250,16 @@ async function routeRequest(
 
   if (options.customProviderService && url.pathname.startsWith("/api/v1/custom-providers")) {
     return routeCustomProviderRequest(request, url, config, options.customProviderService);
+  }
+
+  if (isDeviceSyncDeviceManagementPath(url.pathname)) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    if (options.deviceSyncService) {
+      return routeDeviceSyncDeviceManagementRequest(request, url, options.deviceSyncService);
+    }
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
 
   if (options.exchangeRateService && url.pathname.startsWith("/api/v1/exchange-rates")) {
@@ -692,6 +708,56 @@ function routeConnectDeviceSyncRequest(
     return Promise.resolve(connectDeviceSyncService.cancelDeviceSnapshotUpload())
       .then(jsonResponse)
       .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeDeviceSyncDeviceManagementRequest(
+  request: Request,
+  url: URL,
+  deviceSyncService: DeviceSyncService,
+): Promise<Response> | Response {
+  if (request.method === "POST" && url.pathname === "/api/v1/sync/device/register") {
+    return handleJsonMutation(request, parseRegisterDeviceRequest, (input) =>
+      Promise.resolve(deviceSyncService.registerDevice(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/sync/device/current") {
+    return handleServiceJsonResponse(() => deviceSyncService.getCurrentDevice());
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/sync/devices") {
+    return handleServiceJsonResponse(() =>
+      deviceSyncService.listDevices(url.searchParams.get("scope") ?? undefined),
+    );
+  }
+
+  const revokeDeviceId = deviceSyncRevokeDeviceIdFromPath(url.pathname);
+  if (request.method === "POST" && revokeDeviceId !== undefined) {
+    if (revokeDeviceId instanceof Response) {
+      return revokeDeviceId;
+    }
+    return handleServiceJsonResponse(() => deviceSyncService.revokeDevice(revokeDeviceId));
+  }
+
+  const deviceId = deviceSyncDeviceIdFromPath(url.pathname);
+  if (deviceId !== undefined) {
+    if (deviceId instanceof Response) {
+      return deviceId;
+    }
+    if (request.method === "GET") {
+      return handleServiceJsonResponse(() => deviceSyncService.getDevice(deviceId));
+    }
+    if (request.method === "PATCH") {
+      return handleJsonMutation(request, parseUpdateDeviceRequest, (input) =>
+        Promise.resolve(deviceSyncService.updateDevice(deviceId, input)),
+      );
+    }
+    if (request.method === "DELETE") {
+      return handleServiceJsonResponse(() => deviceSyncService.deleteDevice(deviceId));
+    }
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -2344,6 +2410,16 @@ function domainErrorResponse(error: unknown): Response {
   );
 }
 
+function handleServiceJsonResponse(
+  operation: () => Promise<unknown> | unknown,
+): Promise<Response> | Response {
+  try {
+    return Promise.resolve(operation()).then(jsonResponse).catch(domainErrorResponse);
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | Response> {
   try {
     const payload = await request.json();
@@ -3214,6 +3290,38 @@ function isConnectDevicePath(pathname: string): boolean {
   return pathname === "/api/v1/connect/device" || pathname.startsWith("/api/v1/connect/device/");
 }
 
+function isDeviceSyncDeviceManagementPath(pathname: string): boolean {
+  return pathname === "/api/v1/sync/devices" || pathname.startsWith("/api/v1/sync/device/");
+}
+
+function deviceSyncDeviceIdFromPath(pathname: string): string | Response | undefined {
+  const match = /^\/api\/v1\/sync\/device\/([^/]+)$/.exec(pathname);
+  if (!match || isReservedDeviceSyncDeviceId(match[1])) {
+    return undefined;
+  }
+  return decodePathSegment(match[1]);
+}
+
+function deviceSyncRevokeDeviceIdFromPath(pathname: string): string | Response | undefined {
+  const match = /^\/api\/v1\/sync\/device\/([^/]+)\/revoke$/.exec(pathname);
+  if (!match || isReservedDeviceSyncDeviceId(match[1])) {
+    return undefined;
+  }
+  return decodePathSegment(match[1]);
+}
+
+function isReservedDeviceSyncDeviceId(value: string): boolean {
+  return value === "register" || value === "current";
+}
+
+function decodePathSegment(value: string): string | Response {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return jsonResponse({ code: 400, message: "Invalid path parameter encoding" }, 400);
+  }
+}
+
 async function handleConnectStoreSessionRequest(
   request: Request,
   connectService: ConnectService,
@@ -3303,6 +3411,48 @@ function parseConnectDeviceSyncReconcileReadyRequest(
     return jsonResponse({ code: 400, message: "allowOverwrite must be a boolean" }, 400);
   }
   return { allowOverwrite };
+}
+
+function parseRegisterDeviceRequest(
+  payload: Record<string, unknown>,
+): RegisterDeviceRequest | Response {
+  const displayName = parseRequiredString(payload.displayName, "displayName");
+  if (displayName instanceof Response) {
+    return displayName;
+  }
+  const platform = parseRequiredString(payload.platform, "platform");
+  if (platform instanceof Response) {
+    return platform;
+  }
+  const osVersion = parseOptionalStringOrNull(payload.osVersion, "osVersion");
+  if (osVersion instanceof Response) {
+    return osVersion;
+  }
+  const appVersion = parseOptionalStringOrNull(payload.appVersion, "appVersion");
+  if (appVersion instanceof Response) {
+    return appVersion;
+  }
+  const instanceId = parseRequiredString(payload.instanceId, "instanceId");
+  if (instanceId instanceof Response) {
+    return instanceId;
+  }
+  return {
+    displayName,
+    platform,
+    osVersion: osVersion ?? undefined,
+    appVersion: appVersion ?? undefined,
+    instanceId,
+  };
+}
+
+function parseUpdateDeviceRequest(
+  payload: Record<string, unknown>,
+): UpdateDeviceRequest | Response {
+  const displayName = parseOptionalStringOrNull(payload.displayName, "displayName");
+  if (displayName instanceof Response) {
+    return displayName;
+  }
+  return { displayName: displayName ?? undefined };
 }
 
 function parseWrappedObject<TField extends string>(

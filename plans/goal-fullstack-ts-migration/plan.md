@@ -10,26 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded Connect device-sync enrollment and
-engine HTTP seam after the non-device Connect route seam:
+PR 5 continues vertical slices with a guarded device-sync device-management HTTP
+seam after the Connect device-sync route seam:
 
-- Add an injectable `ConnectDeviceSyncService` seam for
-  `/api/v1/connect/device/*` routes covering sync state, enable, clear,
-  reinitialize, engine status, pairing-source status, bootstrap overwrite check,
-  reconcile-ready-state, bootstrap snapshot, manual cycle trigger, background
-  engine start/stop, snapshot generation, and snapshot cancellation.
-- Preserve Rust HTTP semantics for JSON `null` sync-data clearing, body-ignoring
-  no-body device POST routes, reconcile-ready-state `allowOverwrite` defaulting,
-  method/path inertness, and sidecar bearer-token checks. The TS seam
-  intentionally keeps the existing simplified JSON parser model that collapses
-  Axum's 415/422 extractor distinctions into 400 until runtime parity is
-  implemented.
-- Keep service implementations responsible for Rust-equivalent side effects such
-  as device-id secrets, snapshot cursor cleanup, repository resets, entitlement
-  checks, and background-engine lifecycle.
-- Defer real token lifecycle, E2EE enrollment, sync engine, snapshot/upload
-  runtime, local repositories, feature-flag errors, and background worker
-  behavior to dedicated Connect/device-sync runtime parity slices.
+- Add an injectable `DeviceSyncService` seam for `/api/v1/sync/device/*` and
+  `/api/v1/sync/devices` routes covering register, current-device lookup, device
+  lookup, list, update, delete, and revoke.
+- Preserve Rust HTTP semantics for required camelCase register fields, optional
+  update display names, empty-string scope passthrough, static-vs-dynamic route
+  boundaries, decoded path IDs, malformed path encoding errors, method/path
+  inertness, and sidecar bearer-token checks.
+- Keep service implementations responsible for Rust-equivalent token, cloud,
+  device-id secret, and enrollment side effects.
+- Defer team keys, pairing, E2EE, token lifecycle, feature-flag errors, and
+  broader device-sync runtime behavior to dedicated follow-up slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
