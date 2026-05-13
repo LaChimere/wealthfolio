@@ -35,6 +35,12 @@ export {
   type NewAccount,
   type TrackingMode,
 } from "./domains/accounts";
+export {
+  ACTIVITY_IMPORT_CONTEXT_KIND,
+  type ActivityParseCsvRequest,
+  type ActivitySearchRequest,
+  type ActivityService,
+} from "./domains/activities";
 export type {
   AddonRatingRequest,
   AddonService,

@@ -10,21 +10,22 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk market-data HTTP seam after the
-add-ons route seam:
+PR 5 continues vertical slices with a low-risk activities/import HTTP seam after
+the market-data route seam:
 
-- Add a `MarketDataService` interface and guarded `/exchanges` and
-  `/market-data/*` route tests for exchange list, symbol search/resolve, quote
-  history/latest/update/delete, Yahoo dividends, quote import/check, and market
-  sync requests.
-- Preserve Rust HTTP semantics for route methods, required vs empty query
-  parsing, raw instrument-type pass-through, path decoding, quote `asset_id`
-  overwrite, u8 byte-array validation, required boolean/array bodies, sync-mode
-  precedence, no-body sync-history handling, 204 mutation statuses, and sidecar
-  bearer-token checks.
-- Defer real exchange metadata, provider HTTP clients, Yahoo dividends, quote
-  persistence/import parsing, market sync execution, and portfolio recalculation
-  side effects to dedicated market-data/portfolio parity slices.
+- Add an `ActivityService` interface and guarded `/activities/*` route tests for
+  search, create/update/bulk/delete, transfer link/unlink, import check/preview
+  /apply, CSV parse, mapping, templates, account-template links, and duplicate
+  checks.
+- Preserve Rust HTTP semantics for search filter normalization, sort
+  object/array handling, date validation, JSON body pass-through, tuple-shaped
+  link/unlink responses, multipart CSV parsing, mapping/template wrapper bodies,
+  default `ACTIVITY` import context, duplicate response wrapping, path/query
+  decoding, and sidecar bearer-token checks.
+- Defer real activity persistence, import parsing/mapping/template storage,
+  duplicate lookups, transfer mutation behavior, asset preview resolution, and
+  portfolio recalculation side effects to dedicated activities/import/runtime
+  parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -32,7 +33,8 @@ No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
-runtime, or market-data runtime deletion is in scope for this slice.
+runtime, market-data runtime, or activities/import runtime deletion is in scope
+for this slice.
 
 ## Next slices
 

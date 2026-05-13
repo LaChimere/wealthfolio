@@ -68,8 +68,8 @@
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
     provider, alternative assets, assets, app utilities, portfolio metrics,
-    holdings, add-ons, and market-data TS repository/service or route config
-    implementations plus guarded route tests in
+    holdings, add-ons, market-data, and activities TS repository/service or
+    route config implementations plus guarded route tests in
     `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
@@ -82,7 +82,8 @@
     `apps/backend/src/domains/portfolio-jobs.ts`,
     `apps/backend/src/domains/holdings.ts`,
     `apps/backend/src/domains/addons.ts`,
-    `apps/backend/src/domains/market-data.ts`, `apps/backend/src/events.ts`, and
+    `apps/backend/src/domains/market-data.ts`,
+    `apps/backend/src/domains/activities.ts`, `apps/backend/src/events.ts`, and
     `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
     migration endpoints are deferred to the health/classification service slice;
     custom provider `test-source` is deferred to an external-I/O slice; goals
@@ -106,7 +107,10 @@
     behavior are deferred to add-on runtime parity slices; exchange metadata,
     provider HTTP, Yahoo dividends, quote import/persistence, market sync, and
     portfolio recalculation behavior are deferred to market-data/portfolio
-    parity slices.
+    parity slices; activity persistence, import parsing/mapping/template
+    storage, duplicate lookups, transfer mutation behavior, asset preview
+    resolution, and portfolio recalculation side effects are deferred to
+    activities/import runtime parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -434,6 +438,21 @@ contract:
   route inertness, type-safety, and test coverage.
 - `pr5-market-data-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-activities-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable activity search, create/update/bulk/delete,
+  transfer link/unlink, import check/preview/apply, multipart CSV parse, import
+  mapping, templates, account-template links, duplicate checks, guarded HTTP
+  route access, route inertness without injection, search filter normalization,
+  sort object/array handling, date validation, JSON body pass-through, tuple
+  response preservation, wrapper-body validation, default/empty import context
+  behavior, path/query decoding, and deferred real activities/import runtime
+  behavior.
+- `pr5-activities-route-seam-review`: code review found no actionable issues
+  across Rust route parity, frontend adapter compatibility, sidecar auth, route
+  inertness, multipart parsing, type-safety, error handling, or test coverage.
+- `pr5-activities-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -445,8 +464,9 @@ contract:
   plus market-data provider settings, portfolio job trigger, event stream,
   secrets route seam, AI provider route seam, alternative assets route seam,
   assets route seam, app utility route seam, portfolio metrics route seam,
-  holdings route seam, add-ons route seam, and market-data route seam slices
-  implemented; broader migration remains active.
+  holdings route seam, add-ons route seam, market-data route seam, and
+  activities/import route seam slices implemented; broader migration remains
+  active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -468,4 +488,7 @@ contract:
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
   parity slices; exchange metadata, provider HTTP, Yahoo dividends, quote
   import/persistence, market sync, and portfolio recalculation behavior move
-  with market-data/portfolio parity slices.
+  with market-data/portfolio parity slices; activity persistence, import
+  parsing/mapping/template storage, duplicate lookups, transfer mutation
+  behavior, asset preview resolution, and portfolio recalculation side effects
+  move with activities/import runtime parity slices.

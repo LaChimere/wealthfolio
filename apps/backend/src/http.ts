@@ -8,6 +8,12 @@ import type {
   AddonZipInstallRequest,
 } from "./domains/addons";
 import { parseTrackingMode } from "./domains/accounts";
+import {
+  ACTIVITY_IMPORT_CONTEXT_KIND,
+  type ActivityParseCsvRequest,
+  type ActivitySearchRequest,
+  type ActivityService,
+} from "./domains/activities";
 import type {
   AiProviderService,
   AiProviderSettingsUpdate,
@@ -67,6 +73,7 @@ export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
   accountService?: AccountService;
+  activityService?: ActivityService;
   addonService?: AddonService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
@@ -144,6 +151,10 @@ async function routeRequest(
 
   if (options.accountService && url.pathname.startsWith("/api/v1/accounts")) {
     return await routeAccountRequest(request, url, config, options.accountService);
+  }
+
+  if (options.activityService && url.pathname.startsWith("/api/v1/activities")) {
+    return routeActivityRequest(request, url, config, options.activityService);
   }
 
   if (options.addonService && url.pathname.startsWith("/api/v1/addons")) {
@@ -262,6 +273,151 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeActivityRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  activityService: ActivityService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/search") {
+    return handleJsonMutation(request, parseActivitySearchRequest, (input) =>
+      Promise.resolve(activityService.searchActivities(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities") {
+    return handleJsonMutation(request, passThroughObject, (activity) =>
+      Promise.resolve(activityService.createActivity(activity)),
+    );
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/activities") {
+    return handleJsonMutation(request, passThroughObject, (activity) =>
+      Promise.resolve(activityService.updateActivity(activity)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/bulk") {
+    return handleJsonMutation(request, passThroughObject, (input) =>
+      Promise.resolve(activityService.bulkMutateActivities(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/link") {
+    return handleJsonMutation(request, parseTransferActivitiesRequest, (input) =>
+      Promise.resolve(activityService.linkTransferActivities(input.activityAId, input.activityBId)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/unlink") {
+    return handleJsonMutation(request, parseTransferActivitiesRequest, (input) =>
+      Promise.resolve(
+        activityService.unlinkTransferActivities(input.activityAId, input.activityBId),
+      ),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/check") {
+    return handleJsonMutation(request, parseActivitiesArrayRequest, (input) =>
+      Promise.resolve(activityService.checkActivitiesImport(input.activities)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/assets/preview") {
+    return handleJsonMutation(request, parseImportCandidatesRequest, (input) =>
+      Promise.resolve(activityService.previewImportAssets(input.candidates)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import") {
+    return handleJsonMutation(request, parseActivitiesArrayRequest, (input) =>
+      Promise.resolve(activityService.importActivities(input.activities)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/parse") {
+    return handleActivityCsvParseRequest(request, activityService);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/activities/import/mapping") {
+    const input = parseActivityImportMappingQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(activityService.getImportMapping(input.accountId, input.contextKind))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/mapping") {
+    return handleJsonMutation(request, parseWrappedObject("mapping"), (input) =>
+      Promise.resolve(activityService.saveImportMapping(input.mapping)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/activities/import/templates") {
+    return Promise.resolve(activityService.listImportTemplates())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/templates") {
+    return handleJsonMutation(request, parseWrappedObject("template"), (input) =>
+      Promise.resolve(activityService.saveImportTemplate(input.template)),
+    );
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/v1/activities/import/templates") {
+    const id = parseRequiredQueryString(url, "id");
+    if (id instanceof Response) {
+      return id;
+    }
+    return Promise.resolve(activityService.deleteImportTemplate(id))
+      .then(() => jsonResponse({ success: true }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/activities/import/templates/item") {
+    const id = parseRequiredQueryString(url, "id");
+    if (id instanceof Response) {
+      return id;
+    }
+    return Promise.resolve(activityService.getImportTemplate(id))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/templates/link") {
+    return handleJsonMutation(request, parseLinkAccountTemplateRequest, async (input) => {
+      await activityService.linkAccountTemplate(
+        input.accountId,
+        input.templateId,
+        input.contextKind,
+      );
+      return { success: true };
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/activities/import/check-duplicates") {
+    return handleJsonMutation(request, parseCheckDuplicatesRequest, async (input) => ({
+      duplicates: await activityService.checkExistingDuplicates(input.idempotencyKeys),
+    }));
+  }
+
+  const activityId = activityIdFromPath(url.pathname);
+  if (request.method === "DELETE" && activityId !== undefined) {
+    return Promise.resolve(activityService.deleteActivity(activityId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1518,6 +1674,11 @@ function addonRuntimeIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function activityIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/activities\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function aiProviderModelsIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/ai\/providers\/([^/]+)\/models$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -2262,6 +2423,291 @@ function parseRestoreDatabaseRequest(
     return backupFilePath;
   }
   return { backupFilePath };
+}
+
+function parseActivitySearchRequest(
+  payload: Record<string, unknown>,
+): ActivitySearchRequest | Response {
+  const page = parseRequiredInteger(payload.page, "page");
+  if (page instanceof Response) {
+    return page;
+  }
+  const pageSize = parseRequiredInteger(payload.pageSize, "pageSize");
+  if (pageSize instanceof Response) {
+    return pageSize;
+  }
+  const accountIds = parseOptionalStringOrArray(payload.accountIdFilter, "accountIdFilter");
+  if (accountIds instanceof Response) {
+    return accountIds;
+  }
+  const activityTypes = parseOptionalStringOrArray(
+    payload.activityTypeFilter,
+    "activityTypeFilter",
+  );
+  if (activityTypes instanceof Response) {
+    return activityTypes;
+  }
+  const instrumentTypes = parseOptionalStringOrArray(
+    payload.instrumentTypeFilter,
+    "instrumentTypeFilter",
+  );
+  if (instrumentTypes instanceof Response) {
+    return instrumentTypes;
+  }
+  const assetIdKeyword = parseOptionalStringOrNull(payload.assetIdKeyword, "assetIdKeyword");
+  if (assetIdKeyword instanceof Response) {
+    return assetIdKeyword;
+  }
+  const sort = parseOptionalActivitySort(payload.sort, "sort");
+  if (sort instanceof Response) {
+    return sort;
+  }
+  const needsReview = parseOptionalBooleanOrNull(payload.needsReviewFilter, "needsReviewFilter");
+  if (needsReview instanceof Response) {
+    return needsReview;
+  }
+  const dateFrom = parseOptionalDateBody(payload.dateFrom, "dateFrom");
+  if (dateFrom instanceof Response) {
+    return dateFrom;
+  }
+  const dateTo = parseOptionalDateBody(payload.dateTo, "dateTo");
+  if (dateTo instanceof Response) {
+    return dateTo;
+  }
+
+  const parsed: ActivitySearchRequest = { page, pageSize };
+  if (accountIds !== undefined) {
+    parsed.accountIds = accountIds;
+  }
+  if (activityTypes !== undefined) {
+    parsed.activityTypes = activityTypes;
+  }
+  if (instrumentTypes !== undefined) {
+    parsed.instrumentTypes = instrumentTypes;
+  }
+  if (assetIdKeyword !== undefined && assetIdKeyword !== null) {
+    parsed.assetIdKeyword = assetIdKeyword;
+  }
+  if (sort !== undefined) {
+    parsed.sort = sort;
+  }
+  if (needsReview !== undefined && needsReview !== null) {
+    parsed.needsReview = needsReview;
+  }
+  if (dateFrom !== undefined) {
+    parsed.dateFrom = dateFrom;
+  }
+  if (dateTo !== undefined) {
+    parsed.dateTo = dateTo;
+  }
+  return parsed;
+}
+
+function parseOptionalStringOrArray(
+  value: unknown,
+  field: string,
+): string[] | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return [value];
+  }
+  const parsed = parseRequiredStringArray(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  return parsed;
+}
+
+function parseOptionalActivitySort(
+  value: unknown,
+  field: string,
+): ActivitySearchRequest["sort"] | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const parsed = value.map((item, index) => {
+      if (typeof item !== "object" || item === null || Array.isArray(item)) {
+        return jsonResponse({ code: 400, message: `${field}[${index}] must be an object` }, 400);
+      }
+      return parseActivitySort(item as Record<string, unknown>, `${field}[${index}]`);
+    });
+    const error = parsed.find((item) => item instanceof Response);
+    if (error instanceof Response) {
+      return error;
+    }
+    return parsed[0] as ActivitySearchRequest["sort"] | undefined;
+  }
+  if (typeof value !== "object") {
+    return jsonResponse({ code: 400, message: `${field} must be an object or array` }, 400);
+  }
+  return parseActivitySort(value as Record<string, unknown>, field);
+}
+
+function parseActivitySort(
+  payload: Record<string, unknown>,
+  field: string,
+): NonNullable<ActivitySearchRequest["sort"]> | Response {
+  const id = parseRequiredString(payload.id, `${field}.id`);
+  if (id instanceof Response) {
+    return id;
+  }
+  const desc = parseRequiredBoolean(payload.desc, `${field}.desc`);
+  if (desc instanceof Response) {
+    return desc;
+  }
+  return { id, desc };
+}
+
+function passThroughObject(payload: Record<string, unknown>): Record<string, unknown> {
+  return payload;
+}
+
+function parseTransferActivitiesRequest(
+  payload: Record<string, unknown>,
+): { activityAId: string; activityBId: string } | Response {
+  const activityAId = parseRequiredString(payload.activityAId, "activityAId");
+  if (activityAId instanceof Response) {
+    return activityAId;
+  }
+  const activityBId = parseRequiredString(payload.activityBId, "activityBId");
+  if (activityBId instanceof Response) {
+    return activityBId;
+  }
+  return { activityAId, activityBId };
+}
+
+function parseActivitiesArrayRequest(
+  payload: Record<string, unknown>,
+): { activities: unknown[] } | Response {
+  if (!Array.isArray(payload.activities)) {
+    return jsonResponse({ code: 400, message: "activities must be an array" }, 400);
+  }
+  return { activities: payload.activities };
+}
+
+function parseImportCandidatesRequest(
+  payload: Record<string, unknown>,
+): { candidates: unknown[] } | Response {
+  if (!Array.isArray(payload.candidates)) {
+    return jsonResponse({ code: 400, message: "candidates must be an array" }, 400);
+  }
+  return { candidates: payload.candidates };
+}
+
+async function handleActivityCsvParseRequest(
+  request: Request,
+  activityService: ActivityService,
+): Promise<Response> {
+  const input = await parseActivityCsvParseRequest(request);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    return jsonResponse(await activityService.parseCsv(input));
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function parseActivityCsvParseRequest(
+  request: Request,
+): Promise<ActivityParseCsvRequest | Response> {
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch (error) {
+    return jsonResponse(
+      { code: 400, message: `Failed to read multipart request: ${errorMessage(error)}` },
+      400,
+    );
+  }
+
+  const file = formData.get("file");
+  if (file === null) {
+    return jsonResponse({ code: 400, message: "Missing file in multipart request" }, 400);
+  }
+  const content = await formDataValueBytes(file);
+  const configValue = formData.get("config");
+  if (configValue === null) {
+    return { content, config: {} };
+  }
+  const configBytes = await formDataValueBytes(configValue);
+  try {
+    const config = JSON.parse(new TextDecoder().decode(configBytes));
+    if (typeof config !== "object" || config === null || Array.isArray(config)) {
+      return jsonResponse({ code: 400, message: "Invalid config JSON" }, 400);
+    }
+    return { content, config: config as Record<string, unknown> };
+  } catch (error) {
+    return jsonResponse({ code: 400, message: `Invalid config JSON: ${errorMessage(error)}` }, 400);
+  }
+}
+
+async function formDataValueBytes(value: FormDataEntryValue): Promise<Uint8Array> {
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array(await value.arrayBuffer());
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseActivityImportMappingQuery(
+  url: URL,
+): { accountId: string; contextKind: string } | Response {
+  const accountId = parseRequiredQueryString(url, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  return {
+    accountId,
+    contextKind: url.searchParams.get("contextKind") ?? ACTIVITY_IMPORT_CONTEXT_KIND,
+  };
+}
+
+function parseWrappedObject<TField extends string>(
+  field: TField,
+): (payload: Record<string, unknown>) => Record<TField, Record<string, unknown>> | Response {
+  return (payload) => {
+    const value = payload[field];
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return jsonResponse({ code: 400, message: `${field} must be an object` }, 400);
+    }
+    return { [field]: value as Record<string, unknown> } as Record<TField, Record<string, unknown>>;
+  };
+}
+
+function parseLinkAccountTemplateRequest(
+  payload: Record<string, unknown>,
+): { accountId: string; templateId: string; contextKind: string } | Response {
+  const accountId = parseRequiredString(payload.accountId, "accountId");
+  if (accountId instanceof Response) {
+    return accountId;
+  }
+  const templateId = parseRequiredString(payload.templateId, "templateId");
+  if (templateId instanceof Response) {
+    return templateId;
+  }
+  const contextKind = parseOptionalStringOrNull(payload.contextKind, "contextKind");
+  if (contextKind instanceof Response) {
+    return contextKind;
+  }
+  return { accountId, templateId, contextKind: contextKind ?? ACTIVITY_IMPORT_CONTEXT_KIND };
+}
+
+function parseCheckDuplicatesRequest(
+  payload: Record<string, unknown>,
+): { idempotencyKeys: string[] } | Response {
+  const idempotencyKeys = parseRequiredStringArray(payload.idempotencyKeys, "idempotencyKeys");
+  if (idempotencyKeys instanceof Response) {
+    return idempotencyKeys;
+  }
+  return { idempotencyKeys };
 }
 
 function parseAddonZipInstallRequest(

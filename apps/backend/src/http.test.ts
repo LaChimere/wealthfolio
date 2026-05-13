@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
+import type { ActivityService } from "./domains/activities";
 import type { AddonService } from "./domains/addons";
 import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
@@ -509,6 +510,380 @@ describe("TS backend HTTP skeleton", () => {
       ["staging-install", { addonId: "addon-1", enableAfterInstall: true }],
       ["staging-clear", ""],
       ["uninstall", "addon id"],
+    ]);
+  });
+
+  test("routes migrated activities seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const activityService: ActivityService = {
+      searchActivities(request) {
+        calls.push(["search", request]);
+        return { activities: [], page: request.page };
+      },
+      createActivity(activity) {
+        calls.push(["create", activity]);
+        return { ...activity, id: "activity-1" };
+      },
+      updateActivity(activity) {
+        calls.push(["update", activity]);
+        return activity;
+      },
+      bulkMutateActivities(request) {
+        calls.push(["bulk", request]);
+        return { success: true };
+      },
+      deleteActivity(id) {
+        calls.push(["delete", id]);
+        return { id };
+      },
+      linkTransferActivities(activityAId, activityBId) {
+        calls.push(["link", { activityAId, activityBId }]);
+        return [{ id: activityAId }, { id: activityBId }];
+      },
+      unlinkTransferActivities(activityAId, activityBId) {
+        calls.push(["unlink", { activityAId, activityBId }]);
+        return [{ id: activityAId }, { id: activityBId }];
+      },
+      checkActivitiesImport(activities) {
+        calls.push(["check-import", activities]);
+        return activities;
+      },
+      previewImportAssets(candidates) {
+        calls.push(["preview-assets", candidates]);
+        return candidates;
+      },
+      importActivities(activities) {
+        calls.push(["import", activities]);
+        return { imported: activities.length };
+      },
+      parseCsv(request) {
+        calls.push(["parse-csv", { content: Array.from(request.content), config: request.config }]);
+        return { rows: [] };
+      },
+      getImportMapping(accountId, contextKind) {
+        calls.push(["get-mapping", { accountId, contextKind }]);
+        return { accountId, contextKind };
+      },
+      saveImportMapping(mapping) {
+        calls.push(["save-mapping", mapping]);
+        return mapping;
+      },
+      listImportTemplates() {
+        calls.push(["list-templates", undefined]);
+        return [{ id: "template-1" }];
+      },
+      getImportTemplate(id) {
+        calls.push(["get-template", id]);
+        return { id };
+      },
+      saveImportTemplate(template) {
+        calls.push(["save-template", template]);
+        return template;
+      },
+      deleteImportTemplate(id) {
+        calls.push(["delete-template", id]);
+      },
+      linkAccountTemplate(accountId, templateId, contextKind) {
+        calls.push(["link-template", { accountId, templateId, contextKind }]);
+      },
+      checkExistingDuplicates(idempotencyKeys) {
+        calls.push(["duplicates", idempotencyKeys]);
+        return { [idempotencyKeys[0] ?? ""]: "activity-1" };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { activityService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/activities/search"))).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/activities/search", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ page: 0, pageSize: 25 }),
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const searchResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/activities/search", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          page: 0,
+          pageSize: 25,
+          accountIdFilter: "account-1",
+          activityTypeFilter: ["BUY"],
+          instrumentTypeFilter: "EQUITY",
+          assetIdKeyword: "AAPL",
+          needsReviewFilter: true,
+          dateFrom: "2024-01-01",
+          dateTo: "2024-12-31",
+          sort: [
+            { id: "activityDate", desc: true },
+            { id: "ignored", desc: false },
+          ],
+        }),
+      }),
+    );
+    expect(searchResponse.status).toBe(200);
+
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/search", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ page: "0", pageSize: 25 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/search", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ page: 0, pageSize: 25, dateFrom: "01/01/2024" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ id: "activity-1", type: "BUY" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities", {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify({ id: "activity-1", type: "SELL" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/bulk", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ create: [{ id: "activity-2" }] }),
+      }),
+    );
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/link", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ activityAId: "activity-1", activityBId: "activity-2" }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual([{ id: "activity-1" }, { id: "activity-2" }]);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/unlink", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ activityAId: "activity-1", activityBId: "activity-2" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/activity%2F1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/check", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ activities: [{ id: "activity-3" }] }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/assets/preview", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ candidates: [{ symbol: "AAPL" }] }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ activities: [{ id: "activity-4" }] }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/import", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ activities: {} }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    const formData = new FormData();
+    formData.append("ignored", "value");
+    formData.append("file", new Blob([Uint8Array.from([65, 66])]), "activities.csv");
+    formData.append("config", JSON.stringify({ delimiter: "," }));
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/parse", {
+        method: "POST",
+        headers: authHeaders,
+        body: formData,
+      }),
+    );
+    const missingFileForm = new FormData();
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/import/parse", {
+            method: "POST",
+            headers: authHeaders,
+            body: missingFileForm,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    const invalidConfigForm = new FormData();
+    invalidConfigForm.append("file", new Blob([Uint8Array.from([65])]), "activities.csv");
+    invalidConfigForm.append("config", "not json");
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/import/parse", {
+            method: "POST",
+            headers: authHeaders,
+            body: invalidConfigForm,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/activities/import/mapping?accountId=account-1&contextKind=",
+        { headers: authHeaders },
+      ),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/mapping?accountId=account-2", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/mapping", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ mapping: { accountId: "account-1" } }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/import/mapping", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ accountId: "account-1" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/templates", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/templates/item?id=template-1", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/templates", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ template: { id: "template-1" } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/templates/link", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ accountId: "account-1", templateId: "template-1" }),
+      }),
+    );
+    const deleteTemplateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/activities/import/templates?id=template-1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(deleteTemplateResponse.status).toBe(200);
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/import/check-duplicates", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ idempotencyKeys: ["key-1"] }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ duplicates: { "key-1": "activity-1" } });
+
+    expect(calls).toEqual([
+      [
+        "search",
+        {
+          page: 0,
+          pageSize: 25,
+          accountIds: ["account-1"],
+          activityTypes: ["BUY"],
+          instrumentTypes: ["EQUITY"],
+          assetIdKeyword: "AAPL",
+          sort: { id: "activityDate", desc: true },
+          needsReview: true,
+          dateFrom: "2024-01-01",
+          dateTo: "2024-12-31",
+        },
+      ],
+      ["create", { id: "activity-1", type: "BUY" }],
+      ["update", { id: "activity-1", type: "SELL" }],
+      ["bulk", { create: [{ id: "activity-2" }] }],
+      ["link", { activityAId: "activity-1", activityBId: "activity-2" }],
+      ["unlink", { activityAId: "activity-1", activityBId: "activity-2" }],
+      ["delete", "activity/1"],
+      ["check-import", [{ id: "activity-3" }]],
+      ["preview-assets", [{ symbol: "AAPL" }]],
+      ["import", [{ id: "activity-4" }]],
+      ["parse-csv", { content: [65, 66], config: { delimiter: "," } }],
+      ["get-mapping", { accountId: "account-1", contextKind: "" }],
+      ["get-mapping", { accountId: "account-2", contextKind: "ACTIVITY" }],
+      ["save-mapping", { accountId: "account-1" }],
+      ["list-templates", undefined],
+      ["get-template", "template-1"],
+      ["save-template", { id: "template-1" }],
+      [
+        "link-template",
+        { accountId: "account-1", templateId: "template-1", contextKind: "ACTIVITY" },
+      ],
+      ["delete-template", "template-1"],
+      ["duplicates", ["key-1"]],
     ]);
   });
 
