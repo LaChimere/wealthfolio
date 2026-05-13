@@ -152,6 +152,7 @@ export {
   type SnapshotRecalcMode,
   type ValuationRecalcMode,
 } from "./domains/portfolio-jobs";
+export type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,

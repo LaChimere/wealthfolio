@@ -23,6 +23,7 @@ import {
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
+import type { PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
@@ -1002,6 +1003,154 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(deferredEventsResponse.status).toBe(404);
+  });
+
+  test("routes migrated portfolio metrics seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const portfolioMetricsService: PortfolioMetricsService = {
+      getNetWorth(date) {
+        calls.push(["net-worth", date]);
+        return { totalAssets: "100.00", totalLiabilities: "25.00", netWorth: "75.00" };
+      },
+      getNetWorthHistory(startDate, endDate) {
+        calls.push(["net-worth-history", { startDate, endDate }]);
+        return [{ date: startDate, netWorth: "75.00" }];
+      },
+      calculateAccountsSimplePerformance(accountIds) {
+        calls.push(["accounts-simple", accountIds]);
+        return [{ accountId: accountIds?.[0], simpleReturn: 0.1 }];
+      },
+      calculatePerformanceHistory(request) {
+        calls.push(["performance-history", request]);
+        return { twr: 0.12, mwr: 0.08 };
+      },
+      calculatePerformanceSummary(request) {
+        calls.push(["performance-summary", request]);
+        return { twr: 0.1, mwr: 0.07 };
+      },
+      getIncomeSummary(accountId) {
+        calls.push(["income-summary", accountId]);
+        return [{ accountId, amount: "12.34" }];
+      },
+    };
+    const handler = createBackendRequestHandler(config, { portfolioMetricsService });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/net-worth"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/net-worth", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    expect(
+      await (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/net-worth?date=2026-05-14", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).json(),
+    ).toEqual({ totalAssets: "100.00", totalLiabilities: "25.00", netWorth: "75.00" });
+
+    expect(
+      await (
+        await handler(
+          new Request(
+            "http://127.0.0.1/api/v1/net-worth/history?startDate=2026-05-01&endDate=2026-05-14",
+            { headers: { authorization: "Bearer sidecar-token" } },
+          ),
+        )
+      ).json(),
+    ).toEqual([{ date: "2026-05-01", netWorth: "75.00" }]);
+
+    expect(
+      await (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/performance/accounts/simple", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer sidecar-token",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ accountIds: [] }),
+          }),
+        )
+      ).json(),
+    ).toEqual([]);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/performance/accounts/simple", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ accountIds: ["acc-1"] }),
+      }),
+    );
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/performance/history", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          itemType: "account",
+          itemId: "acc-1",
+          startDate: "2026-05-01",
+          endDate: "2026-05-14",
+          trackingMode: "HOLDINGS",
+        }),
+      }),
+    );
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/performance/summary", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ itemType: "account", itemId: "acc-1", trackingMode: "UNKNOWN" }),
+      }),
+    );
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/income/summary?accountId=acc-1", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+
+    const invalidDateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/net-worth?date=2026-02-31", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(invalidDateResponse.status).toBe(400);
+
+    expect(calls).toEqual([
+      ["net-worth", "2026-05-14"],
+      ["net-worth-history", { startDate: "2026-05-01", endDate: "2026-05-14" }],
+      ["accounts-simple", ["acc-1"]],
+      [
+        "performance-history",
+        {
+          itemType: "account",
+          itemId: "acc-1",
+          startDate: "2026-05-01",
+          endDate: "2026-05-14",
+          trackingMode: "HOLDINGS",
+        },
+      ],
+      ["performance-summary", { itemType: "account", itemId: "acc-1" }],
+      ["income-summary", "acc-1"],
+    ]);
   });
 
   test("routes migrated event stream only when an event bus is provided", async () => {

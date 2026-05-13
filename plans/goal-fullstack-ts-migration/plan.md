@@ -10,25 +10,26 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk app utility HTTP seam after the
-assets route seam:
+PR 5 continues vertical slices with a low-risk portfolio metrics HTTP seam after
+the app utility route seam:
 
-- Add an `AppUtilityService` interface and guarded `/app` and
-  `/utilities/database` route tests for app info, update checks, database
-  backup, backup-to-path, and restore behavior.
-- Preserve Rust HTTP semantics for route methods, query/body parsing, backup
-  response `dataB64`, 204 restore responses, and sidecar bearer-token checks.
-- Correct the settings auto-update route seam to
-  `/settings/auto-update-enabled`, matching Rust and the web adapter.
-- Defer real update HTTP requests, backup/restore file I/O, path normalization,
-  and app runtime metadata resolution to dedicated runtime utility slices.
+- Add a `PortfolioMetricsService` interface and guarded `/net-worth`,
+  `/performance`, and `/income/summary` route tests for net worth, net worth
+  history, simple account performance, performance history/summary, and income
+  summary.
+- Preserve Rust HTTP semantics for route methods, required/optional date
+  parsing, optional/unknown tracking-mode handling, empty account-list
+  short-circuiting, and sidecar bearer-token checks.
+- Defer real net-worth, performance, income, holdings, FX, and valuation
+  calculations to dedicated portfolio calculation parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
-or app utility runtime deletion is in scope for this slice.
+app utility runtime, or portfolio metrics runtime deletion is in scope for this
+slice.
 
 ## Next slices
 

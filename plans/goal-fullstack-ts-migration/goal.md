@@ -145,6 +145,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `/api/v1/utilities/database/*` routes, update-check query parsing,
   backup/restore request validation, 204 restore responses, corrected
   `/settings/auto-update-enabled`, and targeted backend tests.
+- Turn 20: Implemented the low-risk portfolio metrics HTTP seam TS slice:
+  injectable `PortfolioMetricsService`, guarded `/api/v1/net-worth`,
+  `/api/v1/performance/*`, and `/api/v1/income/summary` routes, date validation,
+  empty account-list short-circuiting, tracking-mode parsing, and targeted
+  backend tests.
 
 ## Deferred items
 
@@ -193,6 +198,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   path normalization remain active follow-ups. reason=this slice only adds the
   guarded HTTP seam, while runtime behavior must move with dedicated app utility
   parity slices.
+- Net-worth, performance, income, holdings, FX, and valuation calculations
+  remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
+  while runtime behavior must move with dedicated portfolio calculation parity
+  slices.
 
 ## Blockers
 

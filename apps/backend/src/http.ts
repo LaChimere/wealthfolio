@@ -34,6 +34,7 @@ import {
   type PortfolioJobService,
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
+import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
@@ -62,6 +63,7 @@ export interface BackendRequestHandlerOptions {
   goalService?: GoalService;
   healthService?: HealthService;
   marketDataProviderService?: MarketDataProviderService;
+  portfolioMetricsService?: PortfolioMetricsService;
   portfolioJobService?: PortfolioJobService;
   secretService?: SecretService;
   settingsService?: SettingsService;
@@ -192,6 +194,15 @@ async function routeRequest(
 
   if (options.portfolioJobService && url.pathname.startsWith("/api/v1/portfolio")) {
     return await routePortfolioJobRequest(request, url, config, options.portfolioJobService);
+  }
+
+  if (
+    options.portfolioMetricsService &&
+    (url.pathname.startsWith("/api/v1/net-worth") ||
+      url.pathname.startsWith("/api/v1/performance") ||
+      url.pathname === "/api/v1/income/summary")
+  ) {
+    return routePortfolioMetricsRequest(request, url, config, options.portfolioMetricsService);
   }
 
   if (options.secretService && url.pathname === "/api/v1/secrets") {
@@ -420,6 +431,73 @@ function routeAppUtilityRequest(
     return handleJsonMutationNoContent(request, parseRestoreDatabaseRequest, async (input) => {
       await appUtilityService.restoreDatabase(input.backupFilePath);
     });
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routePortfolioMetricsRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  portfolioMetricsService: PortfolioMetricsService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/net-worth") {
+    const date = parseOptionalDateQuery(url, "date");
+    if (date instanceof Response) {
+      return date;
+    }
+    return Promise.resolve(portfolioMetricsService.getNetWorth(date))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/net-worth/history") {
+    const startDate = parseRequiredDateQuery(url, "startDate");
+    if (startDate instanceof Response) {
+      return startDate;
+    }
+    const endDate = parseRequiredDateQuery(url, "endDate");
+    if (endDate instanceof Response) {
+      return endDate;
+    }
+    return Promise.resolve(portfolioMetricsService.getNetWorthHistory(startDate, endDate))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/performance/accounts/simple") {
+    return handleJsonMutation(request, parseAccountsSimplePerformanceRequest, (input) => {
+      if (input.accountIds?.length === 0) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(
+        portfolioMetricsService.calculateAccountsSimplePerformance(input.accountIds),
+      );
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/performance/history") {
+    return handleJsonMutation(request, parsePerformanceRequest, (input) =>
+      Promise.resolve(portfolioMetricsService.calculatePerformanceHistory(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/performance/summary") {
+    return handleJsonMutation(request, parsePerformanceRequest, (input) =>
+      Promise.resolve(portfolioMetricsService.calculatePerformanceSummary(input)),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/income/summary") {
+    const accountId = url.searchParams.get("accountId") ?? undefined;
+    return Promise.resolve(portfolioMetricsService.getIncomeSummary(accountId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1744,6 +1822,51 @@ function parseRestoreDatabaseRequest(
   return { backupFilePath };
 }
 
+function parseAccountsSimplePerformanceRequest(
+  payload: Record<string, unknown>,
+): { accountIds?: string[] } | Response {
+  const accountIds = parseOptionalStringArrayOrNull(payload.accountIds, "accountIds");
+  if (accountIds instanceof Response) {
+    return accountIds;
+  }
+  return accountIds === undefined || accountIds === null ? {} : { accountIds };
+}
+
+function parsePerformanceRequest(payload: Record<string, unknown>): PerformanceRequest | Response {
+  const itemType = parseRequiredString(payload.itemType, "itemType");
+  if (itemType instanceof Response) {
+    return itemType;
+  }
+  const itemId = parseRequiredString(payload.itemId, "itemId");
+  if (itemId instanceof Response) {
+    return itemId;
+  }
+  const startDate = parseOptionalDateBody(payload.startDate, "startDate");
+  if (startDate instanceof Response) {
+    return startDate;
+  }
+  const endDate = parseOptionalDateBody(payload.endDate, "endDate");
+  if (endDate instanceof Response) {
+    return endDate;
+  }
+  const trackingMode = parseOptionalPerformanceTrackingMode(payload.trackingMode);
+  if (trackingMode instanceof Response) {
+    return trackingMode;
+  }
+
+  const parsed: PerformanceRequest = { itemType, itemId };
+  if (startDate !== undefined) {
+    parsed.startDate = startDate;
+  }
+  if (endDate !== undefined) {
+    parsed.endDate = endDate;
+  }
+  if (trackingMode !== undefined) {
+    parsed.trackingMode = trackingMode;
+  }
+  return parsed;
+}
+
 function parseSecretSetRequest(
   payload: Record<string, unknown>,
 ): { secretKey: string; secret: string } | Response {
@@ -2778,6 +2901,22 @@ function parseRequiredQueryString(url: URL, field: string): string | Response {
   return value;
 }
 
+function parseRequiredDateQuery(url: URL, field: string): string | Response {
+  const value = parseRequiredQueryString(url, field);
+  if (value instanceof Response) {
+    return value;
+  }
+  return parseIsoDate(value, field);
+}
+
+function parseOptionalDateQuery(url: URL, field: string): string | undefined | Response {
+  const value = url.searchParams.get(field);
+  if (value === null) {
+    return undefined;
+  }
+  return parseIsoDate(value, field);
+}
+
 function parseRequiredString(value: unknown, field: string): string | Response {
   if (typeof value !== "string") {
     return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
@@ -2797,6 +2936,35 @@ function parseOptionalStringOrNull(
   }
   if (typeof value !== "string") {
     return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalDateBody(value: unknown, field: string): string | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+  }
+  return parseIsoDate(value, field);
+}
+
+function parseIsoDate(value: string, field: string): string | Response {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return jsonResponse({ code: 400, message: `${field} must be a YYYY-MM-DD date` }, 400);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return jsonResponse({ code: 400, message: `${field} must be a valid date` }, 400);
   }
   return value;
 }
@@ -2974,4 +3142,19 @@ function parseOptionalTrackingMode(
     return jsonResponse({ code: 400, message: "trackingMode must be a string" }, 400);
   }
   return parseTrackingMode(value);
+}
+
+function parseOptionalPerformanceTrackingMode(
+  value: unknown,
+): "HOLDINGS" | "TRANSACTIONS" | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === "HOLDINGS" || value === "TRANSACTIONS") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: "trackingMode must be a string" }, 400);
+  }
+  return undefined;
 }

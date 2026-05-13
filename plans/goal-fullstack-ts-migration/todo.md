@@ -67,9 +67,9 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, alternative assets, assets, and app utilities TS
-    repository/service or route config implementations plus guarded route tests
-    in `apps/backend/src/domains/settings.ts`,
+    provider, alternative assets, assets, app utilities, and portfolio metrics
+    TS repository/service or route config implementations plus guarded route
+    tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -94,7 +94,8 @@
     parity slices; asset persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app runtime metadata,
     update-check HTTP/cache, backup/restore I/O, and path normalization are
-    deferred to app utility parity slices.
+    deferred to app utility parity slices; portfolio metric calculations are
+    deferred to portfolio calculation parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -360,6 +361,18 @@ contract:
   coverage.
 - `pr5-app-utility-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-portfolio-metrics-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable net-worth, net-worth-history, simple account
+  performance, performance history/summary, and income summary behavior, guarded
+  HTTP route access, date validation, empty account-list short-circuiting,
+  tracking-mode parsing, route inertness without injection, and deferred real
+  portfolio metric calculations.
+- `pr5-portfolio-metrics-route-seam-review`: code review found no actionable
+  issues across Rust route parity, sidecar auth, date validation, type-safety,
+  error handling, or test coverage.
+- `pr5-portfolio-metrics-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -370,8 +383,8 @@ contract:
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
   plus market-data provider settings, portfolio job trigger, event stream,
   secrets route seam, AI provider route seam, alternative assets route seam,
-  assets route seam, and app utility route seam slices implemented; broader
-  migration remains active.
+  assets route seam, app utility route seam, and portfolio metrics route seam
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -386,4 +399,5 @@ contract:
   asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
   moves with asset/market-data/portfolio parity slices; app runtime metadata,
   update-check HTTP/cache, backup/restore I/O, and path normalization move with
-  app utility parity slices.
+  app utility parity slices; portfolio metric calculations move with portfolio
+  calculation parity slices.
