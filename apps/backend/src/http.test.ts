@@ -31,6 +31,7 @@ import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import type { PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
+import type { SyncCryptoService } from "./domains/sync-crypto";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createEventBus } from "./events";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -3310,6 +3311,229 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(missingResponse.status).toBe(400);
+  });
+
+  test("routes migrated sync crypto seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const syncCryptoService: SyncCryptoService = {
+      generateRootKey() {
+        calls.push(["generate-root-key", undefined]);
+        return { value: "root-key" };
+      },
+      deriveDek(rootKey, version) {
+        calls.push(["derive-dek", { rootKey, version }]);
+        return { value: `${rootKey}:${version}` };
+      },
+      generateKeypair() {
+        calls.push(["generate-keypair", undefined]);
+        return { publicKey: "public-key", secretKey: "secret-key" };
+      },
+      computeSharedSecret(ourSecret, theirPublic) {
+        calls.push(["compute-shared-secret", { ourSecret, theirPublic }]);
+        return { value: `${ourSecret}:${theirPublic}` };
+      },
+      deriveSessionKey(sharedSecret, context) {
+        calls.push(["derive-session-key", { sharedSecret, context }]);
+        return { value: `${sharedSecret}:${context}` };
+      },
+      encrypt(key, plaintext) {
+        calls.push(["encrypt", { key, plaintext }]);
+        return { value: "ciphertext" };
+      },
+      decrypt(key, ciphertext) {
+        calls.push(["decrypt", { key, ciphertext }]);
+        if (ciphertext === "bad") {
+          throw new Error("invalid ciphertext");
+        }
+        return { value: "plaintext" };
+      },
+      generatePairingCode() {
+        calls.push(["generate-pairing-code", undefined]);
+        return { value: "123456" };
+      },
+      hashPairingCode(code) {
+        calls.push(["hash-pairing-code", code]);
+        return { value: `hash:${code}` };
+      },
+      hmacSha256(key, data) {
+        calls.push(["hmac-sha256", { key, data }]);
+        return { value: `${key}:${data}` };
+      },
+      computeSas(sharedSecret) {
+        calls.push(["compute-sas", sharedSecret]);
+        return { value: "123-456" };
+      },
+      generateDeviceId() {
+        calls.push(["generate-device-id", undefined]);
+        return { value: "device-1" };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { syncCryptoService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/sync/crypto/generate-root-key"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/sync/crypto/generate-root-key", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const rootKeyResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/generate-root-key", {
+        method: "POST",
+        headers: { ...authHeaders, "content-type": "application/json" },
+        body: "not json",
+      }),
+    );
+    expect(await rootKeyResponse.json()).toEqual({ value: "root-key" });
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/derive-dek", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ rootKey: "", version: 4_294_967_295 }),
+      }),
+    );
+    for (const body of [
+      { root_key: "root-key", version: 1 },
+      { rootKey: 123, version: 1 },
+      { rootKey: "root-key", version: "1" },
+      { rootKey: "root-key", version: null },
+      { rootKey: "root-key", version: 1.5 },
+      { rootKey: "root-key", version: -1 },
+      { rootKey: "root-key", version: 4_294_967_296 },
+    ]) {
+      expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/sync/crypto/derive-dek", {
+              method: "POST",
+              headers: jsonHeaders,
+              body: JSON.stringify(body),
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/crypto/generate-keypair", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ publicKey: "public-key", secretKey: "secret-key" });
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/compute-shared-secret", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ ourSecret: "", theirPublic: "" }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/sync/crypto/compute-shared-secret", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ our_secret: "", their_public: "" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/derive-session-key", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ sharedSecret: "", context: "" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/encrypt", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ key: "", plaintext: "" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/decrypt", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ key: "", ciphertext: "" }),
+      }),
+    );
+    const decryptErrorResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/decrypt", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ key: "", ciphertext: "bad" }),
+      }),
+    );
+    expect(decryptErrorResponse.status).toBe(400);
+    await expect(decryptErrorResponse.json()).resolves.toEqual({
+      code: 400,
+      message: "invalid ciphertext",
+    });
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/generate-pairing-code", {
+        method: "POST",
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/hash-pairing-code", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ code: "" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/hmac-sha256", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ key: "", data: "" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/compute-sas", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ sharedSecret: "" }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/sync/crypto/generate-device-id", {
+        method: "POST",
+        headers: authHeaders,
+      }),
+    );
+
+    expect(calls).toEqual([
+      ["generate-root-key", undefined],
+      ["derive-dek", { rootKey: "", version: 4_294_967_295 }],
+      ["generate-keypair", undefined],
+      ["compute-shared-secret", { ourSecret: "", theirPublic: "" }],
+      ["derive-session-key", { sharedSecret: "", context: "" }],
+      ["encrypt", { key: "", plaintext: "" }],
+      ["decrypt", { key: "", ciphertext: "" }],
+      ["decrypt", { key: "", ciphertext: "bad" }],
+      ["generate-pairing-code", undefined],
+      ["hash-pairing-code", ""],
+      ["hmac-sha256", { key: "", data: "" }],
+      ["compute-sas", ""],
+      ["generate-device-id", undefined],
+    ]);
   });
 
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {

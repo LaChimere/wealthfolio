@@ -10,21 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk AI chat/thread HTTP seam after
-the activities/import route seam:
+PR 5 continues vertical slices with a guarded sync crypto HTTP seam after the AI
+chat route seam:
 
-- Add an `AiChatService` interface and guarded `/ai/chat/stream`,
-  `/ai/threads/*`, and `/ai/tool-result` route tests for NDJSON streaming,
-  thread list/get/messages/update/delete, tag reads/no-op mutations, and tool
-  result updates.
-- Preserve Rust HTTP semantics for NDJSON headers and newline framing,
-  pre-stream and mid-stream AI error shapes/statuses, stream cancellation,
-  query/path decoding, `u32` limit validation, optional update body handling,
-  JSON `null` thread responses, tag no-op body validation, missing-thread tag
-  defaults, tool-result `resultPatch` presence, and sidecar bearer-token checks.
-- Defer real AI chat service persistence, provider streaming, tool execution,
-  thread storage, tag persistence, and tool-result mutation behavior to
-  dedicated AI runtime parity slices.
+- Add a `SyncCryptoService` interface and guarded `/sync/crypto/*` route tests
+  for root key, DEK derivation, keypair, shared/session key derivation,
+  encrypt/decrypt, pairing-code/hash, HMAC, SAS, and device-id commands.
+- Preserve Rust HTTP semantics for POST-only routes, no-body endpoints ignoring
+  invalid request bodies, exact camelCase body fields, empty-string
+  pass-through, `u32` version validation, direct `{ value }` and
+  `{ publicKey, secretKey }` response shapes, 400 crypto operation errors, route
+  inertness, and sidecar bearer-token checks.
+- Defer real TypeScript cryptographic implementation, key material handling,
+  WebCrypto/libsodium selection, and device-sync integration to dedicated
+  sync-crypto/runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -33,7 +32,7 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, or AI chat runtime
-deletion is in scope for this slice.
+deletion, or real sync crypto runtime implementation is in scope for this slice.
 
 ## Next slices
 

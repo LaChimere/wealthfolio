@@ -195,6 +195,11 @@ export {
   type SettingsUpdate,
 } from "./domains/settings";
 export type { SecretService } from "./domains/secrets";
+export type {
+  SyncCryptoEphemeralKeyPair,
+  SyncCryptoService,
+  SyncCryptoStringResponse,
+} from "./domains/sync-crypto";
 export {
   createTaxonomyRepository,
   createTaxonomyReadRepository,

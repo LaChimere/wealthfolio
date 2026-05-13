@@ -66,6 +66,7 @@ import {
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
+import type { SyncCryptoService } from "./domains/sync-crypto";
 import type {
   NewAssetTaxonomyAssignment,
   NewTaxonomy,
@@ -101,6 +102,7 @@ export interface BackendRequestHandlerOptions {
   portfolioJobService?: PortfolioJobService;
   secretService?: SecretService;
   settingsService?: SettingsService;
+  syncCryptoService?: SyncCryptoService;
   taxonomyService?: TaxonomyService;
 }
 
@@ -270,6 +272,10 @@ async function routeRequest(
 
   if (options.secretService && url.pathname === "/api/v1/secrets") {
     return routeSecretRequest(request, url, config, options.secretService);
+  }
+
+  if (options.syncCryptoService && url.pathname.startsWith("/api/v1/sync/crypto")) {
+    return routeSyncCryptoRequest(request, url, config, options.syncCryptoService);
   }
 
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
@@ -1098,6 +1104,74 @@ function routeSecretRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeSyncCryptoRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  syncCryptoService: SyncCryptoService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  switch (url.pathname) {
+    case "/api/v1/sync/crypto/generate-root-key":
+      return Promise.resolve(syncCryptoService.generateRootKey())
+        .then(jsonResponse)
+        .catch(domainErrorResponse);
+    case "/api/v1/sync/crypto/derive-dek":
+      return handleJsonMutation(request, parseSyncDeriveDekRequest, (input) =>
+        Promise.resolve(syncCryptoService.deriveDek(input.rootKey, input.version)),
+      );
+    case "/api/v1/sync/crypto/generate-keypair":
+      return Promise.resolve(syncCryptoService.generateKeypair())
+        .then(jsonResponse)
+        .catch(domainErrorResponse);
+    case "/api/v1/sync/crypto/compute-shared-secret":
+      return handleJsonMutation(request, parseSyncComputeSharedSecretRequest, (input) =>
+        Promise.resolve(syncCryptoService.computeSharedSecret(input.ourSecret, input.theirPublic)),
+      );
+    case "/api/v1/sync/crypto/derive-session-key":
+      return handleJsonMutation(request, parseSyncDeriveSessionKeyRequest, (input) =>
+        Promise.resolve(syncCryptoService.deriveSessionKey(input.sharedSecret, input.context)),
+      );
+    case "/api/v1/sync/crypto/encrypt":
+      return handleJsonMutation(request, parseSyncEncryptRequest, (input) =>
+        Promise.resolve(syncCryptoService.encrypt(input.key, input.plaintext)),
+      );
+    case "/api/v1/sync/crypto/decrypt":
+      return handleJsonMutation(request, parseSyncDecryptRequest, (input) =>
+        Promise.resolve(syncCryptoService.decrypt(input.key, input.ciphertext)),
+      );
+    case "/api/v1/sync/crypto/generate-pairing-code":
+      return Promise.resolve(syncCryptoService.generatePairingCode())
+        .then(jsonResponse)
+        .catch(domainErrorResponse);
+    case "/api/v1/sync/crypto/hash-pairing-code":
+      return handleJsonMutation(request, parseSyncHashPairingCodeRequest, (input) =>
+        Promise.resolve(syncCryptoService.hashPairingCode(input.code)),
+      );
+    case "/api/v1/sync/crypto/hmac-sha256":
+      return handleJsonMutation(request, parseSyncHmacSha256Request, (input) =>
+        Promise.resolve(syncCryptoService.hmacSha256(input.key, input.data)),
+      );
+    case "/api/v1/sync/crypto/compute-sas":
+      return handleJsonMutation(request, parseSyncComputeSasRequest, (input) =>
+        Promise.resolve(syncCryptoService.computeSas(input.sharedSecret)),
+      );
+    case "/api/v1/sync/crypto/generate-device-id":
+      return Promise.resolve(syncCryptoService.generateDeviceId())
+        .then(jsonResponse)
+        .catch(domainErrorResponse);
+    default:
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
 }
 
 function routeEventStreamRequest(
@@ -3398,6 +3472,110 @@ function parseSecretSetRequest(
   return { secretKey, secret };
 }
 
+function parseSyncDeriveDekRequest(
+  payload: Record<string, unknown>,
+): { rootKey: string; version: number } | Response {
+  const rootKey = parseRequiredString(payload.rootKey, "rootKey");
+  if (rootKey instanceof Response) {
+    return rootKey;
+  }
+  const version = parseRequiredU32(payload.version, "version");
+  if (version instanceof Response) {
+    return version;
+  }
+  return { rootKey, version };
+}
+
+function parseSyncComputeSharedSecretRequest(
+  payload: Record<string, unknown>,
+): { ourSecret: string; theirPublic: string } | Response {
+  const ourSecret = parseRequiredString(payload.ourSecret, "ourSecret");
+  if (ourSecret instanceof Response) {
+    return ourSecret;
+  }
+  const theirPublic = parseRequiredString(payload.theirPublic, "theirPublic");
+  if (theirPublic instanceof Response) {
+    return theirPublic;
+  }
+  return { ourSecret, theirPublic };
+}
+
+function parseSyncDeriveSessionKeyRequest(
+  payload: Record<string, unknown>,
+): { sharedSecret: string; context: string } | Response {
+  const sharedSecret = parseRequiredString(payload.sharedSecret, "sharedSecret");
+  if (sharedSecret instanceof Response) {
+    return sharedSecret;
+  }
+  const context = parseRequiredString(payload.context, "context");
+  if (context instanceof Response) {
+    return context;
+  }
+  return { sharedSecret, context };
+}
+
+function parseSyncEncryptRequest(
+  payload: Record<string, unknown>,
+): { key: string; plaintext: string } | Response {
+  const key = parseRequiredString(payload.key, "key");
+  if (key instanceof Response) {
+    return key;
+  }
+  const plaintext = parseRequiredString(payload.plaintext, "plaintext");
+  if (plaintext instanceof Response) {
+    return plaintext;
+  }
+  return { key, plaintext };
+}
+
+function parseSyncDecryptRequest(
+  payload: Record<string, unknown>,
+): { key: string; ciphertext: string } | Response {
+  const key = parseRequiredString(payload.key, "key");
+  if (key instanceof Response) {
+    return key;
+  }
+  const ciphertext = parseRequiredString(payload.ciphertext, "ciphertext");
+  if (ciphertext instanceof Response) {
+    return ciphertext;
+  }
+  return { key, ciphertext };
+}
+
+function parseSyncHashPairingCodeRequest(
+  payload: Record<string, unknown>,
+): { code: string } | Response {
+  const code = parseRequiredString(payload.code, "code");
+  if (code instanceof Response) {
+    return code;
+  }
+  return { code };
+}
+
+function parseSyncHmacSha256Request(
+  payload: Record<string, unknown>,
+): { key: string; data: string } | Response {
+  const key = parseRequiredString(payload.key, "key");
+  if (key instanceof Response) {
+    return key;
+  }
+  const data = parseRequiredString(payload.data, "data");
+  if (data instanceof Response) {
+    return data;
+  }
+  return { key, data };
+}
+
+function parseSyncComputeSasRequest(
+  payload: Record<string, unknown>,
+): { sharedSecret: string } | Response {
+  const sharedSecret = parseRequiredString(payload.sharedSecret, "sharedSecret");
+  if (sharedSecret instanceof Response) {
+    return sharedSecret;
+  }
+  return { sharedSecret };
+}
+
 function parsePortfolioRequestBody(
   payload: Record<string, unknown>,
 ): PortfolioRequestBody | Response {
@@ -4803,6 +4981,17 @@ function parseRequiredInteger(value: unknown, field: string): number | Response 
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
   }
   return value;
+}
+
+function parseRequiredU32(value: unknown, field: string): number | Response {
+  const parsed = parseRequiredInteger(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed < 0 || parsed > 4_294_967_295) {
+    return jsonResponse({ code: 400, message: `${field} must be a u32 integer` }, 400);
+  }
+  return parsed;
 }
 
 function parseRequiredU8(value: unknown, field: string): number | Response {

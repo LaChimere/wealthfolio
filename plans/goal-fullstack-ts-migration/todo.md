@@ -67,8 +67,8 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, AI chat, alternative assets, assets, app utilities, portfolio
-    metrics, holdings, add-ons, market-data, and activities TS
+    provider, AI chat, sync crypto, alternative assets, assets, app utilities,
+    portfolio metrics, holdings, add-ons, market-data, and activities TS
     repository/service or route config implementations plus guarded route tests
     in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
@@ -84,7 +84,8 @@
     `apps/backend/src/domains/addons.ts`,
     `apps/backend/src/domains/market-data.ts`,
     `apps/backend/src/domains/activities.ts`,
-    `apps/backend/src/domains/ai-chat.ts`, `apps/backend/src/events.ts`, and
+    `apps/backend/src/domains/ai-chat.ts`,
+    `apps/backend/src/domains/sync-crypto.ts`, `apps/backend/src/events.ts`, and
     `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
     migration endpoints are deferred to the health/classification service slice;
     custom provider `test-source` is deferred to an external-I/O slice; goals
@@ -113,7 +114,10 @@
     resolution, and portfolio recalculation side effects are deferred to
     activities/import runtime parity slices; AI chat persistence, provider
     streaming, tool execution, thread storage, tag persistence, and tool-result
-    mutation behavior are deferred to AI runtime parity slices.
+    mutation behavior are deferred to AI runtime parity slices; real sync crypto
+    implementation, key material handling, WebCrypto/libsodium selection, and
+    device-sync integration are deferred to sync-crypto/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -473,6 +477,22 @@ contract:
   auth, route inertness, type-safety, and test coverage.
 - `pr5-ai-chat-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-sync-crypto-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable root key, DEK derivation, keypair, shared/session
+  key derivation, encrypt/decrypt, pairing-code/hash, HMAC, SAS, and device-id
+  commands, guarded HTTP route access, route inertness without injection,
+  no-body route body ignoring, exact camelCase field validation, snake_case
+  rejection, empty-string pass-through, `u32` version boundaries, keypair
+  response shape, service error mapping, positional argument forwarding, and
+  deferred real sync crypto runtime behavior.
+- `pr5-sync-crypto-route-seam-review`: rubber-duck and code review found no
+  actionable issues after confirming EphemeralKeyPair shape, no-body route
+  behavior, exact field validation, u32 version parity, empty-string
+  pass-through, service error mapping, sidecar auth, route inertness, sensitive
+  data handling, and test coverage.
+- `pr5-sync-crypto-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -485,8 +505,8 @@ contract:
   secrets route seam, AI provider route seam, alternative assets route seam,
   assets route seam, app utility route seam, portfolio metrics route seam,
   holdings route seam, add-ons route seam, market-data route seam,
-  activities/import route seam, and AI chat route seam slices implemented;
-  broader migration remains active.
+  activities/import route seam, AI chat route seam, and sync crypto route seam
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -513,4 +533,6 @@ contract:
   behavior, asset preview resolution, and portfolio recalculation side effects
   move with activities/import runtime parity slices; AI chat persistence,
   provider streaming, tool execution, thread storage, tag persistence, and
-  tool-result mutation behavior move with AI runtime parity slices.
+  tool-result mutation behavior move with AI runtime parity slices; real sync
+  crypto implementation, key material handling, WebCrypto/libsodium selection,
+  and device-sync integration move with sync-crypto/device-sync parity slices.
