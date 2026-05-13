@@ -29,9 +29,9 @@ interface.
 │                         Transport Layer                                      │
 │                                                                              │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │   Tauri (Desktop)           │    │   Axum (Web Server)                 │ │
-│  │   - IPC Channel streaming   │    │   - NDJSON HTTP streaming           │ │
-│  │   - TauriAiEnvironment      │    │   - ServerAiEnvironment             │ │
+│  │   Electron (Desktop)        │    │   Axum (Web Server)                 │ │
+│  │   - IPC-mediated streaming  │    │   - NDJSON HTTP streaming           │ │
+│  │   - DesktopAiEnvironment    │    │   - ServerAiEnvironment             │ │
 │  └─────────────────────────────┘    └─────────────────────────────────────┘ │
 │                                    │                                         │
 └────────────────────────────────────┼─────────────────────────────────────────┘
@@ -207,7 +207,7 @@ async fn persistence_actor(
 
 ### AiEnvironment Trait
 
-Dependency injection interface implemented by Tauri and Axum:
+Dependency injection interface implemented by desktop and Axum runtimes:
 
 ```rust
 pub trait AiEnvironment: Send + Sync {

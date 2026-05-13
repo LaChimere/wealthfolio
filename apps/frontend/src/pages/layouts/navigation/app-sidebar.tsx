@@ -33,19 +33,19 @@ export function AppSidebar({ navigation }: AppSidebarProps) {
         "md:w-sidebar": !collapsed,
         "md:w-sidebar-collapsed": collapsed,
       })}
-      data-tauri-drag-region="true"
+      data-desktop-drag-region="true"
     >
       <div className="z-20 w-full rounded-xl md:flex">
         <div className="flex w-full flex-col">
           <div className="flex w-full flex-1 flex-col overflow-y-auto">
-            <div data-tauri-drag-region="true" className="flex-1">
+            <div data-desktop-drag-region="true" className="flex-1">
               <nav
-                data-tauri-drag-region="true"
+                data-desktop-drag-region="true"
                 aria-label="Sidebar"
                 className="flex shrink-0 flex-col p-2"
               >
                 <div
-                  data-tauri-drag-region="true"
+                  data-desktop-drag-region="true"
                   className="draggable flex items-center justify-center pb-6"
                 >
                   <Link to="/">

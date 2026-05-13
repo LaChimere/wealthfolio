@@ -2,14 +2,14 @@
 //!
 //! This crate provides the AI assistant functionality for Wealthfolio,
 //! handling the model ↔ tools ↔ model orchestration loop and streaming
-//! `AiStreamEvent` to Tauri/Axum consumers.
+//! `AiStreamEvent` to desktop/Axum consumers.
 //!
 //! # Architecture
 //!
 //! - `chat`: Main streaming chat service with tool execution loop
 //! - `providers`: Provider catalog and rig-core client factory
 //! - `tools`: Tool registry, schemas, and bounded outputs
-//! - `types`: Shared DTOs/events used by Axum/Tauri + frontend
+//! - `types`: Shared DTOs/events used by Axum/desktop + frontend
 //! - `env`: Environment abstraction for services/secrets/config
 //! - `title_generator`: Auto-generates thread titles from user messages
 //! - `eval`: Behavioral evaluation harness (test only)
@@ -23,7 +23,7 @@
 //! ```ignore
 //! use wealthfolio_ai::{ChatService, ChatConfig, AiEnvironment};
 //!
-//! // Create environment (Tauri/Axum implements AiEnvironment)
+//! // Create environment (desktop/Axum implements AiEnvironment)
 //! let env = create_runtime_environment(...);
 //!
 //! // Create chat service

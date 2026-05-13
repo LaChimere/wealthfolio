@@ -91,7 +91,6 @@ export const getPlatform = async (): Promise<PlatformInfo> => {
     os: osByPlatform[runtime.platform] ?? runtime.platform,
     is_mobile: false,
     is_desktop: true,
-    is_tauri: false,
     is_electron: true,
     capabilities: {
       connect_sync: true,

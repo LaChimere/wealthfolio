@@ -22,7 +22,7 @@ const AppLayoutContent = () => {
   const { data: settings, isSuccess: isSettingsReady } = useSettings();
   const location = useLocation();
   const navigation = useNavigation();
-  const { isMobile, isTauri } = usePlatform();
+  const { isMobile, isDesktop } = usePlatform();
   const isMobileViewport = useIsMobileViewport();
   const isIPad =
     typeof window !== "undefined" &&
@@ -37,7 +37,7 @@ const AppLayoutContent = () => {
 
   useGlobalEventListener();
   useNavigationEventListener();
-  useActiveAppSyncTrigger({ enabled: isTauri, requireWindowFocusForInterval: !isMobile });
+  useActiveAppSyncTrigger({ enabled: isDesktop, requireWindowFocusForInterval: !isMobile });
 
   if (!isSettingsReady) {
     return (
@@ -79,7 +79,7 @@ const AppLayoutContent = () => {
         >
           <main className="relative flex min-h-0 w-full max-w-full flex-1 flex-col overflow-x-hidden">
             <div
-              data-tauri-drag-region="true"
+              data-desktop-drag-region="true"
               className="draggable pointer-events-auto absolute inset-x-0 top-0 z-50 h-6 cursor-grab opacity-0"
             ></div>
             {shouldUseMobileNavigation ? (

@@ -1,7 +1,7 @@
 //! Centralized broker sync orchestrator.
 //!
 //! This module provides a unified sync implementation that can be used
-//! by both Tauri (desktop) and Axum (web) platforms.
+//! by both desktop and Axum (web) platforms.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl Default for SyncConfig {
 /// Orchestrates broker data synchronization.
 ///
 /// This struct encapsulates the sync logic previously duplicated in
-/// Tauri commands and Axum handlers. It handles:
+/// desktop commands and Axum handlers. It handles:
 /// - Connection syncing
 /// - Account syncing (with sync_enabled filtering)
 /// - Activity syncing with full pagination support
@@ -46,7 +46,7 @@ impl Default for SyncConfig {
 /// # Example
 ///
 /// ```ignore
-/// let reporter = Arc::new(TauriProgressReporter::new(app_handle));
+/// let reporter = Arc::new(DesktopProgressReporter::new(app_handle));
 /// let orchestrator = SyncOrchestrator::new(sync_service, reporter, SyncConfig::default());
 /// let result = orchestrator.sync_all(&api_client).await?;
 /// ```

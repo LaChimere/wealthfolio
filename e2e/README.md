@@ -1,7 +1,7 @@
 # E2E Tests
 
 Wealthfolio E2E tests use [Playwright](https://playwright.dev/) and run against
-the **web app** (not the Tauri desktop app). There are **no mocks** — both
+the **web app** (not the Electron desktop app). There are **no mocks** — both
 frontend and backend must be running against a fresh database.
 
 ---
@@ -100,10 +100,10 @@ bun x playwright test && bun x playwright show-report
 - **Always run `prep-e2e.mjs` before starting the server.** Tests assume an
   empty database. If you run against an existing database, setup steps may
   silently skip asset creation and tests may fail for unrelated reasons.
-- **Do not run E2E tests against the Tauri desktop app.** The tests are
+- **Do not run E2E tests against the Electron desktop app.** The tests are
   hardcoded to `http://localhost:1420`.
-- **Do not run E2E tests while the Tauri dev server (`bun tauri dev`) is
-  running** on the same ports — they conflict.
+- **Do not run E2E tests while desktop dev (`bun run dev:electron`) is running**
+  on the same ports — they conflict.
 - Tests run **serially** (1 worker, serial mode). Do not try to parallelize
   them.
 

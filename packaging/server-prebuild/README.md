@@ -1,8 +1,7 @@
 # Wealthfolio Server — Linux amd64 prebuild
 
-Standalone HTTP server build for self-hosting (no Tauri, no desktop runtime).
-Built on Ubuntu 22.04 (glibc 2.35) — runs on Debian 12+, Ubuntu 22.04+, and
-derivatives.
+Standalone HTTP server build for self-hosting (no desktop runtime). Built on
+Ubuntu 22.04 (glibc 2.35) — runs on Debian 12+, Ubuntu 22.04+, and derivatives.
 
 ## Layout
 

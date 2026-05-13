@@ -20,7 +20,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { authenticate as authenticateWithASWebAuth } from "tauri-plugin-web-auth-api";
 import { clearSyncSession, restoreSyncSession, storeSyncSession } from "../services/auth-service";
 import { getUserInfo } from "../services/broker-service";
 import type { UserInfo } from "../types";
@@ -33,7 +32,7 @@ const AUTH_PUBLISHABLE_KEY =
   "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
 
 // Key for storing refresh token in keyring/localStorage (for session restoration)
-// Note: For keyring (Tauri), the "wealthfolio_" prefix is added automatically by SecretStore
+// Note: For desktop keyring, the "wealthfolio_" prefix is added automatically by SecretStore
 const REFRESH_TOKEN_KEY = "sync_refresh_token";
 
 // Deep-link URL for desktop callbacks (custom URL scheme)
@@ -504,28 +503,15 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
       setError(null);
 
       try {
-        const isTauri = isDesktop;
-        const platform = isTauri ? await getPlatform() : null;
-        const isMobile = platform?.is_mobile ?? false;
-        const isIOS = platform?.os === "ios";
-
-        // iOS mobile: Use ASWebAuthenticationSession with deep link callback
-        // This is required because Google blocks OAuth from embedded webviews (WKWebView)
-        // ASWebAuthenticationSession opens a secure Safari sheet that Google accepts
-        // Note: This is needed in both dev and prod modes on iOS
-        const useASWebAuth = isTauri && isMobile && isIOS;
-
         // Determine redirect URL based on platform
-        // iOS ASWebAuth always needs deep link URL (works in dev and prod)
         // Desktop prod uses hosted callback → deep link (can't use in dev - URL scheme not registered)
         // Dev mode uses webview redirect (simpler, no deep link registration needed)
-        const redirectUrl = useASWebAuth
-          ? DESKTOP_DEEP_LINK_URL // iOS: direct custom scheme, captured by ASWebAuth
-          : isTauri && import.meta.env.PROD
+        const redirectUrl =
+          isDesktop && import.meta.env.PROD
             ? HOSTED_OAUTH_CALLBACK_URL // Desktop & Android: bounce page → wealthfolio://
             : getWebRedirectUrl(); // Web or dev mode
 
-        const useSystemBrowser = isTauri && import.meta.env.PROD && !useASWebAuth;
+        const useSystemBrowser = isDesktop && import.meta.env.PROD;
         const queryParams =
           provider === "google"
             ? {
@@ -537,7 +523,7 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
         const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
           provider,
           options: {
-            skipBrowserRedirect: useSystemBrowser || useASWebAuth,
+            skipBrowserRedirect: useSystemBrowser,
             redirectTo: redirectUrl,
             queryParams,
           },
@@ -545,35 +531,6 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
 
         if (oauthError) {
           throw oauthError;
-        }
-
-        // iOS mobile: Use ASWebAuthenticationSession plugin
-        // This opens a secure Safari sheet that Google accepts for OAuth
-        if (useASWebAuth && data.url) {
-          try {
-            const result = await authenticateWithASWebAuth({
-              url: data.url,
-              callbackScheme: "wealthfolio",
-            });
-
-            // The plugin returns the full callback URL with the auth code
-            if (result?.callbackUrl) {
-              await handleAuthCallback(result.callbackUrl);
-            } else {
-              logger.error("No callbackUrl in ASWebAuth result");
-            }
-          } catch (authErr) {
-            // User cancelled or auth failed
-            const message =
-              authErr instanceof Error ? authErr.message : "Authentication was cancelled";
-            logger.error(`ASWebAuth error: ${message}`);
-            // Don't throw if user just cancelled
-            if (!message.toLowerCase().includes("cancel")) {
-              throw authErr;
-            }
-            logger.info("OAuth authentication was cancelled by user");
-          }
-          return;
         }
 
         // Desktop: Open the OAuth URL in the system browser
@@ -588,7 +545,7 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
         setIsLoading(false);
       }
     },
-    [supabase, handleAuthCallback],
+    [supabase],
   );
 
   const signInWithMagicLink = useCallback(
@@ -597,15 +554,9 @@ function EnabledWealthfolioConnectProvider({ children }: { children: ReactNode }
       setError(null);
 
       try {
-        const isTauri = isDesktop;
-        const platform = isTauri ? await getPlatform() : null;
-        const isMobile = platform?.is_mobile ?? false;
-
         const redirectUrl =
-          isTauri && import.meta.env.PROD
-            ? isMobile
-              ? HOSTED_OAUTH_CALLBACK_URL // Mobile: bounce page → wealthfolio://
-              : DESKTOP_DEEP_LINK_URL // Desktop: direct wealthfolio:// from email client
+          isDesktop && import.meta.env.PROD
+            ? DESKTOP_DEEP_LINK_URL // Desktop: direct wealthfolio:// from email client
             : getWebRedirectUrl();
 
         const { error: otpError } = await supabase.auth.signInWithOtp({

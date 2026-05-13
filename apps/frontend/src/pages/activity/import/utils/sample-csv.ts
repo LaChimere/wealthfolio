@@ -15,7 +15,7 @@ const SAMPLE_CSV_CONTENT = `date,symbol,instrumentType,quantity,activityType,uni
 /**
  * Downloads the sample CSV template for activity imports.
  * The sample demonstrates all supported activity types and fields.
- * Uses Blob approach to work in both web and Tauri environments.
+ * Uses Blob approach to work in both web and desktop environments.
  */
 export function downloadSampleCsv() {
   const blob = new Blob([SAMPLE_CSV_CONTENT], { type: "text/csv;charset=utf-8;" });

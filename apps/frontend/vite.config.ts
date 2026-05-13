@@ -3,7 +3,6 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { defineConfig } from "vitest/config";
 
-const host = process.env.TAURI_DEV_HOST;
 const apiTarget =
   process.env.VITE_API_TARGET || process.env.WF_API_TARGET || "http://127.0.0.1:8080";
 const enableProxy = process.env.WF_ENABLE_VITE_PROXY === "true";
@@ -20,24 +19,19 @@ const serverProxy = enableProxy
     }
   : undefined;
 
-// Determine build target: "tauri" for Tauri desktop, "electron" for Electron,
-// and "web" for browser.
-// Default to "tauri" for local development - use BUILD_TARGET=web for web builds
-// TAURI_DEV_HOST is only set for mobile/network dev, so we can't rely on it
-const buildTarget = process.env.BUILD_TARGET || "tauri";
+// Determine build target: "electron" for desktop and "web" for browser.
+const buildTarget = process.env.BUILD_TARGET || "web";
 const adapterTargets = {
   electron: "./src/adapters/electron",
-  tauri: "./src/adapters/tauri",
   web: "./src/adapters/web",
 } as const;
 const platformTargets = {
   electron: "./src/adapters/electron/core",
-  tauri: "./src/adapters/tauri/core",
   web: "./src/adapters/web/core",
 } as const;
 
 if (!(buildTarget in adapterTargets)) {
-  throw new Error(`Unsupported BUILD_TARGET "${buildTarget}". Expected tauri, web, or electron.`);
+  throw new Error(`Unsupported BUILD_TARGET "${buildTarget}". Expected web or electron.`);
 }
 
 const resolvedBuildTarget = buildTarget as keyof typeof adapterTargets;
@@ -65,40 +59,18 @@ export default defineConfig({
     },
     extensions: [".js", ".ts", ".jsx", ".tsx", ".json"],
   },
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent vite from obscuring rust errors
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
-    host: host ? "0.0.0.0" : false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
     proxy: serverProxy,
     watch: {
-      // 3. tell vite to ignore watching native desktop shells
-      ignored: ["**/apps/tauri/**", "**/apps/electron/**"],
+      ignored: ["**/apps/electron/**"],
     },
   },
-  // 3. to make use of `TAURI_DEBUG` and other env variables
-  // https://tauri.app/v1/api/config#buildconfig.beforedevcommand
-  envPrefix: ["VITE_", "TAURI_", "CONNECT_"],
+  envPrefix: ["VITE_", "CONNECT_"],
   build: {
-    // Output to project root's dist folder (for Tauri)
     outDir: "../../dist",
-    // Tauri uses Chromium on Windows and WebKit on macOS and Linux
-    // Keep target unset to use modern defaults for desktop WebView engines.
-    // don't minify for debug builds
-    minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
-    // produce sourcemaps for debug builds
-    sourcemap: !!process.env.TAURI_DEBUG,
   },
   test: {
     globals: true,

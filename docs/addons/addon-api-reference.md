@@ -363,7 +363,7 @@ const activities = await Promise.all([
 ]);
 
 // You can also scope results to a single account by passing its ID as a string.
-// The host normalizes this for both desktop (Tauri) and web modes—no need to
+// The host normalizes this for both desktop and web modes—no need to
 // wrap the value in an array.
 
 // Activity search accepts single values or arrays for filters.

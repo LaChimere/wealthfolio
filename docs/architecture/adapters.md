@@ -1,215 +1,72 @@
 # Adapter Architecture
 
-This document describes the adapter system used to support multiple runtime
-environments (Desktop/Tauri and Web/REST API) with compile-time environment
-detection.
+Wealthfolio uses compile-time adapters so the React app can run in Electron
+desktop builds and browser/web builds with the same feature-level imports.
 
-> Migration note: the target Electron desktop architecture is tracked in
-> [Electron Migration Architecture](./electron-migration.md). This document
-> describes the current adapter system until that migration lands.
+## Runtime targets
 
-## Overview
+- **Electron desktop**: `@/adapters` resolves to
+  `apps/frontend/src/adapters/electron` and commands cross the secure preload
+  IPC bridge before Electron main proxies Rust-backed operations to the
+  authenticated sidecar.
+- **Web**: `@/adapters` resolves to `apps/frontend/src/adapters/web` and
+  commands call REST endpoints on the Axum server.
 
-Wealthfolio runs in two environments:
+## Build-time resolution
 
-- **Desktop (Tauri)**: Uses Tauri's IPC to invoke Rust commands directly
-- **Web**: Uses REST API calls to a backend server
+`apps/frontend/vite.config.ts` selects the adapter with `BUILD_TARGET`:
 
-The adapter system provides a unified interface that works identically in both
-environments, with the correct implementation selected at build time.
-
-## Directory Structure
-
-```
-apps/frontend/src/adapters/
-├── index.ts          # Re-exports from default adapter (for TypeScript)
-├── types.ts          # Shared types for all adapters
-├── tauri/
-│   └── index.ts      # Desktop/Tauri implementation
-└── web/
-    └── index.ts      # Web/REST API implementation
+```ts
+const buildTarget = process.env.BUILD_TARGET || "web";
 ```
 
-## How It Works
-
-### Build-Time Resolution
-
-Vite's `resolve.alias` is configured to point `@/adapters` to either
-`adapters/tauri` or `adapters/web` based on the `BUILD_TARGET` environment
-variable:
-
-```typescript
-// apps/frontend/vite.config.ts
-const buildTarget = process.env.BUILD_TARGET || "tauri";
-
-export default defineConfig({
-  resolve: {
-    alias: {
-      "@/adapters": path.resolve(
-        __dirname,
-        buildTarget === "tauri" ? "./src/adapters/tauri" : "./src/adapters/web",
-      ),
-    },
-  },
-});
-```
-
-### Build Scripts
-
-The `package.json` scripts set the appropriate `BUILD_TARGET`:
+The root scripts set this explicitly:
 
 ```json
 {
   "scripts": {
-    "dev": "BUILD_TARGET=web vite",
-    "dev:tauri": "BUILD_TARGET=tauri vite",
-    "build": "BUILD_TARGET=web ... vite build",
-    "build:tauri": "BUILD_TARGET=tauri vite build"
+    "dev": "bun run --cwd apps/frontend dev",
+    "dev:electron": "bun run scripts/dev-electron.mjs",
+    "build": "bun run --cwd apps/frontend build",
+    "build:electron": "bun run --cwd apps/frontend build:electron && bun run --cwd apps/electron build && bun run --cwd apps/electron stage:renderer"
   }
 }
 ```
 
-### TypeScript Support
+For TypeScript outside Vite, `apps/frontend/src/adapters/index.ts` re-exports
+the Electron adapter by default. Web and Electron builds still receive the
+correct runtime implementation through Vite aliases.
 
-For TypeScript type-checking (which doesn't use Vite's aliases), `index.ts`
-re-exports from the Tauri adapter by default:
+## Unified interface
 
-```typescript
-// apps/frontend/src/adapters/index.ts
-export * from "./tauri";
+Feature code imports typed functions from `@/adapters` instead of importing
+Electron, Node.js, or HTTP clients directly:
+
+```ts
+import { getAccounts, isDesktop, logger } from "@/adapters";
+
+const accounts = await getAccounts();
 ```
 
-This ensures TypeScript can resolve types correctly while the actual build uses
-the correct adapter.
+Adapters expose shared runtime flags, logging, command wrappers, event
+listeners, file dialogs, update helpers, and addon operations. Desktop-only work
+must stay behind adapter functions so web bundles do not include Electron code
+and renderer code does not gain raw Node.js access.
 
-## Unified Interface
+## Adding commands
 
-All adapters export the same interface:
+1. Add the typed adapter export in `apps/frontend/src/adapters/electron` and, if
+   needed, the matching web adapter export.
+2. Register Electron IPC metadata in `apps/electron/src/shared/ipc.ts` and route
+   it through `apps/electron/src/main/commands.ts`.
+3. Add or reuse the Axum sidecar/web endpoint under `apps/server/src/api/`.
+4. Keep business logic in `crates/core` or the relevant shared Rust crate.
+5. Add/update adapter parity tests so Electron IPC, web mappings, and frontend
+   invocations stay aligned.
 
-```typescript
-// Core exports
-export const RUN_ENV: RunEnv; // "desktop" | "web"
-export const isDesktop: boolean;
-export const isWeb: boolean;
-export const logger: Logger;
+## Trust boundary
 
-// Typed command functions (preferred pattern)
-export const getAccounts: <T>() => Promise<T[]>;
-export const syncBrokerData: () => Promise<void>;
-export const getImportRuns: <T>(request?: ImportRunsRequest) => Promise<T[]>;
-// ... more typed functions for each backend command
-
-// Event listeners
-export const listenDeepLink: (callback: EventCallback<string>) => Promise<UnlistenFn>;
-export const listenNavigateToRoute: (callback: EventCallback<string>) => Promise<UnlistenFn>;
-// ... more event listeners
-
-// File operations
-export const openFileSaveDialog: (content: string | Uint8Array | Blob, fileName: string) => Promise<boolean>;
-export const openFolderDialog: () => Promise<string | null>;
-
-// Types
-export type { EventCallback, UnlistenFn, Logger, RunEnv };
-export type { ExtractedAddon, InstalledAddon, AddonManifest, ... };
-```
-
-## Usage in Code
-
-Import typed functions from `@/adapters` and use them in services:
-
-```typescript
-import {
-  logger,
-  getAccounts as getAccountsAdapter,
-  syncBrokerData as syncBrokerDataAdapter,
-} from "@/adapters";
-
-// Service wraps adapter with error handling
-export const getAccounts = async (): Promise<Account[]> => {
-  try {
-    return await getAccountsAdapter<Account>();
-  } catch (error) {
-    logger.error("Error getting accounts.");
-    throw error;
-  }
-};
-
-// Check environment when needed
-import { isDesktop } from "@/adapters";
-
-if (isDesktop) {
-  // Desktop-specific code (e.g., file dialogs)
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  // ...
-}
-```
-
-## Benefits
-
-1. **Dead Code Elimination**: Web builds don't include Tauri code and vice versa
-2. **No Runtime Checks**: Environment is determined at compile time
-3. **Type Safety**: Full TypeScript support with unified types
-4. **Cleaner Code**: No `if (isDesktop)` scattered throughout the codebase
-5. **Smaller Bundles**: Each build only includes the code it needs
-
-## Adding New Commands
-
-When adding a new backend command:
-
-1. Add a typed function in `adapters/tauri/index.ts` using `tauriInvoke`
-2. Add the REST API mapping in `adapters/web/index.ts` COMMANDS map
-3. Add a matching typed function in `adapters/web/index.ts` using `invoke`
-4. Create a service function that wraps the adapter with error handling
-
-Example:
-
-```typescript
-// adapters/tauri/index.ts
-export async function myNewCommand<T>(data: MyData): Promise<T> {
-  return tauriInvoke<T>("my_new_command", { data });
-}
-
-// adapters/web/index.ts
-// 1. Add to COMMANDS map
-const COMMANDS = {
-  // ...existing commands
-  my_new_command: { method: "POST", path: "/my-endpoint" },
-};
-
-// 2. Add typed function
-export async function myNewCommand<T>(data: MyData): Promise<T> {
-  return invoke<T>("my_new_command", { data });
-}
-
-// services/my-service.ts
-import { logger, myNewCommand as myNewCommandAdapter } from "@/adapters";
-
-export const myNewCommand = async (data: MyData): Promise<Result> => {
-  try {
-    return await myNewCommandAdapter<Result>(data);
-  } catch (error) {
-    logger.error("Error in myNewCommand.");
-    throw error;
-  }
-};
-```
-
-## Desktop-Only Features
-
-Some features only work on desktop (e.g., file system dialogs). These should:
-
-1. Check `isDesktop` before calling
-2. Use dynamic imports for Tauri plugins
-3. Provide graceful fallbacks for web
-
-```typescript
-import { isDesktop } from "@/adapters";
-
-if (isDesktop) {
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const filePath = await open({
-    filters: [{ name: "CSV", extensions: ["csv"] }],
-  });
-  // ...
-}
-```
+Renderer code never receives sidecar URLs, sidecar tokens, database paths, log
+paths, or raw Electron/Node.js APIs. Electron main owns native APIs, sidecar
+lifecycle, authenticated sidecar requests, update installation, file dialogs,
+deep links, and event redaction.

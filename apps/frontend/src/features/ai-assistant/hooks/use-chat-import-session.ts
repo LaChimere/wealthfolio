@@ -190,7 +190,7 @@ function reducer(state: ChatImportState, action: Action): ChatImportState {
 
 /**
  * Wrap a string of CSV content as a File so it flows through the existing
- * `parseCsv` adapter (which expects a File to cover both tauri + web paths).
+ * `parseCsv` adapter (which expects a File to cover both desktop and web paths).
  */
 function csvStringAsFile(csvContent: string, name = "import.csv"): File {
   return new File([csvContent], name, { type: "text/csv" });

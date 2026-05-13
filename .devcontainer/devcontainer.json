@@ -8,13 +8,13 @@
    * This configuration defines the setup for a development container used to
    * run Wealthflolio application development in an isolated, reproducible
    * environment. It includes all the necessary components to work with
-   * the Tauri framework, Rust, X11, and VNC server for GUI applications.
+   * Electron, Rust, X11, and VNC server for GUI applications.
    *
    * =======================================================================
    * Key Components:
    * =======================================================================
-   * 1. **Base Image**: The container uses the "ivangabriele/tauri:debian-bookworm-22"
-   *    Docker image, which comes with the necessary dependencies for Tauri apps.
+   * 1. **Base Image**: The container uses the "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm"
+   *    Docker image, which comes with Node.js for Electron and frontend work.
    *
    * 2. **X11 Virtual Display**: The container includes Xvfb (X virtual framebuffer)
    *    to simulate a display environment, enabling GUI applications to run without
@@ -25,7 +25,7 @@
    *    packages such as `xvfb`, `x11vnc`, `net-tools`, and others required
    *    for running/developing the Wealthflolio app and managing GUI display output.
    *
-   * 4. **VS Code Setup**: Preconfigured VS Code extensions for Rust, Tauri,
+   * 4. **VS Code Setup**: Preconfigured VS Code extensions for Rust,
    *    Docker, ESLint, Prettier, and Git integration, making it a seamless
    *    environment for development and debugging.
    *
@@ -63,7 +63,7 @@
 
   // Base Docker image used for the development container
   // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "image": "ivangabriele/tauri:debian-bookworm-22",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm",
 
   // Environment variables to be set inside the container
   "containerEnv": {
@@ -159,7 +159,6 @@
     "vscode": {
       "extensions": [
         "rust-lang.rust-analyzer", // Rust language server for Rust development
-        "tauri-apps.tauri-vscode", // Tauri framework support for building desktop apps
         "ms-azuretools.vscode-docker", // Docker integration for VS Code
         "esbenp.prettier-vscode", // Prettier integration for code formatting
         "rvest.vs-code-prettier-eslint", // Prettier + ESLint integration for code quality

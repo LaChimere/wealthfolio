@@ -17,7 +17,7 @@ Key Principles
 - When refactoring, make sure to remove unused code 
 
 Project Stack:
-- Desktop application using Tauri Framework
+- Desktop application using Electron with a Rust sidecar
 - Diesel ORM for database access
 - SQLite
 

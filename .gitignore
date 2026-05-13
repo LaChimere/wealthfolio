@@ -56,20 +56,15 @@ tsconfig.node.tsbuildinfo
 # Database
 ./db/*
 apps/db/*
-apps/tauri/db/*
 
 # Rust/Cargo
 target/
 **/*.rs.bk
 # Workspace members share the root Cargo.lock
 apps/server/Cargo.lock
-apps/tauri/Cargo.lock
 crates/core/Cargo.lock
 # addon-sdk is a Bun workspace member; root bun.lock is authoritative
 packages/addon-sdk/package-lock.json
-
-# Tauri generated
-apps/tauri/gen/schemas/
 
 # Electron packaging staging
 apps/electron/resources/sidecars/*
@@ -98,6 +93,5 @@ Thumbs.db
 .conductor/
 db/
 apps/db/
-apps/tauri/db/
 tasks
 **/*.local.md

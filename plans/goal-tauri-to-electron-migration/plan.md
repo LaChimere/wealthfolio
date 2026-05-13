@@ -2,11 +2,10 @@
 
 ## Approach
 
-Use an adapter-preserving, side-by-side migration. First lock the evidence and
-contracts, then move JS tooling to Bun/Biome/Lefthook and TypeScript 6, then add
-Electron next to Tauri, prove Electron adapter/IPC parity, reuse the Rust
-service graph safely, replace native desktop features and packaging, and remove
-Tauri only after Electron is verified.
+Use an adapter-preserving migration. Lock the evidence and contracts, move JS
+tooling to Bun/Biome/Lefthook and TypeScript 6, add Electron with secure IPC,
+reuse the Rust service graph safely, replace native desktop features and
+packaging, and remove Tauri after Electron is verified.
 
 ## Execution slices
 

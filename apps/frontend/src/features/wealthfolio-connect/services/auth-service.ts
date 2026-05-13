@@ -8,7 +8,7 @@ import {
 /**
  * Store Wealthfolio Connect tokens in the backend's encrypted secret store.
  * The backend uses the refresh token to mint fresh access tokens when needed.
- * Works in both desktop (Tauri) and web modes.
+ * Works in both desktop and web modes.
  */
 export const storeSyncSession = async (refreshToken: string): Promise<void> => {
   try {
@@ -22,7 +22,7 @@ export const storeSyncSession = async (refreshToken: string): Promise<void> => {
 
 /**
  * Clear Wealthfolio Connect session from the backend's secret store.
- * Works in both desktop (Tauri) and web modes.
+ * Works in both desktop and web modes.
  */
 /**
  * Restore Wealthfolio Connect session from the backend (web mode only).

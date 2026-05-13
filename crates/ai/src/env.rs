@@ -1,8 +1,8 @@
 //! Environment abstraction for AI assistant.
 //!
 //! This module provides the `AiEnvironment` trait that abstracts runtime
-//! dependencies like secret stores, services, and configuration. The Tauri
-//! and Axum backends implement this trait with their specific service instances.
+//! dependencies like secret stores, services, and configuration. Desktop and
+//! Axum backends implement this trait with their specific service instances.
 
 use async_trait::async_trait;
 use std::sync::Arc;

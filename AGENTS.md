@@ -47,8 +47,8 @@ common task playbooks.
 ## Overview
 
 - **Frontend**: React + Vite + Tailwind v4 + shadcn (`apps/frontend/`)
-- **Desktop**: Tauri today, Electron migration in progress (`apps/tauri/`,
-  `apps/electron/`, `crates/`)
+- **Desktop**: Electron main/preload with a Rust sidecar (`apps/electron/`,
+  `apps/server/`, `crates/`)
 - **Web mode**: Axum HTTP server (`apps/server/`)
 - **Packages**: `@wealthfolio/ui`, addon-sdk, addon-dev-tools (`packages/`)
 
@@ -60,15 +60,12 @@ apps/frontend/
 │   ├── pages/          # Route pages
 │   ├── components/     # Shared components
 │   ├── features/       # Self-contained feature modules
-│   ├── commands/       # Backend call wrappers (Tauri/Web)
-│   ├── adapters/       # Runtime adapters (Tauri/Electron/Web)
+│   ├── commands/       # Backend call wrappers (Desktop/Web)
+│   ├── adapters/       # Runtime adapters (Electron/Web)
 │   └── addons/         # Addon runtime
 
 apps/electron/
 └── src/                # Electron main/preload/shared IPC
-
-apps/tauri/src/
-└── commands/           # Tauri IPC commands
 
 apps/server/src/
 └── api/                # Axum HTTP handlers
@@ -86,8 +83,7 @@ crates/
 
 | Task           | Command                    |
 | -------------- | -------------------------- |
-| Desktop dev    | `bun tauri dev`            |
-| Electron dev   | `bun run dev:electron`     |
+| Desktop dev    | `bun run dev:electron`     |
 | Web dev        | `bun run dev:web`          |
 | Tests (TS)     | `bun run test`             |
 | Tests (Rust)   | `cargo test`               |
@@ -108,9 +104,9 @@ crates/
    `apps/frontend/src/routes.tsx`
 2. **Command wrapper** → `apps/frontend/src/commands/<domain>.ts` (follow
    `RUN_ENV` pattern)
-3. **Tauri command** → `apps/tauri/src/commands/*.rs`, wire in `mod.rs` +
-   `lib.rs`
-4. **Web endpoint** → `apps/server/src/api/`, call `crates/core` service
+3. **Electron IPC** → `apps/electron/src/shared/ipc.ts` +
+   `apps/electron/src/main/commands.ts`
+4. **Sidecar/Web endpoint** → `apps/server/src/api/`, call `crates/core` service
 5. **Core logic** → `crates/core/` services/repos
 6. **Tests** → Vitest for TS, `#[test]` for Rust
 
@@ -124,9 +120,9 @@ crates/
 ### Architecture pattern
 
 ```
-Frontend → Adapter (Tauri/Electron/Web) → Command wrapper
+Frontend → Adapter (Electron/Web) → Command wrapper
                 ↓
-   Tauri IPC | Electron IPC + Rust sidecar | Axum HTTP
+        Electron IPC + Rust sidecar | Axum HTTP
                 ↓
            crates/core (business logic)
                 ↓
@@ -148,7 +144,7 @@ Frontend → Adapter (Tauri/Electron/Web) → Command wrapper
 
 - Idiomatic Rust, small focused functions
 - `Result`/`Option`, propagate with `?`, `thiserror` for domain errors
-- Keep Tauri/Axum commands thin—delegate to `crates/core`
+- Keep Electron/Axum boundaries thin—delegate business logic to `crates/core`
 - Migrations in `crates/storage-sqlite/migrations`
 
 ### Security
@@ -163,7 +159,7 @@ Frontend → Adapter (Tauri/Electron/Web) → Command wrapper
 
 Before completing any task:
 
-- [ ] Builds: `bun run build` or `bun tauri dev` or `cargo check`
+- [ ] Builds: `bun run build`, `bun run build:electron`, or `cargo check`
 - [ ] Tests pass: `bun run test` and/or `cargo test`
 - [ ] Both desktop and web compile if touching shared code
 - [ ] Changes are minimal and surgical

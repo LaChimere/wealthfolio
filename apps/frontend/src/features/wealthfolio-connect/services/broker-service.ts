@@ -31,7 +31,7 @@ import type {
 
 /**
  * Sync broker data from the cloud to the local database.
- * Works on both desktop (Tauri) and web platforms:
+ * Works on both desktop and web platforms:
  * - Triggers sync via command (returns immediately)
  * - Global event listener handles toast notifications via SSE events
  */

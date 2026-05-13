@@ -11,9 +11,8 @@ pub fn format_service_id(service: &str) -> String {
 }
 
 /// Platform-agnostic contract for storing provider secrets. Concrete
-/// implementations live in the platform crates (e.g. the Tauri desktop app or
-/// the self-hosted web server) so the core crate remains focused on business
-/// logic.
+/// implementations live in the platform crates so the core crate remains
+/// focused on business logic.
 pub trait SecretStore: Send + Sync {
     fn set_secret(&self, service: &str, secret: &str) -> Result<()>;
     fn get_secret(&self, service: &str) -> Result<Option<String>>;

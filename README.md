@@ -132,7 +132,6 @@ Ensure you have the following installed on your machine:
 - [Node.js](https://nodejs.org/)
 - [Bun](https://bun.com/)
 - [Rust](https://www.rust-lang.org/)
-- [Tauri](https://tauri.app/)
 
 ### Building from Source
 
@@ -167,23 +166,23 @@ Ensure you have the following installed on your machine:
 
 4. **Run in Development Mode**:
 
-Build and run the desktop application using Tauri:
+Build and run the desktop application using Electron:
 
 ```bash
-bun tauri dev
+bun run dev:electron
 ```
 
 #### Addon Development Mode
 
 Addon hot reload servers now start only when you explicitly opt in.
 
-**For desktop development with Tauri:**
+**For desktop development with Electron:**
 
 ```bash
-VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
+VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron
 ```
 
-**For browser-only development (Vite only, no Tauri):**
+**For browser-only development (Vite only, no Electron shell):**
 
 ```bash
 bun run dev:addons
@@ -197,7 +196,7 @@ persist the setting.
 Build the application for production:
 
 ```bash
-bun tauri build
+bun run package:electron
 ```
 
 ### Web Mode (Browser + REST API server)
@@ -508,7 +507,7 @@ steps and provides an isolated environment with all necessary dependencies.
 
 #### Features
 
-- Pre-configured Tauri development environment
+- Pre-configured desktop/web development environment
 - X11 virtual display with VNC access (port 5900)
 - Complete Rust development setup
 - GPU support (via Docker's --gpus=all flag)
@@ -563,7 +562,7 @@ functionality with custom features.
 
 3. **Start Wealthfolio in addon development mode** (in another terminal):
    ```bash
-   VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
+   VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron
    ```
 
 Your addon will be automatically discovered and loaded with hot reload support!
@@ -610,8 +609,9 @@ for maintained addon examples including:
 
 ### Backend
 
-- **Tauri**: Framework for building tiny, secure, and fast desktop applications.
+- **Electron**: Desktop shell, native integrations, packaging, and updates.
 - **Rust**: Systems programming language for core backend functionality.
+- **Axum**: HTTP framework used by web mode and the Electron sidecar.
 - **SQLite**: Embedded database for local data storage.
 - **Diesel**: Safe, extensible ORM and query builder for Rust.
 
@@ -640,7 +640,7 @@ wealthfolio/
 ├── apps/                        # Application packages
 │   ├── frontend/                # React frontend application
 │   │   ├── src/                 # Source code
-│   │   │   ├── adapters/        # Environment adapters (Tauri/Web)
+│   │   │   ├── adapters/        # Environment adapters (Electron/Web)
 │   │   │   ├── addons/          # Addon system runtime
 │   │   │   ├── components/      # React components
 │   │   │   ├── features/        # Feature modules (self-contained)
@@ -650,7 +650,7 @@ wealthfolio/
 │   │   ├── public/              # Static assets
 │   │   ├── index.html           # HTML entry point
 │   │   └── vite.config.ts       # Vite build config
-│   ├── tauri/                   # Tauri desktop/mobile app (Rust IPC commands)
+│   ├── electron/                # Electron main/preload desktop shell
 │   └── server/                  # Axum HTTP server for web mode
 ├── crates/                      # Rust crates (shared backend logic)
 │   ├── core/                    # Core business logic, services, models

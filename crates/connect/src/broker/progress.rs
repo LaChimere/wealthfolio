@@ -1,7 +1,7 @@
 //! Progress reporting for broker sync operations.
 //!
 //! This module defines traits and types for reporting sync progress,
-//! allowing both Tauri and Axum to implement platform-specific progress reporting.
+//! allowing desktop and Axum runtimes to implement platform-specific progress reporting.
 
 use serde::{Deserialize, Serialize};
 
@@ -91,7 +91,7 @@ impl SyncProgressPayload {
 
 /// Trait for reporting sync progress.
 ///
-/// Implementations can emit events to different backends (Tauri events, SSE, etc.).
+/// Implementations can emit events to different backends (IPC events, SSE, etc.).
 pub trait SyncProgressReporter: Send + Sync {
     /// Report progress for an account sync.
     fn report_progress(&self, payload: SyncProgressPayload);

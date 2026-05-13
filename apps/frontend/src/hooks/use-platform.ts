@@ -27,7 +27,6 @@ export interface UsePlatformResult {
   isWindows: boolean;
   isLinux: boolean;
   isWeb: boolean;
-  isTauri: boolean;
   loading: boolean;
 }
 
@@ -47,7 +46,7 @@ export function usePlatform(): UsePlatformResult {
     }
 
     if (isDesktopEnv) {
-      // We're in Tauri, get actual platform info
+      // We're in the desktop runtime, get actual platform info
       getPlatformApi()
         .then((info) => {
           cachedPlatform = info;
@@ -71,7 +70,6 @@ export function usePlatform(): UsePlatformResult {
     }
   }, []);
 
-  const isTauri = isDesktopEnv;
   const isWeb = isWebEnv;
 
   return {
@@ -84,7 +82,6 @@ export function usePlatform(): UsePlatformResult {
     isWindows: platform?.os === "windows",
     isLinux: platform?.os === "linux",
     isWeb,
-    isTauri,
     loading,
   };
 }

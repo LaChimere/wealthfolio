@@ -849,7 +849,7 @@ impl<T: GoalRepositoryTrait + Send + Sync> GoalServiceTrait for GoalService<T> {
         };
 
         let input = SaveUpInput {
-            // Save-up plans do not carry a separate currency. The web and Tauri goal write paths
+            // Save-up plans do not carry a separate currency. Goal write paths
             // force goal amounts to the configured base currency, matching valuation_map values.
             current_value,
             target_amount: goal.target_amount.unwrap_or(0.0),

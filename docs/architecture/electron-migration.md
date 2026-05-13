@@ -1,8 +1,7 @@
-# Electron Migration Architecture
+# Electron Desktop Architecture
 
-This document captures the migration decisions for replacing the current Tauri
-desktop shell with Electron. It describes the target architecture, not the
-current production runtime.
+This document captures the desktop architecture after replacing the former Tauri
+shell with Electron.
 
 ## Goals
 
@@ -10,13 +9,13 @@ current production runtime.
   changes.
 - Reuse the existing Rust business logic, SQLite storage, sync, AI, and market
   data services instead of rewriting financial logic in TypeScript.
-- Preserve local desktop data and secrets during the Tauri-to-Electron cutover.
+- Preserve local desktop data and secrets from earlier desktop releases.
 - Keep web mode separate and functional throughout the migration.
 
 ## Runtime shape
 
-Electron should run as a thin desktop shell around the existing frontend and a
-managed local Rust sidecar.
+Electron runs as a thin desktop shell around the existing frontend and a managed
+local Rust sidecar.
 
 ```text
 Renderer (React)
@@ -33,9 +32,8 @@ sidecar credentials.
 
 ## Rust sidecar profile
 
-The sidecar should be based on the existing Axum server/service graph, but it
-cannot be the current server binary as-is. Desktop needs a dedicated sidecar
-profile or startup builder with these properties:
+The sidecar is based on the existing Axum server/service graph with a dedicated
+desktop startup profile:
 
 - bind to loopback only, preferably on an ephemeral port;
 - require a per-run secret or token known only to Electron main;
@@ -58,9 +56,9 @@ binary from Electron's `resources/sidecars` directory.
 
 The Electron sidecar sets `WF_SECRET_BACKEND=keyring` and starts the server with
 the `keyring-backend` feature so desktop provider secrets are durable and stay
-in the same OS keyring namespace as Tauri. Electron still generates a per-run
-`WF_SECRET_KEY` for the sidecar's server profile, but provider secret storage no
-longer uses `WF_SECRET_FILE` in desktop mode.
+in the same OS keyring namespace as earlier desktop releases. Electron still
+generates a per-run `WF_SECRET_KEY` for the sidecar's server profile, but
+provider secret storage no longer uses `WF_SECRET_FILE` in desktop mode.
 
 ## Data root compatibility
 
@@ -83,8 +81,8 @@ Tauri path or a tested one-shot migration is implemented.
 
 ## Secrets and keyring
 
-Desktop secrets must continue using the same Rust keyring namespace as the Tauri
-app:
+Desktop secrets continue using the same Rust keyring namespace as earlier
+desktop releases:
 
 - service key: `wealthfolio_core::secrets::format_service_id(service)`;
 - username: `default`;
@@ -92,9 +90,7 @@ app:
   `wealthfolio-desktop-secrets` crate.
 
 This shared namespace is intentional for migration continuity: Electron can read
-the same existing keyring entries that Tauri wrote. Developers should avoid
-running Tauri and Electron against the same profile concurrently because both
-desktop runtimes target the same `wealthfolio_*` keyring entries.
+the same existing keyring entries written by earlier desktop releases.
 
 The server file-backed secret store remains valid for web/self-hosted mode and
 is still the default when `WF_SECRET_BACKEND` is unset or set to `file`.
@@ -111,15 +107,12 @@ Keep the adapter seam:
 - `@/adapters` resolves to the active runtime implementation;
 - `#platform` resolves to runtime-specific `invoke`, logging, and platform
   flags;
-- `RUN_ENV` distinguishes `"desktop"` (Tauri), `"electron"`, and `"web"`, while
-  `isDesktop` remains `true` for both desktop shells.
+- `RUN_ENV` distinguishes `"electron"` and `"web"`, while `isDesktop` remains
+  `true` for the desktop shell.
 
-The Electron adapter should preserve existing command names and typed adapter
-exports. Command parity tests should compare Electron IPC coverage with the
-existing web command map and, while Tauri remains, the Tauri command registry.
-Until the sidecar bridge is connected, Electron domain commands must reject
-through the preload IPC bridge instead of falling back to browser REST calls or
-exposing a backend URL to the renderer.
+The Electron adapter preserves existing command names and typed adapter exports.
+Command parity tests compare Electron IPC coverage with the existing web command
+map so renderer invocations stay registered.
 
 The sidecar command paths cover account list/create/update/delete, settings
 read/update/auto-update preference reads, portfolio update/recalculate, and
@@ -183,27 +176,26 @@ The Electron preload exposes native file-dialog and shell operations as typed
 dedicated IPC methods, not as renderer Node APIs:
 
 - CSV/database/folder open dialogs are owned by Electron main and return
-  Tauri-compatible `string | null` shapes.
+  `string | null` shapes.
 - Save dialogs are owned by Electron main; renderer content is converted to
   string/bytes before IPC, and main writes the selected path after cancellation
   checks.
 - Add-on package selection is also owned by the adapter seam: Electron main
-  reads the selected ZIP bytes, Tauri keeps using its dialog/fs plugins behind
-  the Tauri adapter, and web mode keeps using an `<input type="file">`.
+  reads the selected ZIP bytes, and web mode keeps using an
+  `<input type="file">`.
 - External URL opening is owned by Electron main and is limited to `http:`,
   `https:`, and `mailto:` protocols before calling `shell.openExternal`.
 - Application menu actions are owned by Electron main. Menu-triggered route
   navigation and update-available notifications are forwarded through the typed
-  preload event listener API; renderer code does not import Electron or Tauri
-  event APIs directly for those flows.
+  preload event listener API; renderer code does not import Electron event APIs
+  directly for those flows.
 - Window theme and fullscreen operations are behind the runtime adapter seam.
   Electron main owns `nativeTheme` updates and focused-window fullscreen
-  toggles; Tauri keeps using `getCurrentWindow()` only inside the Tauri adapter.
+  toggles.
 - Electron restores and persists the main window's normal bounds/maximized state
   in `electron-window-state.json` under the legacy Tauri data root. On macOS,
-  the Electron window uses a hidden-inset titlebar to preserve the Tauri
-  overlay-style chrome; existing `data-tauri-drag-region` markers also map to
-  Electron drag regions through CSS.
+  the Electron window uses a hidden-inset titlebar and
+  `data-desktop-drag-region` markers map to Electron drag regions through CSS.
 - Wealthfolio deep links are owned by Electron main. The app registers the
   `wealthfolio://` protocol, enforces a single-instance lock before sidecar
   startup, queues callback URLs until the renderer's dedicated deep-link
@@ -256,8 +248,7 @@ artifacts per platform/architecture, uploads them as workflow artifacts, then a
 single publish job merges `latest*.yml` metadata before uploading to a draft
 GitHub release. That merge step prevents per-architecture jobs from overwriting
 each other's updater metadata. Platform signing/notarization and rollback policy
-still need production-secret validation before removing all Tauri release
-fallbacks.
+still need production-secret validation.
 
 ## OAuth and deep links
 
@@ -266,9 +257,7 @@ protocol callback handled by Electron main. Callback URLs must start with
 `wealthfolio://`, are never logged with query strings, and are delivered through
 the `listenDeepLink` adapter only after the renderer has registered a dedicated
 listener. The existing Wealthfolio Connect provider parses the forwarded URL and
-stores refresh tokens through the Rust sidecar/keyring path. Mobile-only
-ASWebAuthenticationSession behavior remains Tauri-specific and outside the
-Electron desktop migration.
+stores refresh tokens through the Rust sidecar/keyring path.
 
 ## Validation expectations
 

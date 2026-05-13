@@ -267,6 +267,12 @@
   The workflow now builds per-platform/arch Electron artifacts, stages matching
   sidecar binaries through an `afterPack` hook, merges updater metadata in a
   single publish job, and keeps the standalone Linux server prebuild release.
+- Turn 49: Removed the Tauri runtime path after Electron parity verification.
+  The repository no longer contains `apps/tauri`, the frontend Tauri adapter,
+  Tauri package dependencies, Tauri run scripts, or Tauri Docker/CI stubs.
+  Desktop docs and adapter defaults now describe Electron, while legacy
+  data-root/event naming remains documented only where it preserves migration
+  compatibility.
 
 ## Deferred items
 

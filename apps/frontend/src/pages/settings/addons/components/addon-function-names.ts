@@ -4,7 +4,7 @@
  * that are more understandable for end users.
  *
  * Uses structured keys that match the Host API categories (e.g., 'accounts.getAll', 'portfolio.getHoldings')
- * as detected by the backend permission system in src-tauri/src/addons/service.rs
+ * as detected by the backend permission system.
  *
  * Based on the Host API structure defined in packages/addon-sdk/src/host-api.ts
  */

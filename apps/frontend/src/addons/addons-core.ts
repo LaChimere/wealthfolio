@@ -19,7 +19,7 @@ const loadedAddons = new Map<string, { disable?: () => void }>();
 const loadedAddonIds = new Set<string>(); // Prevent re-loading already processed addons
 
 /**
- * Discovers all available addons using Tauri commands
+ * Discovers all available addons through the runtime adapter.
  */
 async function discoverAddons(): Promise<AddonFile[]> {
   try {
@@ -28,7 +28,7 @@ async function discoverAddons(): Promise<AddonFile[]> {
 
     for (const addon of installedAddons) {
       // Create AddonFile structure from InstalledAddon
-      // Note: filePath from Tauri represents the addon directory, not the specific file
+      // Note: filePath represents the addon directory, not the specific file
       addonFiles.push({
         path: `${addon.filePath}/${addon.metadata.main}`, // Construct the main file path
         manifestPath: `${addon.filePath}/manifest.json`, // Construct manifest path
@@ -58,7 +58,7 @@ function validateAddonCompatibility(manifest: AddonManifest): boolean {
 }
 
 /**
- * Loads a single addon using Tauri commands
+ * Loads a single addon through the runtime adapter.
  */
 async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<boolean> {
   let blobUrl: string | null = null;
@@ -78,8 +78,7 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
       return false;
     }
 
-    // Load addon using Tauri command instead of direct file access
-    // Load addon for runtime execution using Tauri command
+    // Load addon for runtime execution through the backend instead of direct file access.
     const extractedAddon = await loadAddonRuntime(addonFile.manifest.id);
 
     // Find the main file from the extracted addon files

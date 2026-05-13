@@ -10,9 +10,8 @@ import "./globals.css";
 if (isAddonDevModeEnabled) {
   void import("./addons/addons-dev-mode");
 } else if (isDesktop && !import.meta.env.DEV) {
-  // Only install lockdown on actual desktop platforms (not iOS/Android running in Tauri).
-  // `isDesktop` is a compile-time constant that is true for ALL Tauri builds, so we
-  // check the runtime platform to avoid disabling text selection and gestures on mobile.
+  // Only install lockdown on actual desktop platforms.
+  // `isDesktop` is a compile-time constant, so we still check runtime platform metadata.
   void getPlatform().then(async (platform) => {
     if (!platform.is_mobile) {
       const { installLockdown } = await import("./lockdown");

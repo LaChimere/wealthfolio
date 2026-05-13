@@ -13,7 +13,7 @@ clear separation between:
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Application Layer                             │
-│                   (Tauri Commands / REST API)                        │
+│                    (Electron IPC / REST API)                         │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼

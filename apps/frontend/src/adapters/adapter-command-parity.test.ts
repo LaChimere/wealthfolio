@@ -10,7 +10,6 @@ const frontendSrcDir = path.resolve(currentDir, "..");
 const repoRoot = path.resolve(currentDir, "../../../..");
 
 const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*['"`]([a-zA-Z0-9_]+)['"`]/g;
-const TAURI_REGISTERED_COMMAND_RE = /commands::[a-z_]+::([a-zA-Z0-9_]+)/g;
 const ELECTRON_REGISTERED_COMMAND_RE = /^\s*([a-zA-Z0-9_]+):\s*\{/gm;
 
 afterEach(() => {
@@ -46,11 +45,6 @@ function collectInvokedCommands(files: string[]): Map<string, string[]> {
   return commands;
 }
 
-function collectRegisteredTauriCommands(): Set<string> {
-  const source = readFileSync(path.join(repoRoot, "apps/tauri/src/lib.rs"), "utf8");
-  return new Set([...source.matchAll(TAURI_REGISTERED_COMMAND_RE)].map((match) => match[1]));
-}
-
 function collectRegisteredElectronCommands(): Set<string> {
   const source = readFileSync(path.join(repoRoot, "apps/electron/src/shared/ipc.ts"), "utf8");
   return new Set([...source.matchAll(ELECTRON_REGISTERED_COMMAND_RE)].map((match) => match[1]));
@@ -72,33 +66,17 @@ describe("adapter command parity", () => {
     expect(missing).toEqual([]);
   });
 
-  it("registers every command reachable from the Tauri adapter", () => {
-    const files = [
-      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
-      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/tauri")),
-    ];
-    const invokedCommands = collectInvokedCommands(files);
-    const registeredCommands = collectRegisteredTauriCommands();
-
-    const missing = [...invokedCommands.entries()]
-      .filter(([command]) => !registeredCommands.has(command))
-      .map(([command, files]) => `${command}: ${files.join(", ")}`)
-      .sort();
-
-    expect(missing).toEqual([]);
-  });
-
-  it("keeps every command reachable from the Electron adapter aligned with Tauri", () => {
+  it("keeps every command reachable from the Electron adapter aligned with web or Electron IPC", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/electron")),
     ];
     const invokedCommands = collectInvokedCommands(files);
-    const registeredCommands = collectRegisteredTauriCommands();
+    const registeredCommands = collectRegisteredElectronCommands();
     const webCommands = new Set(Object.keys(COMMANDS));
 
     const missing = [...invokedCommands.entries()]
-      .filter(([command]) => !registeredCommands.has(command) && !webCommands.has(command))
+      .filter(([command]) => !webCommands.has(command) && !registeredCommands.has(command))
       .map(([command, files]) => `${command}: ${files.join(", ")}`)
       .sort();
 

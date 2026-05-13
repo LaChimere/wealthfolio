@@ -2,8 +2,6 @@
 // Input form for the claimer to enter the pairing code
 // =====================================================
 
-import { logger } from "@/adapters";
-import { usePlatform } from "@/hooks/use-platform";
 import { Icons } from "@wealthfolio/ui";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Input } from "@wealthfolio/ui/components/ui/input";
@@ -19,7 +17,6 @@ interface EnterCodeProps {
 export function EnterCode({ onSubmit, onCancel, isLoading, error }: EnterCodeProps) {
   const [code, setCode] = useState("");
   const [isScanning, setIsScanning] = useState(false);
-  const { isMobile } = usePlatform();
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -28,8 +25,7 @@ export function EnterCode({ onSubmit, onCancel, isLoading, error }: EnterCodePro
     };
   }, []);
 
-  // Scan only available on mobile (native iOS/Android)
-  const canScan = isMobile;
+  const canScan = false;
 
   // Normalize code: uppercase, alphanumeric only, max 6 chars
   const normalizeCode = (value: string): string => {
@@ -66,70 +62,11 @@ export function EnterCode({ onSubmit, onCancel, isLoading, error }: EnterCodePro
     if (!canScan) return;
 
     setIsScanning(true);
-    logger.info("[Scan] Starting scanner...");
-
-    let scannedContent: string | null = null;
-
-    try {
-      const scanner = await import("@tauri-apps/plugin-barcode-scanner");
-
-      const currentPermission =
-        typeof scanner.checkPermissions === "function"
-          ? await scanner.checkPermissions()
-          : "denied";
-
-      if (currentPermission !== "granted") {
-        logger.info("[Scan] Camera permission not granted, requesting...");
-        const requestedPermission =
-          typeof scanner.requestPermissions === "function"
-            ? await scanner.requestPermissions()
-            : "denied";
-
-        if (requestedPermission !== "granted") {
-          logger.info("[Scan] Camera permission denied by user");
-          return;
-        }
-
-        // iOS may need a short delay after first-time permission grant
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-
-      const result = await scanner.scan({
-        windowed: false,
-        formats: [scanner.Format.QRCode],
-      });
-
-      logger.info("[Scan] Scan returned: " + JSON.stringify(result));
-      scannedContent = result?.content || null;
-    } catch (err) {
-      const errorStr = String(err);
-      logger.error("[Scan] Error: " + errorStr);
-
-      if (!errorStr.includes("cancel")) {
-        try {
-          const { cancel } = await import("@tauri-apps/plugin-barcode-scanner");
-          await cancel().catch(() => {});
-        } catch {
-          // Ignore
-        }
-      }
-    }
 
     // Guard against unmount during permission dialog / camera view
     if (!mountedRef.current) return;
 
     setIsScanning(false);
-
-    if (scannedContent) {
-      const normalized = normalizeCode(scannedContent);
-      if (normalized.length === 6) {
-        setTimeout(() => {
-          if (!mountedRef.current) return;
-          setCode(normalized);
-          onSubmit(normalized);
-        }, 100);
-      }
-    }
   };
 
   // Format display: "ABC 123"

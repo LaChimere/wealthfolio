@@ -33,7 +33,7 @@ cd wealthfolio
 bun install
 
 # Start in addon development mode
-VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev
+VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron
 ```
 
 This enables:
@@ -43,7 +43,7 @@ This enables:
 - Automatic addon discovery
 - Console logging for development
 
-> **Note:** For browser-only development (without Tauri), you can use
+> **Note:** For browser-only development (without Electron), you can use
 > `bun run dev:addons` instead.
 
 ## Create New Addon
@@ -188,7 +188,7 @@ bun run bundle       # Bundle addon for distribution
 Verify in Wealthfolio:
 
 1. Open Wealthfolio in addon development mode with
-   `VITE_ENABLE_ADDON_DEV_MODE=true bun tauri dev`
+   `VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron`
 2. Check sidebar for "Hello World"
 3. Click to load addon page
 4. Check console for log message

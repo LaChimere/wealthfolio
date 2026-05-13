@@ -56,18 +56,18 @@
   }
 }
 
-[data-tauri-drag-region="true"],
+[data-desktop-drag-region="true"],
 .draggable {
   -webkit-app-region: drag;
   app-region: drag;
 }
 
-[data-tauri-drag-region="true"] a,
-[data-tauri-drag-region="true"] button,
-[data-tauri-drag-region="true"] input,
-[data-tauri-drag-region="true"] select,
-[data-tauri-drag-region="true"] textarea,
-[data-tauri-drag-region="true"] [role="button"],
+[data-desktop-drag-region="true"] a,
+[data-desktop-drag-region="true"] button,
+[data-desktop-drag-region="true"] input,
+[data-desktop-drag-region="true"] select,
+[data-desktop-drag-region="true"] textarea,
+[data-desktop-drag-region="true"] [role="button"],
 .draggable a,
 .draggable button,
 .draggable input,

@@ -1,6 +1,6 @@
 //! Device sync API endpoints for the web server.
 //!
-//! This module provides REST endpoints that mirror the Tauri device sync commands,
+//! This module provides REST endpoints that mirror the desktop device sync commands,
 //! using the shared wealthfolio-device-sync crate for cloud API communication.
 
 use std::sync::Arc;
