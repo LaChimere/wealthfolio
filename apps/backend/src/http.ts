@@ -2380,7 +2380,7 @@ async function routeSettingsRequest(
   if (request.method === "GET" && url.pathname === "/api/v1/settings") {
     return jsonResponse(settingsService.getSettings());
   }
-  if (request.method === "POST" && url.pathname === "/api/v1/settings") {
+  if (request.method === "PUT" && url.pathname === "/api/v1/settings") {
     const payload = await parseJsonBody(request);
     if (payload instanceof Response) {
       return payload;

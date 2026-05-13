@@ -50,7 +50,7 @@ describe("TS backend runtime composition", () => {
       });
 
       const updateResponse = await fetch(`${server.baseUrl}/api/v1/settings`, {
-        method: "POST",
+        method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ baseCurrency: "USD", timezone: "UTC" }),
       });

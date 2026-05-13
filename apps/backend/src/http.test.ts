@@ -153,7 +153,7 @@ describe("TS backend HTTP skeleton", () => {
       expect((await handler(new Request("http://127.0.0.1/api/v1/settings"))).status).toBe(401);
       const updateResponse = await handler(
         new Request("http://127.0.0.1/api/v1/settings", {
-          method: "POST",
+          method: "PUT",
           headers: {
             authorization: "Bearer sidecar-token",
             "content-type": "application/json",
