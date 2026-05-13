@@ -4,7 +4,8 @@
     { "path": "./apps/frontend" },
     { "path": "./apps/electron" },
     { "path": "./packages/ui" },
-    { "path": "./packages/addon-sdk" }
+    { "path": "./packages/addon-sdk" },
+    { "path": "./packages/backend-contracts" }
   ],
   "files": []
 }

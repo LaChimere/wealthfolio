@@ -15,8 +15,9 @@
 
 ## Plan Reference
 
-- Plan version/date: pending Gate 1 design approval.
-- Approved by (if applicable): pending.
+- Plan version/date: PR sequence v1.
+- Approved by (if applicable): user instructed implementation to start after
+  planning.
 
 ## Checklist
 
@@ -28,15 +29,17 @@
   - Evidence: `plans/goal-fullstack-ts-migration/research.md`
 - [x] Draft staged PR decomposition/design.
   - Evidence: `plans/goal-fullstack-ts-migration/design.md`
-- [ ] Gate 1: approve design before implementation planning.
-  - Evidence: pending.
+- [x] Gate 1: approve design before implementation planning.
+  - Evidence: user instructed to stop planning and start implementation.
 
 ### Implementation
 
-- [ ] PR 1: TS backend contract foundation.
+- [x] PR 1: TS backend contract foundation.
   - Acceptance criteria: current command/API surface is represented in typed TS
     contracts and parity harness smoke coverage exists without runtime changes.
-  - Evidence: pending.
+  - Evidence: `packages/backend-contracts` package with command-surface parser,
+    classification tests, normalization helpers, parity smoke commands, and
+    addon-host canary contract.
 - [ ] PR 2: TS backend runtime skeleton.
   - Acceptance criteria: guarded TS backend skeleton supports health/readiness,
     sidecar-token/auth parity, and Electron lifecycle tests while Rust remains
@@ -81,8 +84,8 @@ contract:
 
 ### Verification (Evidence)
 
-- [ ] Run lint/typecheck: `bun run check` (attach output/excerpt).
-- [ ] Run unit tests: targeted TS backend/domain tests (attach output/excerpt).
+- [x] Run lint/typecheck: `bun run check` (attach output/excerpt).
+- [x] Run unit tests: targeted TS backend/domain tests (attach output/excerpt).
 - [ ] Run integration/e2e or before/after check: parity harness and selected
       Electron/web smoke flows (attach proof).
 - [ ] Capture logs/metrics for performance-sensitive calculation/import slices.
@@ -98,9 +101,14 @@ contract:
 
 - `research/decomposition`: initial evidence and PR sequence recorded in
   `research.md` and `design.md`.
+- `pr1-contract-foundation`: targeted checks passed:
+  `bun run --cwd packages/backend-contracts test` and
+  `bun run --cwd packages/backend-contracts type-check`.
+- `pr1-repo-check`: full repo check passed with `bun run check`.
 
 ## Result
 
-- Outcome: pending.
-- Follow-ups: resolve Gate 1 design approval, then translate design into
-  `plan.md` and implementation todos.
+- Outcome: PR 1 contract foundation implemented; broader migration remains
+  active.
+- Follow-ups: run full repo check, then continue with PR 2 TS backend runtime
+  skeleton.
