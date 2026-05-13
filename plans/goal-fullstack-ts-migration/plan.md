@@ -10,29 +10,28 @@ SQLite data.
 
 ## Current execution slice
 
-PR 2 establishes the guarded TS backend runtime skeleton while keeping Rust as
-the default backend:
+PR 3 establishes the TS SQLite foundation while Rust remains the runtime source
+of truth:
 
-- Add `apps/backend` as a Bun/TypeScript backend runtime migration target.
-- Serve only health/readiness and auth-status skeleton routes.
-- Mirror Rust fail-closed config checks for sidecar token, CORS/auth, listener,
-  request timeout, and secret key basics.
-- Add sidecar-token middleware helpers and guarded debug/test coverage.
-- Add Electron runtime selection that defaults to Rust and can explicitly spawn
-  the TS backend as a Bun child process in dev/test.
+- Use `bun:sqlite` for the TS storage layer.
+- Load the existing Rust/Diesel SQL migration directory as the TS source of
+  truth.
+- Preserve Diesel-compatible `__diesel_schema_migrations` bookkeeping.
+- Apply the same connection and migration PRAGMA profiles used by Rust.
+- Add backup/restore helpers compatible with the current `VACUUM INTO` and
+  pre-restore backup behavior.
 
-No domain command routing, production TS default, or Rust sidecar deletion is in
-scope for PR 2.
+No domain repositories, production TS default, or Rust storage deletion is in
+scope for PR 3.
 
 ## Next slices
 
-1. Add TS SQLite migration/open/backup foundation compatible with current DBs.
-2. Add compatibility preflights for keyring IDs, addon host, command aliases,
+1. Add compatibility preflights for keyring IDs, addon host, command aliases,
    and mixed-version sync expectations.
-3. Migrate backend domains in vertical slices with Rust-vs-TS parity evidence.
-4. Cut over Electron/web to the TS backend by default after parity and rollback
+2. Migrate backend domains in vertical slices with Rust-vs-TS parity evidence.
+3. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.
-5. Remove Rust backend/runtime artifacts only after the TS-only architecture is
+4. Remove Rust backend/runtime artifacts only after the TS-only architecture is
    proven and documented.
 
 ## Verification

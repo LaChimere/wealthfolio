@@ -13,3 +13,19 @@ export {
 export { startBackendServer, type BackendServerHandle } from "./server";
 export { createEventBus, type BackendEvent, type BackendEventBus } from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
+export {
+  DEFAULT_MIGRATIONS_RELATIVE_PATH,
+  DIESEL_SCHEMA_MIGRATIONS_TABLE,
+  applyConnectionPragmas,
+  backupDatabaseToFile,
+  getAppliedMigrationVersions,
+  getSqliteDbPath,
+  initializeSqliteDatabase,
+  loadSqlMigrations,
+  openSqliteDatabase,
+  resolveMigrationsDir,
+  restoreDatabase,
+  runPendingMigrations,
+  type InitializedSqliteDatabase,
+  type SqlMigration,
+} from "./storage/sqlite";

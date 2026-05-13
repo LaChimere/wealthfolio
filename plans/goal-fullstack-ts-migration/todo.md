@@ -47,10 +47,12 @@
   - Evidence: `apps/backend` Bun runtime skeleton with config/auth/CORS/timeout
     tests; Electron runtime selector defaults to Rust and can explicitly spawn
     TS backend in dev/test.
-- [ ] PR 3: TS SQLite foundation.
+- [x] PR 3: TS SQLite foundation.
   - Acceptance criteria: TS storage can open existing DBs, preserve migration
     history/PRAGMAs, and pass read/backup/restore parity fixtures.
-  - Evidence: pending.
+  - Evidence: `apps/backend/src/storage/sqlite.ts` uses `bun:sqlite`, existing
+    Rust migration files, Diesel-compatible migration history, Rust-aligned
+    PRAGMAs, and backup/restore fixtures.
 - [ ] PR 4: Cross-cutting compatibility preflights.
   - Acceptance criteria: keyring service IDs, addon canary, command registry
     classification, and mixed-version sync fixture requirements are documented
@@ -115,9 +117,15 @@ contract:
 - `pr2-review-fix`: code review found the guarded debug route was open when no
   sidecar token was configured; fixed it to fail closed and re-ran targeted
   checks plus `bun run check`.
+- `pr3-sqlite-foundation`: targeted checks passed:
+  `bun run --cwd apps/backend test` and `bun run --cwd apps/backend type-check`.
+- `pr3-repo-check`: full repo check passed with `bun run check`.
+- `pr3-review-fix`: code review requested whitespace-only `DATABASE_URL`
+  coverage; added the edge-case test and re-ran backend checks plus
+  `bun run check`.
 
 ## Result
 
-- Outcome: PR 1 contract foundation and PR 2 guarded TS backend runtime skeleton
-  implemented; broader migration remains active.
-- Follow-ups: continue with PR 3 TS SQLite foundation.
+- Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
+  and PR 3 TS SQLite foundation implemented; broader migration remains active.
+- Follow-ups: continue with PR 4 compatibility preflights.
