@@ -10,26 +10,25 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues low-risk vertical slices with scoped goals base persistence after
-custom providers:
+PR 5 continues vertical slices with local exchange-rate persistence after the
+scoped goals base slice:
 
-- Add TS goals repository/service behavior and guarded route tests for
-  list/get/create/update/delete, funding rule reads/replacement, and read-only
-  goal plan access.
-- Preserve Rust base-persistence semantics: list order by priority descending,
-  generated goal/funding IDs, `targetAmount` null/zero mapping, lifecycle and
-  retirement uniqueness guards, retirement seed funding from eligible accounts,
-  cross-goal funding capacity validation, non-retirement tax-bucket clearing,
-  DC-linked account guards, idempotent deletes, and sync hooks.
-- Defer goal plan write/delete, summary refresh, save-up overview, and
-  retirement simulation endpoints to dedicated calculation-heavy slices because
-  they require retirement plan validation/calculation parity.
+- Add TS exchange-rate repository/service behavior and guarded route tests for
+  latest FX reads plus local add/update/delete.
+- Preserve Rust local-persistence semantics: FX assets are keyed by generated
+  `FX:FROM/TO` instrument keys, common provider configs are reproduced, latest
+  quotes are selected by max timestamp, manual updates write `MANUAL` quotes,
+  deletes remove quotes plus the FX asset, and asset sync hooks fire only for
+  asset create/delete.
+- Defer FX currency converter, historical lookup, register-pair, and automatic
+  market sync behavior to later calculation/market-data slices because those
+  paths require quote-history and provider-sync parity.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-accounts/settings/limits/taxonomies/custom-provider/goals deletion is in scope
-for this slice.
+accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate deletion
+is in scope for this slice.
 
 ## Next slices
 

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 9
+turns_used: 10
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T01:24:39+08:00"
+updated_at: "2026-05-14T01:38:14+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -102,6 +102,10 @@ updated_at: "2026-05-14T01:24:39+08:00"
   read-only goal plan access, base-currency forcing at the HTTP seam, retirement
   seed funding, lifecycle/retirement uniqueness/capacity/DC-link guards, sync
   hooks, guarded HTTP routes, and targeted backend tests.
+- Turn 10: Implemented the local exchange-rate TS slice: latest FX reads,
+  add/update/delete behavior, FX asset creation, quote upserts, provider-config
+  parity for common providers, asset sync hooks, guarded HTTP routes, and
+  targeted backend tests.
 
 ## Deferred items
 
@@ -115,6 +119,9 @@ updated_at: "2026-05-14T01:24:39+08:00"
   simulation endpoints remain active follow-ups. reason=they require retirement
   plan validation/calculation parity and should move in dedicated
   calculation-heavy slices.
+- FX currency converter, historical lookup, register-pair, and automatic market
+  sync behavior remain active follow-ups. reason=they depend on calculation,
+  quote history, and provider sync parity beyond local exchange-rate CRUD.
 
 ## Blockers
 

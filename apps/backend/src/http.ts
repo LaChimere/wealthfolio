@@ -8,6 +8,7 @@ import type {
   NewCustomProviderSource,
   UpdateCustomProvider,
 } from "./domains/custom-providers";
+import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
@@ -26,6 +27,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
+  exchangeRateService?: ExchangeRateService;
   goalService?: GoalService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
@@ -106,6 +108,10 @@ async function routeRequest(
     return routeCustomProviderRequest(request, url, config, options.customProviderService);
   }
 
+  if (options.exchangeRateService && url.pathname.startsWith("/api/v1/exchange-rates")) {
+    return routeExchangeRateRequest(request, url, config, options.exchangeRateService);
+  }
+
   if (options.goalService && url.pathname.startsWith("/api/v1/goals")) {
     return routeGoalRequest(request, url, config, options.goalService);
   }
@@ -124,6 +130,43 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeExchangeRateRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  exchangeRateService: ExchangeRateService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/exchange-rates/latest") {
+    return jsonResponse(exchangeRateService.getLatestExchangeRates());
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/exchange-rates") {
+    return handleJsonMutation(request, parseNewExchangeRate, (newRate) =>
+      exchangeRateService.addExchangeRate(newRate),
+    );
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/exchange-rates") {
+    return handleJsonMutation(request, parseExchangeRate, (rate) =>
+      exchangeRateService.updateExchangeRate(rate.fromCurrency, rate.toCurrency, rate.rate),
+    );
+  }
+
+  const rateId = exchangeRateIdFromPath(url.pathname);
+  if (rateId && request.method === "DELETE") {
+    return exchangeRateService
+      .deleteExchangeRate(rateId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -531,6 +574,11 @@ function customProviderIdFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function exchangeRateIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/exchange-rates\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function goalIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/goals\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
@@ -725,6 +773,51 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewExchangeRate(payload: Record<string, unknown>): NewExchangeRate | Response {
+  const fromCurrency = parseRequiredString(payload.fromCurrency, "fromCurrency");
+  if (fromCurrency instanceof Response) {
+    return fromCurrency;
+  }
+  const toCurrency = parseRequiredString(payload.toCurrency, "toCurrency");
+  if (toCurrency instanceof Response) {
+    return toCurrency;
+  }
+  const rate = parseRequiredString(payload.rate, "rate");
+  if (rate instanceof Response) {
+    return rate;
+  }
+  const source = parseRequiredString(payload.source, "source");
+  if (source instanceof Response) {
+    return source;
+  }
+  return {
+    fromCurrency,
+    toCurrency,
+    rate,
+    source,
+  };
+}
+
+function parseExchangeRate(payload: Record<string, unknown>): ExchangeRate | Response {
+  const id = parseRequiredString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const newRate = parseNewExchangeRate(payload);
+  if (newRate instanceof Response) {
+    return newRate;
+  }
+  const timestamp = parseRequiredString(payload.timestamp, "timestamp");
+  if (timestamp instanceof Response) {
+    return timestamp;
+  }
+  return {
+    id,
+    ...newRate,
+    timestamp,
+  };
 }
 
 function parseNewGoal(payload: Record<string, unknown>): NewGoal | Response {

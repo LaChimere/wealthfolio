@@ -11,6 +11,7 @@ import {
   createCustomProviderRepository,
   createCustomProviderService,
 } from "./domains/custom-providers";
+import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
@@ -677,6 +678,76 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("routes migrated exchange rate CRUD only when a service is provided", async () => {
+    const db = createExchangeRatesDb();
+    const handler = createBackendRequestHandler(config, {
+      exchangeRateService: createExchangeRateService(createExchangeRateRepository(db)),
+    });
+
+    try {
+      expect(
+        (await handler(new Request("http://127.0.0.1/api/v1/exchange-rates/latest"))).status,
+      ).toBe(401);
+
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/exchange-rates", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            fromCurrency: "EUR",
+            toCurrency: "USD",
+            rate: "1.20",
+            source: "YAHOO",
+          }),
+        }),
+      );
+      const created = await createResponse.json();
+      expect(createResponse.status).toBe(200);
+      expect(created).toMatchObject({
+        fromCurrency: "EUR",
+        toCurrency: "USD",
+        rate: "1.20",
+        source: "YAHOO",
+      });
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/exchange-rates", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ...created, rate: "1.25", source: "IGNORED" }),
+        }),
+      );
+      expect(await updateResponse.json()).toMatchObject({
+        id: created.id,
+        rate: "1.25",
+        source: "MANUAL",
+      });
+
+      const latestResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/exchange-rates/latest", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await latestResponse.json()).toEqual([expect.objectContaining({ id: created.id })]);
+
+      const deleteResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/exchange-rates/${created.id}`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteResponse.status).toBe(204);
+    } finally {
+      db.close();
+    }
+  });
+
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });
@@ -838,6 +909,54 @@ function createCustomProvidersDb(): Database {
     CREATE TABLE assets (
       id TEXT NOT NULL PRIMARY KEY,
       provider_config TEXT
+    );
+  `);
+  return db;
+}
+
+function createExchangeRatesDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE assets (
+      id TEXT NOT NULL PRIMARY KEY,
+      kind TEXT NOT NULL,
+      name TEXT,
+      display_code TEXT,
+      notes TEXT,
+      metadata TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      quote_mode TEXT NOT NULL DEFAULT 'MARKET',
+      quote_ccy TEXT NOT NULL,
+      instrument_type TEXT,
+      instrument_symbol TEXT,
+      instrument_exchange_mic TEXT,
+      instrument_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN instrument_type = 'FX' AND instrument_symbol IS NOT NULL
+          THEN 'FX:' || instrument_symbol || '/' || quote_ccy
+          ELSE instrument_symbol
+        END
+      ) STORED,
+      provider_config TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE quotes (
+      id TEXT NOT NULL PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      source TEXT NOT NULL,
+      open TEXT,
+      high TEXT,
+      low TEXT,
+      close TEXT NOT NULL,
+      adjclose TEXT,
+      volume TEXT,
+      currency TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      timestamp TEXT NOT NULL
     );
   `);
   return db;

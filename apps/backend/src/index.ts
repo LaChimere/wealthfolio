@@ -58,6 +58,18 @@ export {
   type UpdateCustomProvider,
 } from "./domains/custom-providers";
 export {
+  createExchangeRateRepository,
+  createExchangeRateService,
+  type ExchangeRate,
+  type ExchangeRateAssetSyncEvent,
+  type ExchangeRateAssetSyncOperation,
+  type ExchangeRateRepository,
+  type ExchangeRateRepositoryOptions,
+  type ExchangeRateService,
+  type FxAssetPayload,
+  type NewExchangeRate,
+} from "./domains/exchange-rates";
+export {
   createGoalRepository,
   createGoalService,
   type Goal,
