@@ -4,6 +4,7 @@ import { parseTrackingMode } from "./domains/accounts";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
+  NewAssetTaxonomyAssignment,
   NewTaxonomy,
   NewTaxonomyCategory,
   Taxonomy,
@@ -158,6 +159,25 @@ function routeTaxonomyRequest(
         moveRequest.position,
       ),
     );
+  }
+
+  const assignmentAssetId = taxonomyAssignmentAssetIdFromPath(url.pathname);
+  if (assignmentAssetId && request.method === "GET") {
+    return jsonResponse(taxonomyService.getAssetAssignments(assignmentAssetId));
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/assignments") {
+    return handleJsonMutation(request, parseNewAssetTaxonomyAssignment, (assignment) =>
+      taxonomyService.assignAssetToCategory(assignment),
+    );
+  }
+
+  const assignmentId = taxonomyAssignmentIdFromPath(url.pathname);
+  if (assignmentId && request.method === "DELETE") {
+    return taxonomyService
+      .removeAssetAssignment(assignmentId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   const categoryIds = taxonomyCategoryIdsFromPath(url.pathname);
@@ -391,6 +411,16 @@ function taxonomyCategoryIdsFromPath(
         categoryId: decodeURIComponent(match[2]),
       }
     : undefined;
+}
+
+function taxonomyAssignmentAssetIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/taxonomies\/assignments\/asset\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function taxonomyAssignmentIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/taxonomies\/assignments\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
 }
 
 function applyCors(response: Response, request: Request, config: BackendRuntimeConfig): Response {
@@ -679,6 +709,43 @@ function parseMoveCategoryRequest(payload: Record<string, unknown>):
     categoryId,
     newParentId: newParentId ?? null,
     position,
+  };
+}
+
+function parseNewAssetTaxonomyAssignment(
+  payload: Record<string, unknown>,
+): NewAssetTaxonomyAssignment | Response {
+  const id = parseOptionalStringOrNull(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const assetId = parseRequiredString(payload.assetId, "assetId");
+  if (assetId instanceof Response) {
+    return assetId;
+  }
+  const taxonomyId = parseRequiredString(payload.taxonomyId, "taxonomyId");
+  if (taxonomyId instanceof Response) {
+    return taxonomyId;
+  }
+  const categoryId = parseRequiredString(payload.categoryId, "categoryId");
+  if (categoryId instanceof Response) {
+    return categoryId;
+  }
+  const weight = parseRequiredInteger(payload.weight, "weight");
+  if (weight instanceof Response) {
+    return weight;
+  }
+  const source = parseRequiredString(payload.source, "source");
+  if (source instanceof Response) {
+    return source;
+  }
+  return {
+    id,
+    assetId,
+    taxonomyId,
+    categoryId,
+    weight,
+    source,
   };
 }
 

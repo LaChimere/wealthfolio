@@ -62,6 +62,15 @@ export interface AssetTaxonomyAssignment {
   updatedAt: string;
 }
 
+export interface NewAssetTaxonomyAssignment {
+  id?: string | null;
+  assetId: string;
+  taxonomyId: string;
+  categoryId: string;
+  weight: number;
+  source: string;
+}
+
 export type TaxonomySyncOperation = "Create" | "Update" | "Delete";
 
 export interface TaxonomySyncEvent {
@@ -75,8 +84,15 @@ export interface TaxonomySyncPayload {
   categories: TaxonomyCategory[];
 }
 
+export interface TaxonomyAssignmentSyncEvent {
+  assignmentId: string;
+  operation: Extract<TaxonomySyncOperation, "Update" | "Delete">;
+  payload: AssetTaxonomyAssignment | { id: string };
+}
+
 export interface TaxonomyRepositoryOptions {
   queueSyncEvent?: (event: TaxonomySyncEvent) => void;
+  queueAssignmentSyncEvent?: (event: TaxonomyAssignmentSyncEvent) => void;
 }
 
 export interface TaxonomyReadRepository {
@@ -91,7 +107,11 @@ export interface TaxonomyRepository extends TaxonomyReadRepository {
   updateTaxonomy(taxonomy: Taxonomy): Taxonomy;
   deleteTaxonomy(id: string): number;
   getCategory(taxonomyId: string, categoryId: string): TaxonomyCategory | null;
+  getAssetAssignments(assetId: string): AssetTaxonomyAssignment[];
   getCategoryAssignments(taxonomyId: string, categoryId: string): AssetTaxonomyAssignment[];
+  upsertAssignment(assignment: NewAssetTaxonomyAssignment): AssetTaxonomyAssignment;
+  deleteAssignment(id: string): number;
+  deleteAssetAssignments(assetId: string, taxonomyId: string): number;
   createCategory(newCategory: NewTaxonomyCategory): TaxonomyCategory;
   updateCategory(category: TaxonomyCategory): TaxonomyCategory;
   deleteCategory(taxonomyId: string, categoryId: string): number;
@@ -115,6 +135,9 @@ export interface TaxonomyService extends TaxonomyReadService {
     newParentId: string | null,
     position: number,
   ): Promise<TaxonomyCategory>;
+  getAssetAssignments(assetId: string): AssetTaxonomyAssignment[];
+  assignAssetToCategory(assignment: NewAssetTaxonomyAssignment): Promise<AssetTaxonomyAssignment>;
+  removeAssetAssignment(id: string): Promise<number>;
 }
 
 interface TaxonomyRow {
@@ -293,6 +316,18 @@ export function createTaxonomyRepository(
         .get(taxonomyId, categoryId);
       return row ? taxonomyCategoryFromRow(row) : null;
     },
+    getAssetAssignments(assetId) {
+      return db
+        .query<AssetTaxonomyAssignmentRow, [string]>(
+          `
+            SELECT ${assetTaxonomyAssignmentColumns()}
+            FROM asset_taxonomy_assignments
+            WHERE asset_id = ?
+          `,
+        )
+        .all(assetId)
+        .map(assetTaxonomyAssignmentFromRow);
+    },
     getCategoryAssignments(taxonomyId, categoryId) {
       return db
         .query<AssetTaxonomyAssignmentRow, [string, string]>(
@@ -304,6 +339,87 @@ export function createTaxonomyRepository(
         )
         .all(taxonomyId, categoryId)
         .map(assetTaxonomyAssignmentFromRow);
+    },
+    upsertAssignment(assignment) {
+      const id = assignment.id || crypto.randomUUID();
+      const now = timestampNow();
+      let saved: AssetTaxonomyAssignment | undefined;
+      db.transaction(() => {
+        const existing = findAssignmentByNaturalKey(
+          db,
+          assignment.assetId,
+          assignment.taxonomyId,
+          assignment.categoryId,
+        );
+        if (existing) {
+          db.prepare(
+            `
+              UPDATE asset_taxonomy_assignments
+              SET weight = ?, source = ?
+              WHERE id = ?
+            `,
+          ).run(assignment.weight, assignment.source, existing.id);
+          saved = readAssignmentById(db, existing.id);
+        } else {
+          db.prepare(
+            `
+              INSERT INTO asset_taxonomy_assignments (
+                id, asset_id, taxonomy_id, category_id, weight, source, created_at, updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+          ).run(
+            id,
+            assignment.assetId,
+            assignment.taxonomyId,
+            assignment.categoryId,
+            assignment.weight,
+            assignment.source,
+            now,
+            now,
+          );
+          saved = readAssignmentById(db, id);
+        }
+        queueAssignmentUpdate(options, saved);
+      })();
+      if (!saved) {
+        throw new Error(`Record not found: taxonomy assignment ${id}`);
+      }
+      return saved;
+    },
+    deleteAssignment(id) {
+      let affected = 0;
+      db.transaction(() => {
+        affected = db
+          .prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?")
+          .run(id).changes;
+        if (affected > 0) {
+          queueAssignmentDelete(options, id);
+        }
+      })();
+      return affected;
+    },
+    deleteAssetAssignments(assetId, taxonomyId) {
+      let affected = 0;
+      db.transaction(() => {
+        const existingIds = db
+          .query<{ id: string }, [string, string]>(
+            `
+              SELECT id
+              FROM asset_taxonomy_assignments
+              WHERE asset_id = ? AND taxonomy_id = ?
+            `,
+          )
+          .all(assetId, taxonomyId)
+          .map((row) => row.id);
+        affected = db
+          .prepare("DELETE FROM asset_taxonomy_assignments WHERE asset_id = ? AND taxonomy_id = ?")
+          .run(assetId, taxonomyId).changes;
+        for (const assignmentId of existingIds) {
+          queueAssignmentDelete(options, assignmentId);
+        }
+      })();
+      return affected;
     },
     createCategory(newCategory) {
       const id = newCategory.id || crypto.randomUUID();
@@ -441,6 +557,19 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
         sortOrder: position,
       });
     },
+    getAssetAssignments(assetId) {
+      return repository.getAssetAssignments(assetId);
+    },
+    async assignAssetToCategory(assignment) {
+      const taxonomy = repository.getTaxonomy(assignment.taxonomyId);
+      if (taxonomy?.isSingleSelect) {
+        repository.deleteAssetAssignments(assignment.assetId, assignment.taxonomyId);
+      }
+      return repository.upsertAssignment(assignment);
+    },
+    async removeAssetAssignment(id) {
+      return repository.deleteAssignment(id);
+    },
   };
 }
 
@@ -547,6 +676,40 @@ function readCategoryById(db: Database, taxonomyId: string, categoryId: string):
   return taxonomyCategoryFromRow(row);
 }
 
+function readAssignmentById(db: Database, id: string): AssetTaxonomyAssignment {
+  const row = db
+    .query<AssetTaxonomyAssignmentRow, [string]>(
+      `
+        SELECT ${assetTaxonomyAssignmentColumns()}
+        FROM asset_taxonomy_assignments
+        WHERE id = ?
+      `,
+    )
+    .get(id);
+  if (!row) {
+    throw new Error(`Record not found: taxonomy assignment ${id}`);
+  }
+  return assetTaxonomyAssignmentFromRow(row);
+}
+
+function findAssignmentByNaturalKey(
+  db: Database,
+  assetId: string,
+  taxonomyId: string,
+  categoryId: string,
+): AssetTaxonomyAssignment | null {
+  const row = db
+    .query<AssetTaxonomyAssignmentRow, [string, string, string]>(
+      `
+        SELECT ${assetTaxonomyAssignmentColumns()}
+        FROM asset_taxonomy_assignments
+        WHERE asset_id = ? AND taxonomy_id = ? AND category_id = ?
+      `,
+    )
+    .get(assetId, taxonomyId, categoryId);
+  return row ? assetTaxonomyAssignmentFromRow(row) : null;
+}
+
 function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetTaxonomyAssignment {
   return {
     id: row.id,
@@ -558,6 +721,28 @@ function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetT
     createdAt: toApiDate(row.created_at),
     updatedAt: toApiDate(row.updated_at),
   };
+}
+
+function queueAssignmentUpdate(
+  options: TaxonomyRepositoryOptions,
+  assignment: AssetTaxonomyAssignment | undefined,
+): void {
+  if (!assignment) {
+    return;
+  }
+  options.queueAssignmentSyncEvent?.({
+    assignmentId: assignment.id,
+    operation: "Update",
+    payload: assignment,
+  });
+}
+
+function queueAssignmentDelete(options: TaxonomyRepositoryOptions, assignmentId: string): void {
+  options.queueAssignmentSyncEvent?.({
+    assignmentId,
+    operation: "Delete",
+    payload: { id: assignmentId },
+  });
 }
 
 function isSyncableTaxonomy(db: Database, taxonomyId: string): boolean {

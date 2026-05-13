@@ -469,6 +469,46 @@ describe("TS backend HTTP skeleton", () => {
         sortOrder: 5,
       });
 
+      const assignResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/assignments", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            id: "assignment-1",
+            assetId: "asset-1",
+            taxonomyId: "strategy",
+            categoryId: "growth",
+            weight: 10_000,
+            source: "manual",
+          }),
+        }),
+      );
+      expect(await assignResponse.json()).toMatchObject({
+        id: "assignment-1",
+        assetId: "asset-1",
+        categoryId: "growth",
+      });
+
+      const assignmentsResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/assignments/asset/asset-1", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await assignmentsResponse.json()).toEqual([
+        expect.objectContaining({ id: "assignment-1", taxonomyId: "strategy" }),
+      ]);
+
+      const removeAssignmentResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/taxonomies/assignments/assignment-1", {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(removeAssignmentResponse.status).toBe(204);
+
       const deleteCategoryResponse = await handler(
         new Request("http://127.0.0.1/api/v1/taxonomies/strategy/categories/growth", {
           method: "DELETE",

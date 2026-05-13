@@ -10,18 +10,18 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues low-risk domain vertical slices with taxonomy/category mutation
-parity after the settings, accounts, contribution limits, and taxonomy read
-slices:
+PR 5 continues low-risk domain vertical slices with taxonomy assignment parity
+after the settings, accounts, contribution limits, taxonomy read, and
+taxonomy/category mutation slices:
 
-- Add TS taxonomy/category create, update, delete, move-category repository and
-  service behavior with guarded route tests.
-- Preserve Rust taxonomy/category mutation semantics: caller-supplied IDs,
-  generated IDs when omitted, system taxonomy delete rejection, category
-  child/assignment delete guards, idempotent missing deletes, and custom
-  taxonomy sync bundle/delete hooks.
-- Keep taxonomy assignment and import/export work in follow-up atomic sub-slices
-  because those paths add separate upsert/replacement and JSON tree behavior.
+- Add TS asset taxonomy assignment reads, upserts, deletes, and guarded route
+  tests.
+- Preserve Rust assignment semantics: natural-key upsert by
+  `assetId/taxonomyId/categoryId`, original row identity/timestamps on conflict,
+  single-select taxonomy replacement, idempotent missing deletes, and optional
+  assignment sync hooks.
+- Keep taxonomy import/export work in a follow-up atomic sub-slice because it
+  adds recursive JSON tree behavior.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -30,8 +30,8 @@ accounts/settings/limits/taxonomies deletion is in scope for this slice.
 
 ## Next slices
 
-1. Continue taxonomy sub-slices: assignments, import/export JSON, then
-   migration/health endpoints.
+1. Continue taxonomy sub-slices: import/export JSON, then migration/health
+   endpoints.
 2. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
 3. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.

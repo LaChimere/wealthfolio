@@ -6,6 +6,7 @@ import {
   createTaxonomyReadService,
   createTaxonomyRepository,
   createTaxonomyService,
+  type TaxonomyAssignmentSyncEvent,
   type TaxonomySyncEvent,
 } from "./taxonomies";
 
@@ -278,6 +279,138 @@ describe("TS taxonomies domain", () => {
         sortOrder: 3,
       });
       await expect(service.deleteCategory("custom_groups", child.id)).resolves.toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("upserts asset assignments and preserves original row identity on conflicts", async () => {
+    const db = createTaxonomiesDb();
+    const assignmentEvents: TaxonomyAssignmentSyncEvent[] = [];
+    const service = createTaxonomyService(
+      createTaxonomyRepository(db, {
+        queueAssignmentSyncEvent: (event) => assignmentEvents.push(event),
+      }),
+    );
+
+    try {
+      seedTaxonomy(db, {
+        id: "asset_classes",
+        name: "Asset Classes",
+        color: "#879a39",
+        isSystem: true,
+        isSingleSelect: false,
+        sortOrder: 20,
+      });
+      seedCategory(db, {
+        id: "EQUITY",
+        taxonomyId: "asset_classes",
+        name: "Equity",
+        key: "EQUITY",
+        color: "#4385be",
+        sortOrder: 1,
+      });
+
+      const created = await service.assignAssetToCategory({
+        id: "assignment-1",
+        assetId: "asset-1",
+        taxonomyId: "asset_classes",
+        categoryId: "EQUITY",
+        weight: 10_000,
+        source: "manual",
+      });
+      const upserted = await service.assignAssetToCategory({
+        id: "ignored-new-id",
+        assetId: "asset-1",
+        taxonomyId: "asset_classes",
+        categoryId: "EQUITY",
+        weight: 5_000,
+        source: "provider",
+      });
+
+      expect(upserted).toMatchObject({
+        id: created.id,
+        weight: 5_000,
+        source: "provider",
+        createdAt: created.createdAt,
+        updatedAt: created.updatedAt,
+      });
+      expect(service.getAssetAssignments("asset-1")).toEqual([upserted]);
+      expect(assignmentEvents).toEqual([
+        expect.objectContaining({ assignmentId: "assignment-1", operation: "Update" }),
+        expect.objectContaining({ assignmentId: "assignment-1", operation: "Update" }),
+      ]);
+
+      await expect(service.removeAssetAssignment("assignment-1")).resolves.toBe(1);
+      expect(assignmentEvents.at(-1)).toEqual({
+        assignmentId: "assignment-1",
+        operation: "Delete",
+        payload: { id: "assignment-1" },
+      });
+      await expect(service.removeAssetAssignment("missing")).resolves.toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("replaces existing asset assignments for single-select taxonomies", async () => {
+    const db = createTaxonomiesDb();
+    const assignmentEvents: TaxonomyAssignmentSyncEvent[] = [];
+    const service = createTaxonomyService(
+      createTaxonomyRepository(db, {
+        queueAssignmentSyncEvent: (event) => assignmentEvents.push(event),
+      }),
+    );
+
+    try {
+      seedTaxonomy(db, {
+        id: "risk_category",
+        name: "Risk Category",
+        color: "#d14d41",
+        isSystem: true,
+        isSingleSelect: true,
+        sortOrder: 50,
+      });
+      seedCategory(db, {
+        id: "LOW",
+        taxonomyId: "risk_category",
+        name: "Low",
+        key: "LOW",
+        color: "#879a39",
+        sortOrder: 1,
+      });
+      seedCategory(db, {
+        id: "HIGH",
+        taxonomyId: "risk_category",
+        name: "High",
+        key: "HIGH",
+        color: "#d14d41",
+        sortOrder: 2,
+      });
+
+      await service.assignAssetToCategory({
+        id: "risk-low",
+        assetId: "asset-1",
+        taxonomyId: "risk_category",
+        categoryId: "LOW",
+        weight: 10_000,
+        source: "manual",
+      });
+      const high = await service.assignAssetToCategory({
+        id: "risk-high",
+        assetId: "asset-1",
+        taxonomyId: "risk_category",
+        categoryId: "HIGH",
+        weight: 10_000,
+        source: "manual",
+      });
+
+      expect(service.getAssetAssignments("asset-1")).toEqual([high]);
+      expect(assignmentEvents).toEqual([
+        expect.objectContaining({ assignmentId: "risk-low", operation: "Update" }),
+        { assignmentId: "risk-low", operation: "Delete", payload: { id: "risk-low" } },
+        expect.objectContaining({ assignmentId: "risk-high", operation: "Update" }),
+      ]);
     } finally {
       db.close();
     }

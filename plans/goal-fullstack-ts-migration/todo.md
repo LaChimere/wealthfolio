@@ -178,11 +178,22 @@ contract:
   structs, so the TS slice kept parity and added explicit tests for that
   behavior. No remaining actionable issues.
 - `pr5-taxonomies-crud-repo-check`: full repo check passed with `bun run check`.
+- `pr5-taxonomies-assignments`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes asset assignment reads, natural-key upsert behavior,
+  original row identity/timestamps on conflict, single-select replacement,
+  idempotent missing deletes, optional assignment sync hooks, and guarded HTTP
+  assignment routes.
+- `pr5-taxonomies-assignments-review`: first review flagged two possible issues;
+  both were rechecked against Rust parity and TS runtime behavior, then a
+  focused second review found no remaining actionable issues.
+- `pr5-taxonomies-assignments-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
-  mutation slices implemented; broader migration remains active.
-- Follow-ups: continue taxonomy assignment/import-export sub-slices.
+  mutation and assignment slices implemented; broader migration remains active.
+- Follow-ups: continue taxonomy import/export sub-slice.
