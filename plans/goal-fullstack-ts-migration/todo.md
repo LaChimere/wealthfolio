@@ -69,9 +69,10 @@
     provider settings, portfolio job trigger, event stream, secrets, AI
     provider, AI chat, sync crypto, Connect broker/session and device-sync
     enrollment/engine, device-sync device management, team-key/reset, and
-    pairing, alternative assets, assets, app utilities, portfolio metrics,
+    pairing, standalone runtime composition for already-ported SQLite-backed
+    domains, alternative assets, assets, app utilities, portfolio metrics,
     holdings, add-ons, market-data, and activities TS repository/service or
-    route config implementations plus guarded route tests in
+    route config implementations plus guarded/runtime route tests in
     `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
@@ -89,18 +90,18 @@
     `apps/backend/src/domains/ai-chat.ts`,
     `apps/backend/src/domains/sync-crypto.ts`,
     `apps/backend/src/domains/device-sync.ts`,
-    `apps/backend/src/domains/connect.ts`, `apps/backend/src/events.ts`, and
-    `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
-    migration endpoints are deferred to the health/classification service slice;
-    custom provider `test-source` is deferred to an external-I/O slice; goals
-    plan writes and calculation endpoints are deferred to calculation-heavy
-    slices; FX converter/history and provider sync behavior plus broader
-    market-data quote/search/import/sync behavior are deferred to
-    calculation/market-data slices; actual portfolio job execution and event
-    production are deferred to portfolio/calculation slices; real secret
-    persistence/keyring integration is deferred to a runtime/keyring parity
-    slice; AI provider catalog/settings/model-listing runtime behavior is
-    deferred to AI/secrets parity slices; alternative asset
+    `apps/backend/src/domains/connect.ts`, `apps/backend/src/events.ts`,
+    `apps/backend/src/runtime.ts`, and `apps/backend/src/http.test.ts`. Health
+    status/check/fix and taxonomy migration endpoints are deferred to the
+    health/classification service slice; custom provider `test-source` is
+    deferred to an external-I/O slice; goals plan writes and calculation
+    endpoints are deferred to calculation-heavy slices; FX converter/history and
+    provider sync behavior plus broader market-data quote/search/import/sync
+    behavior are deferred to calculation/market-data slices; actual portfolio
+    job execution and event production are deferred to portfolio/calculation
+    slices; real secret persistence/keyring integration is deferred to a
+    runtime/keyring parity slice; AI provider catalog/settings/model-listing
+    runtime behavior is deferred to AI/secrets parity slices; alternative asset
     persistence/quotes/holdings/job behavior is deferred to asset/portfolio
     parity slices; asset persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app runtime metadata,
@@ -601,6 +602,19 @@ contract:
   and test coverage.
 - `pr5-device-sync-pairing-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-runtime-composition`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes `WF_DB_PATH` precedence over `DATABASE_URL`, explicit/env
+  app-data and migration-dir resolution, migration replay into a temporary DB,
+  standalone TS server startup with SQLite-backed settings/accounts routes,
+  settings persistence through the runtime handler, and idempotent runtime
+  close.
+- `pr5-runtime-composition-review`: code review found no actionable issues after
+  confirming env-path precedence, migration strategy, resource cleanup, service
+  wiring boundaries, Electron/Rust default isolation, type-safety, and test
+  coverage.
+- `pr5-runtime-composition-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -616,8 +630,9 @@ contract:
   activities/import route seam, AI chat route seam, sync crypto route seam, and
   health/classification route seam, Connect broker/session route seam, Connect
   device-sync enrollment/engine route seam, device-sync device-management route
-  seam, device-sync team-key/reset route seam, and device-sync pairing route
-  seam slices implemented; broader migration remains active.
+  seam, device-sync team-key/reset route seam, device-sync pairing route seam,
+  and standalone TS runtime composition for already-ported SQLite-backed domains
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,

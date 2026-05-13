@@ -29,6 +29,12 @@ describe("TS SQLite storage foundation", () => {
     expect(getSqliteDbPath("/data/root", { DATABASE_URL: "/tmp/custom.db" })).toBe(
       "/tmp/custom.db",
     );
+    expect(
+      getSqliteDbPath("/data/root", {
+        DATABASE_URL: "/tmp/database-url.db",
+        WF_DB_PATH: "/tmp/wf-db-path.db",
+      }),
+    ).toBe("/tmp/wf-db-path.db");
   });
 
   test("opens SQLite databases with Rust-compatible connection pragmas", () => {

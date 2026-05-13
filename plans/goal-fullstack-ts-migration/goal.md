@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 32
+turns_used: 33
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -235,6 +235,13 @@ updated_at: "2026-05-14T05:18:49+08:00"
   presence, optional snapshot/proof fields, decoded pairing IDs, reserved static
   route boundaries, malformed path encoding errors, sidecar-auth route
   semantics, and targeted backend tests.
+- Turn 33: Added standalone TS backend runtime composition for already-ported
+  SQLite-backed domains: startup now initializes the existing Rust migrations,
+  wires settings, accounts, contribution limits, taxonomies, custom providers,
+  goals, exchange-rate CRUD, local health dismissal/config, market-data provider
+  settings, and event-stream services into the TS request handler; `WF_DB_PATH`
+  now takes precedence over `DATABASE_URL`, with explicit app-data and
+  migration-dir resolution tests.
 
 ## Deferred items
 

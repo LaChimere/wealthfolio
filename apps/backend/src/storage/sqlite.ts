@@ -23,6 +23,11 @@ interface MigrationRow {
 }
 
 export function getSqliteDbPath(appDataDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  const wfDbPath = env.WF_DB_PATH?.trim();
+  if (wfDbPath) {
+    return wfDbPath;
+  }
+
   const databaseUrl = env.DATABASE_URL?.trim();
   return databaseUrl ? databaseUrl : path.join(appDataDir, "app.db");
 }

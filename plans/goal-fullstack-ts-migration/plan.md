@@ -10,25 +10,21 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded device-sync pairing HTTP seam
-after the team-key/reset route seam:
+PR 5 continues vertical slices by wiring the already-ported SQLite-backed TS
+services into the standalone TS backend runtime:
 
-- Extend the injectable `DeviceSyncService` seam with optional pairing and
-  pairing-flow methods for `/api/v1/sync/pairing*` issuer, claimer, composite,
-  and flow-coordinator routes.
-- Preserve Rust HTTP semantics for required camelCase bodies, body-ignoring
-  approve/cancel routes, `sasProof` JSON-value presence, optional snapshot/proof
-  fields, decoded pairing IDs, reserved static pairing route boundaries,
-  malformed path encoding errors, method/path inertness, and sidecar
-  bearer-token checks.
-- Keep service implementations responsible for Rust-equivalent token, cloud,
-  device-id lookup, E2EE key exchange, freshness gates, background engine, and
-  bootstrap side effects.
-- Defer real pairing/E2EE/cloud runtime, freshness gate persistence,
-  feature-flag errors, and background worker behavior to dedicated follow-up
-  slices.
-- Keep routes guarded behind explicit TS runtime handler wiring and sidecar
-  token checks in tests.
+- Add a runtime composition module that initializes SQLite with the existing
+  Rust migrations and injects settings, accounts, contribution limits,
+  taxonomies, custom providers, goals, exchange-rate CRUD, local health
+  dismissal/config, market-data provider settings, and event-stream services.
+- Preserve the existing guarded handler model for unimplemented domains and keep
+  Electron/Rust sidecar defaults unchanged until cutover gates are ready.
+- Align TS runtime database resolution with desktop/web envs by honoring
+  `WF_DB_PATH` before `DATABASE_URL`, and by supporting explicit app-data and
+  migration-dir overrides for non-repo deployments.
+- Defer real secrets, AI, Connect/device-sync, add-on, market-data provider,
+  portfolio calculation, holdings, asset, app utility, and health-check runtimes
+  to dedicated follow-up slices.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream

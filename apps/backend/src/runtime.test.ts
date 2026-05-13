@@ -1,0 +1,73 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { describe, expect, test } from "bun:test";
+
+import type { BackendRuntimeConfig } from "./config";
+import {
+  createSqliteBackedBackendServices,
+  resolveBackendAppDataDir,
+  resolveBackendMigrationsDir,
+} from "./runtime";
+import { startBackendServer } from "./server";
+
+const repositoryRoot = path.resolve(import.meta.dir, "../../..");
+const config: BackendRuntimeConfig = {
+  listen: { host: "127.0.0.1", port: 0 },
+  cors: { allowOrigins: ["*"] },
+  requestTimeoutMs: 1_000,
+  secretKey: new Uint8Array(32),
+};
+
+describe("TS backend runtime composition", () => {
+  test("resolves runtime data and migration roots from explicit options and env", () => {
+    expect(resolveBackendAppDataDir({}, "/tmp/app-data")).toBe("/tmp/app-data");
+    expect(resolveBackendAppDataDir({ WF_APP_DATA_DIR: "/tmp/env-data" })).toBe("/tmp/env-data");
+    expect(resolveBackendMigrationsDir({}, { repositoryRoot })).toBe(
+      path.join(repositoryRoot, "crates/storage-sqlite/migrations"),
+    );
+    expect(resolveBackendMigrationsDir({ WF_MIGRATIONS_DIR: "/tmp/migrations" })).toBe(
+      "/tmp/migrations",
+    );
+  });
+
+  test("starts a TS server with SQLite-backed low-risk services", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-"));
+    const runtime = createSqliteBackedBackendServices({ appDataDir, repositoryRoot });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      expect(runtime.dbPath).toBe(path.join(appDataDir, "app.db"));
+      expect(runtime.appliedMigrations.length).toBeGreaterThan(0);
+
+      const settingsResponse = await fetch(`${server.baseUrl}/api/v1/settings`);
+      expect(settingsResponse.status).toBe(200);
+      await expect(settingsResponse.json()).resolves.toMatchObject({
+        theme: "light",
+        baseCurrency: "",
+        onboardingCompleted: false,
+      });
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/settings`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseCurrency: "USD", timezone: "UTC" }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        baseCurrency: "USD",
+        timezone: "UTC",
+      });
+
+      const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
+      expect(accountsResponse.status).toBe(200);
+      await expect(accountsResponse.json()).resolves.toEqual([]);
+    } finally {
+      server.stop();
+      runtime.close();
+    }
+
+    expect(() => runtime.close()).not.toThrow();
+  });
+});

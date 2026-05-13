@@ -20,6 +20,13 @@ export {
 } from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
 export {
+  createSqliteBackedBackendServices,
+  resolveBackendAppDataDir,
+  resolveBackendMigrationsDir,
+  type SqliteBackedBackendServices,
+  type SqliteBackedBackendServicesOptions,
+} from "./runtime";
+export {
   ACCOUNTS_CHANGED_EVENT,
   TRACKING_MODE_CHANGED_EVENT,
   createAccountRepository,
