@@ -18,6 +18,7 @@ wealthfolio-connect = { workspace = true }
 wealthfolio-storage-sqlite = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-ai = { workspace = true }
+wealthfolio-desktop-secrets = { workspace = true }
 
 # Tauri
 tauri = { version = "2.10", features = [] }
@@ -43,7 +44,6 @@ async-trait = { workspace = true }
 
 # Additional dependencies
 dotenvy = "0.15.7"
-keyring = "2.0"
 local-ip-address = "0.6"
 hostname = "0.3"
 base64 = "0.22"

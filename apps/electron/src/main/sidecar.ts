@@ -1,8 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -24,7 +22,7 @@ export interface SidecarExitEvent {
   error?: string;
 }
 
-interface SidecarCommand {
+export interface SidecarCommand {
   command: string;
   args: string[];
 }
@@ -44,7 +42,6 @@ interface SidecarEnvironmentOptions {
   listenAddr: string;
   token: string;
   secretKey: string;
-  secretFile: string;
 }
 
 export function toPublicSidecarStatus(status: SidecarRuntimeStatus): SidecarRuntimeStatus {
@@ -65,18 +62,33 @@ export function createSidecarEnvironment({
   listenAddr,
   token,
   secretKey,
-  secretFile,
 }: SidecarEnvironmentOptions): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     WF_ADDONS_DIR: legacyPaths.dataRoot,
     WF_AUTH_REQUIRED: "false",
     WF_CORS_ALLOW_ORIGINS: "http://localhost:1420,http://127.0.0.1:1420",
     WF_DB_PATH: legacyPaths.dbPath,
     WF_LISTEN_ADDR: listenAddr,
-    WF_SECRET_FILE: secretFile,
+    WF_SECRET_BACKEND: "keyring",
     WF_SECRET_KEY: secretKey,
     WF_SIDECAR_TOKEN: token,
+  };
+  delete env.WF_SECRET_FILE;
+  return env;
+}
+
+export function createRustSidecarCommand(repositoryRoot: string): SidecarCommand {
+  return {
+    command: "cargo",
+    args: [
+      "run",
+      "--quiet",
+      "--manifest-path",
+      path.join(repositoryRoot, "apps/server/Cargo.toml"),
+      "--features",
+      "keyring-backend",
+    ],
   };
 }
 
@@ -97,27 +109,14 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
   const baseUrl = `http://${listenAddr}`;
   const token = randomBytes(32).toString("base64url");
   const secretKey = randomBytes(32).toString("base64");
-  const secretFile = path.join(
-    tmpdir(),
-    `wealthfolio-electron-sidecar-${process.pid}-${Date.now()}-secrets.json`,
-  );
   const env = createSidecarEnvironment({
     legacyPaths: options.legacyPaths,
     listenAddr,
     token,
     secretKey,
-    secretFile,
   });
 
-  const sidecarCommand = options.command ?? {
-    command: "cargo",
-    args: [
-      "run",
-      "--quiet",
-      "--manifest-path",
-      path.join(options.repositoryRoot, "apps/server/Cargo.toml"),
-    ],
-  };
+  const sidecarCommand = options.command ?? createRustSidecarCommand(options.repositoryRoot);
 
   const child = spawn(sidecarCommand.command, sidecarCommand.args, {
     cwd: options.repositoryRoot,
@@ -134,7 +133,6 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
     await Promise.race([waitForReady(baseUrl, options.timeoutMs ?? 120_000, child), abort.promise]);
   } catch (error) {
     await stopChild(child);
-    await removeTempSecretFile(secretFile);
     throw error;
   } finally {
     abort.dispose();
@@ -143,11 +141,6 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
   const exitListeners = new Set<(event: SidecarExitEvent) => void>();
   let stopping = false;
   let exitNotified = false;
-  let cleanupPromise: Promise<void> | null = null;
-  const cleanupSecretFile = () => {
-    cleanupPromise ??= removeTempSecretFile(secretFile);
-    return cleanupPromise;
-  };
   const notifyExit = (event: SidecarExitEvent) => {
     if (exitNotified) {
       return;
@@ -159,7 +152,6 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
   };
 
   child.once("exit", (code, signal) => {
-    void cleanupSecretFile();
     notifyExit({ code, signal, expected: stopping });
   });
   child.once("error", (error) => {
@@ -178,7 +170,6 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
     async stop() {
       stopping = true;
       await stopChild(child);
-      await cleanupSecretFile();
     },
     onExit(listener) {
       exitListeners.add(listener);
@@ -303,14 +294,6 @@ function formatExit(code: number | null, signal: NodeJS.Signals | null): string 
     return `signal ${signal}`;
   }
   return "unknown exit status";
-}
-
-async function removeTempSecretFile(secretFile: string): Promise<void> {
-  try {
-    await rm(secretFile, { force: true });
-  } catch (error) {
-    console.warn(`Failed to remove Electron sidecar temp secret file at ${secretFile}:`, error);
-  }
 }
 
 async function stopChild(child: ChildProcess): Promise<void> {

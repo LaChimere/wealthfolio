@@ -1,0 +1,13 @@
+[package]
+name = "wealthfolio-desktop-secrets"
+version.workspace = true
+edition.workspace = true
+description = "Desktop secret-store integration for Wealthfolio"
+authors = ["Aziz Fadil"]
+license = "AGPL-3.0"
+repository = "https://github.com/wealthfolio/wealthfolio"
+
+[dependencies]
+wealthfolio-core = { workspace = true }
+
+keyring = "2.0"

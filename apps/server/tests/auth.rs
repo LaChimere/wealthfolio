@@ -13,6 +13,7 @@ use tower::ServiceExt;
 use wealthfolio_server::{api::app_router, build_state, config::Config};
 
 async fn build_test_router(password: &str) -> axum::Router {
+    cleanup_env();
     let tmp = tempdir().unwrap();
     std::env::set_var("WF_DB_PATH", tmp.path().join("test.db"));
 
@@ -39,6 +40,8 @@ fn cleanup_env() {
         "WF_DB_PATH",
         "WF_AUTH_PASSWORD_HASH",
         "WF_SECRET_KEY",
+        "WF_SECRET_FILE",
+        "WF_SECRET_BACKEND",
         "WF_CORS_ALLOW_ORIGINS",
     ] {
         std::env::remove_var(key);

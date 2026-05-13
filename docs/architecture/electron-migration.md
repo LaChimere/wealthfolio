@@ -45,8 +45,8 @@ profile or startup builder with these properties:
 - expose domain events through SSE or an equivalent main-mediated event bridge.
 
 The current web server defaults are intentionally different: `apps/server` reads
-`WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_FILE`, auth, and CORS from environment
-variables for self-hosted deployments.
+`WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_BACKEND`, `WF_SECRET_FILE`, auth, and
+CORS from environment variables for self-hosted deployments.
 
 The initial Electron sidecar profile uses `WF_SIDECAR_TOKEN` to enable a
 fail-closed bearer-token middleware on protected API routes. When that variable
@@ -55,13 +55,11 @@ empty tokens. Electron main generates the token per run, keeps the base URL and
 token out of the renderer, and starts the server through `cargo run` only in
 development until release packaging provides a bundled sidecar binary.
 
-Until the desktop keyring store is factored out of Tauri, the Electron dev
-sidecar points `WF_SECRET_FILE` at an isolated temporary file with a per-run
-`WF_SECRET_KEY`. This prevents the sidecar from corrupting legacy desktop
-secrets. Electron can proxy secret set/get/delete commands through the sidecar
-for current-session feature parity, but durable desktop secret persistence is
-intentionally deferred until the keyring-backed sidecar secret store is
-implemented.
+The Electron sidecar sets `WF_SECRET_BACKEND=keyring` and starts the server with
+the `keyring-backend` feature so desktop provider secrets are durable and stay
+in the same OS keyring namespace as Tauri. Electron still generates a per-run
+`WF_SECRET_KEY` for the sidecar's server profile, but provider secret storage no
+longer uses `WF_SECRET_FILE` in desktop mode.
 
 ## Data root compatibility
 
@@ -89,14 +87,21 @@ app:
 
 - service key: `wealthfolio_core::secrets::format_service_id(service)`;
 - username: `default`;
-- backend: the Rust `keyring` crate through a shared `SecretStore`
-  implementation.
+- backend: the Rust `keyring` crate through the shared
+  `wealthfolio-desktop-secrets` crate.
 
-The current keyring implementation lives under `apps/tauri`. During the
-migration it should move to a shared Rust module or crate that can be used by
-the Electron sidecar without depending on the Tauri application crate. The
-server file-backed secret store remains valid for web/self-hosted mode, but it
-must not replace desktop keyring storage during migration.
+This shared namespace is intentional for migration continuity: Electron can read
+the same existing keyring entries that Tauri wrote. Developers should avoid
+running Tauri and Electron against the same profile concurrently because both
+desktop runtimes target the same `wealthfolio_*` keyring entries.
+
+The server file-backed secret store remains valid for web/self-hosted mode and
+is still the default when `WF_SECRET_BACKEND` is unset or set to `file`.
+`WF_SECRET_BACKEND=keyring` is a desktop sidecar mode and requires a server
+binary compiled with the `keyring-backend` Cargo feature. On Linux, the OS
+keyring backend requires a working desktop secret-service provider/session; if
+that provider is unavailable, secret reads/writes surface the keyring error
+instead of falling back to disk.
 
 ## Frontend adapter strategy
 
@@ -126,35 +131,34 @@ taxonomy migration helpers, Health Center status/fix/config operations, and Net
 Worth calculations/history, AI provider settings/model listing, non-streaming AI
 thread/tool-result operations, alternative asset/liability operations, and
 market data provider/custom-provider settings, and add-on install/runtime/store
-staging operations. Temporary sidecar-backed secret set/get/delete commands are
-also proxied while durable keyring-backed Electron secret storage is still
-pending. Device-sync crypto helpers proxy through the sidecar crypto endpoints
-and unwrap server `{ value }` responses to preserve the existing adapter return
-shape. Wealthfolio Connect session, broker sync/listing, subscription/user,
-local broker data, import-run, and broker-sync-profile commands proxy through
-the sidecar Connect endpoints. Device-sync state, enable/clear/reinitialize,
-background engine status/start/stop, bootstrap/reconcile, trigger-cycle, and
-snapshot generation/cancellation commands proxy through the sidecar Connect
-device endpoints. Device-sync device management, team reset, pairing, composite
-pairing transfer/bootstrap, and pairing-flow coordinator commands proxy through
-the sidecar sync endpoints with path identifiers encoded in Electron main.
-Snapshot management, holdings CSV import, activity CSV parsing, database
-backup/restore, and update checks also proxy through the sidecar so
-manual/imported holdings updates and utility operations stay in Rust. Electron
-update installation is still blocked until the Electron updater/release pipeline
-is implemented. Add-on zip payloads are validated as byte arrays in Electron
-main and forwarded to the sidecar as base64 JSON fields. AI chat NDJSON
-streaming uses dedicated start/cancel IPC channels because it cannot safely use
-the request/response JSON command proxy; Electron main owns the sidecar fetch,
-streams parsed events only to the originating `webContents`, and aborts streams
-when the owner closes or navigates. The renderer still calls the typed preload
-IPC bridge, Electron main validates each command against an explicit allowlist,
-waits for sidecar readiness, and proxies to the loopback sidecar with the
-per-run bearer token. Sidecar base URLs and tokens must stay confined to
-Electron main; public runtime status and command errors must redact loopback
-URLs and token-shaped values before crossing IPC. Electron app info must use
-sanitized runtime metadata and must not expose desktop DB or log paths to the
-renderer. JSON request bodies must be sent with
+staging operations. Durable keyring-backed secret set/get/delete commands are
+also proxied through the sidecar. Device-sync crypto helpers proxy through the
+sidecar crypto endpoints and unwrap server `{ value }` responses to preserve the
+existing adapter return shape. Wealthfolio Connect session, broker sync/listing,
+subscription/user, local broker data, import-run, and broker-sync-profile
+commands proxy through the sidecar Connect endpoints. Device-sync state,
+enable/clear/reinitialize, background engine status/start/stop,
+bootstrap/reconcile, trigger-cycle, and snapshot generation/cancellation
+commands proxy through the sidecar Connect device endpoints. Device-sync device
+management, team reset, pairing, composite pairing transfer/bootstrap, and
+pairing-flow coordinator commands proxy through the sidecar sync endpoints with
+path identifiers encoded in Electron main. Snapshot management, holdings CSV
+import, activity CSV parsing, database backup/restore, and update checks also
+proxy through the sidecar so manual/imported holdings updates and utility
+operations stay in Rust. Electron update installation is still blocked until the
+Electron updater/release pipeline is implemented. Add-on zip payloads are
+validated as byte arrays in Electron main and forwarded to the sidecar as base64
+JSON fields. AI chat NDJSON streaming uses dedicated start/cancel IPC channels
+because it cannot safely use the request/response JSON command proxy; Electron
+main owns the sidecar fetch, streams parsed events only to the originating
+`webContents`, and aborts streams when the owner closes or navigates. The
+renderer still calls the typed preload IPC bridge, Electron main validates each
+command against an explicit allowlist, waits for sidecar readiness, and proxies
+to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
+tokens must stay confined to Electron main; public runtime status and command
+errors must redact loopback URLs and token-shaped values before crossing IPC.
+Electron app info must use sanitized runtime metadata and must not expose
+desktop DB or log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

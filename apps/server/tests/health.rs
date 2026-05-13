@@ -5,6 +5,9 @@ use wealthfolio_server::{api::app_router, build_state, config::Config};
 
 #[tokio::test]
 async fn healthz_works() {
+    for key in ["WF_SECRET_FILE", "WF_SECRET_BACKEND"] {
+        std::env::remove_var(key);
+    }
     let tmp = tempdir().unwrap();
     std::env::set_var("WF_DB_PATH", tmp.path().join("test.db"));
     std::env::set_var("WF_SECRET_KEY", "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
@@ -24,7 +27,13 @@ async fn healthz_works() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    for key in ["WF_DB_PATH", "WF_SECRET_KEY", "WF_LISTEN_ADDR"] {
+    for key in [
+        "WF_DB_PATH",
+        "WF_SECRET_KEY",
+        "WF_SECRET_FILE",
+        "WF_SECRET_BACKEND",
+        "WF_LISTEN_ADDR",
+    ] {
         std::env::remove_var(key);
     }
 }

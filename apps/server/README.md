@@ -33,10 +33,20 @@ Key environment variables
   For Docker Compose `.env`/`--env-file`, single-quote the value or double every `$`;
   for YAML inline values, double every `$` in the hash (`$$argon2id$$...`).
   When unset, authentication is disabled.
-- `WF_AUTH_TOKEN_TTL_MINUTES`: Optional JWT access token lifetime (minutes). Defaults to `60`.
-- `WF_SECRET_FILE`: Optional override for where encrypted secrets are stored. Defaults to `<data-root>/secrets.json`.
+- `WF_AUTH_TOKEN_TTL_MINUTES`: Optional JWT access token lifetime (minutes).
+  Defaults to `60`.
+- `WF_SECRET_BACKEND`: Optional secret-store backend. Use `file` for
+  web/self-hosted mode (default) or `keyring` for desktop sidecar builds
+  compiled with the `keyring-backend` Cargo feature.
+- `WF_SECRET_FILE`: Optional override for where encrypted file-backed secrets
+  are stored. Defaults to `<data-root>/secrets.json`. Ignored when
+  `WF_SECRET_BACKEND=keyring`.
 
 Notes
-- The server also honors `DATABASE_URL`; when running in this workspace, `WF_DB_PATH` is preferred and propagated to `DATABASE_URL` internally so the core layer uses the expected path.
+- The server also honors `DATABASE_URL`; when running in this workspace,
+  `WF_DB_PATH` is preferred and propagated to `DATABASE_URL` internally so the
+  core layer uses the expected path.
 - Database migrations are embedded and applied automatically on startup.
-- Secrets in web/server mode are stored in an encrypted JSON file derived from the database directory using `WF_SECRET_KEY`.
+- Secrets in web/server mode are stored in an encrypted JSON file derived from
+  the database directory using `WF_SECRET_KEY`; desktop sidecars use the OS
+  keyring backend.

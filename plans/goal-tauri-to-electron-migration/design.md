@@ -70,9 +70,9 @@ username `default`). The Electron sidecar desktop profile should use a shared
 Rust keyring-backed `SecretStore`; the existing server `secrets.json` store is
 for web/server mode and must not silently replace desktop keyring storage.
 
-The keyring implementation should be factored out of `apps/tauri` into a shared
-crate or shared Rust module used by the desktop sidecar. The sidecar must not
-depend on `apps/tauri`.
+The keyring implementation lives in the shared `wealthfolio-desktop-secrets`
+crate. Tauri and the Electron sidecar both use it without the sidecar depending
+on `apps/tauri`.
 
 ### Local sidecar security
 

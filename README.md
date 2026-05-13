@@ -257,8 +257,12 @@ All configuration is done via environment variables in `.env.web`.
   - `true` - always set `Secure` (use when TLS is guaranteed but the header is
     absent)
   - `false` - never set `Secure` (plain HTTP without a reverse proxy)
-- `WF_SECRET_FILE` - **Optional** path to secrets storage file (default:
-  `<data-root>/secrets.json`)
+- `WF_SECRET_BACKEND` - **Optional** secret-store backend: `file` for
+  web/self-hosted mode (default), or `keyring` for desktop sidecar builds
+  compiled with the `keyring-backend` Cargo feature
+- `WF_SECRET_FILE` - **Optional** path to encrypted file-backed secrets storage
+  (default: `<data-root>/secrets.json`; ignored when
+  `WF_SECRET_BACKEND=keyring`)
 - `WF_ADDONS_DIR` - **Optional** path to addons directory (default: derived from
   database path)
 
@@ -688,13 +692,14 @@ dependencies:
 
 #### API Keys & Secrets
 
-API credentials are securely stored using the operating system keyring through
-the `keyring` crate:
+Desktop API credentials are securely stored using the operating system keyring
+through the shared Rust `keyring` backend:
 
 - **Core App**: Use `set_secret` and `get_secret` commands for external services
 - **Addons**: Use the Secrets API (`ctx.api.secrets`) for addon-specific
   sensitive data
-- **No Disk Storage**: Keys never written to disk or configuration files
+- **No Disk Storage in Desktop Mode**: Keys never written to disk or
+  configuration files
 
 #### Permission System
 

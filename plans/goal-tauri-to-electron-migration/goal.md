@@ -218,6 +218,11 @@
   to the Tauri tuple shape, CSV parsing uses authenticated multipart without
   exposing sidecar credentials, and Electron update installation now fails with
   an explicit pending-updater error instead of an unknown command.
+- Turn 37: Factored the Tauri keyring secret store into the shared
+  `wealthfolio-desktop-secrets` crate and switched the Electron sidecar to
+  `WF_SECRET_BACKEND=keyring`. Web/self-hosted server mode still defaults to the
+  encrypted file store, while desktop keyring support is gated behind the server
+  `keyring-backend` feature.
 
 ## Deferred items
 

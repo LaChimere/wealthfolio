@@ -11,6 +11,7 @@ wealthfolio-connect = { workspace = true }
 wealthfolio-storage-sqlite = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-ai = { workspace = true }
+wealthfolio-desktop-secrets = { workspace = true, optional = true }
 
 # Web framework
 axum = { version = "0.8", features = ["json", "macros", "multipart"] }
@@ -57,6 +58,7 @@ hyper = { version = "0.14", features = ["full"] }
 default = ["connect-sync", "device-sync"]
 connect-sync = []
 device-sync = []
+keyring-backend = ["dep:wealthfolio-desktop-secrets"]
 
 [dev-dependencies]
 reqwest = { workspace = true }

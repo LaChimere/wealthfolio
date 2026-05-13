@@ -5,7 +5,12 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { describe, expect, spyOn, test } from "bun:test";
 
-import { createSidecarEnvironment, startRustSidecar, toPublicSidecarStatus } from "./sidecar";
+import {
+  createRustSidecarCommand,
+  createSidecarEnvironment,
+  startRustSidecar,
+  toPublicSidecarStatus,
+} from "./sidecar";
 
 const legacyPaths = {
   dataRoot: "/Users/alex/Library/Application Support/com.teymz.wealthfolio",
@@ -38,28 +43,48 @@ describe("Electron sidecar configuration", () => {
     expect(publicStatus.error).not.toContain("sidecar-token");
   });
 
-  test("uses the legacy Tauri data root and an isolated temporary secret file", () => {
-    const env = createSidecarEnvironment({
-      legacyPaths,
-      listenAddr: "127.0.0.1:12000",
-      token: "sidecar-token",
-      secretKey: "secret-key",
-      secretFile: "/tmp/wealthfolio-sidecar-secrets.json",
-    });
+  test("uses the legacy Tauri data root and durable keyring secret backend", () => {
+    const previousSecretFile = process.env.WF_SECRET_FILE;
+    process.env.WF_SECRET_FILE = "/tmp/wealthfolio-sidecar-secrets.json";
+    try {
+      const env = createSidecarEnvironment({
+        legacyPaths,
+        listenAddr: "127.0.0.1:12000",
+        token: "sidecar-token",
+        secretKey: "secret-key",
+      });
 
-    expect(env.WF_LISTEN_ADDR).toBe("127.0.0.1:12000");
-    expect(env.WF_DB_PATH).toBe(
-      "/Users/alex/Library/Application Support/com.teymz.wealthfolio/app.db",
-    );
-    expect(env.WF_ADDONS_DIR).toBe("/Users/alex/Library/Application Support/com.teymz.wealthfolio");
-    expect(env.WF_SECRET_FILE).toBe("/tmp/wealthfolio-sidecar-secrets.json");
-    expect(env.WF_SIDECAR_TOKEN).toBe("sidecar-token");
+      expect(env.WF_LISTEN_ADDR).toBe("127.0.0.1:12000");
+      expect(env.WF_DB_PATH).toBe(
+        "/Users/alex/Library/Application Support/com.teymz.wealthfolio/app.db",
+      );
+      expect(env.WF_ADDONS_DIR).toBe(
+        "/Users/alex/Library/Application Support/com.teymz.wealthfolio",
+      );
+      expect(env.WF_SECRET_BACKEND).toBe("keyring");
+      expect(env.WF_SECRET_FILE).toBeUndefined();
+      expect(env.WF_SIDECAR_TOKEN).toBe("sidecar-token");
+    } finally {
+      if (previousSecretFile === undefined) {
+        delete process.env.WF_SECRET_FILE;
+      } else {
+        process.env.WF_SECRET_FILE = previousSecretFile;
+      }
+    }
   });
 
-  test("starts, stops, and removes the temporary secret file", async () => {
+  test("starts the development sidecar with the keyring backend feature", () => {
+    const command = createRustSidecarCommand("/repo");
+
+    expect(command.command).toBe("cargo");
+    expect(command.args).toContain("keyring-backend");
+    expect(command.args).toContain(path.join("/repo", "apps/server/Cargo.toml"));
+  });
+
+  test("starts and stops with keyring-backed sidecar environment", async () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-test-"));
-    const secretPathCapture = path.join(tempRoot, "secret-path.txt");
-    process.env.WF_SIDECAR_TEST_SECRET_CAPTURE = secretPathCapture;
+    const envCapture = path.join(tempRoot, "sidecar-env.json");
+    process.env.WF_SIDECAR_TEST_ENV_CAPTURE = envCapture;
 
     try {
       const handle = await startRustSidecar({
@@ -72,8 +97,11 @@ describe("Electron sidecar configuration", () => {
           const fs = require("node:fs");
           const http = require("node:http");
           const [host, port] = process.env.WF_LISTEN_ADDR.split(":");
-          fs.writeFileSync(process.env.WF_SIDECAR_TEST_SECRET_CAPTURE, process.env.WF_SECRET_FILE);
-          fs.writeFileSync(process.env.WF_SECRET_FILE, JSON.stringify({ ok: true }));
+          fs.writeFileSync(process.env.WF_SIDECAR_TEST_ENV_CAPTURE, JSON.stringify({
+            backend: process.env.WF_SECRET_BACKEND,
+            secretFile: process.env.WF_SECRET_FILE ?? null,
+            hasSecretKey: Boolean(process.env.WF_SECRET_KEY),
+          }));
           const server = http.createServer((request, response) => {
             if (request.url === "/api/v1/readyz") {
               response.writeHead(200);
@@ -90,14 +118,17 @@ describe("Electron sidecar configuration", () => {
       });
       const exitEvents: unknown[] = [];
       handle.onExit((event) => exitEvents.push(event));
-      const secretFile = readFileSync(secretPathCapture, "utf8");
+      const capturedEnv = JSON.parse(readFileSync(envCapture, "utf8"));
 
-      expect(existsSync(secretFile)).toBe(true);
+      expect(capturedEnv).toEqual({
+        backend: "keyring",
+        secretFile: null,
+        hasSecretKey: true,
+      });
       await handle.stop();
-      expect(existsSync(secretFile)).toBe(false);
       expect(exitEvents).toEqual([{ code: 0, signal: null, expected: true }]);
     } finally {
-      delete process.env.WF_SIDECAR_TEST_SECRET_CAPTURE;
+      delete process.env.WF_SIDECAR_TEST_ENV_CAPTURE;
       rmSync(tempRoot, { force: true, recursive: true });
     }
   });
@@ -119,10 +150,10 @@ describe("Electron sidecar configuration", () => {
     expect(Date.now() - startedAt).toBeLessThan(3_000);
   });
 
-  test("cancels startup and cleans up when Electron quits before readiness", async () => {
+  test("cancels startup and stops the sidecar when Electron quits before readiness", async () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-abort-test-"));
-    const secretPathCapture = path.join(tempRoot, "secret-path.txt");
-    process.env.WF_SIDECAR_TEST_SECRET_CAPTURE = secretPathCapture;
+    const envCapture = path.join(tempRoot, "sidecar-env.json");
+    process.env.WF_SIDECAR_TEST_ENV_CAPTURE = envCapture;
     const controller = new AbortController();
 
     try {
@@ -135,23 +166,25 @@ describe("Electron sidecar configuration", () => {
         signal: controller.signal,
         command: bunEval(`
           const fs = require("node:fs");
-          fs.writeFileSync(process.env.WF_SIDECAR_TEST_SECRET_CAPTURE, process.env.WF_SECRET_FILE);
-          fs.writeFileSync(process.env.WF_SECRET_FILE, JSON.stringify({ ok: true }));
+          fs.writeFileSync(process.env.WF_SIDECAR_TEST_ENV_CAPTURE, JSON.stringify({
+            backend: process.env.WF_SECRET_BACKEND,
+            secretFile: process.env.WF_SECRET_FILE ?? null,
+          }));
           process.on("SIGTERM", () => process.exit(0));
           setInterval(() => {}, 1000);
         `),
       });
 
-      for (let attempt = 0; attempt < 20 && !existsSync(secretPathCapture); attempt += 1) {
+      for (let attempt = 0; attempt < 20 && !existsSync(envCapture); attempt += 1) {
         await delay(25);
       }
-      const secretFile = readFileSync(secretPathCapture, "utf8");
+      const capturedEnv = JSON.parse(readFileSync(envCapture, "utf8"));
+      expect(capturedEnv).toEqual({ backend: "keyring", secretFile: null });
 
       controller.abort();
       await expect(startPromise).rejects.toThrow(/startup was cancelled/);
-      expect(existsSync(secretFile)).toBe(false);
     } finally {
-      delete process.env.WF_SIDECAR_TEST_SECRET_CAPTURE;
+      delete process.env.WF_SIDECAR_TEST_ENV_CAPTURE;
       rmSync(tempRoot, { force: true, recursive: true });
     }
   });
