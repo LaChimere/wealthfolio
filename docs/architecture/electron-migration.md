@@ -196,6 +196,11 @@ dedicated IPC methods, not as renderer Node APIs:
 - Window theme and fullscreen operations are behind the runtime adapter seam.
   Electron main owns `nativeTheme` updates and focused-window fullscreen
   toggles; Tauri keeps using `getCurrentWindow()` only inside the Tauri adapter.
+- Electron restores and persists the main window's normal bounds/maximized state
+  in `electron-window-state.json` under the legacy Tauri data root. On macOS,
+  the Electron window uses a hidden-inset titlebar to preserve the Tauri
+  overlay-style chrome; existing `data-tauri-drag-region` markers also map to
+  Electron drag regions through CSS.
 - Wealthfolio deep links are owned by Electron main. The app registers the
   `wealthfolio://` protocol, enforces a single-instance lock before sidecar
   startup, queues callback URLs until the renderer's dedicated deep-link
@@ -213,7 +218,6 @@ dedicated IPC methods, not as renderer Node APIs:
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
-- window state persistence and titlebar behavior;
 - updater install/progress events;
 
 Mobile-only Tauri features are not part of the Electron migration.

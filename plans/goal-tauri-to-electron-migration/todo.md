@@ -12,59 +12,59 @@
 | electron-scaffold      | done        | Add Electron main/preload shell that can host the existing frontend side-by-side with Tauri.                                  | `apps/electron`; `bun run check`, `bun run build:electron`, Electron tests, adapter tests, and Electron binary check passed.                                                                                                                                                                                                                                                                                                                                                                              |
 | electron-adapter       | done        | Add Electron frontend adapter and typed IPC registry preserving shared adapter APIs.                                          | `BUILD_TARGET=electron`; adapter/core/AI tests, web build, Tauri build, Electron build, and `bun run check` passed.                                                                                                                                                                                                                                                                                                                                                                                       |
 | rust-service-bridge    | in_progress | Connect Electron to existing Rust-backed services, SQLite data dir behavior, and domain event streams.                        | Sidecar lifecycle, account/settings/update-check/database utilities, durable keyring-backed secrets, sync crypto, Wealthfolio Connect broker/session/profile/device engine/device management/pairing, portfolio, snapshots/imports, activities/CSV parsing, exchange rates, market-data providers, contribution limits, assets, quotes/imports/sync, taxonomies, Health Center, Net Worth, alternative assets, add-ons, AI providers/thread metadata/streaming, goals, and retirement proxy tests passed. |
-| native-parity          | in_progress | Replace Tauri native desktop plugins/features with Electron equivalents.                                                      | Electron file open/save dialogs, add-on ZIP package selection/reading, external URL opening, application menu route navigation, update-available menu events, window theme/fullscreen toggles, single-instance, deep-link OAuth callbacks, add-on file-drop events, and app logging now use typed native IPC; updater install/progress and window state persistence/titlebar remain.                                                                                                                      |
+| native-parity          | in_progress | Replace Tauri native desktop plugins/features with Electron equivalents.                                                      | Electron file open/save dialogs, add-on ZIP package selection/reading, external URL opening, application menu route navigation, update-available menu events, window theme/fullscreen toggles, single-instance, deep-link OAuth callbacks, add-on file-drop events, app logging, window state persistence, and macOS titlebar/drag-region behavior now use typed native IPC or Electron-native configuration; updater install/progress remains.                                                           |
 | electron-release       | pending     | Replace Tauri desktop packaging/release artifacts with Electron packaging while preserving server prebuilds.                  | Pending                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | tauri-cleanup          | pending     | Remove Tauri runtime/dependencies/docs only after Electron parity is verified.                                                | Pending                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Review checkpoints
 
-| Checkpoint                       | Status | Notes                                                                                                             |
-| -------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
-| Design self-review               | done   | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates.                                           |
-| Rubber-duck design review        | done   | Re-review found no blockers for starting PR1/guardrail work.                                                      |
-| Code review after first diff     | done   | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues.    |
-| Tooling/TS6 milestone review     | done   | PR review found docs/template/CLI/boundary-test gaps; fixes were applied and re-reviewed.                         |
-| Electron scaffold review         | done   | Code-review found a startup error-handling gap; the guarded startup fix was re-reviewed with no blockers.         |
-| Electron adapter review          | done   | Rubber-duck found web fallback/IPC allowlist risks; code-review found AI streaming zero-event risk; both fixed.   |
-| Rust sidecar lifecycle review    | done   | Code-review found process lifecycle and cleanup gaps; fixes were applied and re-reviewed with no blockers.        |
-| Command proxy smoke review       | done   | Code-review found command error redaction and fail-closed gaps; fixes were re-reviewed with no high issues.       |
-| Event bridge review              | done   | Rubber-duck flagged retry/abort/webContents/redaction risks; implementation review found no remaining issues.     |
-| Portfolio proxy review           | done   | Code-review found no blocking issues in dashboard command mappings, JSON headers, empty responses, or redaction.  |
-| Goals proxy review               | done   | Code-review found no blocking issues in goals, funding, plan, or retirement simulation proxy mappings.            |
-| Snapshot proxy review            | done   | Code-review found no blocking issues in snapshot query/body mappings, imports, empty responses, or redaction.     |
-| Activities proxy review          | done   | Code-review found no blocking issues in activity CRUD/import/template route, body, query, or redaction handling.  |
-| Exchange-rate proxy review       | done   | Code-review found and re-reviewed a test payload schema gap; no blocking issues remain.                           |
-| Provider proxy review            | done   | Code-review found no blocking issues in market-data/custom-provider route, body, path, or redaction handling.     |
-| Contribution limit proxy review  | done   | Code-review found no blocking issues in contribution-limit route, body, path, or redaction handling.              |
-| Asset/quote proxy review         | done   | Code-review found missing `sync_market_data.refetchAll` validation; fix was re-reviewed with no remaining issues. |
-| Taxonomy proxy review            | done   | Code-review found no blocking issues in taxonomy route, body, path, validation, or redaction handling.            |
-| Health proxy review              | done   | Code-review found no blocking issues in Health Center route, body, timezone header, or no-body POST handling.     |
-| Net Worth proxy review           | done   | Code-review found no blocking issues in Net Worth route, query, validation, or redaction handling.                |
-| Web alternative route review     | done   | Code-review found no blocking issues in the liability link/unlink route alignment with Rust server endpoints.     |
-| Alternative asset proxy review   | done   | Code-review found metadata needed string-record validation; fix was re-reviewed with no remaining issues.         |
-| AI provider/thread proxy review  | done   | Rubber-duck found thread update ID and limit-validation risks; code review found no blocking issues.              |
-| Add-on proxy review              | done   | Rubber-duck found zip byte-validation and query/no-body edge cases; code review found no blocking issues.         |
-| Secrets proxy review             | done   | Code-review found no blocking issues in secret command route, body, query, or validation handling.                |
-| AI streaming bridge review       | done   | Rubber-duck found cancellation, start-failure, and owner-window scoping risks; code review found no blockers.     |
-| Sync crypto proxy review         | done   | Code-review found no blocking issues in route, body, return-shape, validation, or redaction handling.             |
-| Connect broker proxy review      | done   | Re-review found no blocking issues after structured sync response coverage was added.                             |
-| Device sync engine proxy review  | done   | Review found a no-body header assertion gap; tests were tightened and re-review found no remaining issues.        |
-| Device sync pairing proxy review | done   | Review found `update_device` display-name optionality and coverage gaps; fixes were re-reviewed cleanly.          |
-| Utility command proxy review     | done   | Review found an Electron IPC coverage guardrail gap; parity test was added and re-review found no issues.         |
-| Keyring sidecar review           | done   | Rubber-duck flagged web build dependency risk; implementation gates keyring behind a server feature.              |
-| Native files/shell review        | done   | Re-review found no remaining issues after IPC boundary, byte-content, and URL protocol tests were tightened.      |
-| Add-on package native review     | done   | Review found web cancel/focus fallback and Tauri basename hardening gaps; fixes were re-reviewed cleanly.         |
-| Menu/update event review         | done   | Review found missing Electron route-event listener wiring; fix was re-reviewed with no remaining issues.          |
-| Window theme/fullscreen review   | done   | Review found desktop system-theme fallback ordering issues; fixes were re-reviewed with no remaining issues.      |
-| Deep-link/single-instance review | done   | Rubber-duck found a cold-start listener race; implementation uses a renderer drain handshake and targeted sends.  |
-| File-drop bridge review          | done   | Review found dragover IPC flooding; fix sends hover only on window entry and re-review found no remaining issues. |
-| Logging bridge review            | done   | Code review found no blockers in renderer IPC validation, log-root use, sidecar routing, or failure handling.     |
+| Checkpoint                       | Status | Notes                                                                                                              |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| Design self-review               | done   | Refined bridge, data-root, keyring, updater, OAuth, Bun, and TS6 gates.                                            |
+| Rubber-duck design review        | done   | Re-review found no blockers for starting PR1/guardrail work.                                                       |
+| Code review after first diff     | done   | Code-review found path handling issues in the guardrail test; fixes were re-reviewed with no remaining issues.     |
+| Tooling/TS6 milestone review     | done   | PR review found docs/template/CLI/boundary-test gaps; fixes were applied and re-reviewed.                          |
+| Electron scaffold review         | done   | Code-review found a startup error-handling gap; the guarded startup fix was re-reviewed with no blockers.          |
+| Electron adapter review          | done   | Rubber-duck found web fallback/IPC allowlist risks; code-review found AI streaming zero-event risk; both fixed.    |
+| Rust sidecar lifecycle review    | done   | Code-review found process lifecycle and cleanup gaps; fixes were applied and re-reviewed with no blockers.         |
+| Command proxy smoke review       | done   | Code-review found command error redaction and fail-closed gaps; fixes were re-reviewed with no high issues.        |
+| Event bridge review              | done   | Rubber-duck flagged retry/abort/webContents/redaction risks; implementation review found no remaining issues.      |
+| Portfolio proxy review           | done   | Code-review found no blocking issues in dashboard command mappings, JSON headers, empty responses, or redaction.   |
+| Goals proxy review               | done   | Code-review found no blocking issues in goals, funding, plan, or retirement simulation proxy mappings.             |
+| Snapshot proxy review            | done   | Code-review found no blocking issues in snapshot query/body mappings, imports, empty responses, or redaction.      |
+| Activities proxy review          | done   | Code-review found no blocking issues in activity CRUD/import/template route, body, query, or redaction handling.   |
+| Exchange-rate proxy review       | done   | Code-review found and re-reviewed a test payload schema gap; no blocking issues remain.                            |
+| Provider proxy review            | done   | Code-review found no blocking issues in market-data/custom-provider route, body, path, or redaction handling.      |
+| Contribution limit proxy review  | done   | Code-review found no blocking issues in contribution-limit route, body, path, or redaction handling.               |
+| Asset/quote proxy review         | done   | Code-review found missing `sync_market_data.refetchAll` validation; fix was re-reviewed with no remaining issues.  |
+| Taxonomy proxy review            | done   | Code-review found no blocking issues in taxonomy route, body, path, validation, or redaction handling.             |
+| Health proxy review              | done   | Code-review found no blocking issues in Health Center route, body, timezone header, or no-body POST handling.      |
+| Net Worth proxy review           | done   | Code-review found no blocking issues in Net Worth route, query, validation, or redaction handling.                 |
+| Web alternative route review     | done   | Code-review found no blocking issues in the liability link/unlink route alignment with Rust server endpoints.      |
+| Alternative asset proxy review   | done   | Code-review found metadata needed string-record validation; fix was re-reviewed with no remaining issues.          |
+| AI provider/thread proxy review  | done   | Rubber-duck found thread update ID and limit-validation risks; code review found no blocking issues.               |
+| Add-on proxy review              | done   | Rubber-duck found zip byte-validation and query/no-body edge cases; code review found no blocking issues.          |
+| Secrets proxy review             | done   | Code-review found no blocking issues in secret command route, body, query, or validation handling.                 |
+| AI streaming bridge review       | done   | Rubber-duck found cancellation, start-failure, and owner-window scoping risks; code review found no blockers.      |
+| Sync crypto proxy review         | done   | Code-review found no blocking issues in route, body, return-shape, validation, or redaction handling.              |
+| Connect broker proxy review      | done   | Re-review found no blocking issues after structured sync response coverage was added.                              |
+| Device sync engine proxy review  | done   | Review found a no-body header assertion gap; tests were tightened and re-review found no remaining issues.         |
+| Device sync pairing proxy review | done   | Review found `update_device` display-name optionality and coverage gaps; fixes were re-reviewed cleanly.           |
+| Utility command proxy review     | done   | Review found an Electron IPC coverage guardrail gap; parity test was added and re-review found no issues.          |
+| Keyring sidecar review           | done   | Rubber-duck flagged web build dependency risk; implementation gates keyring behind a server feature.               |
+| Native files/shell review        | done   | Re-review found no remaining issues after IPC boundary, byte-content, and URL protocol tests were tightened.       |
+| Add-on package native review     | done   | Review found web cancel/focus fallback and Tauri basename hardening gaps; fixes were re-reviewed cleanly.          |
+| Menu/update event review         | done   | Review found missing Electron route-event listener wiring; fix was re-reviewed with no remaining issues.           |
+| Window theme/fullscreen review   | done   | Review found desktop system-theme fallback ordering issues; fixes were re-reviewed with no remaining issues.       |
+| Deep-link/single-instance review | done   | Rubber-duck found a cold-start listener race; implementation uses a renderer drain handshake and targeted sends.   |
+| File-drop bridge review          | done   | Review found dragover IPC flooding; fix sends hover only on window entry and re-review found no remaining issues.  |
+| Logging bridge review            | done   | Code review found no blockers in renderer IPC validation, log-root use, sidecar routing, or failure handling.      |
+| Window state/titlebar review     | done   | Review found async close-save and off-screen restore risks; sync save/display validation were re-reviewed cleanly. |
 
 ## Non-blocking cautions carried forward
 
-- Remaining native work must connect updater install/progress and window
-  state/titlebar persistence through main-mediated Electron IPC without exposing
-  privileged APIs to the renderer.
+- Remaining native work must connect updater install/progress through
+  main-mediated Electron IPC without exposing privileged APIs to the renderer.
 - Electron desktop keyring mode requires an OS keyring provider. Linux desktop
   sessions without secret-service support will surface keyring errors instead of
   falling back to disk.

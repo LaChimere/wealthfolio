@@ -29,6 +29,7 @@ import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
+import { createWindowStatePersistence } from "./window-state";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(currentDir, "..");
@@ -49,6 +50,7 @@ const aiChatStreamManager = createAiChatStreamManager({ getSidecar: getReadySide
 
 function configureAppPaths(): void {
   const legacyPaths = resolveLegacyTauriPaths();
+  mkdirSync(legacyPaths.dataRoot, { recursive: true });
   mkdirSync(legacyPaths.logRoot, { recursive: true });
   app.setPath("logs", legacyPaths.logRoot);
   electronLogWriter = createElectronLogWriter(
@@ -338,10 +340,18 @@ function configureWindowThemeEvents(): void {
 }
 
 async function createWindow(): Promise<void> {
+  const legacyPaths = resolveLegacyTauriPaths();
   const preloadPath = path.join(distRoot, "preload", "index.cjs");
   const rendererUrl = process.env.WF_ELECTRON_RENDERER_URL;
   const indexHtmlPath = path.join(repositoryRoot, "dist", "index.html");
-  await createMainWindow({ preloadPath, rendererUrl, indexHtmlPath });
+  await createMainWindow({
+    preloadPath,
+    rendererUrl,
+    indexHtmlPath,
+    windowState: createWindowStatePersistence(
+      path.join(legacyPaths.dataRoot, "electron-window-state.json"),
+    ),
+  });
 }
 
 async function startSidecarBridge(): Promise<void> {

@@ -56,6 +56,28 @@
   }
 }
 
+[data-tauri-drag-region="true"],
+.draggable {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+[data-tauri-drag-region="true"] a,
+[data-tauri-drag-region="true"] button,
+[data-tauri-drag-region="true"] input,
+[data-tauri-drag-region="true"] select,
+[data-tauri-drag-region="true"] textarea,
+[data-tauri-drag-region="true"] [role="button"],
+.draggable a,
+.draggable button,
+.draggable input,
+.draggable select,
+.draggable textarea,
+.draggable [role="button"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 @theme {
   /* Font families */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
