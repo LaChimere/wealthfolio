@@ -4,6 +4,10 @@ export interface ConnectImportRunsRequest {
   offset: number;
 }
 
+export interface ConnectDeviceSyncReconcileReadyRequest {
+  allowOverwrite: boolean;
+}
+
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
 
 export interface ConnectSyncBrokerDataResult {
@@ -46,4 +50,36 @@ export interface ConnectService {
   getSubscriptionPlans(): Promise<unknown> | unknown;
   getSubscriptionPlansPublic(): Promise<unknown> | unknown;
   getUserInfo(): Promise<unknown> | unknown;
+}
+
+export interface ConnectDeviceSyncService {
+  getDeviceSyncState(): Promise<unknown> | unknown;
+  /**
+   * Runtime implementations own all Rust-equivalent side effects, including
+   * device-id secrets, snapshot cursors, repository resets, and engine startup.
+   */
+  enableDeviceSync(): Promise<unknown> | unknown;
+  /**
+   * Runtime implementations own all Rust-equivalent side effects, including
+   * device-id secret cleanup, snapshot cursor cleanup, repository reset, and
+   * engine shutdown.
+   */
+  clearDeviceSyncData(): Promise<void> | void;
+  /**
+   * Runtime implementations own all Rust-equivalent side effects, including
+   * device-id secrets, snapshot cursors, repository resets, and engine startup.
+   */
+  reinitializeDeviceSync(): Promise<unknown> | unknown;
+  getDeviceSyncEngineStatus(): Promise<unknown> | unknown;
+  getDeviceSyncPairingSourceStatus(): Promise<unknown> | unknown;
+  getDeviceSyncBootstrapOverwriteCheck(): Promise<unknown> | unknown;
+  reconcileDeviceSyncReadyState(
+    request: ConnectDeviceSyncReconcileReadyRequest,
+  ): Promise<unknown> | unknown;
+  bootstrapDeviceSnapshot(): Promise<unknown> | unknown;
+  triggerDeviceSyncCycle(): Promise<unknown> | unknown;
+  startDeviceSyncBackgroundEngine(): Promise<unknown> | unknown;
+  stopDeviceSyncBackgroundEngine(): Promise<unknown> | unknown;
+  generateDeviceSnapshotNow(): Promise<unknown> | unknown;
+  cancelDeviceSnapshotUpload(): Promise<unknown> | unknown;
 }

@@ -38,6 +38,8 @@ import type {
 import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 import type {
+  ConnectDeviceSyncReconcileReadyRequest,
+  ConnectDeviceSyncService,
   ConnectImportRunsRequest,
   ConnectService,
   ConnectSyncBrokerDataResult,
@@ -94,6 +96,7 @@ export interface BackendRequestHandlerOptions {
   alternativeAssetService?: AlternativeAssetService;
   appUtilityService?: AppUtilityService;
   assetService?: AssetService;
+  connectDeviceSyncService?: ConnectDeviceSyncService;
   connectService?: ConnectService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
@@ -204,6 +207,16 @@ async function routeRequest(
 
   if (options.assetService && url.pathname.startsWith("/api/v1/assets")) {
     return routeAssetRequest(request, url, config, options.assetService);
+  }
+
+  if (isConnectDevicePath(url.pathname)) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    if (options.connectDeviceSyncService) {
+      return routeConnectDeviceSyncRequest(request, url, options.connectDeviceSyncService);
+    }
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
   }
 
   if (isConnectBrokerPath(url.pathname)) {
@@ -579,6 +592,104 @@ function routeConnectRequest(
 
   if (request.method === "GET" && url.pathname === "/api/v1/connect/user") {
     return Promise.resolve(connectService.getUserInfo())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeConnectDeviceSyncRequest(
+  request: Request,
+  url: URL,
+  connectDeviceSyncService: ConnectDeviceSyncService,
+): Promise<Response> | Response {
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/device/sync-state") {
+    return Promise.resolve(connectDeviceSyncService.getDeviceSyncState())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/enable") {
+    return Promise.resolve(connectDeviceSyncService.enableDeviceSync())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/v1/connect/device/sync-data") {
+    return Promise.resolve(connectDeviceSyncService.clearDeviceSyncData())
+      .then(() => jsonResponse(null))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/reinitialize") {
+    return Promise.resolve(connectDeviceSyncService.reinitializeDeviceSync())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/device/engine-status") {
+    return Promise.resolve(connectDeviceSyncService.getDeviceSyncEngineStatus())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/connect/device/pairing-source-status") {
+    return Promise.resolve(connectDeviceSyncService.getDeviceSyncPairingSourceStatus())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/v1/connect/device/bootstrap-overwrite-check"
+  ) {
+    return Promise.resolve(connectDeviceSyncService.getDeviceSyncBootstrapOverwriteCheck())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/api/v1/connect/device/reconcile-ready-state"
+  ) {
+    return handleJsonMutation(request, parseConnectDeviceSyncReconcileReadyRequest, (input) =>
+      Promise.resolve(connectDeviceSyncService.reconcileDeviceSyncReadyState(input)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/bootstrap-snapshot") {
+    return Promise.resolve(connectDeviceSyncService.bootstrapDeviceSnapshot())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/trigger-cycle") {
+    return Promise.resolve(connectDeviceSyncService.triggerDeviceSyncCycle())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/start-background") {
+    return Promise.resolve(connectDeviceSyncService.startDeviceSyncBackgroundEngine())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/stop-background") {
+    return Promise.resolve(connectDeviceSyncService.stopDeviceSyncBackgroundEngine())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/generate-snapshot") {
+    return Promise.resolve(connectDeviceSyncService.generateDeviceSnapshotNow())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/connect/device/cancel-snapshot") {
+    return Promise.resolve(connectDeviceSyncService.cancelDeviceSnapshotUpload())
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
@@ -3182,6 +3293,16 @@ function parseConnectBrokerSyncProfileQuery(
     return sourceSystem;
   }
   return { accountId, sourceSystem };
+}
+
+function parseConnectDeviceSyncReconcileReadyRequest(
+  payload: Record<string, unknown>,
+): ConnectDeviceSyncReconcileReadyRequest | Response {
+  const allowOverwrite = payload.allowOverwrite ?? false;
+  if (typeof allowOverwrite !== "boolean") {
+    return jsonResponse({ code: 400, message: "allowOverwrite must be a boolean" }, 400);
+  }
+  return { allowOverwrite };
 }
 
 function parseWrappedObject<TField extends string>(

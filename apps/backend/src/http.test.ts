@@ -10,7 +10,11 @@ import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService } from "./domains/assets";
-import type { ConnectService, ConnectSyncBrokerDataStatus } from "./domains/connect";
+import type {
+  ConnectDeviceSyncService,
+  ConnectService,
+  ConnectSyncBrokerDataStatus,
+} from "./domains/connect";
 import {
   createContributionLimitRepository,
   createContributionLimitService,
@@ -4050,6 +4054,233 @@ describe("TS backend HTTP skeleton", () => {
       ["import-runs", { limit: 10, offset: -1, runType: "broker" }],
       ["broker-sync-profile", { accountId: "acct-1", sourceSystem: "snaptrade" }],
       ["save-broker-sync-profile", { rules: [{ id: "rule-1" }] }],
+    ]);
+  });
+
+  test("routes migrated Connect device sync seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const connectDeviceSyncService: ConnectDeviceSyncService = {
+      getDeviceSyncState() {
+        calls.push(["sync-state", undefined]);
+        return { state: "READY" };
+      },
+      enableDeviceSync() {
+        calls.push(["enable", undefined]);
+        return { state: "READY", deviceId: "device-1" };
+      },
+      clearDeviceSyncData() {
+        calls.push(["clear-sync-data", undefined]);
+      },
+      reinitializeDeviceSync() {
+        calls.push(["reinitialize", undefined]);
+        return { state: "READY", deviceId: "device-2" };
+      },
+      getDeviceSyncEngineStatus() {
+        calls.push(["engine-status", undefined]);
+        return { backgroundRunning: true };
+      },
+      getDeviceSyncPairingSourceStatus() {
+        calls.push(["pairing-source-status", undefined]);
+        return { status: "ready" };
+      },
+      getDeviceSyncBootstrapOverwriteCheck() {
+        calls.push(["bootstrap-overwrite-check", undefined]);
+        return { bootstrapRequired: false };
+      },
+      reconcileDeviceSyncReadyState(request) {
+        calls.push(["reconcile-ready-state", request]);
+        return { status: "ready", allowOverwrite: request.allowOverwrite };
+      },
+      bootstrapDeviceSnapshot() {
+        calls.push(["bootstrap-snapshot", undefined]);
+        return { status: "skipped" };
+      },
+      triggerDeviceSyncCycle() {
+        calls.push(["trigger-cycle", undefined]);
+        return { status: "ok", pushedCount: 0 };
+      },
+      startDeviceSyncBackgroundEngine() {
+        calls.push(["start-background", undefined]);
+        return { status: "started" };
+      },
+      stopDeviceSyncBackgroundEngine() {
+        calls.push(["stop-background", undefined]);
+        return { status: "stopped" };
+      },
+      generateDeviceSnapshotNow() {
+        calls.push(["generate-snapshot", undefined]);
+        return { status: "uploaded", snapshotId: "snapshot-1" };
+      },
+      cancelDeviceSnapshotUpload() {
+        calls.push(["cancel-snapshot", undefined]);
+        return { status: "cancel_requested" };
+      },
+    };
+    const handler = createBackendRequestHandler(config, { connectDeviceSyncService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/connect/device/sync-state"))).status,
+    ).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/connect/device/sync-state", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/sync-state", {
+            headers: authHeaders,
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ state: "READY" });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/enable", {
+            method: "POST",
+            headers: authHeaders,
+            body: "not-json",
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ state: "READY", deviceId: "device-1" });
+
+    const clearResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/connect/device/sync-data", {
+        method: "DELETE",
+        headers: authHeaders,
+        body: "not-json",
+      }),
+    );
+    expect(clearResponse.status).toBe(200);
+    expect(clearResponse.headers.get("content-type")).toBe("application/json");
+    expect(await clearResponse.text()).toBe("null");
+
+    for (const [path, expected] of [
+      ["/api/v1/connect/device/reinitialize", { state: "READY", deviceId: "device-2" }],
+      ["/api/v1/connect/device/bootstrap-snapshot", { status: "skipped" }],
+      ["/api/v1/connect/device/trigger-cycle", { status: "ok", pushedCount: 0 }],
+      ["/api/v1/connect/device/start-background", { status: "started" }],
+      ["/api/v1/connect/device/stop-background", { status: "stopped" }],
+      [
+        "/api/v1/connect/device/generate-snapshot",
+        { status: "uploaded", snapshotId: "snapshot-1" },
+      ],
+      ["/api/v1/connect/device/cancel-snapshot", { status: "cancel_requested" }],
+    ] as const) {
+      await expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1${path}`, {
+              method: "POST",
+              headers: authHeaders,
+              body: "not-json",
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual(expected);
+    }
+
+    for (const [path, expected] of [
+      ["/api/v1/connect/device/engine-status", { backgroundRunning: true }],
+      ["/api/v1/connect/device/pairing-source-status", { status: "ready" }],
+      ["/api/v1/connect/device/bootstrap-overwrite-check", { bootstrapRequired: false }],
+    ] as const) {
+      await expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1${path}`, {
+              headers: authHeaders,
+            }),
+          )
+        ).json(),
+      ).resolves.toEqual(expected);
+    }
+
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/reconcile-ready-state", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({}),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "ready", allowOverwrite: false });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/reconcile-ready-state", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ allowOverwrite: true }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "ready", allowOverwrite: true });
+    await expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/reconcile-ready-state", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ allow_overwrite: true }),
+          }),
+        )
+      ).json(),
+    ).resolves.toEqual({ status: "ready", allowOverwrite: false });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/reconcile-ready-state", {
+            method: "POST",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/connect/device/reconcile-ready-state", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ allowOverwrite: "yes" }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect((await handler(new Request("http://127.0.0.1/api/v1/connect/devicefoo"))).status).toBe(
+      401,
+    );
+
+    expect(calls).toEqual([
+      ["sync-state", undefined],
+      ["enable", undefined],
+      ["clear-sync-data", undefined],
+      ["reinitialize", undefined],
+      ["bootstrap-snapshot", undefined],
+      ["trigger-cycle", undefined],
+      ["start-background", undefined],
+      ["stop-background", undefined],
+      ["generate-snapshot", undefined],
+      ["cancel-snapshot", undefined],
+      ["engine-status", undefined],
+      ["pairing-source-status", undefined],
+      ["bootstrap-overwrite-check", undefined],
+      ["reconcile-ready-state", { allowOverwrite: false }],
+      ["reconcile-ready-state", { allowOverwrite: true }],
+      ["reconcile-ready-state", { allowOverwrite: false }],
     ]);
   });
 

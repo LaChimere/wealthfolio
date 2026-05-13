@@ -10,22 +10,26 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a guarded Connect broker/session HTTP seam
-after the health/classification route seam:
+PR 5 continues vertical slices with a guarded Connect device-sync enrollment and
+engine HTTP seam after the non-device Connect route seam:
 
-- Add an injectable `ConnectService` seam for non-device `/api/v1/connect/*`
-  routes covering session storage/status/restore, broker list/sync operations,
-  local synced data reads, import-run queries, broker sync profiles,
-  subscription plans, public plans, and user info.
-- Preserve Rust HTTP semantics for JSON `null` session mutations, body-ignoring
-  sync POST routes, 202/403/501 broker-sync trigger status, import-run query
-  defaults/validation, direct broker-profile body pass-through, method/path
-  inertness, and sidecar bearer-token checks.
-- Keep `/api/v1/connect/device/*` out of scope for the dedicated device-sync
-  runtime parity slice.
-- Defer real Connect token lifecycle, cloud HTTP clients, broker sync
-  orchestration, local sync repositories, entitlement checks, and event
-  production to dedicated Connect runtime parity slices.
+- Add an injectable `ConnectDeviceSyncService` seam for
+  `/api/v1/connect/device/*` routes covering sync state, enable, clear,
+  reinitialize, engine status, pairing-source status, bootstrap overwrite check,
+  reconcile-ready-state, bootstrap snapshot, manual cycle trigger, background
+  engine start/stop, snapshot generation, and snapshot cancellation.
+- Preserve Rust HTTP semantics for JSON `null` sync-data clearing, body-ignoring
+  no-body device POST routes, reconcile-ready-state `allowOverwrite` defaulting,
+  method/path inertness, and sidecar bearer-token checks. The TS seam
+  intentionally keeps the existing simplified JSON parser model that collapses
+  Axum's 415/422 extractor distinctions into 400 until runtime parity is
+  implemented.
+- Keep service implementations responsible for Rust-equivalent side effects such
+  as device-id secrets, snapshot cursor cleanup, repository resets, entitlement
+  checks, and background-engine lifecycle.
+- Defer real token lifecycle, E2EE enrollment, sync engine, snapshot/upload
+  runtime, local repositories, feature-flag errors, and background worker
+  behavior to dedicated Connect/device-sync runtime parity slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
@@ -35,12 +39,12 @@ secret storage, AI provider runtime, alternative asset runtime, asset runtime,
 app utility runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, or AI chat runtime
 deletion, real sync crypto runtime implementation, real health/classification
-runtime implementation, real Connect runtime implementation, or device-sync
-runtime implementation is in scope for this slice.
+runtime implementation, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 
-1. Continue other low-risk/high-risk route seams before calculation-heavy work.
+1. Continue remaining high-risk route seams before calculation-heavy work.
 2. Migrate Connect/device-sync runtime behavior with dedicated service parity
    gates.
 3. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.

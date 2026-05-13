@@ -67,10 +67,11 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, AI chat, sync crypto, Connect broker/session, alternative assets,
-    assets, app utilities, portfolio metrics, holdings, add-ons, market-data,
-    and activities TS repository/service or route config implementations plus
-    guarded route tests in `apps/backend/src/domains/settings.ts`,
+    provider, AI chat, sync crypto, Connect broker/session and device-sync
+    enrollment/engine, alternative assets, assets, app utilities, portfolio
+    metrics, holdings, add-ons, market-data, and activities TS
+    repository/service or route config implementations plus guarded route tests
+    in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -122,9 +123,10 @@
     execution, health cache behavior, and taxonomy/asset side effects are
     deferred to health/classification parity slices; real Connect token
     lifecycle, cloud HTTP clients, broker sync orchestration, local sync
-    repositories, subscription entitlement checks, event production, and
-    device-sync enrollment/engine behavior are deferred to Connect/device-sync
-    parity slices.
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+    background workers, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -531,6 +533,23 @@ contract:
   type-safety, and test coverage.
 - `pr5-connect-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-connect-device-sync-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable Connect device sync state, enable, clear,
+  reinitialize, engine status, pairing-source status, bootstrap overwrite check,
+  reconcile-ready-state, bootstrap snapshot, cycle trigger, background engine
+  start/stop, snapshot generation, and snapshot cancellation routes, guarded
+  HTTP route access, route inertness without injection, JSON `null` clear
+  responses, body-ignoring no-body routes, `allowOverwrite` defaulting and
+  camelCase-only request handling, explicit device path boundaries, sidecar
+  auth, and deferred real Connect/device-sync runtime behavior.
+- `pr5-connect-device-sync-route-seam-review`: rubber-duck and code review found
+  no actionable issues after confirming route parity, sidecar auth, path
+  boundaries, body/no-body behavior, JSON `null` clear responses,
+  reconcile-ready-state validation/defaulting, type-safety, docs accuracy, and
+  test coverage.
+- `pr5-connect-device-sync-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -544,8 +563,9 @@ contract:
   assets route seam, app utility route seam, portfolio metrics route seam,
   holdings route seam, add-ons route seam, market-data route seam,
   activities/import route seam, AI chat route seam, sync crypto route seam, and
-  health/classification route seam, and Connect broker/session route seam slices
-  implemented; broader migration remains active.
+  health/classification route seam, Connect broker/session route seam, and
+  Connect device-sync enrollment/engine route seam slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -579,5 +599,6 @@ contract:
   health cache behavior, and taxonomy/asset side effects move with
   health/classification parity slices; real Connect token lifecycle, cloud HTTP
   clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, and device-sync enrollment/engine
-  behavior move with Connect/device-sync parity slices.
+  entitlement checks, event production, E2EE enrollment, sync engine,
+  snapshot/upload runtime, feature-flag errors, background workers, and secret
+  side effects move with Connect/device-sync parity slices.

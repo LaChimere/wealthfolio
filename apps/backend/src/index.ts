@@ -83,6 +83,8 @@ export type {
 } from "./domains/app-utilities";
 export type { Asset, AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 export type {
+  ConnectDeviceSyncReconcileReadyRequest,
+  ConnectDeviceSyncService,
   ConnectImportRunsRequest,
   ConnectService,
   ConnectSyncBrokerDataResult,
