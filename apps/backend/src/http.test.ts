@@ -13,6 +13,7 @@ import {
 } from "./domains/custom-providers";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
+import { createHealthRepository, createHealthService } from "./domains/health";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -748,6 +749,108 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("routes migrated health dismissals and config only when a service is provided", async () => {
+    const db = createHealthDb();
+    const handler = createBackendRequestHandler(config, {
+      healthService: createHealthService(createHealthRepository(db)),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/health/dismissed"))).status).toBe(
+        401,
+      );
+
+      const dismissResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/dismiss", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ issueId: "price_stale:AAPL", dataHash: "hash-1" }),
+        }),
+      );
+      expect(dismissResponse.status).toBe(200);
+      expect(await dismissResponse.text()).toBe("");
+
+      const dismissedResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/dismissed", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await dismissedResponse.json()).toEqual(["price_stale:AAPL"]);
+
+      const configResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/config", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await configResponse.json()).toMatchObject({
+        priceStaleWarningHours: 24,
+        priceStaleCriticalHours: 72,
+      });
+
+      const updateConfigResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/config", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            priceStaleWarningHours: 12,
+            priceStaleCriticalHours: 48,
+            fxStaleWarningHours: 24,
+            fxStaleCriticalHours: 72,
+            mvEscalationThreshold: 0.3,
+            classificationWarnThreshold: 0.05,
+          }),
+        }),
+      );
+      expect(updateConfigResponse.status).toBe(200);
+
+      const invalidConfigResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/config", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            priceStaleWarningHours: 72,
+            priceStaleCriticalHours: 48,
+            fxStaleWarningHours: 24,
+            fxStaleCriticalHours: 72,
+            mvEscalationThreshold: 0.3,
+            classificationWarnThreshold: 0.05,
+          }),
+        }),
+      );
+      expect(invalidConfigResponse.status).toBe(400);
+
+      const restoreResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/restore", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ issueId: "price_stale:AAPL" }),
+        }),
+      );
+      expect(restoreResponse.status).toBe(200);
+
+      const deferredStatusResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/status", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deferredStatusResponse.status).toBe(404);
+    } finally {
+      db.close();
+    }
+  });
+
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });
@@ -957,6 +1060,18 @@ function createExchangeRatesDb(): Database {
       notes TEXT,
       created_at TEXT NOT NULL,
       timestamp TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+function createHealthDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE health_issue_dismissals (
+      issue_id TEXT NOT NULL PRIMARY KEY,
+      dismissed_at TEXT NOT NULL,
+      data_hash TEXT NOT NULL
     );
   `);
   return db;

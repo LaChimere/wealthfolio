@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 10
+turns_used: 11
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T01:38:14+08:00"
+updated_at: "2026-05-14T02:05:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -106,6 +106,11 @@ updated_at: "2026-05-14T01:38:14+08:00"
   add/update/delete behavior, FX asset creation, quote upserts, provider-config
   parity for common providers, asset sync hooks, guarded HTTP routes, and
   targeted backend tests.
+- Turn 11: Implemented the low-risk health local-state TS slice: issue dismissal
+  save/replace/restore/list behavior, in-memory health config defaults and
+  validation, guarded `/api/v1/health/{dismiss,restore,dismissed,config}`
+  routes, explicit deferred health status/check/fix behavior, and targeted
+  backend tests.
 
 ## Deferred items
 
@@ -122,6 +127,10 @@ updated_at: "2026-05-14T01:38:14+08:00"
 - FX currency converter, historical lookup, register-pair, and automatic market
   sync behavior remain active follow-ups. reason=they depend on calculation,
   quote history, and provider sync parity beyond local exchange-rate CRUD.
+- Health status/check/fix endpoints and classification migration behavior remain
+  active follow-ups. reason=they depend on holdings, quotes, FX, assets,
+  valuation, taxonomy, market sync, and classification migration parity beyond
+  local health dismissal/config state.
 
 ## Blockers
 

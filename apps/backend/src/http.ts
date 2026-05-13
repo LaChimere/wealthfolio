@@ -10,6 +10,7 @@ import type {
 } from "./domains/custom-providers";
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
+import type { HealthConfig, HealthService } from "./domains/health";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -29,6 +30,7 @@ export interface BackendRequestHandlerOptions {
   customProviderService?: CustomProviderService;
   exchangeRateService?: ExchangeRateService;
   goalService?: GoalService;
+  healthService?: HealthService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -116,6 +118,10 @@ async function routeRequest(
     return routeGoalRequest(request, url, config, options.goalService);
   }
 
+  if (options.healthService && url.pathname.startsWith("/api/v1/health")) {
+    return routeHealthRequest(request, url, config, options.healthService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -130,6 +136,45 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeHealthRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  healthService: HealthService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/health/dismissed") {
+    return healthService.getDismissedIds().then(jsonResponse).catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/health/dismiss") {
+    return handleJsonMutationEmpty(request, parseHealthDismissRequest, (body) =>
+      healthService.dismissIssue(body.issueId, body.dataHash),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/health/restore") {
+    return handleJsonMutationEmpty(request, parseHealthRestoreRequest, (body) =>
+      healthService.restoreIssue(body.issueId),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/health/config") {
+    return healthService.getConfig().then(jsonResponse).catch(domainErrorResponse);
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/health/config") {
+    return handleJsonMutationEmpty(request, parseHealthConfig, (config) =>
+      healthService.updateConfig(config),
+    );
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -713,6 +758,27 @@ async function handleJsonMutation<TInput, TOutput>(
   }
 }
 
+async function handleJsonMutationEmpty<TInput>(
+  request: Request,
+  parse: (payload: Record<string, unknown>) => TInput | Response,
+  mutate: (input: TInput) => Promise<void>,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input = parse(payload);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    await mutate(input);
+    return new Response(null, { status: 200 });
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
 async function handleJsonArrayMutation<TInput, TOutput>(
   request: Request,
   parseItem: (payload: Record<string, unknown>, index: number) => TInput | Response,
@@ -738,6 +804,84 @@ async function handleJsonArrayMutation<TInput, TOutput>(
   } catch (error) {
     return domainErrorResponse(error);
   }
+}
+
+function parseHealthDismissRequest(
+  payload: Record<string, unknown>,
+): { issueId: string; dataHash: string } | Response {
+  const issueId = parseRequiredString(payload.issueId, "issueId");
+  if (issueId instanceof Response) {
+    return issueId;
+  }
+  const dataHash = parseRequiredString(payload.dataHash, "dataHash");
+  if (dataHash instanceof Response) {
+    return dataHash;
+  }
+  return { issueId, dataHash };
+}
+
+function parseHealthRestoreRequest(
+  payload: Record<string, unknown>,
+): { issueId: string } | Response {
+  const issueId = parseRequiredString(payload.issueId, "issueId");
+  if (issueId instanceof Response) {
+    return issueId;
+  }
+  return { issueId };
+}
+
+function parseHealthConfig(payload: Record<string, unknown>): HealthConfig | Response {
+  const priceStaleWarningHours = parseRequiredInteger(
+    payload.priceStaleWarningHours,
+    "priceStaleWarningHours",
+  );
+  if (priceStaleWarningHours instanceof Response) {
+    return priceStaleWarningHours;
+  }
+  const priceStaleCriticalHours = parseRequiredInteger(
+    payload.priceStaleCriticalHours,
+    "priceStaleCriticalHours",
+  );
+  if (priceStaleCriticalHours instanceof Response) {
+    return priceStaleCriticalHours;
+  }
+  const fxStaleWarningHours = parseRequiredInteger(
+    payload.fxStaleWarningHours,
+    "fxStaleWarningHours",
+  );
+  if (fxStaleWarningHours instanceof Response) {
+    return fxStaleWarningHours;
+  }
+  const fxStaleCriticalHours = parseRequiredInteger(
+    payload.fxStaleCriticalHours,
+    "fxStaleCriticalHours",
+  );
+  if (fxStaleCriticalHours instanceof Response) {
+    return fxStaleCriticalHours;
+  }
+  const mvEscalationThreshold = parseRequiredNumber(
+    payload.mvEscalationThreshold,
+    "mvEscalationThreshold",
+  );
+  if (mvEscalationThreshold instanceof Response) {
+    return mvEscalationThreshold;
+  }
+  const classificationWarnThreshold = parseRequiredNumber(
+    payload.classificationWarnThreshold,
+    "classificationWarnThreshold",
+  );
+  if (classificationWarnThreshold instanceof Response) {
+    return classificationWarnThreshold;
+  }
+
+  return {
+    priceStaleWarningHours,
+    priceStaleCriticalHours,
+    fxStaleWarningHours,
+    fxStaleCriticalHours,
+    mvEscalationThreshold,
+    classificationWarnThreshold,
+  };
 }
 
 function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {

@@ -88,6 +88,15 @@ export {
   type NewGoal,
 } from "./domains/goals";
 export {
+  DEFAULT_HEALTH_CONFIG,
+  createHealthRepository,
+  createHealthService,
+  type HealthConfig,
+  type HealthRepository,
+  type HealthService,
+  type IssueDismissal,
+} from "./domains/health";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,
