@@ -11,7 +11,13 @@ export {
   type BackendRequestHandlerOptions,
 } from "./http";
 export { startBackendServer, type BackendServerHandle } from "./server";
-export { createEventBus, type BackendEvent, type BackendEventBus } from "./events";
+export {
+  createEventBus,
+  createEventStream,
+  formatSseEvent,
+  type BackendEvent,
+  type BackendEventBus,
+} from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
 export {
   ACCOUNTS_CHANGED_EVENT,

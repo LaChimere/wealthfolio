@@ -21,6 +21,7 @@ import {
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
+import { createEventBus } from "./events";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
@@ -996,6 +997,30 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(deferredEventsResponse.status).toBe(404);
+  });
+
+  test("routes migrated event stream only when an event bus is provided", async () => {
+    const eventBus = createEventBus();
+    const handler = createBackendRequestHandler(config, { eventBus });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/events/stream"))).status).toBe(401);
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/v1/events/stream", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    eventBus.publish({ name: "portfolio_update_start", payload: { accountId: "acc-1" } });
+    const event = await reader?.read();
+    expect(new TextDecoder().decode(event?.value)).toBe(
+      'event: portfolio_update_start\ndata: {"accountId":"acc-1"}\n\n',
+    );
+    await reader?.cancel();
   });
 
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {

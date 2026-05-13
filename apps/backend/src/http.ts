@@ -28,12 +28,14 @@ import type {
   TaxonomyCategory,
   TaxonomyService,
 } from "./domains/taxonomies";
+import { createEventStream, type BackendEventBus } from "./events";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
 export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
   accountService?: AccountService;
+  eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
   exchangeRateService?: ExchangeRateService;
@@ -132,6 +134,10 @@ async function routeRequest(
     return routeHealthRequest(request, url, config, options.healthService);
   }
 
+  if (options.eventBus && url.pathname === "/api/v1/events/stream") {
+    return routeEventStreamRequest(request, config, options.eventBus);
+  }
+
   if (
     options.marketDataProviderService &&
     (url.pathname === "/api/v1/providers" || url.pathname.startsWith("/api/v1/providers/settings"))
@@ -160,6 +166,27 @@ async function routeRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeEventStreamRequest(
+  request: Request,
+  config: BackendRuntimeConfig,
+  eventBus: BackendEventBus,
+): Response {
+  if (request.method !== "GET") {
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  return new Response(createEventStream(eventBus), {
+    headers: {
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      "content-type": "text/event-stream",
+    },
+  });
 }
 
 async function routePortfolioJobRequest(

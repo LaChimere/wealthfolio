@@ -10,23 +10,21 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with portfolio job trigger routes after the
-market-data provider settings slice:
+PR 5 continues vertical slices with backend event stream transport after the
+portfolio job trigger slice:
 
-- Add TS portfolio job route config behavior and guarded route tests for
-  `/portfolio/update` and `/portfolio/recalculate`.
-- Preserve Rust route semantics: empty or `none` update requests default to
-  incremental market sync, empty or `none` recalculation requests default to
-  five-year backfill history, update jobs use incremental snapshot/valuation
-  modes, and recalculation jobs use full snapshot/valuation modes.
-- Defer SSE event streaming and actual portfolio job execution to later
+- Add TS SSE formatting and guarded route tests for `/events/stream`.
+- Preserve Rust transport semantics: named SSE events, JSON payloads with `null`
+  for payload-less events, no-cache event-stream headers, and periodic
+  keep-alive comments.
+- Defer actual portfolio job execution and event production to later
   portfolio/calculation slices because those paths require market sync,
   holdings, snapshots, valuations, accounts, health, and FX service parity.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job
+accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 deletion is in scope for this slice.
 
 ## Next slices

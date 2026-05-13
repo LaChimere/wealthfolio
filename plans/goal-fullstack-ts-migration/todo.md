@@ -66,9 +66,9 @@
     inert for production until TS cutover.
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
-    provider settings, and portfolio job trigger TS repository/service or route
-    config implementations plus guarded route tests in
-    `apps/backend/src/domains/settings.ts`,
+    provider settings, portfolio job trigger, and event stream TS
+    repository/service or route config implementations plus guarded route tests
+    in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -78,14 +78,15 @@
     `apps/backend/src/domains/health.ts`,
     `apps/backend/src/domains/market-data-providers.ts`,
     `apps/backend/src/domains/portfolio-jobs.ts`, and
-    `apps/backend/src/http.test.ts`. Health status/check/fix and taxonomy
-    migration endpoints are deferred to the health/classification service slice;
-    custom provider `test-source` is deferred to an external-I/O slice; goals
-    plan writes and calculation endpoints are deferred to calculation-heavy
-    slices; FX converter/history and provider sync behavior plus broader
-    market-data quote/search/import/sync behavior are deferred to
-    calculation/market-data slices; actual portfolio job execution and SSE
-    streaming are deferred to portfolio/calculation slices.
+    `apps/backend/src/events.ts`, and `apps/backend/src/http.test.ts`. Health
+    status/check/fix and taxonomy migration endpoints are deferred to the
+    health/classification service slice; custom provider `test-source` is
+    deferred to an external-I/O slice; goals plan writes and calculation
+    endpoints are deferred to calculation-heavy slices; FX converter/history and
+    provider sync behavior plus broader market-data quote/search/import/sync
+    behavior are deferred to calculation/market-data slices; actual portfolio
+    job execution and event production are deferred to portfolio/calculation
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -283,6 +284,16 @@ contract:
   coverage, and re-review found no actionable issues.
 - `pr5-portfolio-job-triggers-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-event-stream-transport`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes SSE event formatting, payload-less `null` data, stream
+  subscription/cancel behavior, guarded HTTP event-stream route, stream headers,
+  and event delivery through the TS event bus.
+- `pr5-event-stream-transport-review`: code review found no actionable issues
+  across Rust transport parity, route compatibility/security, stream cleanup,
+  type-safety, or test coverage.
+- `pr5-event-stream-transport-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -291,13 +302,13 @@ contract:
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
   mutation, assignment, import/export, custom provider CRUD, and scoped goals
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
-  plus market-data provider settings and portfolio job trigger slices
-  implemented; broader migration remains active.
+  plus market-data provider settings, portfolio job trigger, and event stream
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
   with calculation-heavy goal slices; FX converter/history/register-pair and
   provider sync plus broader market-data quote/search/import/sync behavior move
-  with calculation/market-data slices; actual portfolio job execution and SSE
-  streaming move with portfolio/calculation slices.
+  with calculation/market-data slices; actual portfolio job execution and event
+  production move with portfolio/calculation slices.
