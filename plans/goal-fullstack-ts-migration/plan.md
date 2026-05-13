@@ -10,21 +10,24 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 starts low-risk domain vertical slices with settings:
+PR 5 continues low-risk domain vertical slices with accounts after the settings
+slice:
 
-- Add TS settings models, repository/service behavior, and route tests.
-- Preserve Rust defaults and boolean parsing for `app_settings`.
-- Canonicalize and reject invalid IANA timezones before persistence.
+- Add TS accounts models, repository/service behavior, and route tests.
+- Preserve Rust account create/list/update/delete semantics, including generated
+  IDs, immutable currency, broker-managed fields, archive/tracking-mode
+  handling, group `Option` behavior, domain events, and orphaned asset cleanup
+  hooks.
 - Keep the route guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
-settings deletion is in scope for this slice.
+accounts/settings deletion is in scope for this slice.
 
 ## Next slices
 
-1. Continue low-risk domain slices: accounts, contribution limits, taxonomies,
-   and other CRUD/read-heavy domains.
+1. Continue low-risk domain slices: contribution limits, taxonomies, and other
+   CRUD/read-heavy domains.
 2. Migrate calculation-heavy domains with Rust-vs-TS parity evidence.
 3. Cut over Electron/web to the TS backend by default after parity and rollback
    gates are satisfied.

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
 import type { BackendRuntimeConfig } from "./config";
+import { createAccountRepository, createAccountService } from "./domains/accounts";
 import { createSettingsService } from "./domains/settings";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
@@ -140,4 +141,117 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated accounts domain only when a service is provided", async () => {
+    const db = createAccountsDb();
+    const handler = createBackendRequestHandler(config, {
+      accountService: createAccountService(createAccountRepository(db)),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/accounts"))).status).toBe(401);
+
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/accounts", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "Brokerage",
+            accountType: "SECURITIES",
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+          }),
+        }),
+      );
+      const createdAccount = await createResponse.json();
+      expect(createResponse.status).toBe(200);
+      expect(createdAccount).toMatchObject({
+        name: "Brokerage",
+        currency: "USD",
+        isArchived: false,
+        trackingMode: "NOT_SET",
+      });
+
+      const updateResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/accounts/${createdAccount.id}`, {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "Brokerage Archived",
+            accountType: "SECURITIES",
+            currency: "CAD",
+            isDefault: false,
+            isActive: false,
+            isArchived: true,
+            trackingMode: "HOLDINGS",
+          }),
+        }),
+      );
+      const updatedAccount = await updateResponse.json();
+      expect(updateResponse.status).toBe(200);
+      expect(updatedAccount).toMatchObject({
+        id: createdAccount.id,
+        name: "Brokerage Archived",
+        currency: "USD",
+        isArchived: true,
+        trackingMode: "HOLDINGS",
+      });
+
+      const listResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/accounts", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await listResponse.json()).toEqual([]);
+
+      const includeArchivedResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/accounts?includeArchived=true", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await includeArchivedResponse.json()).toHaveLength(1);
+
+      const deleteResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/accounts/${createdAccount.id}`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deleteResponse.status).toBe(204);
+    } finally {
+      db.close();
+    }
+  });
 });
+
+function createAccountsDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE accounts (
+      id TEXT NOT NULL PRIMARY KEY,
+      name TEXT NOT NULL,
+      account_type TEXT NOT NULL DEFAULT 'SECURITIES',
+      "group" TEXT,
+      currency TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      platform_id TEXT,
+      account_number TEXT,
+      meta TEXT,
+      provider TEXT,
+      provider_account_id TEXT,
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      tracking_mode TEXT NOT NULL DEFAULT 'NOT_SET'
+    );
+  `);
+  return db;
+}

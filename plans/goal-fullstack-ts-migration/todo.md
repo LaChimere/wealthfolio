@@ -64,8 +64,9 @@
   - Acceptance criteria: each migrated domain has Rust-vs-TS parity for reads,
     writes, validation, errors, events, and adapter behavior while remaining
     inert for production until TS cutover.
-  - Evidence: settings domain TS repository/service and guarded route tests in
-    `apps/backend/src/domains/settings.ts` and `apps/backend/src/http.test.ts`.
+  - Evidence: settings and accounts domain TS repository/service implementations
+    plus guarded route tests in `apps/backend/src/domains/settings.ts`,
+    `apps/backend/src/domains/accounts.ts`, and `apps/backend/src/http.test.ts`.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -133,10 +134,22 @@ contract:
 - `pr5-settings-domain`: targeted checks passed:
   `bun run --cwd apps/backend test` and `bun run --cwd apps/backend type-check`.
 - `pr5-settings-repo-check`: full repo check passed with `bun run check`.
+- `pr5-accounts-domain`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Accounts coverage includes generated IDs, list filters/sort order, immutable
+  update fields, archive/tracking-mode preservation, Rust-compatible group
+  clearing, delete events, orphaned investment cleanup hooks, and guarded HTTP
+  routes.
+- `pr5-accounts-review`: code review found transaction-boundary and event
+  snapshot issues during refinement; create/update now read back inside
+  transaction boundaries and update events use transaction-captured before/after
+  snapshots. Final review found no remaining actionable issues.
+- `pr5-accounts-repo-check`: full repo check passed with `bun run check`.
 
 ## Result
 
 - Outcome: PR 1 contract foundation, PR 2 guarded TS backend runtime skeleton,
   PR 3 TS SQLite foundation, and PR 4 compatibility preflights implemented; PR 5
-  settings domain slice implemented; broader migration remains active.
+  settings and accounts domain slices implemented; broader migration remains
+  active.
 - Follow-ups: continue low-risk domain slices.

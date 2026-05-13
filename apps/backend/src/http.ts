@@ -1,10 +1,13 @@
 import type { BackendRuntimeConfig } from "./config";
+import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
+import { parseTrackingMode } from "./domains/accounts";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import { sidecarTokenAuthorized } from "./sidecar-auth";
 
 export interface BackendRequestHandlerOptions {
   includeDebugRoutes?: boolean;
   debugDelayMs?: number;
+  accountService?: AccountService;
   settingsService?: SettingsService;
 }
 
@@ -62,6 +65,10 @@ async function routeRequest(
     return jsonResponse({ requiresPassword: Boolean(config.authPasswordHash) });
   }
 
+  if (options.accountService && url.pathname.startsWith("/api/v1/accounts")) {
+    return await routeAccountRequest(request, url, config, options.accountService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -75,6 +82,72 @@ async function routeRequest(
         return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
       }
       return jsonResponse({ ok: true });
+    }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function routeAccountRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  accountService: AccountService,
+): Promise<Response> {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/accounts") {
+    const includeArchived = url.searchParams.get("includeArchived") === "true";
+    return jsonResponse(
+      includeArchived ? accountService.getAllAccounts() : accountService.getNonArchivedAccounts(),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/accounts") {
+    const payload = await parseJsonBody(request);
+    if (payload instanceof Response) {
+      return payload;
+    }
+    const newAccount = parseNewAccount(payload);
+    if (newAccount instanceof Response) {
+      return newAccount;
+    }
+    try {
+      return jsonResponse(await accountService.createAccount(newAccount));
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  const accountId = accountIdFromPath(url.pathname);
+  if (!accountId) {
+    return jsonResponse({ code: 404, message: "Not Found" }, 404);
+  }
+
+  if (request.method === "PUT") {
+    const payload = await parseJsonBody(request);
+    if (payload instanceof Response) {
+      return payload;
+    }
+    const accountUpdate = parseAccountUpdate(payload, accountId);
+    if (accountUpdate instanceof Response) {
+      return accountUpdate;
+    }
+    try {
+      return jsonResponse(await accountService.updateAccount(accountUpdate));
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
+  }
+
+  if (request.method === "DELETE") {
+    try {
+      await accountService.deleteAccount(accountId);
+      return new Response(null, { status: 204 });
+    } catch (error) {
+      return domainErrorResponse(error);
     }
   }
 
@@ -117,6 +190,11 @@ async function routeSettingsRequest(
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
+function accountIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/accounts\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 function applyCors(response: Response, request: Request, config: BackendRuntimeConfig): Response {
   const origin = request.headers.get("origin");
   const allowedOrigin = resolveAllowedOrigin(origin, config.cors.allowOrigins);
@@ -156,6 +234,13 @@ function jsonResponse(body: unknown, status = 200): Response {
       "content-type": "application/json",
     },
   });
+}
+
+function domainErrorResponse(error: unknown): Response {
+  return jsonResponse(
+    { code: 400, message: error instanceof Error ? error.message : String(error) },
+    400,
+  );
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | Response> {
@@ -203,4 +288,182 @@ function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate |
   }
 
   return update;
+}
+
+function parseNewAccount(payload: Record<string, unknown>): NewAccount | Response {
+  const name = payload.name;
+  const accountType = payload.accountType;
+  const currency = payload.currency;
+  const isDefault = payload.isDefault;
+  const isActive = payload.isActive;
+  if (typeof name !== "string") {
+    return jsonResponse({ code: 400, message: "name must be a string" }, 400);
+  }
+  if (typeof accountType !== "string") {
+    return jsonResponse({ code: 400, message: "accountType must be a string" }, 400);
+  }
+  if (typeof currency !== "string") {
+    return jsonResponse({ code: 400, message: "currency must be a string" }, 400);
+  }
+  if (typeof isDefault !== "boolean") {
+    return jsonResponse({ code: 400, message: "isDefault must be a boolean" }, 400);
+  }
+  if (typeof isActive !== "boolean") {
+    return jsonResponse({ code: 400, message: "isActive must be a boolean" }, 400);
+  }
+  const optionals = parseAccountOptionals(payload);
+  if (optionals instanceof Response) {
+    return optionals;
+  }
+  const id = parseOptionalString(payload.id, "id");
+  if (id instanceof Response) {
+    return id;
+  }
+  const isArchived = parseOptionalBoolean(payload.isArchived, "isArchived");
+  if (isArchived instanceof Response) {
+    return isArchived;
+  }
+  const trackingMode = parseOptionalTrackingMode(payload.trackingMode);
+  if (trackingMode instanceof Response) {
+    return trackingMode;
+  }
+
+  return {
+    id,
+    name,
+    accountType,
+    group: optionals.group,
+    currency,
+    isDefault,
+    isActive,
+    isArchived,
+    trackingMode,
+    platformId: optionals.platformId,
+    accountNumber: optionals.accountNumber,
+    meta: optionals.meta,
+    provider: optionals.provider,
+    providerAccountId: optionals.providerAccountId,
+  };
+}
+
+function parseAccountUpdate(
+  payload: Record<string, unknown>,
+  accountId: string,
+): AccountUpdate | Response {
+  const name = payload.name;
+  const accountType = payload.accountType;
+  const isDefault = payload.isDefault;
+  const isActive = payload.isActive;
+  if (typeof name !== "string") {
+    return jsonResponse({ code: 400, message: "name must be a string" }, 400);
+  }
+  if (typeof accountType !== "string") {
+    return jsonResponse({ code: 400, message: "accountType must be a string" }, 400);
+  }
+  if (typeof isDefault !== "boolean") {
+    return jsonResponse({ code: 400, message: "isDefault must be a boolean" }, 400);
+  }
+  if (typeof isActive !== "boolean") {
+    return jsonResponse({ code: 400, message: "isActive must be a boolean" }, 400);
+  }
+  const optionals = parseAccountOptionals(payload);
+  if (optionals instanceof Response) {
+    return optionals;
+  }
+  const isArchived = parseOptionalBoolean(payload.isArchived, "isArchived");
+  if (isArchived instanceof Response) {
+    return isArchived;
+  }
+  const trackingMode = parseOptionalTrackingMode(payload.trackingMode);
+  if (trackingMode instanceof Response) {
+    return trackingMode;
+  }
+
+  return {
+    id: accountId,
+    name,
+    accountType,
+    group: optionals.group,
+    isDefault,
+    isActive,
+    isArchived,
+    trackingMode,
+    platformId: optionals.platformId,
+    accountNumber: optionals.accountNumber,
+    meta: optionals.meta,
+    provider: optionals.provider,
+    providerAccountId: optionals.providerAccountId,
+  };
+}
+
+function parseAccountOptionals(payload: Record<string, unknown>):
+  | {
+      group?: string | null;
+      platformId?: string | null;
+      accountNumber?: string | null;
+      meta?: string | null;
+      provider?: string | null;
+      providerAccountId?: string | null;
+    }
+  | Response {
+  const stringOrNullFields = [
+    "group",
+    "platformId",
+    "accountNumber",
+    "meta",
+    "provider",
+    "providerAccountId",
+  ] as const;
+  const parsed: {
+    group?: string | null;
+    platformId?: string | null;
+    accountNumber?: string | null;
+    meta?: string | null;
+    provider?: string | null;
+    providerAccountId?: string | null;
+  } = {};
+
+  for (const field of stringOrNullFields) {
+    const value = payload[field];
+    if (value === undefined) {
+      continue;
+    }
+    if (value !== null && typeof value !== "string") {
+      return jsonResponse({ code: 400, message: `${field} must be a string or null` }, 400);
+    }
+    parsed[field] = value;
+  }
+  return parsed;
+}
+
+function parseOptionalString(value: unknown, field: string): string | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalBoolean(value: unknown, field: string): boolean | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    return jsonResponse({ code: 400, message: `${field} must be a boolean` }, 400);
+  }
+  return value;
+}
+
+function parseOptionalTrackingMode(
+  value: unknown,
+): ReturnType<typeof parseTrackingMode> | undefined | Response {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: "trackingMode must be a string" }, 400);
+  }
+  return parseTrackingMode(value);
 }

@@ -14,6 +14,22 @@ export { startBackendServer, type BackendServerHandle } from "./server";
 export { createEventBus, type BackendEvent, type BackendEventBus } from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
 export {
+  ACCOUNTS_CHANGED_EVENT,
+  TRACKING_MODE_CHANGED_EVENT,
+  createAccountRepository,
+  createAccountService,
+  parseTrackingMode,
+  type Account,
+  type AccountListFilters,
+  type AccountRepository,
+  type AccountService,
+  type AccountServiceOptions,
+  type AccountUpdate,
+  type AccountUpdateResult,
+  type NewAccount,
+  type TrackingMode,
+} from "./domains/accounts";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,

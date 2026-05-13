@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1
+turns_used: 2
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-13T21:33:49+08:00"
+updated_at: "2026-05-13T23:35:57+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -70,6 +70,10 @@ updated_at: "2026-05-13T21:33:49+08:00"
   ran rubber-duck design review, and refined the design to address SQLite stack,
   dual-writer, normalization, keyring, device-sync, addon, rollback, benchmark,
   and CI risks before Gate 1.
+- Turn 2: Implemented and refined the low-risk accounts TS domain slice:
+  repository/service behavior, guarded HTTP routes, Rust-parity validation and
+  events, transaction-bound create/update readbacks, orphaned asset cleanup
+  hooks, and targeted backend tests.
 
 ## Deferred items
 
@@ -77,6 +81,4 @@ updated_at: "2026-05-13T21:33:49+08:00"
 
 ## Blockers
 
-- Gate 1 design approval is required before implementation because the migration
-  changes backend architecture, storage behavior, security-sensitive
-  sync/crypto, and public API/runtime contracts.
+- None.
