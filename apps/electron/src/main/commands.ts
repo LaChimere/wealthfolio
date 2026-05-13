@@ -37,9 +37,8 @@ export async function invokeSidecarCommand<T>({
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
     case "check_for_updates":
-      return await invokeCheckForUpdates<T>({ payload, sidecar, fetchImpl });
     case "install_app_update":
-      throw new Error("Electron update installation is pending Electron updater integration.");
+      throw new Error("Electron update commands are handled by Electron main.");
     case "backup_database":
       return await invokeBackupDatabase<T>({ sidecar, fetchImpl });
     case "backup_database_to_path":
@@ -1333,47 +1332,6 @@ async function invokePathJson<T>({
       body: body === undefined ? undefined : JSON.stringify(body),
     },
   });
-}
-
-async function invokeCheckForUpdates<T>({
-  payload,
-  sidecar,
-  fetchImpl,
-}: ResolvedSidecarCommandOptions): Promise<T> {
-  const response = await invokeGetWithQuery<{
-    updateAvailable?: unknown;
-    latestVersion?: unknown;
-    notes?: unknown;
-    pubDate?: unknown;
-    downloadUrl?: unknown;
-    changelogUrl?: unknown;
-    screenshots?: unknown;
-  }>({
-    command: "check_for_updates",
-    payload,
-    sidecar,
-    fetchImpl,
-    params: [
-      ["force", optionalBoolean(payload?.force, "force", "check_for_updates") ? "true" : undefined],
-    ],
-  });
-  if (!response.updateAvailable) {
-    return null as T;
-  }
-  return {
-    currentVersion: "",
-    latestVersion: requireString(response.latestVersion, "latestVersion", "check_for_updates"),
-    notes: optionalStringField(response.notes, "notes", "check_for_updates"),
-    pubDate: optionalStringField(response.pubDate, "pubDate", "check_for_updates"),
-    isAppStoreBuild: false,
-    storeUrl: optionalStringField(response.downloadUrl, "downloadUrl", "check_for_updates"),
-    changelogUrl: optionalStringField(response.changelogUrl, "changelogUrl", "check_for_updates"),
-    screenshots: optionalStringArrayStrict(
-      response.screenshots,
-      "screenshots",
-      "check_for_updates",
-    ),
-  } as T;
 }
 
 async function invokeBackupDatabase<T>({
@@ -2712,23 +2670,6 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
     : undefined;
-}
-
-function optionalStringArrayStrict(
-  value: unknown,
-  field: string,
-  command: ElectronCommand,
-): string[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  const items = requireArray(value, field, command);
-  if (items.some((item) => typeof item !== "string")) {
-    throw new Error(
-      `Electron command "${command}" requires string array payload field "${field}".`,
-    );
-  }
-  return items as string[];
 }
 
 function optionalNumber(value: unknown): number | undefined {

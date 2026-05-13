@@ -198,26 +198,11 @@ describe("Electron sidecar command proxy", () => {
     expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
   });
 
-  test("proxies update checks and maps sidecar update responses", async () => {
-    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
-    const responses = [
-      {
-        updateAvailable: false,
-        latestVersion: "3.4.0",
-      },
-      {
-        updateAvailable: true,
-        latestVersion: "3.5.0",
-        notes: "Release notes",
-        pubDate: "2026-01-01T00:00:00Z",
-        downloadUrl: "https://example.com/download",
-        changelogUrl: "https://example.com/changelog",
-        screenshots: ["https://example.com/screenshot.png"],
-      },
-    ];
-    const fetchImpl: FetchLike = (url, init) => {
-      calls.push([url, init]);
-      return Promise.resolve(jsonResponse(responses.shift()));
+  test("keeps updater commands out of the sidecar proxy", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
     };
     const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
 
@@ -227,40 +212,16 @@ describe("Electron sidecar command proxy", () => {
         sidecar,
         fetchImpl,
       }),
-    ).resolves.toBeNull();
-    await expect(
-      invokeSidecarCommand({
-        command: "check_for_updates",
-        payload: { force: true },
-        sidecar,
-        fetchImpl,
-      }),
-    ).resolves.toEqual({
-      currentVersion: "",
-      latestVersion: "3.5.0",
-      notes: "Release notes",
-      pubDate: "2026-01-01T00:00:00Z",
-      isAppStoreBuild: false,
-      storeUrl: "https://example.com/download",
-      changelogUrl: "https://example.com/changelog",
-      screenshots: ["https://example.com/screenshot.png"],
-    });
+    ).rejects.toThrow("Electron update commands are handled by Electron main.");
     await expect(
       invokeSidecarCommand({
         command: "install_app_update",
         sidecar,
         fetchImpl,
       }),
-    ).rejects.toThrow("Electron update installation is pending Electron updater integration.");
+    ).rejects.toThrow("Electron update commands are handled by Electron main.");
 
-    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
-      ["http://127.0.0.1:18444/api/v1/app/check-update", "GET", undefined],
-      ["http://127.0.0.1:18444/api/v1/app/check-update?force=true", "GET", undefined],
-    ]);
-    expect(calls[0]?.[1]?.headers).toEqual({
-      Accept: "application/json",
-      Authorization: "Bearer sidecar-token",
-    });
+    expect(called).toBe(false);
   });
 
   test("proxies database backup and restore utilities with Tauri-compatible shapes", async () => {
@@ -346,15 +307,6 @@ describe("Electron sidecar command proxy", () => {
         fetchImpl,
       }),
     ).rejects.toThrow('requires string payload field "backupFilePath"');
-    await expect(
-      invokeSidecarCommand({
-        command: "check_for_updates",
-        payload: { force: "yes" },
-        sidecar,
-        fetchImpl,
-      }),
-    ).rejects.toThrow('requires boolean payload field "force"');
-
     expect(called).toBe(false);
   });
 

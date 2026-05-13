@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import type { WebContents } from "electron";
+import { autoUpdater } from "electron-updater";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,11 @@ import { createElectronLogWriter, type ElectronLogWriter, validateLogMessage } f
 import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
+import {
+  createElectronUpdaterService,
+  validateCheckForUpdatesOptions,
+  type ElectronUpdaterService,
+} from "./updater";
 import { createMainWindow } from "./window";
 import { createWindowStatePersistence } from "./window-state";
 
@@ -42,6 +48,7 @@ let sidecarStartController: AbortController | null = null;
 let sidecarStartPromise: Promise<void> | null = null;
 let sidecarEventBridge: SidecarEventBridgeHandle | null = null;
 let electronLogWriter: ElectronLogWriter | null = null;
+let electronUpdaterService: ElectronUpdaterService | null = null;
 let nextRendererEventId = 0;
 const pendingDeepLinkUrls: string[] = [];
 const deepLinkListenerWebContentsIds = new Set<number>();
@@ -98,6 +105,16 @@ function registerIpcHandlers(): void {
     IPC_CHANNELS.invoke,
     async (_event, request: ElectronInvokeRequest): Promise<unknown> => {
       const validatedRequest = validateElectronInvokeRequest(request);
+      if (validatedRequest.command === "check_for_updates") {
+        return await getElectronUpdaterService().checkForUpdates(
+          validateCheckForUpdatesOptions(validatedRequest.payload),
+        );
+      }
+      if (validatedRequest.command === "install_app_update") {
+        await getElectronUpdaterService().installUpdate();
+        return undefined;
+      }
+
       const sidecar = await getReadySidecarHandle();
       return await invokeSidecarCommand({
         command: validatedRequest.command,
@@ -322,15 +339,24 @@ function configureApplicationMenu(): void {
       await dialog.showMessageBox(options);
     },
     async checkForUpdates() {
-      const sidecar = await getReadySidecarHandle();
-      return await invokeSidecarCommand({
-        command: "check_for_updates",
-        payload: { force: true },
-        sidecar,
-      });
+      return await getElectronUpdaterService().checkForUpdates({ force: true });
     },
     sendRendererEvent,
   });
+}
+
+function getElectronUpdaterService(): ElectronUpdaterService {
+  if (!electronUpdaterService) {
+    electronUpdaterService = createElectronUpdaterService({
+      app,
+      resourcesPath: process.resourcesPath,
+      updater: autoUpdater,
+      sendProgress(progress) {
+        sendRendererEvent("app:update-download-progress", progress);
+      },
+    });
+  }
+  return electronUpdaterService;
 }
 
 function configureWindowThemeEvents(): void {

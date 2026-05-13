@@ -259,6 +259,10 @@
 - Turn 46: Started Electron release packaging. The Electron app now has
   `electron-builder` configuration, renderer staging, a Bun-managed Rust sidecar
   build/stage script, and packaged sidecar resolution from Electron resources.
+- Turn 47: Added Electron updater checks, install, and progress wiring through
+  `electron-updater`. Electron main now handles update commands before sidecar
+  proxying, emits download/install progress to the renderer, and uses
+  electron-builder GitHub update metadata instead of the legacy Tauri manifest.
 
 ## Deferred items
 

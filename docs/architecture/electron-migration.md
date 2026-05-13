@@ -144,22 +144,24 @@ commands proxy through the sidecar Connect device endpoints. Device-sync device
 management, team reset, pairing, composite pairing transfer/bootstrap, and
 pairing-flow coordinator commands proxy through the sidecar sync endpoints with
 path identifiers encoded in Electron main. Snapshot management, holdings CSV
-import, activity CSV parsing, database backup/restore, and update checks also
-proxy through the sidecar so manual/imported holdings updates and utility
-operations stay in Rust. Electron update installation is still blocked until the
-Electron updater/release pipeline is implemented. Add-on zip payloads are
-validated as byte arrays in Electron main and forwarded to the sidecar as base64
-JSON fields. AI chat NDJSON streaming uses dedicated start/cancel IPC channels
-because it cannot safely use the request/response JSON command proxy; Electron
-main owns the sidecar fetch, streams parsed events only to the originating
-`webContents`, and aborts streams when the owner closes or navigates. The
-renderer still calls the typed preload IPC bridge, Electron main validates each
-command against an explicit allowlist, waits for sidecar readiness, and proxies
-to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
-tokens must stay confined to Electron main; public runtime status and command
-errors must redact loopback URLs and token-shaped values before crossing IPC.
-Electron app info must use sanitized runtime metadata and must not expose
-desktop DB or log paths to the renderer. JSON request bodies must be sent with
+import, activity CSV parsing, and database backup/restore also proxy through the
+sidecar so manual/imported holdings updates and utility operations stay in Rust.
+Add-on zip payloads are validated as byte arrays in Electron main and forwarded
+to the sidecar as base64 JSON fields. AI chat NDJSON streaming uses dedicated
+start/cancel IPC channels because it cannot safely use the request/response JSON
+command proxy; Electron main owns the sidecar fetch, streams parsed events only
+to the originating `webContents`, and aborts streams when the owner closes or
+navigates. Electron update checks and installation are handled in Electron main
+through `electron-updater`, not the Rust sidecar, because Electron updater
+metadata is incompatible with the legacy Tauri update endpoint. The renderer
+still calls the typed preload IPC bridge, Electron main validates each command
+against an explicit allowlist, waits for sidecar readiness when a command needs
+Rust services, and proxies those requests to the loopback sidecar with the
+per-run bearer token. Sidecar base URLs and tokens must stay confined to
+Electron main; public runtime status and command errors must redact loopback
+URLs and token-shaped values before crossing IPC. Electron app info must use
+sanitized runtime metadata and must not expose desktop DB or log paths to the
+renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 
@@ -216,12 +218,9 @@ dedicated IPC methods, not as renderer Node APIs:
   keeps console output for developer tools, but persistent writes cross a typed
   preload IPC method with level/message validation.
 
-Electron must replace the following Tauri plugin responsibilities before the
-Tauri path is removed:
-
-- updater install/progress events;
-
-Mobile-only Tauri features are not part of the Electron migration.
+The Electron main/preload layer now owns the desktop-native responsibilities
+that were previously provided by Tauri plugins. Mobile-only Tauri features are
+not part of the Electron migration.
 
 ## Updates, signing, and packaging
 
@@ -237,10 +236,22 @@ renderer from the asar app path and resolves the sidecar from
 `process.resourcesPath`, so it no longer depends on the repository checkout at
 runtime. Use `bun run package:electron` for the full local packaging flow.
 
+Electron update checks and installs are main-process only. The renderer invokes
+the existing `check_for_updates` and `install_app_update` command names through
+the preload bridge, but Electron main routes them to `electron-updater` instead
+of the sidecar. Startup checks in unpackaged development builds return `null`;
+manual checks and installs fail explicitly unless the app is packaged and
+`app-update.yml` is present. Download progress is forwarded to the renderer as
+`app:update-download-progress`, followed by an `installing` phase before
+`quitAndInstall()`.
+
 Tauri updater metadata and signing are not compatible with Electron updater
-metadata. The release migration must define the new update feed, metadata
-format, signature/notarization flow, and rollback strategy before removing the
-Tauri release workflow.
+metadata. Electron packaging is configured for a GitHub provider
+(`wealthfolio/wealthfolio`) so `electron-builder` can generate
+electron-updater-compatible metadata. The release migration still needs to
+replace the Tauri GitHub Actions release flow, including platform signing,
+notarization, publish behavior, and rollback strategy, before removing the Tauri
+release workflow.
 
 ## OAuth and deep links
 

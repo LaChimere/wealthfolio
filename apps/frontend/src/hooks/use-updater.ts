@@ -138,7 +138,7 @@ interface DownloadProgressEvent {
 
 /**
  * Hook to install an available update (desktop only).
- * Tracks download progress and install phase via Tauri events.
+ * Tracks download progress and install phase via desktop runtime events.
  */
 export function useInstallUpdate() {
   const [phase, setPhase] = useState<UpdatePhase>("idle");
