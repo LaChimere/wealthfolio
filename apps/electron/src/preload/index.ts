@@ -14,6 +14,11 @@ const api: WealthfolioElectronApi = {
     ipcRenderer.invoke(IPC_CHANNELS.startAiChatStream, { streamId, request }),
   cancelAiChatStream: (streamId) =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelAiChatStream, { streamId }),
+  openCsvFileDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openCsvFileDialog),
+  openFolderDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openFolderDialog),
+  openDatabaseFileDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openDatabaseFileDialog),
+  saveFileDialog: (request) => ipcRenderer.invoke(IPC_CHANNELS.saveFileDialog, request),
+  openExternalUrl: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternalUrl, url),
   listen: async (eventName, handler) => {
     if (typeof eventName !== "string" || typeof handler !== "function") {
       throw new Error("Invalid Electron event listener request.");

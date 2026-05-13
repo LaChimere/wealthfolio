@@ -1,27 +1,35 @@
-function unsupportedElectronNativeFeature(name: string): Error {
-  return new Error(`${name} is not available until the Electron native bridge is connected.`);
+import { getElectronApi } from "./core";
+
+async function toSaveContent(
+  fileContent: string | Blob | Uint8Array,
+): Promise<string | Uint8Array> {
+  if (typeof fileContent === "string" || fileContent instanceof Uint8Array) {
+    return fileContent;
+  }
+
+  return new Uint8Array(await fileContent.arrayBuffer());
 }
 
 export const openCsvFileDialog = (): Promise<null | string | string[]> => {
-  return Promise.reject(unsupportedElectronNativeFeature("openCsvFileDialog"));
+  return getElectronApi().openCsvFileDialog();
 };
 
 export const openFolderDialog = (): Promise<string | null> => {
-  return Promise.reject(unsupportedElectronNativeFeature("openFolderDialog"));
+  return getElectronApi().openFolderDialog();
 };
 
 export const openDatabaseFileDialog = (): Promise<string | null> => {
-  return Promise.reject(unsupportedElectronNativeFeature("openDatabaseFileDialog"));
+  return getElectronApi().openDatabaseFileDialog();
 };
 
-export const openFileSaveDialog = (
-  _fileContent: string | Blob | Uint8Array,
-  _fileName: string,
+export const openFileSaveDialog = async (
+  fileContent: string | Blob | Uint8Array,
+  fileName: string,
 ): Promise<boolean> => {
-  return Promise.reject(unsupportedElectronNativeFeature("openFileSaveDialog"));
+  const content = await toSaveContent(fileContent);
+  return getElectronApi().saveFileDialog({ content, fileName });
 };
 
 export const openUrlInBrowser = (url: string): Promise<void> => {
-  window.open(url, "_blank", "noopener,noreferrer");
-  return Promise.resolve();
+  return getElectronApi().openExternalUrl(url);
 };

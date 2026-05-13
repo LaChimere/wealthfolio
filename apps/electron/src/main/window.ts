@@ -1,6 +1,8 @@
 import { BrowserWindow, shell, type BrowserWindowConstructorOptions } from "electron";
 import { pathToFileURL } from "node:url";
 
+import { openExternalUrl } from "./native";
+
 interface CreateMainWindowOptions {
   preloadPath: string;
   rendererUrl?: string;
@@ -40,11 +42,9 @@ export async function createMainWindow({
   const mainWindow = new BrowserWindow(windowOptions);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://") || url.startsWith("http://")) {
-      void shell.openExternal(url).catch((error) => {
-        console.error("Failed to open external URL:", error);
-      });
-    }
+    void openExternalUrl(url, shell).catch((error) => {
+      console.error("Failed to open external URL:", error);
+    });
     return { action: "deny" };
   });
 

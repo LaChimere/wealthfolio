@@ -223,6 +223,10 @@
   `WF_SECRET_BACKEND=keyring`. Web/self-hosted server mode still defaults to the
   encrypted file store, while desktop keyring support is gated behind the server
   `keyring-backend` feature.
+- Turn 38: Added Electron-native preload/main IPC for CSV/database/folder open
+  dialogs, save-dialog file writes, and external URL opening. Renderer code no
+  longer uses unsupported placeholders for these Tauri file/shell adapter APIs,
+  and Electron main validates save payloads plus external URL protocols.
 
 ## Deferred items
 

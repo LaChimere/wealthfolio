@@ -173,11 +173,21 @@ implemented.
 
 ## Native desktop features
 
+The Electron preload exposes native file-dialog and shell operations as typed
+dedicated IPC methods, not as renderer Node APIs:
+
+- CSV/database/folder open dialogs are owned by Electron main and return
+  Tauri-compatible `string | null` shapes.
+- Save dialogs are owned by Electron main; renderer content is converted to
+  string/bytes before IPC, and main writes the selected path after cancellation
+  checks.
+- External URL opening is owned by Electron main and is limited to `http:`,
+  `https:`, and `mailto:` protocols before calling `shell.openExternal`.
+
 Electron must replace the following Tauri plugin responsibilities before the
 Tauri path is removed:
 
 - menu events and route navigation;
-- file open/save dialogs and external URL opening;
 - file-drop and deep-link events;
 - single-instance behavior;
 - window state and titlebar behavior;

@@ -19,7 +19,7 @@ export const logger: Logger = {
   trace: (...args: unknown[]) => console.trace(...args),
 };
 
-function getElectronApi(): WealthfolioElectronApi {
+export function getElectronApi(): WealthfolioElectronApi {
   if (typeof window === "undefined" || !window[ELECTRON_API_KEY]) {
     throw new Error("Electron preload API is unavailable.");
   }

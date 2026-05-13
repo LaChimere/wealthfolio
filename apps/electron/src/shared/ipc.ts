@@ -6,6 +6,11 @@ export const IPC_CHANNELS = {
   serverEvent: "wealthfolio:server-event",
   startAiChatStream: "wealthfolio:ai-chat-stream:start",
   cancelAiChatStream: "wealthfolio:ai-chat-stream:cancel",
+  openCsvFileDialog: "wealthfolio:native:open-csv-file-dialog",
+  openFolderDialog: "wealthfolio:native:open-folder-dialog",
+  openDatabaseFileDialog: "wealthfolio:native:open-database-file-dialog",
+  saveFileDialog: "wealthfolio:native:save-file-dialog",
+  openExternalUrl: "wealthfolio:native:open-external-url",
 } as const;
 
 export const AI_CHAT_STREAM_EVENT_PREFIX = "ai-chat:stream:";
@@ -997,11 +1002,21 @@ export interface ElectronEventMessage<T = unknown> {
   payload: T;
 }
 
+export interface ElectronSaveFileRequest {
+  content: string | Uint8Array | number[];
+  fileName: string;
+}
+
 export interface WealthfolioElectronApi {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
   startAiChatStream(streamId: string, request: unknown): Promise<void>;
   cancelAiChatStream(streamId: string): Promise<void>;
+  openCsvFileDialog(): Promise<null | string | string[]>;
+  openFolderDialog(): Promise<string | null>;
+  openDatabaseFileDialog(): Promise<string | null>;
+  saveFileDialog(request: ElectronSaveFileRequest): Promise<boolean>;
+  openExternalUrl(url: string): Promise<void>;
   listen<T>(
     eventName: string,
     handler: (event: ElectronEventMessage<T>) => void,

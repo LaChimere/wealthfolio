@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { invokeSidecarCommand } from "./commands";
 import { resolveLegacyTauriPaths } from "./data-root";
 import { startSidecarEventBridge, type SidecarEventBridgeHandle } from "./events";
 import { validateElectronInvokeRequest } from "./ipc-validation";
+import { registerNativeIpcHandlers } from "./native";
 import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import { createMainWindow } from "./window";
 
@@ -89,6 +90,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.cancelAiChatStream, (_event, request: unknown): void => {
     aiChatStreamManager.cancel(request);
   });
+  registerNativeIpcHandlers({ ipcMain, dialog, shell });
 }
 
 function handleFatal(error: unknown): void {
