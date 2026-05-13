@@ -25,6 +25,7 @@ import {
 } from "./domains/market-data-providers";
 import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
+import { createSyncCryptoService } from "./domains/sync-crypto";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createEventBus, type BackendEventBus } from "./events";
 import type { BackendRequestHandlerOptions } from "./http";
@@ -178,6 +179,7 @@ function createServicesFromDatabase(
     ),
     secretService,
     settingsService,
+    syncCryptoService: createSyncCryptoService(),
     taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
   };
 

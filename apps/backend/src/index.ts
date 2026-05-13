@@ -229,7 +229,9 @@ export {
   type SettingsUpdate,
 } from "./domains/settings";
 export type { SecretService } from "./domains/secrets";
+export { createSyncCryptoService } from "./domains/sync-crypto";
 export type {
+  SyncCryptoServiceOptions,
   SyncCryptoEphemeralKeyPair,
   SyncCryptoService,
   SyncCryptoStringResponse,

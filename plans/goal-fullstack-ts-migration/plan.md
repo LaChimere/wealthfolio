@@ -10,18 +10,17 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding AI provider settings/catalog runtime
-parity to the standalone TS backend:
+PR 5 continues vertical slices by adding sync crypto runtime parity to the
+standalone TS backend:
 
-- Implement `createAiProviderService` for catalog merging, app-settings
-  persistence, default provider updates, secret-backed API-key flags, grouped
-  tool allowlist normalization, tuning override validation, and provider model
-  listing with injectable fetch.
-- Wire the AI provider service into TS runtime composition when the secrets
-  service is available, loading the current Rust catalog JSON as the source of
-  truth.
-- Keep AI chat/provider execution and tool runtime behavior deferred until their
-  dedicated runtime slices.
+- Implement `createSyncCryptoService` for Rust-compatible root key generation,
+  DEK/session/SAS HKDF derivation, X25519 key exchange, nonce-prefixed
+  XChaCha20-Poly1305 encryption/decryption, pairing code hashing, HMAC-SHA256,
+  and UUID device IDs.
+- Wire the sync crypto service into TS runtime composition so existing guarded
+  `/api/v1/sync/crypto/*` routes have real TS behavior.
+- Keep device-sync cloud/client integration and key material side effects
+  deferred until dedicated device-sync runtime slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -30,10 +29,10 @@ No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 keyring storage, AI chat runtime, alternative asset runtime, asset runtime, app
 utility restore runtime, portfolio metrics runtime, holdings runtime, add-on
-runtime, market-data runtime, activities/import runtime, real sync crypto
-runtime implementation, real health/classification runtime implementation, real
-Connect runtime implementation, real device-sync runtime implementation, or Rust
-runtime removal is in scope for this slice.
+runtime, market-data runtime, activities/import runtime, sync-crypto/device-sync
+integration, real health/classification runtime implementation, real Connect
+runtime implementation, real device-sync runtime implementation, or Rust runtime
+removal is in scope for this slice.
 
 ## Next slices
 

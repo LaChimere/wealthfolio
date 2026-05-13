@@ -104,6 +104,14 @@ describe("TS backend runtime composition", () => {
       );
       expect(secretGetResponse.status).toBe(200);
       await expect(secretGetResponse.json()).resolves.toBe("secret-value");
+
+      const rootKeyResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/crypto/generate-root-key`,
+        { method: "POST" },
+      );
+      expect(rootKeyResponse.status).toBe(200);
+      const rootKey = (await rootKeyResponse.json()) as { value: string };
+      expect(Buffer.from(rootKey.value, "base64").byteLength).toBe(32);
     } finally {
       server.stop();
       runtime.close();

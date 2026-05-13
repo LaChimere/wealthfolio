@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 36
+turns_used: 37
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T06:22:41+08:00"
+updated_at: "2026-05-14T07:50:27+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -257,6 +257,12 @@ updated_at: "2026-05-14T06:22:41+08:00"
   secret-backed API-key flags, grouped tool allowlist normalization, tuning
   validation/sanitization, default-provider updates, model-list parsing with
   injectable fetch, and runtime `/api/v1/ai/providers` wiring.
+- Turn 37: Added sync crypto runtime parity for the standalone TS backend:
+  root-key generation, versioned DEK derivation, X25519 key exchange,
+  session-key derivation, nonce-prefixed XChaCha20-Poly1305 encrypt/decrypt,
+  pairing-code hashing, HMAC-SHA256, SAS computation, UUID device IDs, runtime
+  `/api/v1/sync/crypto/*` wiring, and deterministic Rust/RFC-compatible test
+  vectors.
 
 ## Deferred items
 
@@ -318,10 +324,9 @@ updated_at: "2026-05-14T06:22:41+08:00"
   persistence, and tool-result mutation behavior remain active follow-ups.
   reason=this slice only adds the guarded HTTP seam, while runtime behavior must
   move with dedicated AI runtime parity slices.
-- Real sync crypto implementation, key material handling, WebCrypto/libsodium
-  selection, and device-sync integration remain active follow-ups. reason=this
-  slice only adds the guarded HTTP seam, while runtime behavior must move with a
-  dedicated sync-crypto/device-sync parity slice.
+- Device-sync integration for sync crypto remains an active follow-up.
+  reason=this slice adds the local TS crypto primitives, while cloud/client key
+  material side effects must move with dedicated device-sync runtime slices.
 - Real health checks, classification migration, market sync fix execution,
   health cache behavior, and taxonomy/asset side effects remain active
   follow-ups. reason=this slice only adds optional guarded HTTP seams, while

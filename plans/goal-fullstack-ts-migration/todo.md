@@ -91,21 +91,23 @@
     `apps/backend/src/domains/sync-crypto.ts`,
     `apps/backend/src/domains/device-sync.ts`,
     `apps/backend/src/domains/connect.ts`, `apps/backend/src/events.ts`,
-    `apps/backend/src/runtime.ts`, and `apps/backend/src/http.test.ts`. Health
-    status/check/fix and taxonomy migration endpoints are deferred to the
-    health/classification service slice; custom provider `test-source` is
-    deferred to an external-I/O slice; goals plan writes and calculation
-    endpoints are deferred to calculation-heavy slices; FX converter/history and
-    provider sync behavior plus broader market-data quote/search/import/sync
-    behavior are deferred to calculation/market-data slices; actual portfolio
-    job execution and event production are deferred to portfolio/calculation
-    slices; TS file-backed secret persistence is wired into standalone runtime
-    while real keyring integration is deferred to a runtime/keyring parity
-    slice; AI provider catalog/settings/model-listing runtime behavior is wired
-    into standalone runtime while AI chat execution is deferred to AI runtime
-    parity slices; alternative asset persistence/quotes/holdings/job behavior is
-    deferred to asset/portfolio parity slices; asset
-    persistence/profile/quote-mode behavior is deferred to
+    `apps/backend/src/runtime.ts`, and `apps/backend/src/http.test.ts`. Sync
+    crypto now has a standalone TS runtime implementation for local primitives,
+    while device-sync key material side effects remain deferred to device-sync
+    runtime slices. Health status/check/fix and taxonomy migration endpoints are
+    deferred to the health/classification service slice; custom provider
+    `test-source` is deferred to an external-I/O slice; goals plan writes and
+    calculation endpoints are deferred to calculation-heavy slices; FX
+    converter/history and provider sync behavior plus broader market-data
+    quote/search/import/sync behavior are deferred to calculation/market-data
+    slices; actual portfolio job execution and event production are deferred to
+    portfolio/calculation slices; TS file-backed secret persistence is wired
+    into standalone runtime while real keyring integration is deferred to a
+    runtime/keyring parity slice; AI provider catalog/settings/model-listing
+    runtime behavior is wired into standalone runtime while AI chat execution is
+    deferred to AI runtime parity slices; alternative asset
+    persistence/quotes/holdings/job behavior is deferred to asset/portfolio
+    parity slices; asset persistence/profile/quote-mode behavior is deferred to
     asset/market-data/portfolio parity slices; app utility database restore is
     deferred until TS runtime restart/service-rebuild support exists; portfolio
     metric calculations are deferred to portfolio calculation parity slices;
@@ -121,9 +123,8 @@
     are deferred to activities/import runtime parity slices; AI chat
     persistence, provider streaming, tool execution, thread storage, tag
     persistence, and tool-result mutation behavior are deferred to AI runtime
-    parity slices; real sync crypto implementation, key material handling,
-    WebCrypto/libsodium selection, and device-sync integration are deferred to
-    sync-crypto/device-sync parity slices; real health checks, classification
+    parity slices; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; real health checks, classification
     migration, market sync fix execution, health cache behavior, and
     taxonomy/asset side effects are deferred to health/classification parity
     slices; real Connect token lifecycle, cloud HTTP clients, broker sync
@@ -654,6 +655,19 @@ contract:
   wiring, and test coverage.
 - `pr5-ai-provider-runtime-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-sync-crypto-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes root-key generation, versioned DEK derivation, RFC 7748
+  X25519 shared-secret vectors, generated keypair symmetry, session-key
+  derivation, nonce-prefixed XChaCha20-Poly1305 encryption/decryption,
+  normalized pairing-code hashing, HMAC-SHA256, SAS codes, UUID device IDs, and
+  standalone runtime route wiring.
+- `pr5-sync-crypto-runtime-review`: code review raised the X25519 package
+  subpath as a possible issue; package exports and direct ESM import
+  verification confirmed `@noble/curves/ed25519.js` is the supported path for
+  v2.2.0. No code change was needed.
+- `pr5-sync-crypto-runtime-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -671,8 +685,9 @@ contract:
   device-sync enrollment/engine route seam, device-sync device-management route
   seam, device-sync team-key/reset route seam, device-sync pairing route seam,
   standalone TS runtime composition for already-ported SQLite-backed domains,
-  safe app utility runtime, file-backed secrets runtime, and AI provider
-  settings/catalog runtime slices implemented; broader migration remains active.
+  safe app utility runtime, file-backed secrets runtime, AI provider
+  settings/catalog runtime, and sync crypto runtime slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -698,15 +713,14 @@ contract:
   behavior, asset preview resolution, and portfolio recalculation side effects
   move with activities/import runtime parity slices; AI chat persistence,
   provider streaming, tool execution, thread storage, tag persistence, and
-  tool-result mutation behavior move with AI runtime parity slices; real sync
-  crypto implementation, key material handling, WebCrypto/libsodium selection,
-  and device-sync integration move with sync-crypto/device-sync parity slices;
-  real health checks, classification migration, market sync fix execution,
-  health cache behavior, and taxonomy/asset side effects move with
-  health/classification parity slices; real Connect token lifecycle, cloud HTTP
-  clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, E2EE enrollment, sync engine,
-  snapshot/upload runtime, feature-flag errors, background workers, device-sync
-  cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
-  effects move with Connect/device-sync parity slices.
+  tool-result mutation behavior move with AI runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; real health
+  checks, classification migration, market sync fix execution, health cache
+  behavior, and taxonomy/asset side effects move with health/classification
+  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, local sync repositories, subscription entitlement checks, event
+  production, E2EE enrollment, sync engine, snapshot/upload runtime,
+  feature-flag errors, background workers, device-sync cloud clients, token
+  lifecycle, team-key operations, key material handling, pairing flows,
+  freshness gate persistence, bootstrap transfer, and secret side effects move
+  with Connect/device-sync parity slices.
