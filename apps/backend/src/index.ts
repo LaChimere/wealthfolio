@@ -143,6 +143,7 @@ export type {
   HoldingsSnapshotInput,
   SaveManualHoldingsRequest,
 } from "./domains/holdings";
+export type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
 export {
   createMarketDataProviderRepository,
   createMarketDataProviderService,

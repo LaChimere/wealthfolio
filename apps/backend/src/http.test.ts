@@ -20,6 +20,7 @@ import { createExchangeRateRepository, createExchangeRateService } from "./domai
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
 import type { HoldingsService } from "./domains/holdings";
+import type { MarketDataService } from "./domains/market-data";
 import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
@@ -1175,6 +1176,237 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("routes migrated market data seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const marketDataService: MarketDataService = {
+      getExchanges() {
+        calls.push(["exchanges", undefined]);
+        return [{ mic: "XNAS" }];
+      },
+      searchSymbol(query) {
+        calls.push(["search", query]);
+        return [{ symbol: query }];
+      },
+      resolveSymbolQuote(request) {
+        calls.push(["resolve", request]);
+        return { symbol: request.symbol, currency: "USD" };
+      },
+      getQuoteHistory(symbol) {
+        calls.push(["history", symbol]);
+        return [{ asset_id: symbol }];
+      },
+      fetchYahooDividends(symbol) {
+        calls.push(["dividends", symbol]);
+        return [{ symbol }];
+      },
+      getLatestQuotes(assetIds) {
+        calls.push(["latest", assetIds]);
+        return { [assetIds[0] ?? ""]: { close: "1.00" } };
+      },
+      updateQuote(symbol, quote) {
+        calls.push(["update-quote", { symbol, quote }]);
+      },
+      deleteQuote(id) {
+        calls.push(["delete-quote", id]);
+      },
+      checkQuotesImport(content, hasHeaderRow) {
+        calls.push(["check-import", { content: Array.from(content), hasHeaderRow }]);
+        return [];
+      },
+      importQuotesCsv(quotes, overwriteExisting) {
+        calls.push(["import-quotes", { quotes, overwriteExisting }]);
+        return quotes;
+      },
+      syncHistoryQuotes() {
+        calls.push(["sync-history", undefined]);
+      },
+      syncMarketData(marketSyncMode) {
+        calls.push(["sync-market", marketSyncMode]);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { marketDataService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/exchanges"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/exchanges", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+
+    await expect(
+      (
+        await handler(new Request("http://127.0.0.1/api/v1/exchanges", { headers: authHeaders }))
+      ).json(),
+    ).resolves.toEqual([{ mic: "XNAS" }]);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/search?query=", {
+        headers: authHeaders,
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/search", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await expect(
+      (
+        await handler(
+          new Request(
+            "http://127.0.0.1/api/v1/market-data/resolve-currency?symbol=AAPL&exchangeMic=XNAS&instrumentType=UNKNOWN&quoteCcy=USD&providerId=YAHOO",
+            { headers: authHeaders },
+          ),
+        )
+      ).json(),
+    ).resolves.toEqual({ symbol: "AAPL", currency: "USD" });
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/history?symbol=AAPL", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/yahoo/dividends?symbol=AAPL", {
+        headers: authHeaders,
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/latest", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ assetIds: ["asset-1"] }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/latest", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ asset_ids: ["asset-1"] }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    const updateQuoteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/SYM%2F1", {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify({ asset_id: "wrong", assetId: "wrongCamel", close: "12.34" }),
+      }),
+    );
+    expect(updateQuoteResponse.status).toBe(204);
+    const deleteQuoteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/id/quote%2F1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(deleteQuoteResponse.status).toBe(204);
+
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/check", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ content: [65], hasHeaderRow: true }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/check", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ content: [1.5], hasHeaderRow: true }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/quotes/import", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ quotes: [{ assetId: "asset-1" }], overwriteExisting: false }),
+      }),
+    );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/import", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ quotes: [] }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    const syncHistoryResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/sync/history", {
+        method: "POST",
+        headers: authHeaders,
+        body: "not json",
+      }),
+    );
+    expect(syncHistoryResponse.status).toBe(204);
+    const syncMarketResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/market-data/sync", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ assetIds: null, refetchAll: true, refetchRecentDays: 7 }),
+      }),
+    );
+    expect(syncMarketResponse.status).toBe(204);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/sync", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ assetIds: ["asset-2"] }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+
+    expect(calls).toEqual([
+      ["exchanges", undefined],
+      ["search", ""],
+      [
+        "resolve",
+        {
+          symbol: "AAPL",
+          exchangeMic: "XNAS",
+          instrumentType: "UNKNOWN",
+          quoteCcy: "USD",
+          providerId: "YAHOO",
+        },
+      ],
+      ["history", "AAPL"],
+      ["dividends", "AAPL"],
+      ["latest", ["asset-1"]],
+      [
+        "update-quote",
+        {
+          symbol: "SYM/1",
+          quote: { asset_id: "SYM/1", assetId: "wrongCamel", close: "12.34" },
+        },
+      ],
+      ["delete-quote", "quote/1"],
+      ["check-import", { content: [65], hasHeaderRow: true }],
+      ["import-quotes", { quotes: [{ assetId: "asset-1" }], overwriteExisting: false }],
+      ["sync-history", undefined],
+      ["sync-market", { type: "refetch_recent", asset_ids: null, days: 7 }],
+    ]);
   });
 
   test("routes migrated portfolio job triggers only when a service is provided", async () => {

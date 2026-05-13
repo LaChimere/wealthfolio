@@ -39,8 +39,10 @@ import type {
   HoldingsSnapshotInput,
   SaveManualHoldingsRequest,
 } from "./domains/holdings";
+import type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
 import type { MarketDataProviderService, ProviderUpdate } from "./domains/market-data-providers";
 import {
+  DEFAULT_HISTORY_DAYS,
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
   type MarketSyncMode,
@@ -77,6 +79,7 @@ export interface BackendRequestHandlerOptions {
   goalService?: GoalService;
   healthService?: HealthService;
   holdingsService?: HoldingsService;
+  marketDataService?: MarketDataService;
   marketDataProviderService?: MarketDataProviderService;
   portfolioMetricsService?: PortfolioMetricsService;
   portfolioJobService?: PortfolioJobService;
@@ -219,6 +222,13 @@ async function routeRequest(
     (url.pathname === "/api/v1/providers" || url.pathname.startsWith("/api/v1/providers/settings"))
   ) {
     return routeMarketDataProviderRequest(request, url, config, options.marketDataProviderService);
+  }
+
+  if (
+    options.marketDataService &&
+    (url.pathname === "/api/v1/exchanges" || url.pathname.startsWith("/api/v1/market-data"))
+  ) {
+    return routeMarketDataRequest(request, url, config, options.marketDataService);
   }
 
   if (options.portfolioJobService && url.pathname.startsWith("/api/v1/portfolio")) {
@@ -905,6 +915,115 @@ async function routePortfolioJobRequest(
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
+function routeMarketDataRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  marketDataService: MarketDataService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/exchanges") {
+    return Promise.resolve(marketDataService.getExchanges())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/market-data/search") {
+    const query = parseRequiredQueryString(url, "query");
+    if (query instanceof Response) {
+      return query;
+    }
+    return Promise.resolve(marketDataService.searchSymbol(query))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/market-data/resolve-currency") {
+    const input = parseResolveSymbolQuoteQuery(url);
+    if (input instanceof Response) {
+      return input;
+    }
+    return Promise.resolve(marketDataService.resolveSymbolQuote(input))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/market-data/quotes/history") {
+    const symbol = parseRequiredQueryString(url, "symbol");
+    if (symbol instanceof Response) {
+      return symbol;
+    }
+    return Promise.resolve(marketDataService.getQuoteHistory(symbol))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/market-data/yahoo/dividends") {
+    const symbol = parseRequiredQueryString(url, "symbol");
+    if (symbol instanceof Response) {
+      return symbol;
+    }
+    return Promise.resolve(marketDataService.fetchYahooDividends(symbol))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/market-data/quotes/latest") {
+    return handleJsonMutation(request, parseLatestQuotesRequest, (input) =>
+      Promise.resolve(marketDataService.getLatestQuotes(input.assetIds)),
+    );
+  }
+
+  const updateQuoteSymbol = marketDataQuoteSymbolFromPath(url.pathname);
+  if (request.method === "PUT" && updateQuoteSymbol !== undefined) {
+    return handleJsonMutationNoContent(
+      request,
+      (payload) => {
+        return { symbol: updateQuoteSymbol, quote: { ...payload, asset_id: updateQuoteSymbol } };
+      },
+      async (input) => {
+        await marketDataService.updateQuote(input.symbol, input.quote);
+      },
+    );
+  }
+
+  const deleteQuoteId = marketDataQuoteIdFromPath(url.pathname);
+  if (request.method === "DELETE" && deleteQuoteId !== undefined) {
+    return Promise.resolve(marketDataService.deleteQuote(deleteQuoteId))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/market-data/quotes/check") {
+    return handleJsonMutation(request, parseQuotesCheckRequest, (input) =>
+      Promise.resolve(marketDataService.checkQuotesImport(input.content, input.hasHeaderRow)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/market-data/quotes/import") {
+    return handleJsonMutation(request, parseQuotesImportRequest, (input) =>
+      Promise.resolve(marketDataService.importQuotesCsv(input.quotes, input.overwriteExisting)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/market-data/sync/history") {
+    return Promise.resolve(marketDataService.syncHistoryQuotes())
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/market-data/sync") {
+    return handleJsonMutationNoContent(request, parseMarketDataSyncRequest, async (mode) => {
+      await marketDataService.syncMarketData(mode);
+    });
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
 function routeMarketDataProviderRequest(
   request: Request,
   url: URL,
@@ -1436,6 +1555,16 @@ function assetProfileIdFromPath(pathname: string): string | undefined {
 
 function assetPricingModeIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/assets\/pricing-mode\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function marketDataQuoteSymbolFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/market-data\/quotes\/([^/]+)$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function marketDataQuoteIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/market-data\/quotes\/id\/([^/]+)$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
@@ -2171,15 +2300,7 @@ function parseAddonZipData(payload: Record<string, unknown>): Uint8Array | Respo
     return decodeAddonZipDataB64(zipDataB64);
   }
   if (payload.zipData !== undefined && payload.zipData !== null) {
-    if (
-      !Array.isArray(payload.zipData) ||
-      payload.zipData.some(
-        (byte) => typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 255,
-      )
-    ) {
-      return jsonResponse({ code: 400, message: "zipData must be an array of bytes" }, 400);
-    }
-    return new Uint8Array(payload.zipData);
+    return parseRequiredByteArray(payload.zipData, "zipData");
   }
   return addonZipErrorResponse("Missing zip data");
 }
@@ -2259,6 +2380,90 @@ function parseAddonStagingInstallRequest(
     return enableAfterInstall;
   }
   return { addonId, enableAfterInstall: enableAfterInstall ?? true };
+}
+
+function parseResolveSymbolQuoteQuery(url: URL): ResolveSymbolQuoteRequest | Response {
+  const symbol = parseRequiredQueryString(url, "symbol");
+  if (symbol instanceof Response) {
+    return symbol;
+  }
+  const parsed: ResolveSymbolQuoteRequest = { symbol };
+  const optionalFields = [
+    ["exchangeMic", "exchangeMic"],
+    ["instrumentType", "instrumentType"],
+    ["quoteCcy", "quoteCcy"],
+    ["providerId", "providerId"],
+  ] as const;
+  for (const [queryField, targetField] of optionalFields) {
+    const value = url.searchParams.get(queryField);
+    if (value !== null) {
+      parsed[targetField] = value;
+    }
+  }
+  return parsed;
+}
+
+function parseLatestQuotesRequest(
+  payload: Record<string, unknown>,
+): { assetIds: string[] } | Response {
+  const assetIds = parseRequiredStringArray(payload.assetIds, "assetIds");
+  if (assetIds instanceof Response) {
+    return assetIds;
+  }
+  return { assetIds };
+}
+
+function parseQuotesCheckRequest(
+  payload: Record<string, unknown>,
+): { content: Uint8Array; hasHeaderRow: boolean } | Response {
+  const content = parseRequiredByteArray(payload.content, "content");
+  if (content instanceof Response) {
+    return content;
+  }
+  const hasHeaderRow = parseRequiredBoolean(payload.hasHeaderRow, "hasHeaderRow");
+  if (hasHeaderRow instanceof Response) {
+    return hasHeaderRow;
+  }
+  return { content, hasHeaderRow };
+}
+
+function parseQuotesImportRequest(
+  payload: Record<string, unknown>,
+): { quotes: unknown[]; overwriteExisting: boolean } | Response {
+  if (!Array.isArray(payload.quotes)) {
+    return jsonResponse({ code: 400, message: "quotes must be an array" }, 400);
+  }
+  const overwriteExisting = parseRequiredBoolean(payload.overwriteExisting, "overwriteExisting");
+  if (overwriteExisting instanceof Response) {
+    return overwriteExisting;
+  }
+  return { quotes: payload.quotes, overwriteExisting };
+}
+
+function parseMarketDataSyncRequest(payload: Record<string, unknown>): MarketSyncMode | Response {
+  const assetIds = parseOptionalStringArrayOrNull(payload.assetIds, "assetIds");
+  if (assetIds instanceof Response) {
+    return assetIds;
+  }
+  const refetchAll = parseRequiredBoolean(payload.refetchAll, "refetchAll");
+  if (refetchAll instanceof Response) {
+    return refetchAll;
+  }
+  const refetchRecentDays = parseOptionalIntegerOrNull(
+    payload.refetchRecentDays,
+    "refetchRecentDays",
+  );
+  if (refetchRecentDays instanceof Response) {
+    return refetchRecentDays;
+  }
+
+  if (refetchRecentDays !== undefined && refetchRecentDays !== null) {
+    return { type: "refetch_recent", asset_ids: assetIds ?? null, days: refetchRecentDays };
+  }
+  if (refetchAll) {
+    return { type: "backfill_history", asset_ids: assetIds ?? null, days: DEFAULT_HISTORY_DAYS };
+  }
+  return { type: "incremental", asset_ids: assetIds ?? null };
 }
 
 function parseAccountsSimplePerformanceRequest(
@@ -3742,6 +3947,25 @@ function parseOptionalStringArrayOrNull(
     );
   }
   return value;
+}
+
+function parseRequiredStringArray(value: unknown, field: string): string[] | Response {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    return jsonResponse({ code: 400, message: `${field} must be an array of strings` }, 400);
+  }
+  return value;
+}
+
+function parseRequiredByteArray(value: unknown, field: string): Uint8Array | Response {
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (byte) => typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 255,
+    )
+  ) {
+    return jsonResponse({ code: 400, message: `${field} must be an array of bytes` }, 400);
+  }
+  return new Uint8Array(value);
 }
 
 function parseRequiredBoolean(value: unknown, field: string): boolean | Response {

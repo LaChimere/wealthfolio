@@ -160,6 +160,12 @@ updated_at: "2026-05-14T03:05:00+08:00"
   and staging operations, zip payload decoding/validation, path decoding,
   default/null option handling, rating validation, 204 mutation parity, and
   targeted backend tests.
+- Turn 23: Implemented the low-risk market-data HTTP seam TS slice: injectable
+  `MarketDataService`, guarded `/api/v1/exchanges` and `/api/v1/market-data/*`
+  routes, required/empty query handling, raw resolve query pass-through, quote
+  path decoding and `asset_id` overwrite, byte-array and body validation,
+  Rust-compatible sync-mode precedence, 204 mutation parity, and targeted
+  backend tests.
 
 ## Deferred items
 
@@ -221,6 +227,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
   behavior must move with dedicated add-on parity slices.
+- Exchange metadata, provider HTTP clients, Yahoo dividends, quote
+  persistence/import parsing, market sync execution, and portfolio recalculation
+  side effects remain active follow-ups. reason=this slice only adds the guarded
+  HTTP seam, while runtime behavior must move with dedicated market-data and
+  portfolio parity slices.
 
 ## Blockers
 
