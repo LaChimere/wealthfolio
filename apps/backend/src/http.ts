@@ -11,6 +11,7 @@ import type {
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
 import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
 import type { HealthConfig, HealthService } from "./domains/health";
+import type { MarketDataProviderService, ProviderUpdate } from "./domains/market-data-providers";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -31,6 +32,7 @@ export interface BackendRequestHandlerOptions {
   exchangeRateService?: ExchangeRateService;
   goalService?: GoalService;
   healthService?: HealthService;
+  marketDataProviderService?: MarketDataProviderService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -122,6 +124,13 @@ async function routeRequest(
     return routeHealthRequest(request, url, config, options.healthService);
   }
 
+  if (
+    options.marketDataProviderService &&
+    (url.pathname === "/api/v1/providers" || url.pathname.startsWith("/api/v1/providers/settings"))
+  ) {
+    return routeMarketDataProviderRequest(request, url, config, options.marketDataProviderService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -136,6 +145,32 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeMarketDataProviderRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  providerService: MarketDataProviderService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/api/v1/providers" || url.pathname === "/api/v1/providers/settings")
+  ) {
+    return providerService.getProvidersInfo().then(jsonResponse).catch(domainErrorResponse);
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/v1/providers/settings") {
+    return handleJsonMutationNoContent(request, parseProviderUpdate, (update) =>
+      providerService.updateProviderSettings(update.providerId, update.priority, update.enabled),
+    );
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -779,6 +814,27 @@ async function handleJsonMutationEmpty<TInput>(
   }
 }
 
+async function handleJsonMutationNoContent<TInput>(
+  request: Request,
+  parse: (payload: Record<string, unknown>) => TInput | Response,
+  mutate: (input: TInput) => Promise<void>,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input = parse(payload);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    await mutate(input);
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
 async function handleJsonArrayMutation<TInput, TOutput>(
   request: Request,
   parseItem: (payload: Record<string, unknown>, index: number) => TInput | Response,
@@ -882,6 +938,23 @@ function parseHealthConfig(payload: Record<string, unknown>): HealthConfig | Res
     mvEscalationThreshold,
     classificationWarnThreshold,
   };
+}
+
+function parseProviderUpdate(payload: Record<string, unknown>): ProviderUpdate | Response {
+  const providerId = parseRequiredString(payload.providerId, "providerId");
+  if (providerId instanceof Response) {
+    return providerId;
+  }
+  const priority = parseRequiredInteger(payload.priority, "priority");
+  if (priority instanceof Response) {
+    return priority;
+  }
+  const enabled = parseRequiredBoolean(payload.enabled, "enabled");
+  if (enabled instanceof Response) {
+    return enabled;
+  }
+
+  return { providerId, priority, enabled };
 }
 
 function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {

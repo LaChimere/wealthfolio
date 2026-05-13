@@ -14,6 +14,10 @@ import {
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
+import {
+  createMarketDataProviderRepository,
+  createMarketDataProviderService,
+} from "./domains/market-data-providers";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createBackendRequestHandler, runWithRequestTimeout } from "./http";
@@ -851,6 +855,63 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("routes migrated market data provider settings only when a service is provided", async () => {
+    const db = createMarketDataProvidersDb();
+    const handler = createBackendRequestHandler(config, {
+      marketDataProviderService: createMarketDataProviderService(
+        createMarketDataProviderRepository(db),
+        { readSecret: (providerId) => (providerId === "ALPHA_VANTAGE" ? "secret" : null) },
+      ),
+    });
+
+    try {
+      expect((await handler(new Request("http://127.0.0.1/api/v1/providers"))).status).toBe(401);
+
+      const providersResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/providers/settings", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(await providersResponse.json()).toEqual([
+        expect.objectContaining({ id: "YAHOO", priority: 1, hasApiKey: true }),
+        expect.objectContaining({ id: "ALPHA_VANTAGE", priority: 3, hasApiKey: true }),
+        expect.objectContaining({ id: "FINNHUB", priority: 4, hasApiKey: false }),
+      ]);
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/providers/settings", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ providerId: "FINNHUB", priority: 0, enabled: true }),
+        }),
+      );
+      expect(updateResponse.status).toBe(204);
+
+      const updatedResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/providers", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect((await updatedResponse.json())[0]).toMatchObject({
+        id: "FINNHUB",
+        priority: 0,
+        enabled: true,
+      });
+
+      const deferredSearchResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/market-data/search?query=AAPL", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deferredSearchResponse.status).toBe(404);
+    } finally {
+      db.close();
+    }
+  });
+
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db), { baseCurrency: "USD" });
@@ -1073,6 +1134,44 @@ function createHealthDb(): Database {
       dismissed_at TEXT NOT NULL,
       data_hash TEXT NOT NULL
     );
+  `);
+  return db;
+}
+
+function createMarketDataProvidersDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE market_data_providers (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      url TEXT,
+      priority INTEGER NOT NULL DEFAULT 0,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      logo_filename TEXT,
+      last_synced_at TEXT,
+      last_sync_status TEXT,
+      last_sync_error TEXT,
+      provider_type TEXT NOT NULL DEFAULT 'builtin',
+      config TEXT
+    );
+
+    CREATE TABLE quote_sync_state (
+      asset_id TEXT PRIMARY KEY NOT NULL,
+      last_synced_at TEXT,
+      data_source TEXT NOT NULL,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    INSERT INTO market_data_providers (
+      id, name, description, url, priority, enabled, logo_filename, provider_type
+    )
+    VALUES
+      ('YAHOO', 'Yahoo Finance', 'Yahoo provider', 'https://finance.yahoo.com/', 1, 1, 'yahoo-finance.png', 'builtin'),
+      ('ALPHA_VANTAGE', 'Alpha Vantage', 'Alpha provider', 'https://www.alphavantage.co/', 3, 1, 'alpha-vantage.png', 'builtin'),
+      ('FINNHUB', 'Finnhub', 'Finnhub provider', 'https://finnhub.io/', 4, 0, 'finnhub.png', 'builtin');
   `);
   return db;
 }

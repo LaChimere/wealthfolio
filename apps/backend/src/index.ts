@@ -97,6 +97,19 @@ export {
   type IssueDismissal,
 } from "./domains/health";
 export {
+  createMarketDataProviderRepository,
+  createMarketDataProviderService,
+  type MarketDataProviderRepository,
+  type MarketDataProviderService,
+  type MarketDataProviderServiceOptions,
+  type MarketDataProviderSetting,
+  type ProviderCapabilities,
+  type ProviderInfo,
+  type ProviderSyncError,
+  type ProviderSyncStats,
+  type ProviderUpdate,
+} from "./domains/market-data-providers";
+export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,
   createSettingsService,
