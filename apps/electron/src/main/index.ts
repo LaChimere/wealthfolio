@@ -474,11 +474,11 @@ async function start(): Promise<void> {
   registerIpcHandlers();
   configureWindowThemeEvents();
   configureApplicationMenu();
-  await createWindow();
   sidecarStartPromise = startSidecarBridge().finally(() => {
     sidecarStartPromise = null;
   });
   void sidecarStartPromise;
+  await createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
