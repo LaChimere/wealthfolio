@@ -66,7 +66,7 @@
     inert for production until TS cutover.
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
-    provider settings, portfolio job trigger, and event stream TS
+    provider settings, portfolio job trigger, event stream, and secrets TS
     repository/service or route config implementations plus guarded route tests
     in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
@@ -86,7 +86,8 @@
     provider sync behavior plus broader market-data quote/search/import/sync
     behavior are deferred to calculation/market-data slices; actual portfolio
     job execution and event production are deferred to portfolio/calculation
-    slices.
+    slices; real secret persistence/keyring integration is deferred to a
+    runtime/keyring parity slice.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -294,6 +295,16 @@ contract:
   type-safety, or test coverage.
 - `pr5-event-stream-transport-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-secrets-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable secret set/get/delete behavior, guarded HTTP
+  route access, body/query validation, 204 mutation responses, JSON string/null
+  reads, and deferred real keyring storage.
+- `pr5-secrets-route-seam-review`: code review found no actionable issues across
+  Rust route parity, sidecar auth, route inertness, type-safety, or test
+  coverage.
+- `pr5-secrets-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -302,8 +313,8 @@ contract:
   settings, accounts, contribution limits, taxonomy read, and taxonomy/category
   mutation, assignment, import/export, custom provider CRUD, and scoped goals
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
-  plus market-data provider settings, portfolio job trigger, and event stream
-  slices implemented; broader migration remains active.
+  plus market-data provider settings, portfolio job trigger, event stream, and
+  secrets route seam slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -311,4 +322,5 @@ contract:
   with calculation-heavy goal slices; FX converter/history/register-pair and
   provider sync plus broader market-data quote/search/import/sync behavior move
   with calculation/market-data slices; actual portfolio job execution and event
-  production move with portfolio/calculation slices.
+  production move with portfolio/calculation slices; real secret persistence and
+  keyring integration move with a dedicated runtime parity slice.

@@ -19,6 +19,7 @@ import {
   type PortfolioJobService,
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
+import type { SecretService } from "./domains/secrets";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type {
   NewAssetTaxonomyAssignment,
@@ -43,6 +44,7 @@ export interface BackendRequestHandlerOptions {
   healthService?: HealthService;
   marketDataProviderService?: MarketDataProviderService;
   portfolioJobService?: PortfolioJobService;
+  secretService?: SecretService;
   settingsService?: SettingsService;
   taxonomyService?: TaxonomyService;
 }
@@ -149,6 +151,10 @@ async function routeRequest(
     return await routePortfolioJobRequest(request, url, config, options.portfolioJobService);
   }
 
+  if (options.secretService && url.pathname === "/api/v1/secrets") {
+    return routeSecretRequest(request, url, config, options.secretService);
+  }
+
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
     return await routeSettingsRequest(request, url, config, options.settingsService);
   }
@@ -163,6 +169,45 @@ async function routeRequest(
       }
       return jsonResponse({ ok: true });
     }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeSecretRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  secretService: SecretService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "POST") {
+    return handleJsonMutationNoContent(request, parseSecretSetRequest, async (body) => {
+      await secretService.setSecret(body.secretKey, body.secret);
+    });
+  }
+
+  if (request.method === "GET") {
+    const secretKey = parseRequiredQueryString(url, "secretKey");
+    if (secretKey instanceof Response) {
+      return secretKey;
+    }
+    return Promise.resolve(secretService.getSecret(secretKey))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "DELETE") {
+    const secretKey = parseRequiredQueryString(url, "secretKey");
+    if (secretKey instanceof Response) {
+      return secretKey;
+    }
+    return Promise.resolve(secretService.deleteSecret(secretKey))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1058,6 +1103,20 @@ function parseProviderUpdate(payload: Record<string, unknown>): ProviderUpdate |
   }
 
   return { providerId, priority, enabled };
+}
+
+function parseSecretSetRequest(
+  payload: Record<string, unknown>,
+): { secretKey: string; secret: string } | Response {
+  const secretKey = parseRequiredString(payload.secretKey, "secretKey");
+  if (secretKey instanceof Response) {
+    return secretKey;
+  }
+  const secret = parseRequiredString(payload.secret, "secret");
+  if (secret instanceof Response) {
+    return secret;
+  }
+  return { secretKey, secret };
 }
 
 function parsePortfolioRequestBody(
@@ -2067,6 +2126,14 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
     return undefined;
   }
   if (typeof value !== "string") {
+    return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
+  }
+  return value;
+}
+
+function parseRequiredQueryString(url: URL, field: string): string | Response {
+  const value = url.searchParams.get(field);
+  if (value === null) {
     return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
   }
   return value;

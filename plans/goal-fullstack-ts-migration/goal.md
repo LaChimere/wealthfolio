@@ -124,6 +124,9 @@ updated_at: "2026-05-14T03:05:00+08:00"
 - Turn 14: Implemented the low-risk backend event stream TS slice: event bus SSE
   formatting, keep-alive stream plumbing, guarded `/api/v1/events/stream` route,
   exported stream helpers, and targeted backend tests.
+- Turn 15: Implemented the low-risk secrets HTTP seam TS slice: injectable
+  `SecretService`, guarded `/api/v1/secrets` set/get/delete route, validation
+  for secret body/query input, and targeted backend tests.
 
 ## Deferred items
 
@@ -153,6 +156,9 @@ updated_at: "2026-05-14T03:05:00+08:00"
   reason=they depend on market sync, holdings, snapshot, valuation, account,
   health, and FX service parity beyond route-level job enqueue and SSE transport
   semantics.
+- Real secret persistence/keyring integration remains an active follow-up.
+  reason=this slice only adds the guarded HTTP seam, while production secrets
+  must move with a dedicated runtime/keyring parity slice.
 
 ## Blockers
 

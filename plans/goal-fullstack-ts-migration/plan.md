@@ -10,22 +10,22 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with backend event stream transport after the
-portfolio job trigger slice:
+PR 5 continues vertical slices with a low-risk secrets HTTP seam after the event
+stream transport slice:
 
-- Add TS SSE formatting and guarded route tests for `/events/stream`.
-- Preserve Rust transport semantics: named SSE events, JSON payloads with `null`
-  for payload-less events, no-cache event-stream headers, and periodic
-  keep-alive comments.
-- Defer actual portfolio job execution and event production to later
-  portfolio/calculation slices because those paths require market sync,
-  holdings, snapshots, valuations, accounts, health, and FX service parity.
+- Add a `SecretService` interface and guarded `/secrets` route tests for set,
+  get, and delete behavior.
+- Preserve Rust API semantics: `POST` body `{ secretKey, secret }`, query-based
+  `GET`/`DELETE`, `204` mutations, JSON string-or-null reads, 400 validation
+  errors, and sidecar bearer-token checks.
+- Defer real OS keyring integration to a dedicated secrets/runtime slice so no
+  production secret backend changes land before broader runtime cutover.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-deletion is in scope for this slice.
+or secret storage deletion is in scope for this slice.
 
 ## Next slices
 

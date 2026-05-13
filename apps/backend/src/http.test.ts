@@ -19,6 +19,7 @@ import {
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
+import type { SecretService } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createEventBus } from "./events";
@@ -1021,6 +1022,58 @@ describe("TS backend HTTP skeleton", () => {
       'event: portfolio_update_start\ndata: {"accountId":"acc-1"}\n\n',
     );
     await reader?.cancel();
+  });
+
+  test("routes migrated secrets seam only when a service is provided", async () => {
+    const secrets = new Map<string, string>();
+    const secretService: SecretService = {
+      setSecret(secretKey, secret) {
+        secrets.set(secretKey, secret);
+      },
+      getSecret(secretKey) {
+        return secrets.get(secretKey) ?? null;
+      },
+      deleteSecret(secretKey) {
+        secrets.delete(secretKey);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { secretService });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/secrets"))).status).toBe(401);
+
+    const setResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/secrets", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ secretKey: "provider/key", secret: "secret-value" }),
+      }),
+    );
+    expect(setResponse.status).toBe(204);
+
+    const getResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/secrets?secretKey=provider%2Fkey", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await getResponse.json()).toBe("secret-value");
+
+    const deleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/secrets?secretKey=provider%2Fkey", {
+        method: "DELETE",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const missingResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/secrets", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(missingResponse.status).toBe(400);
   });
 
   test("routes migrated goals CRUD, funding, and plan reads only when a service is provided", async () => {

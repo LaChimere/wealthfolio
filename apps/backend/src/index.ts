@@ -137,6 +137,7 @@ export {
   type SettingsService,
   type SettingsUpdate,
 } from "./domains/settings";
+export type { SecretService } from "./domains/secrets";
 export {
   createTaxonomyRepository,
   createTaxonomyReadRepository,
