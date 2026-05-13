@@ -14,6 +14,7 @@ import type {
   UpdateAlternativeAssetDetailsRequest,
   UpdateAlternativeAssetValuationRequest,
 } from "./domains/alternative-assets";
+import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
 import type {
@@ -52,6 +53,7 @@ export interface BackendRequestHandlerOptions {
   accountService?: AccountService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
+  appUtilityService?: AppUtilityService;
   assetService?: AssetService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
@@ -134,6 +136,14 @@ async function routeRequest(
       url.pathname === "/api/v1/alternative-holdings")
   ) {
     return routeAlternativeAssetRequest(request, url, config, options.alternativeAssetService);
+  }
+
+  if (
+    options.appUtilityService &&
+    (url.pathname.startsWith("/api/v1/app") ||
+      url.pathname.startsWith("/api/v1/utilities/database"))
+  ) {
+    return routeAppUtilityRequest(request, url, config, options.appUtilityService);
   }
 
   if (options.assetService && url.pathname.startsWith("/api/v1/assets")) {
@@ -367,6 +377,49 @@ function routeAssetRequest(
     return Promise.resolve(assetService.deleteAsset(assetId))
       .then(() => new Response(null, { status: 204 }))
       .catch(domainErrorResponse);
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeAppUtilityRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  appUtilityService: AppUtilityService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/app/info") {
+    return Promise.resolve(appUtilityService.getAppInfo())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/app/check-update") {
+    return Promise.resolve(appUtilityService.checkUpdate(url.searchParams.get("force") === "true"))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/utilities/database/backup") {
+    return Promise.resolve(appUtilityService.backupDatabase())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/utilities/database/backup-to-path") {
+    return handleJsonMutation(request, parseBackupToPathRequest, (input) =>
+      Promise.resolve(appUtilityService.backupDatabaseToPath(input.backupDir)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/utilities/database/restore") {
+    return handleJsonMutationNoContent(request, parseRestoreDatabaseRequest, async (input) => {
+      await appUtilityService.restoreDatabase(input.backupFilePath);
+    });
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -944,7 +997,7 @@ async function routeSettingsRequest(
       );
     }
   }
-  if (request.method === "GET" && url.pathname === "/api/v1/settings/auto-update") {
+  if (request.method === "GET" && url.pathname === "/api/v1/settings/auto-update-enabled") {
     return jsonResponse(settingsService.isAutoUpdateCheckEnabled());
   }
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1669,6 +1722,26 @@ function parseQuoteModeBody(payload: Record<string, unknown>): { quoteMode: stri
     return quoteMode;
   }
   return { quoteMode };
+}
+
+function parseBackupToPathRequest(
+  payload: Record<string, unknown>,
+): { backupDir: string } | Response {
+  const backupDir = parseRequiredString(payload.backupDir, "backupDir");
+  if (backupDir instanceof Response) {
+    return backupDir;
+  }
+  return { backupDir };
+}
+
+function parseRestoreDatabaseRequest(
+  payload: Record<string, unknown>,
+): { backupFilePath: string } | Response {
+  const backupFilePath = parseRequiredString(payload.backupFilePath, "backupFilePath");
+  if (backupFilePath instanceof Response) {
+    return backupFilePath;
+  }
+  return { backupFilePath };
 }
 
 function parseSecretSetRequest(

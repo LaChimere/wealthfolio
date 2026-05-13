@@ -140,6 +140,11 @@ updated_at: "2026-05-14T03:05:00+08:00"
   `AssetService`, guarded `/api/v1/assets` list/profile/create/update/quote-mode
   and delete routes, query/path decoding, quoteMode/pricingMode alias handling,
   null-as-omitted option behavior, and targeted backend tests.
+- Turn 19: Implemented the low-risk app utility HTTP seam TS slice: injectable
+  `AppUtilityService`, guarded `/api/v1/app/*` and
+  `/api/v1/utilities/database/*` routes, update-check query parsing,
+  backup/restore request validation, 204 restore responses, corrected
+  `/settings/auto-update-enabled`, and targeted backend tests.
 
 ## Deferred items
 
@@ -184,6 +189,10 @@ updated_at: "2026-05-14T03:05:00+08:00"
   interactions, activity guards, and portfolio recalculation behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/market-data/portfolio parity slices.
+- App runtime metadata, update HTTP requests/cache, backup/restore file I/O, and
+  path normalization remain active follow-ups. reason=this slice only adds the
+  guarded HTTP seam, while runtime behavior must move with dedicated app utility
+  parity slices.
 
 ## Blockers
 

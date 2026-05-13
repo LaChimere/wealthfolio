@@ -10,24 +10,25 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices with a low-risk assets HTTP seam after the
-alternative assets route seam:
+PR 5 continues vertical slices with a low-risk app utility HTTP seam after the
+assets route seam:
 
-- Add an `AssetService` interface and guarded `/assets` route tests for list,
-  profile read, create, profile update, quote-mode update, and delete behavior.
-- Preserve Rust HTTP semantics for route methods, query/path parameters,
-  quoteMode/pricingMode aliases, required notes on profile updates, 204 deletes,
-  null-as-omitted option handling, and sidecar bearer-token checks.
-- Defer real asset repository writes, profile/quote-mode side effects, quote
-  provider interactions, activity guards, and portfolio recalculation behavior
-  to dedicated asset/market-data/portfolio slices.
+- Add an `AppUtilityService` interface and guarded `/app` and
+  `/utilities/database` route tests for app info, update checks, database
+  backup, backup-to-path, and restore behavior.
+- Preserve Rust HTTP semantics for route methods, query/body parsing, backup
+  response `dataB64`, 204 restore responses, and sidecar bearer-token checks.
+- Correct the settings auto-update route seam to
+  `/settings/auto-update-enabled`, matching Rust and the web adapter.
+- Defer real update HTTP requests, backup/restore file I/O, path normalization,
+  and app runtime metadata resolution to dedicated runtime utility slices.
 - Keep routes guarded behind explicit TS runtime handler wiring and sidecar
   token checks in tests.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-secret storage, AI provider runtime, alternative asset runtime, or asset runtime
-deletion is in scope for this slice.
+secret storage, AI provider runtime, alternative asset runtime, asset runtime,
+or app utility runtime deletion is in scope for this slice.
 
 ## Next slices
 

@@ -67,9 +67,9 @@
   - Evidence: settings, accounts, contribution limits, taxonomy, custom
     provider, scoped goals, local exchange-rate, local health, market-data
     provider settings, portfolio job trigger, event stream, secrets, AI
-    provider, alternative assets, and assets TS repository/service or route
-    config implementations plus guarded route tests in
-    `apps/backend/src/domains/settings.ts`,
+    provider, alternative assets, assets, and app utilities TS
+    repository/service or route config implementations plus guarded route tests
+    in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -92,7 +92,9 @@
     runtime behavior is deferred to AI/secrets parity slices; alternative asset
     persistence/quotes/holdings/job behavior is deferred to asset/portfolio
     parity slices; asset persistence/profile/quote-mode behavior is deferred to
-    asset/market-data/portfolio parity slices.
+    asset/market-data/portfolio parity slices; app runtime metadata,
+    update-check HTTP/cache, backup/restore I/O, and path normalization are
+    deferred to app utility parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -346,6 +348,18 @@ contract:
   checks, and final review found no actionable issues.
 - `pr5-assets-route-seam-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-app-utility-route-seam`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes injectable app info, update check, backup, backup-to-path,
+  and restore behavior, guarded HTTP route access, force query parsing, body
+  validation, 204 restore responses, route inertness without injection,
+  corrected `/settings/auto-update-enabled`, and deferred real
+  update/backup/restore behavior.
+- `pr5-app-utility-route-seam-review`: code review found no actionable issues
+  across Rust route parity, sidecar auth, route inertness, type-safety, or test
+  coverage.
+- `pr5-app-utility-route-seam-repo-check`: full repo check passed with
+  `bun run check`.
 
 ## Result
 
@@ -355,8 +369,9 @@ contract:
   mutation, assignment, import/export, custom provider CRUD, and scoped goals
   CRUD/funding plus local exchange-rate CRUD and local health dismissal/config
   plus market-data provider settings, portfolio job trigger, event stream,
-  secrets route seam, AI provider route seam, alternative assets route seam, and
-  assets route seam slices implemented; broader migration remains active.
+  secrets route seam, AI provider route seam, alternative assets route seam,
+  assets route seam, and app utility route seam slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; taxonomy migration/health
   endpoints move with the health/classification services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
@@ -369,4 +384,6 @@ contract:
   catalog/settings/model-listing runtime behavior moves with AI/secrets parity
   slices; alternative asset persistence/quotes/holdings/job behavior moves with
   asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
-  moves with asset/market-data/portfolio parity slices.
+  moves with asset/market-data/portfolio parity slices; app runtime metadata,
+  update-check HTTP/cache, backup/restore I/O, and path normalization move with
+  app utility parity slices.

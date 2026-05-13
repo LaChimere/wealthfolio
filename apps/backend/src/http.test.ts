@@ -5,6 +5,7 @@ import type { BackendRuntimeConfig } from "./config";
 import { createAccountRepository, createAccountService } from "./domains/accounts";
 import type { AiProviderService } from "./domains/ai-providers";
 import type { AlternativeAssetService } from "./domains/alternative-assets";
+import type { AppUtilityService } from "./domains/app-utilities";
 import type { AssetService } from "./domains/assets";
 import {
   createContributionLimitRepository,
@@ -153,7 +154,7 @@ describe("TS backend HTTP skeleton", () => {
       await expect(
         (
           await handler(
-            new Request("http://127.0.0.1/api/v1/settings/auto-update", {
+            new Request("http://127.0.0.1/api/v1/settings/auto-update-enabled", {
               headers: { authorization: "Bearer sidecar-token" },
             }),
           )
@@ -1532,6 +1533,133 @@ describe("TS backend HTTP skeleton", () => {
       ],
       ["quote-mode", { assetId: "asset/2", quoteMode: "MANUAL" }],
       ["delete", "asset/2"],
+    ]);
+  });
+
+  test("routes migrated app utility seam only when a service is provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const appUtilityService: AppUtilityService = {
+      getAppInfo() {
+        calls.push(["info", null]);
+        return { version: "1.0.0", dbPath: "/tmp/wealthfolio.db", logsDir: "/tmp/logs" };
+      },
+      checkUpdate(force) {
+        calls.push(["check-update", force]);
+        return {
+          updateAvailable: false,
+          latestVersion: "1.0.0",
+          notes: null,
+          pubDate: null,
+          downloadUrl: null,
+          changelogUrl: null,
+          screenshots: null,
+        };
+      },
+      backupDatabase() {
+        calls.push(["backup", null]);
+        return { filename: "wealthfolio_backup.db", dataB64: "YmFja3Vw" };
+      },
+      backupDatabaseToPath(backupDir) {
+        calls.push(["backup-to-path", backupDir]);
+        return { path: `${backupDir}/wealthfolio_backup.db` };
+      },
+      restoreDatabase(backupFilePath) {
+        calls.push(["restore", backupFilePath]);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { appUtilityService });
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/app/info"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/app/info", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const appInfoResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/app/info", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await appInfoResponse.json()).toEqual({
+      version: "1.0.0",
+      dbPath: "/tmp/wealthfolio.db",
+      logsDir: "/tmp/logs",
+    });
+
+    const updateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/app/check-update?force=true", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await updateResponse.json()).toEqual({
+      updateAvailable: false,
+      latestVersion: "1.0.0",
+      notes: null,
+      pubDate: null,
+      downloadUrl: null,
+      changelogUrl: null,
+      screenshots: null,
+    });
+
+    const backupResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/utilities/database/backup", {
+        method: "POST",
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(await backupResponse.json()).toEqual({
+      filename: "wealthfolio_backup.db",
+      dataB64: "YmFja3Vw",
+    });
+
+    const backupToPathResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/utilities/database/backup-to-path", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ backupDir: "/tmp/backups" }),
+      }),
+    );
+    expect(await backupToPathResponse.json()).toEqual({
+      path: "/tmp/backups/wealthfolio_backup.db",
+    });
+
+    const restoreResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/utilities/database/restore", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ backupFilePath: "/tmp/backups/wealthfolio_backup.db" }),
+      }),
+    );
+    expect(restoreResponse.status).toBe(204);
+
+    const invalidResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/utilities/database/backup-to-path", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(calls).toEqual([
+      ["info", null],
+      ["check-update", true],
+      ["backup", null],
+      ["backup-to-path", "/tmp/backups"],
+      ["restore", "/tmp/backups/wealthfolio_backup.db"],
     ]);
   });
 
