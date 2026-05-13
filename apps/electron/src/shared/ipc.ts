@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   openCsvFileDialog: "wealthfolio:native:open-csv-file-dialog",
   openFolderDialog: "wealthfolio:native:open-folder-dialog",
   openDatabaseFileDialog: "wealthfolio:native:open-database-file-dialog",
+  openAddonPackageDialog: "wealthfolio:native:open-addon-package-dialog",
   saveFileDialog: "wealthfolio:native:save-file-dialog",
   openExternalUrl: "wealthfolio:native:open-external-url",
 } as const;
@@ -1007,6 +1008,11 @@ export interface ElectronSaveFileRequest {
   fileName: string;
 }
 
+export interface ElectronOpenFileResult {
+  data: Uint8Array;
+  fileName: string;
+}
+
 export interface WealthfolioElectronApi {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
@@ -1015,6 +1021,7 @@ export interface WealthfolioElectronApi {
   openCsvFileDialog(): Promise<null | string | string[]>;
   openFolderDialog(): Promise<string | null>;
   openDatabaseFileDialog(): Promise<string | null>;
+  openAddonPackageDialog(): Promise<ElectronOpenFileResult | null>;
   saveFileDialog(request: ElectronSaveFileRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
   listen<T>(

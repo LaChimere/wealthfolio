@@ -1,5 +1,10 @@
 // Web adapter - File Dialogs (web implementations)
 
+export interface OpenAddonPackageDialogResult {
+  data: Uint8Array;
+  fileName: string;
+}
+
 /**
  * Open a file dialog for CSV files.
  * Web implementation - not fully supported, returns null.
@@ -25,6 +30,67 @@ export const openFolderDialog = (): Promise<string | null> => {
 export const openDatabaseFileDialog = (): Promise<string | null> => {
   // Not supported in web
   return Promise.resolve(null);
+};
+
+export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogResult | null> => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,application/zip";
+  input.style.display = "none";
+
+  const file = await new Promise<File | null>((resolve) => {
+    let settled = false;
+    let focusFallbackId: number | undefined;
+
+    const handleCancel = () => {
+      finish(null);
+    };
+
+    const handleWindowFocus = () => {
+      if (focusFallbackId !== undefined) {
+        window.clearTimeout(focusFallbackId);
+      }
+      focusFallbackId = window.setTimeout(() => {
+        finish(input.files?.[0] ?? null);
+      }, 0);
+    };
+
+    const finish = (selectedFile: File | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (focusFallbackId !== undefined) {
+        window.clearTimeout(focusFallbackId);
+      }
+      input.removeEventListener("cancel", handleCancel);
+      window.removeEventListener("focus", handleWindowFocus);
+      input.remove();
+      resolve(selectedFile);
+    };
+
+    input.onchange = () => {
+      finish(input.files?.[0] ?? null);
+    };
+    input.addEventListener("cancel", handleCancel);
+    window.addEventListener("focus", handleWindowFocus);
+    document.body.appendChild(input);
+    input.click();
+  });
+
+  if (!file) {
+    return null;
+  }
+
+  const isZip = file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip";
+  if (!isZip) {
+    throw new Error("Please select a .zip addon package.");
+  }
+
+  return {
+    fileName: file.name,
+    data: new Uint8Array(await file.arrayBuffer()),
+  };
 };
 
 /**

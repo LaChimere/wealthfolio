@@ -227,6 +227,10 @@
   dialogs, save-dialog file writes, and external URL opening. Renderer code no
   longer uses unsupported placeholders for these Tauri file/shell adapter APIs,
   and Electron main validates save payloads plus external URL protocols.
+- Turn 39: Moved add-on ZIP package selection/reading behind the adapter seam.
+  Electron main now owns ZIP file reads through typed IPC, Tauri keeps dialog/fs
+  usage inside the Tauri adapter, and the add-on settings hook no longer imports
+  Tauri plugins directly.
 
 ## Deferred items
 

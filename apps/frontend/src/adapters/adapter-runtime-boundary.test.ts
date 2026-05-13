@@ -26,10 +26,6 @@ const ALLOWED_NON_ADAPTER_TAURI_IMPORTS: Record<string, string[]> = {
   "apps/frontend/src/hooks/use-updater.ts": ["@tauri-apps/api/event"],
   "apps/frontend/src/lib/settings-provider.tsx": ["@tauri-apps/api/window"],
   "apps/frontend/src/lockdown.ts": ["@tauri-apps/api/window"],
-  "apps/frontend/src/pages/settings/addons/hooks/use-addon-actions.ts": [
-    "@tauri-apps/plugin-dialog",
-    "@tauri-apps/plugin-fs",
-  ],
 };
 
 const ALLOWED_NON_ADAPTER_ELECTRON_IMPORTS: Record<string, string[]> = {

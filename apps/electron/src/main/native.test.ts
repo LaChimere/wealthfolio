@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openDatabaseFileDialog,
   openExternalUrl,
@@ -38,6 +39,30 @@ describe("Electron native bridge", () => {
 
     const databaseDialog = createDialog({ canceled: true, filePaths: [] });
     await expect(openDatabaseFileDialog(databaseDialog)).resolves.toBeNull();
+  });
+
+  test("opens and reads addon package ZIP files in Electron main", async () => {
+    const dialog = createDialog({ canceled: false, filePaths: ["/tmp/addons/example.zip"] });
+
+    await expect(
+      openAddonPackageDialog(dialog, async (filePath) => {
+        expect(filePath).toBe("/tmp/addons/example.zip");
+        return new Uint8Array([80, 75, 3, 4]);
+      }),
+    ).resolves.toEqual({
+      fileName: "example.zip",
+      data: new Uint8Array([80, 75, 3, 4]),
+    });
+    expect(dialog.openCalls[0]).toEqual({
+      filters: [{ name: "Addon Packages", extensions: ["zip"] }],
+      properties: ["openFile"],
+    });
+
+    await expect(
+      openAddonPackageDialog(createDialog({ canceled: true, filePaths: [] }), async () => {
+        throw new Error("read should not be called");
+      }),
+    ).resolves.toBeNull();
   });
 
   test("saves string and byte content through the native save dialog", async () => {

@@ -20,12 +20,12 @@ export const installAddonZip = async (
 
 export const installAddonFile = async (
   fileName: string,
-  fileContent: string,
+  _fileContent: string,
   enableAfterInstall?: boolean,
 ): Promise<AddonManifest> => {
   return Promise.reject(
     new Error(
-      `installAddonFile is not available until the Electron native bridge is connected: ${fileName}, ${fileContent}, ${enableAfterInstall}`,
+      `installAddonFile is not supported in Electron; use installAddonZip instead: ${fileName}, ${enableAfterInstall}`,
     ),
   );
 };

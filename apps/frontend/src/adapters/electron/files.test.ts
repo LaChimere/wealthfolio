@@ -2,6 +2,7 @@ import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/elec
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openDatabaseFileDialog,
   openFileSaveDialog,
@@ -16,6 +17,7 @@ function installElectronApi(api: Partial<WealthfolioElectronApi>) {
     openCsvFileDialog: vi.fn(),
     openFolderDialog: vi.fn(),
     openDatabaseFileDialog: vi.fn(),
+    openAddonPackageDialog: vi.fn(),
     saveFileDialog: vi.fn(),
     openExternalUrl: vi.fn(),
     ...api,
@@ -40,6 +42,20 @@ describe("electron files adapter", () => {
     await expect(openCsvFileDialog()).resolves.toBe("/tmp/import.csv");
     await expect(openFolderDialog()).resolves.toBe("/tmp/exports");
     await expect(openDatabaseFileDialog()).resolves.toBe("/tmp/app.db");
+  });
+
+  it("delegates addon package selection through the preload bridge", async () => {
+    const openAddonPackage = vi.fn().mockResolvedValue({
+      fileName: "example.zip",
+      data: new Uint8Array([80, 75]),
+    });
+    installElectronApi({ openAddonPackageDialog: openAddonPackage });
+
+    await expect(openAddonPackageDialog()).resolves.toEqual({
+      fileName: "example.zip",
+      data: new Uint8Array([80, 75]),
+    });
+    expect(openAddonPackage).toHaveBeenCalledOnce();
   });
 
   it("converts Blob saves to bytes before crossing the bridge", async () => {

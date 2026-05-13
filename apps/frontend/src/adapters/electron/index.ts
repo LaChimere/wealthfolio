@@ -129,6 +129,7 @@ export {
 } from "./events";
 
 export {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openDatabaseFileDialog,
   openFileSaveDialog,

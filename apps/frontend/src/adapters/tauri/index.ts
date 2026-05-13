@@ -197,6 +197,7 @@ export {
 
 // File Dialogs (Tauri file dialogs)
 export {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openFolderDialog,
   openDatabaseFileDialog,

@@ -350,6 +350,7 @@ export {
 
 // File Dialogs (web-specific implementations)
 export {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openDatabaseFileDialog,
   openFileSaveDialog,

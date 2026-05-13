@@ -1,8 +1,12 @@
 import type { IpcMain, OpenDialogOptions, SaveDialogOptions } from "electron";
-import { writeFile as writeFileToDisk } from "node:fs/promises";
+import { readFile as readFileFromDisk, writeFile as writeFileToDisk } from "node:fs/promises";
 import path from "node:path";
 
-import { IPC_CHANNELS, type ElectronSaveFileRequest } from "../shared/ipc";
+import {
+  IPC_CHANNELS,
+  type ElectronOpenFileResult,
+  type ElectronSaveFileRequest,
+} from "../shared/ipc";
 
 interface DialogResult {
   canceled: boolean;
@@ -27,6 +31,7 @@ export interface NativeIpcDependencies {
   ipcMain: Pick<IpcMain, "handle">;
   dialog: NativeDialog;
   shell: NativeShell;
+  readFile?: (filePath: string) => Promise<Uint8Array>;
   writeFile?: (filePath: string, content: Uint8Array) => Promise<void>;
 }
 
@@ -39,6 +44,9 @@ export function registerNativeIpcHandlers(deps: NativeIpcDependencies): void {
   });
   deps.ipcMain.handle(IPC_CHANNELS.openDatabaseFileDialog, async () => {
     return await openDatabaseFileDialog(deps.dialog);
+  });
+  deps.ipcMain.handle(IPC_CHANNELS.openAddonPackageDialog, async () => {
+    return await openAddonPackageDialog(deps.dialog, deps.readFile ?? readFileFromDisk);
   });
   deps.ipcMain.handle(IPC_CHANNELS.saveFileDialog, async (_event, request: unknown) => {
     return await saveFileDialog(request, deps.dialog, deps.writeFile ?? writeFileToDisk);
@@ -71,6 +79,25 @@ export async function openDatabaseFileDialog(dialog: NativeDialog): Promise<stri
   });
 
   return firstSelectedPath(result);
+}
+
+export async function openAddonPackageDialog(
+  dialog: NativeDialog,
+  readFile: (filePath: string) => Promise<Uint8Array>,
+): Promise<ElectronOpenFileResult | null> {
+  const result = await dialog.showOpenDialog({
+    filters: [{ name: "Addon Packages", extensions: ["zip"] }],
+    properties: ["openFile"],
+  });
+  const filePath = firstSelectedPath(result);
+  if (!filePath) {
+    return null;
+  }
+
+  return {
+    fileName: path.basename(filePath),
+    data: new Uint8Array(await readFile(filePath)),
+  };
 }
 
 interface ParsedSaveFileRequest {

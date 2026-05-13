@@ -1,5 +1,10 @@
 import { getElectronApi } from "./core";
 
+export interface OpenAddonPackageDialogResult {
+  data: Uint8Array;
+  fileName: string;
+}
+
 async function toSaveContent(
   fileContent: string | Blob | Uint8Array,
 ): Promise<string | Uint8Array> {
@@ -20,6 +25,10 @@ export const openFolderDialog = (): Promise<string | null> => {
 
 export const openDatabaseFileDialog = (): Promise<string | null> => {
   return getElectronApi().openDatabaseFileDialog();
+};
+
+export const openAddonPackageDialog = (): Promise<OpenAddonPackageDialogResult | null> => {
+  return getElectronApi().openAddonPackageDialog();
 };
 
 export const openFileSaveDialog = async (

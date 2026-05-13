@@ -181,6 +181,9 @@ dedicated IPC methods, not as renderer Node APIs:
 - Save dialogs are owned by Electron main; renderer content is converted to
   string/bytes before IPC, and main writes the selected path after cancellation
   checks.
+- Add-on package selection is also owned by the adapter seam: Electron main
+  reads the selected ZIP bytes, Tauri keeps using its dialog/fs plugins behind
+  the Tauri adapter, and web mode keeps using an `<input type="file">`.
 - External URL opening is owned by Electron main and is limited to `http:`,
   `https:`, and `mailto:` protocols before calling `shell.openExternal`.
 

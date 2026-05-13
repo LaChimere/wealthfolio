@@ -3,10 +3,21 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   BaseDirectory,
   copyFile,
+  readFile,
   remove,
   startAccessingSecurityScopedResource,
   stopAccessingSecurityScopedResource,
 } from "@tauri-apps/plugin-fs";
+
+export interface OpenAddonPackageDialogResult {
+  data: Uint8Array;
+  fileName: string;
+}
+
+const fileNameFromPath = (filePath: string): string => {
+  const segments = filePath.split(/[\\/]/).filter((segment) => segment.length > 0);
+  return segments[segments.length - 1] ?? filePath;
+};
 
 import { invoke } from "./core";
 
@@ -78,6 +89,22 @@ export const openDatabaseFileDialog = async (): Promise<string | null> => {
     return result[0] ?? null;
   }
   return typeof result === "string" ? result : null;
+};
+
+export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogResult | null> => {
+  const filePath = await open({
+    filters: [{ name: "Addon Packages", extensions: ["zip"] }],
+    multiple: false,
+  });
+
+  if (!filePath || Array.isArray(filePath)) {
+    return null;
+  }
+
+  return {
+    fileName: fileNameFromPath(filePath),
+    data: await readFile(filePath),
+  };
 };
 
 export const openFileSaveDialog = async (

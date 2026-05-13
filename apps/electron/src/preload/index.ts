@@ -17,6 +17,7 @@ const api: WealthfolioElectronApi = {
   openCsvFileDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openCsvFileDialog),
   openFolderDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openFolderDialog),
   openDatabaseFileDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openDatabaseFileDialog),
+  openAddonPackageDialog: () => ipcRenderer.invoke(IPC_CHANNELS.openAddonPackageDialog),
   saveFileDialog: (request) => ipcRenderer.invoke(IPC_CHANNELS.saveFileDialog, request),
   openExternalUrl: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternalUrl, url),
   listen: async (eventName, handler) => {
