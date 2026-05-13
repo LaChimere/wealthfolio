@@ -26,6 +26,7 @@ export interface SidecarExitEvent {
 export interface SidecarCommand {
   command: string;
   args: string[];
+  cwd?: string;
 }
 
 export interface StartSidecarOptions {
@@ -99,6 +100,17 @@ export function createRustSidecarCommand(repositoryRoot: string): SidecarCommand
   };
 }
 
+export function createTsBackendCommand(
+  repositoryRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): SidecarCommand {
+  return {
+    command: platform === "win32" ? "bun.exe" : "bun",
+    args: ["run", "start"],
+    cwd: path.join(repositoryRoot, "apps/backend"),
+  };
+}
+
 export function createPackagedSidecarCommand(
   resourcesPath: string,
   platform: NodeJS.Platform = process.platform,
@@ -133,7 +145,9 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
       : createRustSidecarCommand(options.repositoryRoot));
 
   const child = spawn(sidecarCommand.command, sidecarCommand.args, {
-    cwd: options.packaged ? path.dirname(sidecarCommand.command) : options.repositoryRoot,
+    cwd:
+      sidecarCommand.cwd ??
+      (options.packaged ? path.dirname(sidecarCommand.command) : options.repositoryRoot),
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -196,6 +210,16 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
       return () => exitListeners.delete(listener);
     },
   };
+}
+
+export async function startTsBackendSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
+  if (options.packaged && !options.command) {
+    throw new Error("The TypeScript backend runtime is not packaged yet; use the Rust sidecar.");
+  }
+  return await startRustSidecar({
+    ...options,
+    command: options.command ?? createTsBackendCommand(options.repositoryRoot),
+  });
 }
 
 function recordSidecarLog(

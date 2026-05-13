@@ -107,6 +107,15 @@
         "react-dom": "^19.2.4",
       },
     },
+    "apps/backend": {
+      "name": "@wealthfolio/backend",
+      "version": "3.4.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.13",
+        "@types/node": "^25.7.0",
+        "typescript": "^6.0.3",
+      },
+    },
     "apps/electron": {
       "name": "@wealthfolio/electron",
       "version": "3.4.0",
@@ -1196,6 +1205,8 @@
     "@wealthfolio/addon-dev-tools": ["@wealthfolio/addon-dev-tools@workspace:packages/addon-dev-tools"],
 
     "@wealthfolio/addon-sdk": ["@wealthfolio/addon-sdk@workspace:packages/addon-sdk"],
+
+    "@wealthfolio/backend": ["@wealthfolio/backend@workspace:apps/backend"],
 
     "@wealthfolio/backend-contracts": ["@wealthfolio/backend-contracts@workspace:packages/backend-contracts"],
 

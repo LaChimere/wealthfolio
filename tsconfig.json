@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "references": [
+    { "path": "./apps/backend" },
     { "path": "./apps/frontend" },
     { "path": "./apps/electron" },
     { "path": "./packages/ui" },

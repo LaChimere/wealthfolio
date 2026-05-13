@@ -13,6 +13,7 @@ import {
   type RuntimeInfo,
 } from "../shared/ipc";
 import { createAiChatStreamManager } from "./ai-chat-stream-manager";
+import { startElectronBackendRuntime } from "./backend-runtime";
 import { invokeSidecarCommand } from "./commands";
 import { resolveElectronDesktopPaths } from "./data-root";
 import {
@@ -28,7 +29,7 @@ import { validateElectronInvokeRequest } from "./ipc-validation";
 import { createElectronLogWriter, type ElectronLogWriter, validateLogMessage } from "./logging";
 import { installApplicationMenu } from "./menu";
 import { registerNativeIpcHandlers } from "./native";
-import { startRustSidecar, toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
+import { toPublicSidecarStatus, type SidecarHandle } from "./sidecar";
 import {
   createElectronUpdaterService,
   validateCheckForUpdatesOptions,
@@ -393,7 +394,7 @@ async function startSidecarBridge(): Promise<void> {
   const controller = new AbortController();
   sidecarStartController = controller;
   try {
-    sidecarHandle = await startRustSidecar({
+    sidecarHandle = await startElectronBackendRuntime({
       legacyPaths,
       repositoryRoot,
       packaged: app.isPackaged,

@@ -50,6 +50,8 @@ common task playbooks.
 - **Desktop**: Electron main/preload with a Rust sidecar (`apps/electron/`,
   `apps/server/`, `crates/`)
 - **Web mode**: Axum HTTP server (`apps/server/`)
+- **TS backend migration**: Bun runtime skeleton (`apps/backend/`) being built
+  as the eventual replacement for `apps/server/`
 - **Packages**: `@wealthfolio/ui`, addon-sdk, addon-dev-tools (`packages/`)
 
 ## Code Layout
@@ -66,6 +68,9 @@ apps/frontend/
 
 apps/electron/
 └── src/                # Electron main/preload/shared IPC
+
+apps/backend/
+└── src/                # Bun/TypeScript backend runtime migration target
 
 apps/server/src/
 └── api/                # Axum HTTP handlers

@@ -40,11 +40,13 @@
   - Evidence: `packages/backend-contracts` package with command-surface parser,
     classification tests, normalization helpers, parity smoke commands, and
     addon-host canary contract.
-- [ ] PR 2: TS backend runtime skeleton.
+- [x] PR 2: TS backend runtime skeleton.
   - Acceptance criteria: guarded TS backend skeleton supports health/readiness,
     sidecar-token/auth parity, and Electron lifecycle tests while Rust remains
     default.
-  - Evidence: pending.
+  - Evidence: `apps/backend` Bun runtime skeleton with config/auth/CORS/timeout
+    tests; Electron runtime selector defaults to Rust and can explicitly spawn
+    TS backend in dev/test.
 - [ ] PR 3: TS SQLite foundation.
   - Acceptance criteria: TS storage can open existing DBs, preserve migration
     history/PRAGMAs, and pass read/backup/restore parity fixtures.
@@ -105,10 +107,17 @@ contract:
   `bun run --cwd packages/backend-contracts test` and
   `bun run --cwd packages/backend-contracts type-check`.
 - `pr1-repo-check`: full repo check passed with `bun run check`.
+- `pr2-runtime-skeleton`: targeted checks passed:
+  `bun run --cwd apps/backend test`, `bun run --cwd apps/backend type-check`,
+  `bun run --cwd apps/electron test`, and
+  `bun run --cwd apps/electron type-check`.
+- `pr2-repo-check`: full repo check passed with `bun run check`.
+- `pr2-review-fix`: code review found the guarded debug route was open when no
+  sidecar token was configured; fixed it to fail closed and re-ran targeted
+  checks plus `bun run check`.
 
 ## Result
 
-- Outcome: PR 1 contract foundation implemented; broader migration remains
-  active.
-- Follow-ups: run full repo check, then continue with PR 2 TS backend runtime
-  skeleton.
+- Outcome: PR 1 contract foundation and PR 2 guarded TS backend runtime skeleton
+  implemented; broader migration remains active.
+- Follow-ups: continue with PR 3 TS SQLite foundation.
