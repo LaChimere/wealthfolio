@@ -36,6 +36,23 @@ export async function invokeSidecarCommand<T>({
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
+    case "check_for_updates":
+      return await invokeCheckForUpdates<T>({ payload, sidecar, fetchImpl });
+    case "install_app_update":
+      throw new Error("Electron update installation is pending Electron updater integration.");
+    case "backup_database":
+      return await invokeBackupDatabase<T>({ sidecar, fetchImpl });
+    case "backup_database_to_path":
+      return await invokeBackupDatabaseToPath<T>({ payload, sidecar, fetchImpl });
+    case "restore_database":
+      return await invokeVoidJson<T>({
+        command,
+        body: {
+          backupFilePath: requireString(payload?.backupFilePath, "backupFilePath", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "set_secret":
       return await invokePostJson<T>({
         command,
@@ -494,6 +511,8 @@ export async function invokeSidecarCommand<T>({
     case "preview_import_assets":
     case "import_activities":
       return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
+    case "parse_csv":
+      return await invokeParseCsv<T>({ payload, sidecar, fetchImpl });
     case "create_activity":
     case "update_activity":
       return await invokePostJson<T>({
@@ -1316,6 +1335,103 @@ async function invokePathJson<T>({
   });
 }
 
+async function invokeCheckForUpdates<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const response = await invokeGetWithQuery<{
+    updateAvailable?: unknown;
+    latestVersion?: unknown;
+    notes?: unknown;
+    pubDate?: unknown;
+    downloadUrl?: unknown;
+    changelogUrl?: unknown;
+    screenshots?: unknown;
+  }>({
+    command: "check_for_updates",
+    payload,
+    sidecar,
+    fetchImpl,
+    params: [
+      ["force", optionalBoolean(payload?.force, "force", "check_for_updates") ? "true" : undefined],
+    ],
+  });
+  if (!response.updateAvailable) {
+    return null as T;
+  }
+  return {
+    currentVersion: "",
+    latestVersion: requireString(response.latestVersion, "latestVersion", "check_for_updates"),
+    notes: optionalStringField(response.notes, "notes", "check_for_updates"),
+    pubDate: optionalStringField(response.pubDate, "pubDate", "check_for_updates"),
+    isAppStoreBuild: false,
+    storeUrl: optionalStringField(response.downloadUrl, "downloadUrl", "check_for_updates"),
+    changelogUrl: optionalStringField(response.changelogUrl, "changelogUrl", "check_for_updates"),
+    screenshots: optionalStringArrayStrict(
+      response.screenshots,
+      "screenshots",
+      "check_for_updates",
+    ),
+  } as T;
+}
+
+async function invokeBackupDatabase<T>({
+  sidecar,
+  fetchImpl,
+}: Pick<ResolvedSidecarCommandOptions, "sidecar" | "fetchImpl">): Promise<T> {
+  const response = await fetchSidecarJson<{ filename?: unknown; dataB64?: unknown }>({
+    command: "backup_database",
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS.backup_database.path, sidecar.baseUrl),
+    init: { method: ELECTRON_COMMANDS.backup_database.method },
+  });
+  const filename = requireString(response.filename, "filename", "backup_database");
+  const dataB64 = requireString(response.dataB64, "dataB64", "backup_database");
+  return [filename, Array.from(Buffer.from(dataB64, "base64"))] as T;
+}
+
+async function invokeBackupDatabaseToPath<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const response = await invokePostJson<{ path?: unknown }>({
+    command: "backup_database_to_path",
+    body: { backupDir: requireString(payload?.backupDir, "backupDir", "backup_database_to_path") },
+    sidecar,
+    fetchImpl,
+  });
+  return requireString(response.path, "path", "backup_database_to_path") as T;
+}
+
+async function invokeParseCsv<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const content = requireByteArray(payload?.content, "content", "parse_csv", {
+    allowEmpty: true,
+  });
+  const config = requireRecord(payload?.config, "config", "parse_csv");
+  const contentBytes = Uint8Array.from(content);
+  const contentBuffer = new ArrayBuffer(contentBytes.byteLength);
+  new Uint8Array(contentBuffer).set(contentBytes);
+
+  const form = new FormData();
+  form.append("file", new Blob([contentBuffer]), "upload.csv");
+  form.append("config", new Blob([JSON.stringify(config)], { type: "application/json" }));
+
+  return await fetchSidecarMultipartJson<T>({
+    command: "parse_csv",
+    fetchImpl,
+    sidecar,
+    url: new URL(ELECTRON_COMMANDS.parse_csv.path, sidecar.baseUrl),
+    body: form,
+  });
+}
+
 async function invokeSyncCryptoString<T>({
   command,
   sidecar,
@@ -1397,7 +1513,7 @@ async function invokeVoidJson<T>({
 }: {
   command: Extract<
     ElectronCommand,
-    "store_sync_session" | "clear_sync_session" | "clear_device_sync_data"
+    "store_sync_session" | "clear_sync_session" | "clear_device_sync_data" | "restore_database"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -2397,6 +2513,46 @@ async function fetchSidecarJson<T>({
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+async function fetchSidecarMultipartJson<T>({
+  command,
+  fetchImpl,
+  sidecar,
+  url,
+  body,
+}: {
+  command: ElectronCommand;
+  fetchImpl: FetchLike;
+  sidecar: Pick<SidecarHandle, "token">;
+  url: URL;
+  body: FormData;
+}): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: ELECTRON_COMMANDS[command].method,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${sidecar.token}`,
+      },
+      body,
+    });
+  } catch (error) {
+    throw new Error(
+      `Electron sidecar command "${command}" failed: ${sanitizeCommandError(formatError(error), sidecar)}`,
+    );
+  }
+
+  if (!response.ok) {
+    const message = sanitizeCommandError(await readErrorMessage(response), sidecar);
+    throw new Error(
+      `Electron sidecar command "${command}" failed with HTTP ${response.status}: ${message}`,
+    );
+  }
+
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
 function sanitizeCommandError(error: string, sidecar: Pick<SidecarHandle, "token">): string {
   const sanitized = sanitizeSidecarError(error);
   return sidecar.token ? sanitized.replaceAll(sidecar.token, "[redacted]") : sanitized;
@@ -2454,10 +2610,15 @@ function requireArray(value: unknown, field: string, command: ElectronCommand): 
   return value;
 }
 
-function requireByteArray(value: unknown, field: string, command: ElectronCommand): number[] {
+function requireByteArray(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+  options: { allowEmpty?: boolean } = {},
+): number[] {
   const items = requireArray(value, field, command);
   if (
-    items.length === 0 ||
+    (!options.allowEmpty && items.length === 0) ||
     items.some(
       (item) => typeof item !== "number" || !Number.isInteger(item) || item < 0 || item > 255,
     )
@@ -2551,6 +2712,23 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
     : undefined;
+}
+
+function optionalStringArrayStrict(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const items = requireArray(value, field, command);
+  if (items.some((item) => typeof item !== "string")) {
+    throw new Error(
+      `Electron command "${command}" requires string array payload field "${field}".`,
+    );
+  }
+  return items as string[];
 }
 
 function optionalNumber(value: unknown): number | undefined {

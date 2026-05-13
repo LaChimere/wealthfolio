@@ -138,20 +138,23 @@ snapshot generation/cancellation commands proxy through the sidecar Connect
 device endpoints. Device-sync device management, team reset, pairing, composite
 pairing transfer/bootstrap, and pairing-flow coordinator commands proxy through
 the sidecar sync endpoints with path identifiers encoded in Electron main.
-Snapshot management and holdings CSV import also proxy through the sidecar so
-manual/imported holdings updates stay in Rust. Add-on zip payloads are validated
-as byte arrays in Electron main and forwarded to the sidecar as base64 JSON
-fields. AI chat NDJSON streaming uses dedicated start/cancel IPC channels
-because it cannot safely use the request/response JSON command proxy; Electron
-main owns the sidecar fetch, streams parsed events only to the originating
-`webContents`, and aborts streams when the owner closes or navigates. The
-renderer still calls the typed preload IPC bridge, Electron main validates each
-command against an explicit allowlist, waits for sidecar readiness, and proxies
-to the loopback sidecar with the per-run bearer token. Sidecar base URLs and
-tokens must stay confined to Electron main; public runtime status and command
-errors must redact loopback URLs and token-shaped values before crossing IPC.
-Electron app info must use sanitized runtime metadata and must not expose
-desktop DB or log paths to the renderer. JSON request bodies must be sent with
+Snapshot management, holdings CSV import, activity CSV parsing, database
+backup/restore, and update checks also proxy through the sidecar so
+manual/imported holdings updates and utility operations stay in Rust. Electron
+update installation is still blocked until the Electron updater/release pipeline
+is implemented. Add-on zip payloads are validated as byte arrays in Electron
+main and forwarded to the sidecar as base64 JSON fields. AI chat NDJSON
+streaming uses dedicated start/cancel IPC channels because it cannot safely use
+the request/response JSON command proxy; Electron main owns the sidecar fetch,
+streams parsed events only to the originating `webContents`, and aborts streams
+when the owner closes or navigates. The renderer still calls the typed preload
+IPC bridge, Electron main validates each command against an explicit allowlist,
+waits for sidecar readiness, and proxies to the loopback sidecar with the
+per-run bearer token. Sidecar base URLs and tokens must stay confined to
+Electron main; public runtime status and command errors must redact loopback
+URLs and token-shaped values before crossing IPC. Electron app info must use
+sanitized runtime metadata and must not expose desktop DB or log paths to the
+renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

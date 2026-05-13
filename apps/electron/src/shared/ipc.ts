@@ -43,6 +43,26 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/settings/auto-update-enabled",
   },
+  check_for_updates: {
+    method: "GET",
+    path: "/api/v1/app/check-update",
+  },
+  install_app_update: {
+    method: "POST",
+    path: "/__electron_native/install-update",
+  },
+  backup_database: {
+    method: "POST",
+    path: "/api/v1/utilities/database/backup",
+  },
+  backup_database_to_path: {
+    method: "POST",
+    path: "/api/v1/utilities/database/backup-to-path",
+  },
+  restore_database: {
+    method: "POST",
+    path: "/api/v1/utilities/database/restore",
+  },
   set_secret: {
     method: "POST",
     path: "/api/v1/secrets",
@@ -442,6 +462,10 @@ export const ELECTRON_COMMANDS = {
   import_activities: {
     method: "POST",
     path: "/api/v1/activities/import",
+  },
+  parse_csv: {
+    method: "POST",
+    path: "/api/v1/activities/import/parse",
   },
   get_account_import_mapping: {
     method: "GET",

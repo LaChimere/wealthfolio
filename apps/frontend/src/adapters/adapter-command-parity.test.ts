@@ -11,6 +11,7 @@ const repoRoot = path.resolve(currentDir, "../../../..");
 
 const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*['"`]([a-zA-Z0-9_]+)['"`]/g;
 const TAURI_REGISTERED_COMMAND_RE = /commands::[a-z_]+::([a-zA-Z0-9_]+)/g;
+const ELECTRON_REGISTERED_COMMAND_RE = /^\s*([a-zA-Z0-9_]+):\s*\{/gm;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -48,6 +49,11 @@ function collectInvokedCommands(files: string[]): Map<string, string[]> {
 function collectRegisteredTauriCommands(): Set<string> {
   const source = readFileSync(path.join(repoRoot, "apps/tauri/src/lib.rs"), "utf8");
   return new Set([...source.matchAll(TAURI_REGISTERED_COMMAND_RE)].map((match) => match[1]));
+}
+
+function collectRegisteredElectronCommands(): Set<string> {
+  const source = readFileSync(path.join(repoRoot, "apps/electron/src/shared/ipc.ts"), "utf8");
+  return new Set([...source.matchAll(ELECTRON_REGISTERED_COMMAND_RE)].map((match) => match[1]));
 }
 
 describe("adapter command parity", () => {
@@ -93,6 +99,22 @@ describe("adapter command parity", () => {
 
     const missing = [...invokedCommands.entries()]
       .filter(([command]) => !registeredCommands.has(command) && !webCommands.has(command))
+      .map(([command, files]) => `${command}: ${files.join(", ")}`)
+      .sort();
+
+    expect(missing).toEqual([]);
+  });
+
+  it("registers every command reachable from the Electron adapter in Electron IPC", () => {
+    const files = [
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/electron")),
+    ];
+    const invokedCommands = collectInvokedCommands(files);
+    const registeredCommands = collectRegisteredElectronCommands();
+
+    const missing = [...invokedCommands.entries()]
+      .filter(([command]) => !registeredCommands.has(command))
       .map(([command, files]) => `${command}: ${files.join(", ")}`)
       .sort();
 

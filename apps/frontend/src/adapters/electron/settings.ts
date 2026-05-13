@@ -70,7 +70,9 @@ export const getAppInfo = async (): Promise<AppInfo> => {
 export const checkForUpdates = async (_options?: {
   force?: boolean;
 }): Promise<UpdateInfo | null> => {
-  return await invoke<UpdateInfo | null>("check_for_updates");
+  return await invoke<UpdateInfo | null>("check_for_updates", {
+    force: _options?.force,
+  });
 };
 
 export const installUpdate = async (): Promise<void> => {

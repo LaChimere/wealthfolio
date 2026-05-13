@@ -198,6 +198,166 @@ describe("Electron sidecar command proxy", () => {
     expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
   });
 
+  test("proxies update checks and maps sidecar update responses", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const responses = [
+      {
+        updateAvailable: false,
+        latestVersion: "3.4.0",
+      },
+      {
+        updateAvailable: true,
+        latestVersion: "3.5.0",
+        notes: "Release notes",
+        pubDate: "2026-01-01T00:00:00Z",
+        downloadUrl: "https://example.com/download",
+        changelogUrl: "https://example.com/changelog",
+        screenshots: ["https://example.com/screenshot.png"],
+      },
+    ];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse(responses.shift()));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "check_for_updates",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      invokeSidecarCommand({
+        command: "check_for_updates",
+        payload: { force: true },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      currentVersion: "",
+      latestVersion: "3.5.0",
+      notes: "Release notes",
+      pubDate: "2026-01-01T00:00:00Z",
+      isAppStoreBuild: false,
+      storeUrl: "https://example.com/download",
+      changelogUrl: "https://example.com/changelog",
+      screenshots: ["https://example.com/screenshot.png"],
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "install_app_update",
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("Electron update installation is pending Electron updater integration.");
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/app/check-update", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/app/check-update?force=true", "GET", undefined],
+    ]);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("proxies database backup and restore utilities with Tauri-compatible shapes", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/backup")) {
+        return Promise.resolve(
+          jsonResponse({
+            filename: "wealthfolio_backup.db",
+            dataB64: Buffer.from([0, 1, 2, 255]).toString("base64"),
+          }),
+        );
+      }
+      if (path.endsWith("/backup-to-path")) {
+        return Promise.resolve(jsonResponse({ path: "/tmp/wealthfolio_backup.db" }));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual(["wealthfolio_backup.db", [0, 1, 2, 255]]);
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database_to_path",
+        payload: { backupDir: "/tmp" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("/tmp/wealthfolio_backup.db");
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_database",
+        payload: { backupFilePath: "/tmp/wealthfolio_backup.db" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/utilities/database/backup", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/backup-to-path",
+        "POST",
+        JSON.stringify({ backupDir: "/tmp" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/restore",
+        "POST",
+        JSON.stringify({ backupFilePath: "/tmp/wealthfolio_backup.db" }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed utility command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database_to_path",
+        payload: { backupDir: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "backupDir"');
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_database",
+        payload: { backupFilePath: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "backupFilePath"');
+    await expect(
+      invokeSidecarCommand({
+        command: "check_for_updates",
+        payload: { force: "yes" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "force"');
+
+    expect(called).toBe(false);
+  });
+
   test("proxies secret commands without exposing sidecar credentials", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
@@ -1804,6 +1964,43 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies CSV parsing as authenticated multipart without JSON content type", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ headers: ["日期", "Amount"], rows: [] }));
+    };
+    const config = {
+      delimiter: ";",
+      mappings: { date: "日期", amount: "Amount" },
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [0, 1, 2, 255], config },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ headers: ["日期", "Amount"], rows: [] });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/activities/import/parse");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+    expect(init?.body).toBeInstanceOf(FormData);
+    const form = init?.body as FormData;
+    const file = form.get("file");
+    const configPart = form.get("config");
+    expect(file).toBeInstanceOf(Blob);
+    expect(configPart).toBeInstanceOf(Blob);
+    expect(Array.from(new Uint8Array(await (file as Blob).arrayBuffer()))).toEqual([0, 1, 2, 255]);
+    expect(await (configPart as Blob).text()).toBe(JSON.stringify(config));
+  });
+
   test("rejects malformed activity command payloads before fetch", async () => {
     const fetchImpl: FetchLike = () => {
       throw new Error("fetch should not be called");
@@ -1819,6 +2016,22 @@ describe("Electron sidecar command proxy", () => {
     ).rejects.toThrow(
       'Electron command "create_activity" requires object payload field "activity".',
     );
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [256], config: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "content"');
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [], config: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "config"');
   });
 
   test("proxies exchange rate commands", async () => {
