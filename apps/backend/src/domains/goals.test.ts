@@ -505,6 +505,170 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("refreshes non-retirement goal summaries with Rust-compatible health thresholds", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      const cases = [
+        ["on-track", 10_000, "on_track"],
+        ["at-risk", 9_000, "at_risk"],
+        ["off-track", 8_999, "off_track"],
+      ] as const;
+
+      for (const [goalId, projectedValueAtTargetDate, statusHealth] of cases) {
+        seedGoal(db, {
+          id: goalId,
+          title: goalId,
+          targetAmount: 10_000,
+          projectedCompletionDate: "2026-06-01",
+          projectedValueAtTargetDate,
+          summaryTargetAmount: 1,
+        });
+        seedFundingRule(db, {
+          id: `${goalId}-rule`,
+          goalId,
+          accountId: "cash",
+          sharePercent: 50,
+        });
+
+        const refreshed = await service.refreshGoalSummary(goalId, { cash: 10_000 });
+        expect(refreshed).toMatchObject({
+          summaryTargetAmount: 10_000,
+          summaryCurrentValue: 5_000,
+          summaryProgress: 0.5,
+          projectedCompletionDate: "2026-06-01",
+          projectedValueAtTargetDate,
+          statusHealth,
+        });
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  test("refreshes non-retirement goal summaries with target and lifecycle fallback parity", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, {
+        id: "summary-target-fallback",
+        title: "Summary Target",
+        targetAmount: 0,
+        summaryTargetAmount: 5_000,
+        projectedValueAtTargetDate: 5_000,
+      });
+      seedFundingRule(db, {
+        id: "summary-target-rule",
+        goalId: "summary-target-fallback",
+        accountId: "cash",
+        sharePercent: 100,
+      });
+      await expect(
+        service.refreshGoalSummary("summary-target-fallback", { cash: 2_500 }),
+      ).resolves.toMatchObject({
+        summaryTargetAmount: 5_000,
+        summaryCurrentValue: 2_500,
+        summaryProgress: 0.5,
+        statusHealth: "on_track",
+      });
+
+      seedGoal(db, {
+        id: "achieved-stored-zero",
+        title: "Achieved Stored Zero",
+        statusLifecycle: "achieved",
+        targetAmount: 10_000,
+        summaryCurrentValue: 0,
+        projectedValueAtTargetDate: null,
+      });
+      seedFundingRule(db, {
+        id: "achieved-stored-zero-rule",
+        goalId: "achieved-stored-zero",
+        accountId: "cash",
+        sharePercent: 100,
+      });
+      await expect(
+        service.refreshGoalSummary("achieved-stored-zero", { cash: 10_000 }),
+      ).resolves.toMatchObject({
+        summaryCurrentValue: 0,
+        statusHealth: "on_track",
+      });
+
+      seedGoal(db, {
+        id: "achieved-null-current",
+        title: "Achieved Null Current",
+        statusLifecycle: "achieved",
+        targetAmount: 10_000,
+        summaryCurrentValue: null,
+        projectedValueAtTargetDate: null,
+      });
+      seedFundingRule(db, {
+        id: "achieved-null-current-rule",
+        goalId: "achieved-null-current",
+        accountId: "cash",
+        sharePercent: 100,
+      });
+      await expect(
+        service.refreshGoalSummary("achieved-null-current", { cash: 7_500 }),
+      ).resolves.toMatchObject({
+        summaryCurrentValue: 7_500,
+        summaryProgress: 0.75,
+        statusHealth: "on_track",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("refreshes retirement summaries without plans and defers plan-backed retirement", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, {
+        id: "retirement-no-plan",
+        title: "Retirement No Plan",
+        goalType: "retirement",
+        targetAmount: 100_000,
+        projectedCompletionDate: "2040-01-01",
+        projectedValueAtTargetDate: 200_000,
+      });
+      seedFundingRule(db, {
+        id: "retirement-no-plan-rule",
+        goalId: "retirement-no-plan",
+        accountId: "brokerage",
+        sharePercent: 25,
+      });
+      await expect(
+        service.refreshGoalSummary("retirement-no-plan", { brokerage: 80_000 }),
+      ).resolves.toMatchObject({
+        summaryTargetAmount: null,
+        summaryCurrentValue: 20_000,
+        summaryProgress: null,
+        projectedCompletionDate: null,
+        projectedValueAtTargetDate: null,
+        statusHealth: "not_applicable",
+      });
+
+      seedGoal(db, {
+        id: "retirement-plan",
+        title: "Retirement Plan",
+        goalType: "retirement",
+      });
+      seedGoalPlan(db, {
+        goalId: "retirement-plan",
+        planKind: "retirement",
+        settingsJson: "{}",
+      });
+      await expect(service.refreshGoalSummary("retirement-plan", {})).rejects.toThrow(
+        "Retirement goal summary refresh is not implemented in the TS backend yet",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("saves retirement goal plans with validation, age normalization, sync, and unknown preservation", async () => {
     const db = createGoalsDb();
     const syncEvents: GoalSyncEvent[] = [];
@@ -806,6 +970,9 @@ function seedGoal(
     targetAmount?: number;
     targetDate?: string | null;
     summaryCurrentValue?: number | null;
+    projectedCompletionDate?: string | null;
+    projectedValueAtTargetDate?: number | null;
+    summaryTargetAmount?: number | null;
     createdAt?: string;
     updatedAt?: string;
   },
@@ -814,9 +981,11 @@ function seedGoal(
     `
       INSERT INTO goals (
         id, title, description, target_amount, goal_type, status_lifecycle,
-        status_health, priority, target_date, summary_current_value, created_at, updated_at
+        status_health, priority, target_date, summary_current_value,
+        projected_completion_date, projected_value_at_target_date, summary_target_amount,
+        created_at, updated_at
       )
-      VALUES (?, ?, NULL, ?, ?, ?, 'not_applicable', ?, ?, ?, ?, ?)
+      VALUES (?, ?, NULL, ?, ?, ?, 'not_applicable', ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     goal.id,
@@ -827,6 +996,9 @@ function seedGoal(
     goal.priority ?? 0,
     goal.targetDate ?? null,
     goal.summaryCurrentValue ?? null,
+    goal.projectedCompletionDate ?? null,
+    goal.projectedValueAtTargetDate ?? null,
+    goal.summaryTargetAmount ?? null,
     goal.createdAt ?? "2026-01-01T00:00:00Z",
     goal.updatedAt ?? "2026-01-01T00:00:00Z",
   );

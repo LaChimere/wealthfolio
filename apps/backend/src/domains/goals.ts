@@ -77,6 +77,15 @@ export interface SaveGoalPlan {
   summaryJson?: string | null;
 }
 
+export interface GoalSummaryUpdate {
+  summaryTargetAmount: number | null;
+  summaryCurrentValue: number | null;
+  summaryProgress: number | null;
+  projectedCompletionDate: string | null;
+  projectedValueAtTargetDate: number | null;
+  statusHealth: string;
+}
+
 export type GoalValuationMap =
   | ReadonlyMap<string, number>
   | Readonly<Record<string, number | undefined>>;
@@ -123,6 +132,7 @@ export interface GoalRepository {
   loadGoalPlan(goalId: string): GoalPlan | null;
   saveGoalPlan(plan: SaveGoalPlan): GoalPlan;
   deleteGoalPlan(goalId: string): number;
+  updateGoalSummaryFields(goalId: string, update: GoalSummaryUpdate): void;
 }
 
 export interface GoalService {
@@ -137,6 +147,7 @@ export interface GoalService {
   saveGoalPlan(plan: SaveGoalPlan): Promise<GoalPlan>;
   deleteGoalPlan(goalId: string): Promise<number>;
   computeSaveUpOverview(goalId: string, valuationMap: GoalValuationMap): Promise<SaveUpOverview>;
+  refreshGoalSummary(goalId: string, valuationMap: GoalValuationMap): Promise<Goal>;
   getBaseCurrency(): string | undefined;
 }
 
@@ -432,6 +443,29 @@ export function createGoalRepository(
       })();
       return affected;
     },
+    updateGoalSummaryFields(goalId, update) {
+      db.prepare(
+        `
+          UPDATE goals
+          SET
+            summary_target_amount = ?,
+            summary_current_value = ?,
+            summary_progress = ?,
+            projected_completion_date = ?,
+            projected_value_at_target_date = ?,
+            status_health = ?
+          WHERE id = ?
+        `,
+      ).run(
+        update.summaryTargetAmount,
+        update.summaryCurrentValue,
+        update.summaryProgress,
+        update.projectedCompletionDate,
+        update.projectedValueAtTargetDate,
+        update.statusHealth,
+        goalId,
+      );
+    },
   };
 }
 
@@ -562,6 +596,34 @@ export function createGoalService(
         },
         { now: options.now?.() },
       );
+    },
+    async refreshGoalSummary(goalId, valuationMap) {
+      const goal = repository.loadGoal(goalId);
+      const fundingRules = repository.loadFundingRules(goalId);
+      const isRetirement = goal.goalType === "retirement";
+      const plan = isRetirement ? repository.loadGoalPlan(goalId) : null;
+      if (isRetirement && plan) {
+        throw new Error("Retirement goal summary refresh is not implemented in the TS backend yet");
+      }
+
+      const currentValue = computeSummaryCurrentValue(goal, fundingRules, valuationMap);
+      const target = isRetirement ? null : (goal.targetAmount ?? goal.summaryTargetAmount);
+      const progress = target !== null && target > 0 ? Math.min(currentValue / target, 1) : null;
+      const projectedValueAtTargetDate = isRetirement ? null : goal.projectedValueAtTargetDate;
+      const statusHealth =
+        goal.statusLifecycle === GOAL_LIFECYCLE_ACHIEVED
+          ? "on_track"
+          : goalSummaryHealth(isRetirement, projectedValueAtTargetDate, target);
+
+      repository.updateGoalSummaryFields(goalId, {
+        summaryTargetAmount: target,
+        summaryCurrentValue: currentValue,
+        summaryProgress: progress,
+        projectedCompletionDate: isRetirement ? null : goal.projectedCompletionDate,
+        projectedValueAtTargetDate,
+        statusHealth,
+      });
+      return repository.loadGoal(goalId);
     },
     getBaseCurrency() {
       return resolveBaseCurrency(options);
@@ -910,6 +972,27 @@ function computeGoalValueFromShares(
     }
   }
   return value === 0 ? 0 : value;
+}
+
+function goalSummaryHealth(
+  isRetirement: boolean,
+  projectedValueAtTargetDate: number | null,
+  target: number | null,
+): string {
+  if (isRetirement) {
+    return "not_applicable";
+  }
+  if (projectedValueAtTargetDate !== null && target !== null && target > 0) {
+    const ratio = projectedValueAtTargetDate / target;
+    if (ratio >= 1) {
+      return "on_track";
+    }
+    if (ratio >= 0.9) {
+      return "at_risk";
+    }
+    return "off_track";
+  }
+  return "not_applicable";
 }
 
 function accountValuation(valuationMap: GoalValuationMap, accountId: string): number | undefined {
