@@ -316,7 +316,7 @@ async function routeRequest(
   }
 
   if (options.healthService && url.pathname.startsWith("/api/v1/health")) {
-    return routeHealthRequest(request, url, config, options.healthService);
+    return routeHealthRequest(request, url, config, options.healthService, options.taxonomyService);
   }
 
   if (
@@ -2033,6 +2033,7 @@ function routeHealthRequest(
   url: URL,
   config: BackendRuntimeConfig,
   healthService: HealthService,
+  taxonomyService?: TaxonomyService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -2083,15 +2084,46 @@ function routeHealthRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/health/fix") {
-    if (!healthService.executeFix) {
+    const canRunClassificationMigration = Boolean(taxonomyService?.migrateLegacyClassifications);
+    if (!healthService.executeFix && !canRunClassificationMigration) {
       return jsonResponse({ code: 404, message: "Not Found" }, 404);
     }
-    return handleJsonMutationEmpty(request, parseHealthFixAction, async (action) => {
-      await healthService.executeFix?.(action);
-    });
+    return handleHealthFixRequest(request, healthService, taxonomyService);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function handleHealthFixRequest(
+  request: Request,
+  healthService: HealthService,
+  taxonomyService?: TaxonomyService,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const action = parseHealthFixAction(payload);
+  if (action instanceof Response) {
+    return action;
+  }
+
+  try {
+    if (
+      action.id === "migrate_legacy_classifications" &&
+      taxonomyService?.migrateLegacyClassifications
+    ) {
+      await taxonomyService.migrateLegacyClassifications();
+      return new Response(null, { status: 200 });
+    }
+    if (!healthService.executeFix) {
+      return jsonResponse({ code: 404, message: "Not Found" }, 404);
+    }
+    await healthService.executeFix(action);
+    return new Response(null, { status: 200 });
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
 }
 
 function extractClientTimezone(headers: Headers): string | undefined {

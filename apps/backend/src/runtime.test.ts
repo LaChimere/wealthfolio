@@ -238,6 +238,24 @@ describe("TS backend runtime composition", () => {
         issues: [expect.objectContaining({ id: expect.stringMatching(/^timezone_mismatch:/) })],
       });
 
+      const healthMigrationFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "migrate_legacy_classifications",
+          label: "Start Migration",
+          payload: null,
+        }),
+      });
+      expect(healthMigrationFixResponse.status).toBe(200);
+
+      const healthDeferredFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: [] }),
+      });
+      expect(healthDeferredFixResponse.status).toBe(404);
+
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);
       await expect(appInfoResponse.json()).resolves.toMatchObject({

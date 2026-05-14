@@ -13,8 +13,8 @@ SQLite data.
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
 validation, bounded import-apply, save-up goal-plan persistence, local AI chat
-thread/message persistence, and bounded health status/check runtime slices in
-the standalone TS backend:
+thread/message persistence, bounded health status/check runtime, and bounded
+health classification-fix runtime slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -57,6 +57,9 @@ the standalone TS backend:
   missing/invalid/mismatch issues with offset-equivalence parity, severity
   rollups, dismissal filtering, stale cache behavior, and standalone runtime
   wiring.
+- Add bounded health fix runtime for `migrate_legacy_classifications` by
+  dispatching `/api/v1/health/fix` through the migrated taxonomy runtime while
+  keeping price sync, retry sync, FX fetch, and other fix actions deferred.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
@@ -80,8 +83,9 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, local AI chat thread/message persistence, bounded health account/timezone
 status/checks, sync-crypto/device-sync integration, retirement goal-plan
 validation/persistence or summary refresh, calculation-heavy health checks or
-`/health/fix` execution, real Connect runtime implementation, real device-sync
-runtime implementation, or Rust runtime removal is in scope for this slice.
+non-classification `/health/fix` execution, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 
