@@ -1,7 +1,12 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createActivityService, type Activity, type ActivitySearchRequest } from "./activities";
+import {
+  createActivityService,
+  type Activity,
+  type ActivityBulkMutationResult,
+  type ActivitySearchRequest,
+} from "./activities";
 
 describe("TS activities import domain", () => {
   test("searches activities with Rust-compatible filters, ordering, and detail mapping", async () => {
@@ -337,6 +342,185 @@ describe("TS activities import domain", () => {
         needsReview: false,
         createdAt: "2024-01-01T00:00:00Z",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("bulk mutates activities atomically with created mappings and per-entry errors", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, { id: "AAPL", displayCode: "AAPL", name: "Apple", quoteCcy: "USD" });
+      insertActivity(db, {
+        id: "bulk-update",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        idempotencyKey: "bulk-update-key",
+      });
+      insertActivity(db, {
+        id: "bulk-delete",
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        amount: "20",
+        idempotencyKey: "bulk-delete-key",
+      });
+
+      const result = service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "temp-create",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-01",
+            amount: "42",
+            currency: "USD",
+          },
+        ],
+        updates: [
+          {
+            id: "bulk-update",
+            accountId: "account-1",
+            asset: { id: "AAPL" },
+            activityType: "SELL",
+            activityDate: "2025-02-02",
+            quantity: "1",
+            unitPrice: "12",
+            amount: "12",
+            currency: "USD",
+            comment: "updated through bulk",
+          },
+        ],
+        deleteIds: ["bulk-delete"],
+      }) as ActivityBulkMutationResult;
+
+      expect(result.errors).toEqual([]);
+      expect(result.created).toEqual([
+        expect.objectContaining({
+          id: expect.any(String),
+          activityType: "DEPOSIT",
+          amount: "42",
+        }),
+      ]);
+      expect(result.created[0]?.id).not.toBe("temp-create");
+      expect(result.createdMappings).toEqual([
+        { tempId: "temp-create", activityId: result.created[0]?.id },
+      ]);
+      expect(result.updated).toEqual([
+        expect.objectContaining({
+          id: "bulk-update",
+          activityType: "SELL",
+          amount: "12",
+          notes: "updated through bulk",
+        }),
+      ]);
+      expect(result.deleted).toEqual([
+        expect.objectContaining({
+          id: "bulk-delete",
+          amount: "20",
+        }),
+      ]);
+      expect(readActivityValue(db, "bulk-delete", "id")).toBeNull();
+
+      insertActivity(db, {
+        id: "replace-me",
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        amount: "77",
+        idempotencyKey: "replace-key",
+      });
+      const replacement = service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "replacement-temp",
+            idempotencyKey: "replace-key",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-04",
+            amount: "77",
+            currency: "USD",
+          },
+        ],
+        deleteIds: ["replace-me"],
+      }) as ActivityBulkMutationResult;
+
+      expect(replacement.errors).toEqual([]);
+      expect(replacement.deleted).toEqual([expect.objectContaining({ id: "replace-me" })]);
+      expect(replacement.created).toEqual([
+        expect.objectContaining({ idempotencyKey: "replace-key", amount: "77" }),
+      ]);
+      expect(replacement.createdMappings).toEqual([
+        { tempId: "replacement-temp", activityId: replacement.created[0]?.id },
+      ]);
+
+      insertActivity(db, {
+        id: "delete-candidate",
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        amount: "99",
+        idempotencyKey: "delete-candidate-key",
+      });
+      const failed = service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "dup-temp",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-01",
+            amount: "42",
+            currency: "USD",
+          },
+        ],
+        updates: [
+          {
+            id: "missing-update",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-03",
+            currency: "USD",
+          },
+          {
+            id: "delete-candidate",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-03",
+            currency: "USD",
+          },
+        ],
+        deleteIds: ["delete-candidate", "missing-delete"],
+      }) as ActivityBulkMutationResult;
+
+      expect(failed).toMatchObject({
+        created: [],
+        updated: [],
+        deleted: [],
+        createdMappings: [],
+        errors: [
+          { id: "dup-temp", action: "create", message: expect.stringContaining("Duplicate") },
+          {
+            id: "missing-update",
+            action: "update",
+            message: expect.stringContaining("missing-update"),
+          },
+          {
+            id: "delete-candidate",
+            action: "update",
+            message: "Cannot update and delete the same activity",
+          },
+          {
+            id: "missing-delete",
+            action: "delete",
+            message: expect.stringContaining("missing-delete"),
+          },
+        ],
+      });
+      expect(readActivityValue(db, "delete-candidate", "id")).toBe("delete-candidate");
     } finally {
       db.close();
     }

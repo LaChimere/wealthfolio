@@ -130,13 +130,34 @@ export interface Activity {
   updatedAt: string;
 }
 
+export interface ActivityBulkIdentifierMapping {
+  tempId: string | null;
+  activityId: string;
+}
+
+export interface ActivityBulkMutationError {
+  id: string | null;
+  action: string;
+  message: string;
+}
+
+export interface ActivityBulkMutationResult {
+  created: Activity[];
+  updated: Activity[];
+  deleted: Activity[];
+  createdMappings: ActivityBulkIdentifierMapping[];
+  errors: ActivityBulkMutationError[];
+}
+
 export interface ActivityService {
   searchActivities?(
     request: ActivitySearchRequest,
   ): Promise<ActivitySearchResponse> | ActivitySearchResponse;
-  createActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
-  updateActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
-  bulkMutateActivities?(request: Record<string, unknown>): Promise<unknown> | unknown;
+  createActivity?(activity: Record<string, unknown>): Promise<Activity> | Activity;
+  updateActivity?(activity: Record<string, unknown>): Promise<Activity> | Activity;
+  bulkMutateActivities?(
+    request: Record<string, unknown>,
+  ): Promise<ActivityBulkMutationResult> | ActivityBulkMutationResult;
   deleteActivity?(id: string): Promise<Activity> | Activity;
   linkTransferActivities?(
     activityAId: string,
@@ -376,70 +397,96 @@ export function createActivityService(db: Database): ActivityService {
         const update = normalizeActivityUpdateInput(db, input, existing);
 
         try {
-          db.query(
-            `
-              UPDATE activities
-              SET
-                account_id = ?,
-                asset_id = ?,
-                activity_type = ?,
-                activity_type_override = ?,
-                source_type = ?,
-                subtype = ?,
-                status = ?,
-                activity_date = ?,
-                settlement_date = ?,
-                quantity = ?,
-                unit_price = ?,
-                amount = ?,
-                fee = ?,
-                currency = ?,
-                fx_rate = ?,
-                notes = ?,
-                metadata = ?,
-                source_system = ?,
-                source_record_id = ?,
-                source_group_id = ?,
-                idempotency_key = ?,
-                import_run_id = ?,
-                is_user_modified = 1,
-                needs_review = 0,
-                created_at = ?,
-                updated_at = ?
-              WHERE id = ?
-            `,
-          ).run(
-            update.account_id,
-            update.asset_id,
-            update.activity_type,
-            update.activity_type_override,
-            update.source_type,
-            update.subtype,
-            update.status,
-            update.activity_date,
-            update.settlement_date,
-            update.quantity,
-            update.unit_price,
-            update.amount,
-            update.fee,
-            update.currency,
-            update.fx_rate,
-            update.notes,
-            update.metadata,
-            update.source_system,
-            update.source_record_id,
-            update.source_group_id,
-            update.idempotency_key,
-            update.import_run_id,
-            update.created_at,
-            update.updated_at,
-            update.id,
-          );
+          updateActivityRow(db, update);
         } catch (error) {
           throw mapActivitySqliteError(error);
         }
 
         return activityFromRow(readActivityRow(db, activityId));
+      })();
+    },
+
+    bulkMutateActivities(input) {
+      return db.transaction(() => {
+        const creates = recordArrayField(input, "creates");
+        const updates = recordArrayField(input, "updates");
+        const deleteIds = stringArrayField(input, "deleteIds");
+        const errors: ActivityBulkMutationError[] = [];
+        const preparedCreates: Array<{
+          activity: ActivityCreateRowInput;
+          tempId: string | null;
+        }> = [];
+        const preparedUpdates: ActivityRow[] = [];
+        const preparedDeletes: ActivityRow[] = [];
+        const createIdempotencyKeys = new Set<string>();
+        const deleteIdSet = new Set(deleteIds);
+
+        for (const createInput of creates) {
+          const tempId = stringFieldOrNull(createInput.id)?.trim() || null;
+          try {
+            const activity = normalizeActivityCreateInput(db, createInput);
+            if (activity.idempotencyKey !== null) {
+              const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
+              if (existingId !== null && !deleteIdSet.has(existingId)) {
+                throw duplicateActivityError(existingId);
+              }
+              if (createIdempotencyKeys.has(activity.idempotencyKey)) {
+                throw duplicateActivityError(null);
+              }
+              createIdempotencyKeys.add(activity.idempotencyKey);
+            }
+            preparedCreates.push({ activity, tempId });
+          } catch (error) {
+            errors.push({ id: tempId, action: "create", message: errorMessage(error) });
+          }
+        }
+
+        for (const updateInput of updates) {
+          const targetId = stringFieldOrNull(updateInput.id);
+          try {
+            const activityId = requiredNonEmptyString(updateInput.id, "id");
+            if (deleteIdSet.has(activityId)) {
+              throw new Error("Cannot update and delete the same activity");
+            }
+            const existing = readActivityRow(db, activityId);
+            preparedUpdates.push(normalizeActivityUpdateInput(db, updateInput, existing));
+          } catch (error) {
+            errors.push({ id: targetId, action: "update", message: errorMessage(error) });
+          }
+        }
+
+        for (const deleteId of deleteIds) {
+          try {
+            preparedDeletes.push(readActivityRow(db, deleteId));
+          } catch (error) {
+            errors.push({ id: deleteId, action: "delete", message: errorMessage(error) });
+          }
+        }
+
+        if (errors.length > 0) {
+          return emptyBulkMutationResult(errors);
+        }
+
+        const result = emptyBulkMutationResult([]);
+        try {
+          for (const activity of preparedDeletes) {
+            db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
+            result.deleted.push(activityFromRow(activity));
+          }
+          for (const activity of preparedUpdates) {
+            updateActivityRow(db, activity);
+            result.updated.push(activityFromRow(readActivityRow(db, activity.id)));
+          }
+          for (const { activity, tempId } of preparedCreates) {
+            insertActivityRow(db, activity);
+            result.created.push(activityFromRow(readActivityRow(db, activity.id)));
+            result.createdMappings.push({ tempId, activityId: activity.id });
+          }
+        } catch (error) {
+          throw mapActivitySqliteError(error);
+        }
+
+        return result;
       })();
     },
 
@@ -1079,6 +1126,78 @@ function insertActivityRow(db: Database, activity: ActivityCreateRowInput): void
     activity.createdAt,
     activity.updatedAt,
   );
+}
+
+function updateActivityRow(db: Database, activity: ActivityRow): void {
+  db.query(
+    `
+      UPDATE activities
+      SET
+        account_id = ?,
+        asset_id = ?,
+        activity_type = ?,
+        activity_type_override = ?,
+        source_type = ?,
+        subtype = ?,
+        status = ?,
+        activity_date = ?,
+        settlement_date = ?,
+        quantity = ?,
+        unit_price = ?,
+        amount = ?,
+        fee = ?,
+        currency = ?,
+        fx_rate = ?,
+        notes = ?,
+        metadata = ?,
+        source_system = ?,
+        source_record_id = ?,
+        source_group_id = ?,
+        idempotency_key = ?,
+        import_run_id = ?,
+        is_user_modified = 1,
+        needs_review = 0,
+        created_at = ?,
+        updated_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    activity.account_id,
+    activity.asset_id,
+    activity.activity_type,
+    activity.activity_type_override,
+    activity.source_type,
+    activity.subtype,
+    activity.status,
+    activity.activity_date,
+    activity.settlement_date,
+    activity.quantity,
+    activity.unit_price,
+    activity.amount,
+    activity.fee,
+    activity.currency,
+    activity.fx_rate,
+    activity.notes,
+    activity.metadata,
+    activity.source_system,
+    activity.source_record_id,
+    activity.source_group_id,
+    activity.idempotency_key,
+    activity.import_run_id,
+    activity.created_at,
+    activity.updated_at,
+    activity.id,
+  );
+}
+
+function emptyBulkMutationResult(errors: ActivityBulkMutationError[]): ActivityBulkMutationResult {
+  return {
+    created: [],
+    updated: [],
+    deleted: [],
+    createdMappings: [],
+    errors,
+  };
 }
 
 function findActivityIdByIdempotencyKey(db: Database, idempotencyKey: string): string | null {
@@ -1915,6 +2034,31 @@ function serializeActivityMetadata(value: unknown): string | null {
     return null;
   }
   return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function recordArrayField(
+  input: Record<string, unknown>,
+  field: string,
+): Record<string, unknown>[] {
+  const value = input[field];
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || !value.every(isRecord)) {
+    throw new Error(`Invalid input: ${field} must be an array of objects`);
+  }
+  return value;
+}
+
+function stringArrayField(input: Record<string, unknown>, field: string): string[] {
+  const value = input[field];
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new Error(`Invalid input: ${field} must be a string array`);
+  }
+  return value;
 }
 
 function stringFieldOrEmpty(value: unknown): string {
