@@ -69,7 +69,13 @@ import type {
   UpdateDeviceRequest,
 } from "./domains/device-sync";
 import type { ExchangeRate, ExchangeRateService, NewExchangeRate } from "./domains/exchange-rates";
-import type { Goal, GoalFundingRuleInput, GoalService, NewGoal } from "./domains/goals";
+import type {
+  Goal,
+  GoalFundingRuleInput,
+  GoalService,
+  NewGoal,
+  SaveGoalPlan,
+} from "./domains/goals";
 import type { HealthConfig, HealthFixAction, HealthService } from "./domains/health";
 import type {
   HoldingsImportRequest,
@@ -2153,6 +2159,18 @@ function routeGoalRequest(
   const planGoalId = goalPlanIdFromPath(url.pathname);
   if (planGoalId && request.method === "GET") {
     return jsonResponse(goalService.getGoalPlan(planGoalId));
+  }
+  if (planGoalId && request.method === "DELETE") {
+    return goalService
+      .deleteGoalPlan(planGoalId)
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/plan") {
+    return handleJsonMutation(request, parseSaveGoalPlan, (plan) =>
+      goalService.saveGoalPlan(normalizeGoalPlanCurrency(plan, goalService)),
+    );
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/goals") {
@@ -5171,6 +5189,36 @@ function parseGoalFundingRuleInput(
   };
 }
 
+function parseSaveGoalPlan(payload: Record<string, unknown>): SaveGoalPlan | Response {
+  const goalId = parseRequiredString(payload.goalId, "goalId");
+  if (goalId instanceof Response) {
+    return goalId;
+  }
+  const planKind = parseRequiredString(payload.planKind, "planKind");
+  if (planKind instanceof Response) {
+    return planKind;
+  }
+  const settingsJson = parseRequiredString(payload.settingsJson, "settingsJson");
+  if (settingsJson instanceof Response) {
+    return settingsJson;
+  }
+  const plannerMode = parseOptionalStringOrNull(payload.plannerMode, "plannerMode");
+  if (plannerMode instanceof Response) {
+    return plannerMode;
+  }
+  const summaryJson = parseOptionalStringOrNull(payload.summaryJson, "summaryJson");
+  if (summaryJson instanceof Response) {
+    return summaryJson;
+  }
+  return {
+    goalId,
+    planKind,
+    plannerMode,
+    settingsJson,
+    summaryJson,
+  };
+}
+
 function forceGoalCurrency<TGoal extends NewGoal | Goal>(
   goal: TGoal,
   goalService: GoalService,
@@ -5180,6 +5228,26 @@ function forceGoalCurrency<TGoal extends NewGoal | Goal>(
     return goal;
   }
   return { ...goal, currency: baseCurrency };
+}
+
+function normalizeGoalPlanCurrency(plan: SaveGoalPlan, goalService: GoalService): SaveGoalPlan {
+  const baseCurrency = goalService.getBaseCurrency();
+  if (plan.planKind !== "retirement" || !baseCurrency) {
+    return plan;
+  }
+  let settings: unknown;
+  try {
+    settings = JSON.parse(plan.settingsJson);
+  } catch {
+    return plan;
+  }
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+    return plan;
+  }
+  return {
+    ...plan,
+    settingsJson: JSON.stringify({ ...settings, currency: baseCurrency }),
+  };
 }
 
 function parseTestSourceRequest(payload: Record<string, unknown>): TestSourceRequest | Response {

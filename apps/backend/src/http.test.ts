@@ -5301,17 +5301,69 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(await listResponse.json()).toEqual([expect.objectContaining({ id: created.id })]);
 
-      const deferredPlanWrite = await handler(
+      const savePlanResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/plan", {
           method: "POST",
           headers: {
             authorization: "Bearer sidecar-token",
             "content-type": "application/json",
           },
-          body: JSON.stringify({ goalId: created.id }),
+          body: JSON.stringify({
+            goalId: created.id,
+            planKind: "save_up",
+            settingsJson: '{"monthlyContribution":100}',
+            summaryJson: null,
+          }),
         }),
       );
-      expect(deferredPlanWrite.status).toBe(404);
+      expect(savePlanResponse.status).toBe(200);
+      await expect(savePlanResponse.json()).resolves.toMatchObject({
+        goalId: created.id,
+        planKind: "save_up",
+        settingsJson: '{"monthlyContribution":100}',
+        summaryJson: "{}",
+        version: 1,
+      });
+
+      await expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1/api/v1/goals/${created.id}/plan`, {
+              headers: { authorization: "Bearer sidecar-token" },
+            }),
+          )
+        ).json(),
+      ).resolves.toMatchObject({ goalId: created.id, version: 1 });
+
+      const invalidPlanResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/plan", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ goalId: created.id, planKind: "save_up" }),
+        }),
+      );
+      expect(invalidPlanResponse.status).toBe(400);
+
+      const deletePlanResponse = await handler(
+        new Request(`http://127.0.0.1/api/v1/goals/${created.id}/plan`, {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(deletePlanResponse.status).toBe(204);
+      expect(
+        (
+          await handler(
+            new Request(`http://127.0.0.1/api/v1/goals/${created.id}/plan`, {
+              method: "DELETE",
+              headers: { authorization: "Bearer sidecar-token" },
+            }),
+          )
+        ).status,
+      ).toBe(204);
 
       const deleteResponse = await handler(
         new Request(`http://127.0.0.1/api/v1/goals/${created.id}`, {

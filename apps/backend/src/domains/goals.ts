@@ -66,6 +66,14 @@ export interface GoalPlan {
   updatedAt: string;
 }
 
+export interface SaveGoalPlan {
+  goalId: string;
+  planKind: string;
+  plannerMode?: string | null;
+  settingsJson: string;
+  summaryJson?: string | null;
+}
+
 export interface GoalAccount {
   id: string;
   accountType: string;
@@ -75,14 +83,14 @@ export interface GoalAccountProvider {
   getActiveNonArchivedAccounts(): GoalAccount[];
 }
 
-export type GoalSyncEntity = "goals" | "goals_allocation";
+export type GoalSyncEntity = "goals" | "goals_allocation" | "goal_plans";
 export type GoalSyncOperation = "Create" | "Update" | "Delete";
 
 export interface GoalSyncEvent {
   entity: GoalSyncEntity;
   entityId: string;
   operation: GoalSyncOperation;
-  payload: GoalRowPayload | GoalFundingRuleRowPayload | { id: string };
+  payload: GoalRowPayload | GoalFundingRuleRowPayload | GoalPlanRowPayload | { id: string };
 }
 
 export interface GoalRepositoryOptions {
@@ -105,6 +113,8 @@ export interface GoalRepository {
   loadParticipatingFundingRules(): GoalFundingRule[];
   saveGoalFunding(goalId: string, rules: GoalFundingRuleInput[]): GoalFundingRule[];
   loadGoalPlan(goalId: string): GoalPlan | null;
+  saveGoalPlan(plan: SaveGoalPlan): GoalPlan;
+  deleteGoalPlan(goalId: string): number;
 }
 
 export interface GoalService {
@@ -116,6 +126,8 @@ export interface GoalService {
   getGoalFunding(goalId: string): GoalFundingRule[];
   saveGoalFunding(goalId: string, rules: GoalFundingRuleInput[]): Promise<GoalFundingRule[]>;
   getGoalPlan(goalId: string): GoalPlan | null;
+  saveGoalPlan(plan: SaveGoalPlan): Promise<GoalPlan>;
+  deleteGoalPlan(goalId: string): Promise<number>;
   getBaseCurrency(): string | undefined;
 }
 
@@ -167,6 +179,8 @@ export interface GoalRowPayload extends Goal {
 }
 
 export interface GoalFundingRuleRowPayload extends GoalFundingRule {}
+
+export interface GoalPlanRowPayload extends GoalPlan {}
 
 const GOAL_LIFECYCLE_ACTIVE = "active";
 const GOAL_LIFECYCLE_ACHIEVED = "achieved";
@@ -343,6 +357,72 @@ export function createGoalRepository(
         .get(goalId);
       return row ? goalPlanFromRow(row) : null;
     },
+    saveGoalPlan(plan) {
+      let saved: GoalPlanRow | undefined;
+      db.transaction(() => {
+        const existing = db
+          .query<GoalPlanRow, [string]>(
+            `
+              SELECT goal_id, plan_kind, planner_mode, settings_json, summary_json, version, created_at, updated_at
+              FROM goal_plans
+              WHERE goal_id = ?
+            `,
+          )
+          .get(plan.goalId);
+        const now = timestampNow();
+        const row: GoalPlanRow = {
+          goal_id: plan.goalId,
+          plan_kind: plan.planKind,
+          planner_mode: plan.plannerMode ?? null,
+          settings_json: plan.settingsJson,
+          summary_json: plan.summaryJson ?? "{}",
+          version: existing ? existing.version + 1 : 1,
+          created_at: existing?.created_at ?? now,
+          updated_at: now,
+        };
+        db.prepare(
+          `
+            INSERT INTO goal_plans (
+              goal_id, plan_kind, planner_mode, settings_json, summary_json, version, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(goal_id) DO UPDATE SET
+              plan_kind = excluded.plan_kind,
+              planner_mode = excluded.planner_mode,
+              settings_json = excluded.settings_json,
+              summary_json = excluded.summary_json,
+              version = excluded.version,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+          `,
+        ).run(
+          row.goal_id,
+          row.plan_kind,
+          row.planner_mode,
+          row.settings_json,
+          row.summary_json,
+          row.version,
+          row.created_at,
+          row.updated_at,
+        );
+        saved = readGoalPlanRowById(db, plan.goalId);
+        queueGoalPlanSync(options, saved, existing ? "Update" : "Create");
+      })();
+      if (!saved) {
+        throw new Error("Record not found: goal plan");
+      }
+      return goalPlanFromRow(saved);
+    },
+    deleteGoalPlan(goalId) {
+      let affected = 0;
+      db.transaction(() => {
+        affected = db.prepare("DELETE FROM goal_plans WHERE goal_id = ?").run(goalId).changes;
+        if (affected > 0) {
+          queueSyncDelete(options, "goal_plans", goalId);
+        }
+      })();
+      return affected;
+    },
   };
 }
 
@@ -418,6 +498,34 @@ export function createGoalService(
     },
     getGoalPlan(goalId) {
       return repository.loadGoalPlan(goalId);
+    },
+    async saveGoalPlan(plan) {
+      const goal = repository.loadGoal(plan.goalId);
+      const valid =
+        goal.goalType === "retirement"
+          ? plan.planKind === "retirement"
+          : plan.planKind === "save_up";
+      if (!valid) {
+        throw new Error(
+          `Invalid input: Plan kind '${plan.planKind}' is not valid for goal type '${goal.goalType}'`,
+        );
+      }
+      if (
+        plan.plannerMode !== undefined &&
+        plan.plannerMode !== null &&
+        plan.planKind !== "retirement"
+      ) {
+        throw new Error("Invalid input: planner_mode is only valid for retirement plans");
+      }
+      if (plan.planKind === "retirement") {
+        throw new Error(
+          "Invalid input: Saving retirement goal plans is deferred until retirement plan validation is ported",
+        );
+      }
+      return repository.saveGoalPlan(plan);
+    },
+    async deleteGoalPlan(goalId) {
+      return repository.deleteGoalPlan(goalId);
     },
     getBaseCurrency() {
       return resolveBaseCurrency(options);
@@ -609,6 +717,22 @@ function goalPlanFromRow(row: GoalPlanRow): GoalPlan {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function readGoalPlanRowById(db: Database, goalId: string): GoalPlanRow {
+  const row = db
+    .query<GoalPlanRow, [string]>(
+      `
+        SELECT goal_id, plan_kind, planner_mode, settings_json, summary_json, version, created_at, updated_at
+        FROM goal_plans
+        WHERE goal_id = ?
+      `,
+    )
+    .get(goalId);
+  if (!row) {
+    throw new Error(`Record not found: goal plan '${goalId}'`);
+  }
+  return row;
 }
 
 function validateGoalLifecycle(statusLifecycle: string): void {
@@ -812,6 +936,19 @@ function queueFundingSync(
   });
 }
 
+function queueGoalPlanSync(
+  options: GoalRepositoryOptions,
+  row: GoalPlanRow,
+  operation: Exclude<GoalSyncOperation, "Delete">,
+): void {
+  options.queueSyncEvent?.({
+    entity: "goal_plans",
+    entityId: row.goal_id,
+    operation,
+    payload: goalPlanRowPayload(row),
+  });
+}
+
 function queueSyncDelete(
   options: GoalRepositoryOptions,
   entity: GoalSyncEntity,
@@ -834,6 +971,10 @@ function goalRowPayload(row: GoalRow): GoalRowPayload {
 
 function fundingRowPayload(row: GoalFundingRuleRow): GoalFundingRuleRowPayload {
   return fundingRuleFromRow(row);
+}
+
+function goalPlanRowPayload(row: GoalPlanRow): GoalPlanRowPayload {
+  return goalPlanFromRow(row);
 }
 
 function resolveBaseCurrency(options: GoalServiceOptions): string | undefined {

@@ -209,6 +209,114 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("saves and deletes save-up goal plans with versioning, sync, and unknown field preservation", async () => {
+    const db = createGoalsDb();
+    const syncEvents: GoalSyncEvent[] = [];
+    const service = createGoalService(
+      createGoalRepository(db, { queueSyncEvent: (event) => syncEvents.push(event) }),
+    );
+
+    try {
+      seedGoal(db, { id: "goal-1", title: "Goal" });
+
+      const settingsJson = JSON.stringify({
+        monthlyContribution: 100,
+        frontendOnly: { id: "draft-1", flags: ["keep"] },
+      });
+      const saved = await service.saveGoalPlan({
+        goalId: "goal-1",
+        planKind: "save_up",
+        settingsJson,
+        summaryJson: null,
+      });
+      expect(saved).toMatchObject({
+        goalId: "goal-1",
+        planKind: "save_up",
+        plannerMode: null,
+        settingsJson,
+        summaryJson: "{}",
+        version: 1,
+      });
+
+      const updatedSettingsJson = JSON.stringify({
+        monthlyContribution: 125,
+        frontendOnly: { id: "draft-1", flags: ["keep", "updated"] },
+      });
+      const updated = await service.saveGoalPlan({
+        goalId: "goal-1",
+        planKind: "save_up",
+        settingsJson: updatedSettingsJson,
+        summaryJson: '{"progress":0.25}',
+      });
+      expect(updated).toMatchObject({
+        goalId: "goal-1",
+        version: 2,
+        createdAt: saved.createdAt,
+        settingsJson: updatedSettingsJson,
+        summaryJson: '{"progress":0.25}',
+      });
+      expect(JSON.parse(updated.settingsJson).frontendOnly.flags).toEqual(["keep", "updated"]);
+      expect(syncEvents.map((event) => `${event.entity}:${event.operation}`)).toEqual([
+        "goal_plans:Create",
+        "goal_plans:Update",
+      ]);
+
+      await expect(service.deleteGoalPlan("goal-1")).resolves.toBe(1);
+      await expect(service.deleteGoalPlan("goal-1")).resolves.toBe(0);
+      expect(syncEvents.at(-1)).toEqual({
+        entity: "goal_plans",
+        entityId: "goal-1",
+        operation: "Delete",
+        payload: { id: "goal-1" },
+      });
+      expect(syncEvents.filter((event) => event.entity === "goal_plans")).toHaveLength(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("validates bounded goal plan save scope", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, { id: "save-up", title: "Save Up", goalType: "custom_save_up" });
+      seedGoal(db, { id: "retirement", title: "Retirement", goalType: "retirement" });
+
+      await expect(
+        service.saveGoalPlan({
+          goalId: "missing",
+          planKind: "save_up",
+          settingsJson: "{}",
+        }),
+      ).rejects.toThrow("Record not found: goal missing");
+      await expect(
+        service.saveGoalPlan({
+          goalId: "save-up",
+          planKind: "retirement",
+          settingsJson: "{}",
+        }),
+      ).rejects.toThrow("Plan kind 'retirement' is not valid for goal type 'custom_save_up'");
+      await expect(
+        service.saveGoalPlan({
+          goalId: "save-up",
+          planKind: "save_up",
+          plannerMode: "fire",
+          settingsJson: "{}",
+        }),
+      ).rejects.toThrow("planner_mode is only valid for retirement plans");
+      await expect(
+        service.saveGoalPlan({
+          goalId: "retirement",
+          planKind: "retirement",
+          settingsJson: "{}",
+        }),
+      ).rejects.toThrow("Saving retirement goal plans is deferred");
+    } finally {
+      db.close();
+    }
+  });
+
   test("replaces funding rules and deletes goals with Rust-compatible sync behavior", async () => {
     const db = createGoalsDb();
     const syncEvents: GoalSyncEvent[] = [];

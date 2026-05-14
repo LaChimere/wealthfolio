@@ -11,9 +11,9 @@ SQLite data.
 ## Current execution slice
 
 PR 5 continues vertical slices by extending contained activity
-create/update/bulk, CSV parse, read-only asset-preview, and read-only import
-validation plus bounded import-apply runtime slices in the standalone TS
-backend:
+create/update/bulk, CSV parse, read-only asset-preview, read-only import
+validation, bounded import-apply, and save-up goal-plan persistence runtime
+slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -42,9 +42,16 @@ backend:
   duplicate skipping, `forceImport`, import summaries, and cross-account
   transfer-pair auto-linking plus FX pair ensure through the migrated
   exchange-rate runtime.
+- Add bounded save-up goal-plan writes for `POST /api/v1/goals/plan` and
+  `DELETE /api/v1/goals/{id}/plan`, including versioned `goal_plans` upserts,
+  unknown settings preservation, unconditional 204 deletes, and `goal_plans`
+  sync event queuing.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
+- Keep retirement goal-plan validation/persistence, goal summary refresh, and
+  retirement/save-up calculations deferred to dedicated goal/calculation parity
+  slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -58,7 +65,8 @@ runtime, broader activities/import runtime beyond mapping/templates/duplicate
 lookups, read-only search, transfer link/unlink, single activity delete, and
 bounded existing-asset/cash/symbol-resolved activity create/update/bulk
 persistence plus CSV parse/read-only asset preview/read-only import validation
-and bounded import apply, sync-crypto/device-sync integration, real health
+and bounded import apply, sync-crypto/device-sync integration, retirement
+goal-plan validation/persistence or summary refresh, real health
 status/check/fix runtime implementation, real Connect runtime implementation,
 real device-sync runtime implementation, or Rust runtime removal is in scope for
 this slice.

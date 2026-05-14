@@ -195,6 +195,7 @@ export {
   type GoalSyncEvent,
   type GoalSyncOperation,
   type NewGoal,
+  type SaveGoalPlan,
 } from "./domains/goals";
 export {
   DEFAULT_HEALTH_CONFIG,
