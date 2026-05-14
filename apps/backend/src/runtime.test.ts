@@ -199,6 +199,23 @@ describe("TS backend runtime composition", () => {
         providers: expect.arrayContaining([expect.objectContaining({ id: "ollama" })]),
       });
 
+      const aiThreadsResponse = await fetch(`${server.baseUrl}/api/v1/ai/threads`);
+      expect(aiThreadsResponse.status).toBe(200);
+      await expect(aiThreadsResponse.json()).resolves.toEqual({
+        threads: [],
+        nextCursor: null,
+        hasMore: false,
+      });
+      const aiStreamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "hello" }),
+      });
+      expect(aiStreamResponse.status).toBe(501);
+      await expect(aiStreamResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);
       await expect(appInfoResponse.json()).resolves.toMatchObject({

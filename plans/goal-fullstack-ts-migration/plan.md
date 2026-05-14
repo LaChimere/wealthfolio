@@ -12,8 +12,8 @@ SQLite data.
 
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
-validation, bounded import-apply, and save-up goal-plan persistence runtime
-slices in the standalone TS backend:
+validation, bounded import-apply, save-up goal-plan persistence, and local AI
+chat thread/message persistence runtime slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -46,6 +46,11 @@ slices in the standalone TS backend:
   `DELETE /api/v1/goals/{id}/plan`, including versioned `goal_plans` upserts,
   unknown settings preservation, unconditional 204 deletes, and `goal_plans`
   sync event queuing.
+- Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
+  `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
+  including thread sort/search/cursor pagination, message reads, thread
+  update/delete behavior, tool-result patch merging, and an explicit 501 for
+  still-deferred AI chat streaming.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
@@ -59,17 +64,18 @@ slices in the standalone TS backend:
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
-runtime, quote-provider interactions, auto-classification side effects,
-portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
-runtime, broader activities/import runtime beyond mapping/templates/duplicate
-lookups, read-only search, transfer link/unlink, single activity delete, and
-bounded existing-asset/cash/symbol-resolved activity create/update/bulk
-persistence plus CSV parse/read-only asset preview/read-only import validation
-and bounded import apply, sync-crypto/device-sync integration, retirement
-goal-plan validation/persistence or summary refresh, real health
-status/check/fix runtime implementation, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+streaming/provider/tool execution runtime, quote-provider interactions,
+auto-classification side effects, portfolio metrics runtime, holdings runtime,
+add-on runtime, broader market-data runtime, broader activities/import runtime
+beyond mapping/templates/duplicate lookups, read-only search, transfer
+link/unlink, single activity delete, and bounded
+existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
+CSV parse/read-only asset preview/read-only import validation and bounded import
+apply, local AI chat thread/message persistence, sync-crypto/device-sync
+integration, retirement goal-plan validation/persistence or summary refresh,
+real health status/check/fix runtime implementation, real Connect runtime
+implementation, real device-sync runtime implementation, or Rust runtime removal
+is in scope for this slice.
 
 ## Next slices
 

@@ -64,9 +64,15 @@ export {
 } from "./domains/activities";
 export {
   AI_CHAT_ERROR_STATUS_BY_CODE,
+  createAiChatService,
+  type AiChatMessage,
+  type AiChatMessageContent,
+  type AiChatMessagePart,
   type AiChatListThreadsRequest,
   type AiChatService,
   type AiChatServiceErrorShape,
+  type AiChatThread,
+  type AiChatThreadPage,
   type AiChatUpdateThreadRequest,
   type AiChatUpdateToolResultRequest,
 } from "./domains/ai-chat";

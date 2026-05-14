@@ -6,6 +6,7 @@ import {
   createAccountService,
   type AccountService,
 } from "./domains/accounts";
+import { createAiChatService } from "./domains/ai-chat";
 import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
@@ -199,6 +200,7 @@ function createServicesFromDatabase(
             readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
         })
       : undefined,
+    aiChatService: createAiChatService(db),
     appUtilityService: createAppUtilityService({
       appDataDir,
       appVersion: readPackageVersion(runtimeOptions.repositoryRoot),
