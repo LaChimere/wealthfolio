@@ -5518,6 +5518,22 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(domainErrorResponse.status).toBe(400);
       expect(providerCalls).toBe(3);
+
+      const refreshAllResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/refresh-summaries", {
+          method: "POST",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(refreshAllResponse.status).toBe(200);
+      await expect(refreshAllResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: "goal 1",
+          summaryCurrentValue: 500,
+          summaryProgress: 0.5,
+        }),
+      ]);
+      expect(providerCalls).toBe(4);
     } finally {
       db.close();
     }
@@ -5538,6 +5554,7 @@ describe("TS backend HTTP skeleton", () => {
 
     try {
       for (const [method, path] of [
+        ["POST", "/api/v1/goals/refresh-summaries"],
         ["POST", "/api/v1/goals/goal-1/refresh-summary"],
         ["GET", "/api/v1/goals/goal-1/save-up/overview"],
       ] as const) {

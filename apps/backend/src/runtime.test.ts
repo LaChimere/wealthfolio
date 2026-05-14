@@ -595,4 +595,125 @@ describe("TS backend runtime composition", () => {
       }),
     ).toThrow("WF_SECRET_BACKEND=keyring is not yet available in the TS backend runtime");
   });
+
+  test("wires goal valuation routes to latest SQLite account valuations", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-goals-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    try {
+      const { accountService, goalService } = runtime.options;
+      if (!accountService || !goalService) {
+        throw new Error("Runtime goal valuation test requires account and goal services");
+      }
+
+      const account = await accountService.createAccount({
+        name: "Goal Account",
+        accountType: "CASH",
+        currency: "USD",
+        isDefault: false,
+        isActive: true,
+      });
+      const ignoredAccount = await accountService.createAccount({
+        name: "Archived Goal Account",
+        accountType: "CASH",
+        currency: "USD",
+        isDefault: false,
+        isActive: true,
+        isArchived: true,
+      });
+      const goal = await goalService.createGoal({
+        goalType: "custom_save_up",
+        title: "Runtime Goal",
+        targetAmount: 1000,
+        currency: "USD",
+      });
+      await goalService.saveGoalFunding(goal.id, [
+        { accountId: account.id, sharePercent: 40 },
+        { accountId: ignoredAccount.id, sharePercent: 100 },
+      ]);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeValuation(db, {
+          accountId: account.id,
+          date: "2026-05-13",
+          totalValue: "700",
+          fxRateToBase: "9",
+        });
+        seedRuntimeValuation(db, {
+          accountId: account.id,
+          date: "2026-05-14",
+          totalValue: "1000",
+          fxRateToBase: "1.25",
+        });
+        seedRuntimeValuation(db, {
+          accountId: ignoredAccount.id,
+          date: "2026-05-14",
+          totalValue: "1000000",
+          fxRateToBase: "1",
+        });
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const refreshResponse = await fetch(
+          `${server.baseUrl}/api/v1/goals/${goal.id}/refresh-summary`,
+          { method: "POST" },
+        );
+        expect(refreshResponse.status).toBe(200);
+        await expect(refreshResponse.json()).resolves.toMatchObject({
+          id: goal.id,
+          summaryCurrentValue: 500,
+          summaryProgress: 0.5,
+        });
+
+        const overviewResponse = await fetch(
+          `${server.baseUrl}/api/v1/goals/${goal.id}/save-up/overview`,
+        );
+        expect(overviewResponse.status).toBe(200);
+        await expect(overviewResponse.json()).resolves.toMatchObject({
+          currentValue: 500,
+          targetAmount: 1000,
+          progress: 0.5,
+        });
+      } finally {
+        server.stop();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
 });
+
+function seedRuntimeValuation(
+  db: ReturnType<typeof openSqliteDatabase>,
+  valuation: {
+    accountId: string;
+    date: string;
+    totalValue: string;
+    fxRateToBase: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO daily_account_valuation (
+        id, account_id, valuation_date, account_currency, base_currency,
+        fx_rate_to_base, cash_balance, investment_market_value, total_value,
+        cost_basis, net_contribution, calculated_at
+      )
+      VALUES (?, ?, ?, 'USD', 'USD', ?, '0', '0', ?, '0', '0', ?)
+    `,
+  ).run(
+    `${valuation.accountId}_${valuation.date}`,
+    valuation.accountId,
+    valuation.date,
+    valuation.fxRateToBase,
+    valuation.totalValue,
+    `${valuation.date}T00:00:00Z`,
+  );
+}

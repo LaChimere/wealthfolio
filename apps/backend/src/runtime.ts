@@ -34,7 +34,7 @@ import { createSettingsService } from "./domains/settings";
 import { createSyncCryptoService } from "./domains/sync-crypto";
 import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
 import { createEventBus, type BackendEventBus } from "./events";
-import type { BackendRequestHandlerOptions } from "./http";
+import type { BackendRequestHandlerOptions, GoalValuationProvider } from "./http";
 import {
   initializeSqliteDatabase,
   resolveMigrationsDir,
@@ -231,6 +231,7 @@ function createServicesFromDatabase(
       accountProvider: accountService,
       baseCurrency,
     }),
+    goalValuationProvider: createGoalValuationProvider(db, accountService),
     healthService: createHealthService(createHealthRepository(db), undefined, {
       accountProvider: accountService,
       classificationMigrationProvider: taxonomyService,
@@ -303,6 +304,64 @@ function createRuntimeAccountService(
     baseCurrency,
     eventBus,
   });
+}
+
+function createGoalValuationProvider(
+  db: InitializedSqliteDatabase["db"],
+  accountService: AccountService,
+): GoalValuationProvider {
+  return {
+    async getGoalValuationMap() {
+      const accountIds = accountService.getActiveNonArchivedAccounts().map((account) => account.id);
+      if (accountIds.length === 0) {
+        return {};
+      }
+      const placeholders = accountIds.map(() => "?").join(", ");
+      const rows = db
+        .query<DailyAccountValuationRow, string[]>(
+          `
+            WITH ranked_valuations AS (
+              SELECT
+                account_id,
+                fx_rate_to_base,
+                total_value,
+                ROW_NUMBER() OVER (
+                  PARTITION BY account_id
+                  ORDER BY valuation_date DESC
+                ) AS rn
+              FROM daily_account_valuation
+              WHERE account_id IN (${placeholders})
+            )
+            SELECT account_id, fx_rate_to_base, total_value
+            FROM ranked_valuations
+            WHERE rn = 1
+          `,
+        )
+        .all(...accountIds);
+
+      return Object.fromEntries(
+        rows.map((row) => [
+          row.account_id,
+          parseDecimalText(row.total_value, 0) * parseDecimalText(row.fx_rate_to_base, 1),
+        ]),
+      );
+    },
+  };
+}
+
+interface DailyAccountValuationRow {
+  account_id: string;
+  fx_rate_to_base: string;
+  total_value: string;
+}
+
+function parseDecimalText(value: string, fallback: number): number {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function defaultRepositoryRoot(): string {

@@ -9,6 +9,7 @@ export {
   createBackendRequestHandler,
   runWithRequestTimeout,
   type BackendRequestHandlerOptions,
+  type GoalValuationProvider,
 } from "./http";
 export { startBackendServer, type BackendServerHandle } from "./server";
 export {

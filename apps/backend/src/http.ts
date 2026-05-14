@@ -2225,6 +2225,12 @@ function routeGoalRequest(
     );
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/refresh-summaries") {
+    return handleGoalValuationRequest(goalValuationProvider, (valuationMap) =>
+      refreshActiveGoalSummaries(goalService, valuationMap),
+    );
+  }
+
   const refreshGoalId = goalRefreshSummaryIdFromPath(url.pathname);
   if (refreshGoalId && request.method === "POST") {
     return handleGoalValuationRequest(goalValuationProvider, (valuationMap) =>
@@ -2268,6 +2274,21 @@ function routeGoalRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function refreshActiveGoalSummaries(
+  goalService: GoalService,
+  valuationMap: GoalValuationMap,
+): Promise<Goal[]> {
+  const refreshed: Goal[] = [];
+  for (const goal of goalService.getGoals().filter((item) => item.statusLifecycle === "active")) {
+    try {
+      refreshed.push(await goalService.refreshGoalSummary(goal.id, valuationMap));
+    } catch (error) {
+      console.debug(`Failed to refresh goal ${goal.id}: ${errorMessage(error)}`);
+    }
+  }
+  return refreshed;
 }
 
 async function handleGoalValuationRequest<T>(
