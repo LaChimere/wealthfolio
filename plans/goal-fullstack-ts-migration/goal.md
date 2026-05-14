@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 41
+turns_used: 42
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T09:17:10+08:00"
+updated_at: "2026-05-14T09:30:38+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -286,6 +286,12 @@ updated_at: "2026-05-14T09:17:10+08:00"
   closing the live SQLite handle, performs best-effort WAL checkpoint/journal
   cleanup, waits for file handles to settle, restores the backup, and puts the
   HTTP runtime into restart-required `503` mode until the app restarts.
+- Turn 42: Added contribution-limit deposit calculation runtime parity for the
+  standalone TS backend: limit deposit reads now query SQLite
+  activities/accounts, apply Rust-compatible contribution rules for deposits,
+  credits, and transfers, use user-timezone year ranges and FX conversion dates,
+  and return numeric contribution totals through the existing `/api/v1/limits`
+  runtime wiring.
 
 ## Deferred items
 

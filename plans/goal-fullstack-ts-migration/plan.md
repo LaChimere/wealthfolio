@@ -10,17 +10,17 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding app utility database restore runtime
-parity to the standalone TS backend:
+PR 5 continues vertical slices by adding contribution-limit deposit calculation
+runtime parity to the standalone TS backend:
 
-- Implement `AppUtilityService.restoreDatabase` with Rust-compatible file-path
-  normalization, backup existence validation, file-level restore, and a settle
-  delay after database prepare.
-- Before replacing the active database, checkpoint and close the live Bun SQLite
-  handle, then put the HTTP runtime into restart-required readiness mode so
-  stale services cannot keep using the replaced database.
-- Keep broader service rebuild/hot-reload behavior deferred; the existing
-  frontend already instructs users to restart after restore.
+- Replace the prior injectable-only contribution deposit seam with a
+  SQLite-backed calculator wired into runtime composition.
+- Mirror Rust contribution rules for `DEPOSIT`, `TRANSFER_IN`, `TRANSFER_OUT`,
+  and `CREDIT`, including internal transfer-pair exclusion and external-flow
+  metadata checks.
+- Preserve Rust-style activity/account filtering, user-timezone year ranges,
+  inclusive explicit end dates, FX conversion dates, and numeric response
+  shapes.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

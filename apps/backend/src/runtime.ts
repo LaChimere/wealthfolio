@@ -9,6 +9,7 @@ import {
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import {
+  createContributionDepositCalculator,
   createContributionLimitRepository,
   createContributionLimitService,
 } from "./domains/contribution-limits";
@@ -196,6 +197,11 @@ function createServicesFromDatabase(
       createContributionLimitRepository(db),
       {
         baseCurrency,
+        calculateDeposits: createContributionDepositCalculator(
+          db,
+          exchangeRateService,
+          () => settingsService.getSettings().timezone,
+        ),
       },
     ),
     customProviderService: createCustomProviderService(createCustomProviderRepository(db), {

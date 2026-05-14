@@ -70,11 +70,11 @@
     provider, AI chat, sync crypto, Connect broker/session and device-sync
     enrollment/engine, device-sync device management, team-key/reset, and
     pairing, standalone runtime composition for already-ported SQLite-backed
-    domains, safe app utility runtime, custom provider test-source runtime,
-    alternative assets, assets, portfolio metrics, holdings, add-ons,
-    market-data, and activities TS repository/service or route config
-    implementations plus guarded/runtime route tests in
-    `apps/backend/src/domains/settings.ts`,
+    domains, contribution-limit deposit calculation runtime, safe app utility
+    runtime, custom provider test-source runtime, alternative assets, assets,
+    portfolio metrics, holdings, add-ons, market-data, and activities TS
+    repository/service or route config implementations plus guarded/runtime
+    route tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -113,18 +113,21 @@
     asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
     is deferred to asset/market-data/portfolio parity slices; app utility
     database restore now has TS runtime parity with restart-required readiness
-    after file restore; portfolio metric calculations are deferred to portfolio
-    calculation parity slices; holdings fan-out, valuations, allocations,
-    snapshots, imports, and portfolio recalculation side effects are deferred to
-    holdings/portfolio parity slices; add-on filesystem extraction, runtime
-    loading, store HTTP, staging I/O, and update behavior are deferred to add-on
-    runtime parity slices; exchange metadata, provider HTTP, Yahoo dividends,
-    quote import/persistence, market sync, and portfolio recalculation behavior
-    are deferred to market-data/portfolio parity slices; activity persistence,
-    import parsing/mapping/template storage, duplicate lookups, transfer
-    mutation behavior, asset preview resolution, and portfolio recalculation
-    side effects are deferred to activities/import runtime parity slices; AI
-    chat persistence, provider streaming, tool execution, thread storage, tag
+    after file restore; contribution-limit deposit calculation now has TS
+    runtime parity with SQLite activity reads, Rust-compatible contribution
+    rules, user-timezone year ranges, and FX conversion dates; portfolio metric
+    calculations are deferred to portfolio calculation parity slices; holdings
+    fan-out, valuations, allocations, snapshots, imports, and portfolio
+    recalculation side effects are deferred to holdings/portfolio parity slices;
+    add-on filesystem extraction, runtime loading, store HTTP, staging I/O, and
+    update behavior are deferred to add-on runtime parity slices; exchange
+    metadata, provider HTTP, Yahoo dividends, quote import/persistence, market
+    sync, and portfolio recalculation behavior are deferred to
+    market-data/portfolio parity slices; activity persistence, import
+    parsing/mapping/template storage, duplicate lookups, transfer mutation
+    behavior, asset preview resolution, and portfolio recalculation side effects
+    are deferred to activities/import runtime parity slices; AI chat
+    persistence, provider streaming, tool execution, thread storage, tag
     persistence, and tool-result mutation behavior are deferred to AI runtime
     parity slices; device-sync integration for sync crypto is deferred to
     device-sync runtime parity slices; real health checks, market sync fix
@@ -717,6 +720,15 @@ contract:
   and fixed restore settle-delay and best-effort checkpoint/journal parity gaps;
   final review found no remaining actionable issues. Full repository check
   passed with `bun run check`.
+- `pr5-contribution-deposit-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test`. Coverage includes SQLite activity/account
+  filtering, deposit/credit/transfer contribution rules, internal transfer-pair
+  exclusion, external-flow metadata handling, missing counted-amount errors,
+  archived-account exclusion, explicit inclusive date ranges, user-timezone
+  default year boundaries, and FX conversion dates. Rubber-duck critique and
+  focused code review found no remaining actionable issues. Full repository
+  check passed with `bun run check`.
 
 ## Result
 
@@ -737,8 +749,8 @@ contract:
   safe app utility runtime, file-backed secrets runtime, AI provider
   settings/catalog runtime, sync crypto runtime, legacy classification migration
   runtime, custom provider test-source runtime, FX converter/register runtime,
-  and app utility database restore runtime slices implemented; broader migration
-  remains active.
+  app utility database restore runtime, and contribution-limit deposit
+  calculation runtime slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move

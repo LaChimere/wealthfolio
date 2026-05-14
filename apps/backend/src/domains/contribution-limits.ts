@@ -1,5 +1,9 @@
 import type { Database } from "bun:sqlite";
 
+import Decimal from "decimal.js";
+
+import type { ExchangeRateService } from "./exchange-rates";
+
 export interface ContributionLimit {
   id: string;
   groupName: string;
@@ -77,6 +81,18 @@ interface ContributionLimitRow {
   start_date: string | null;
   end_date: string | null;
 }
+
+interface ContributionActivityRow {
+  account_id: string;
+  activity_type: string;
+  activity_date: string;
+  amount: string | null;
+  currency: string;
+  metadata: string | null;
+  source_group_id: string | null;
+}
+
+const CONTRIBUTION_ACTIVITY_TYPES = ["DEPOSIT", "TRANSFER_IN", "TRANSFER_OUT", "CREDIT"] as const;
 
 export function createContributionLimitRepository(db: Database): ContributionLimitRepository {
   return {
@@ -166,6 +182,15 @@ export function createContributionLimitRepository(db: Database): ContributionLim
       db.prepare("DELETE FROM contribution_limits WHERE id = ?").run(id);
     },
   };
+}
+
+export function createContributionDepositCalculator(
+  db: Database,
+  exchangeRateService: Pick<ExchangeRateService, "convertCurrencyForDate">,
+  timezoneProvider: () => string | undefined,
+): NonNullable<ContributionLimitServiceOptions["calculateDeposits"]> {
+  return (limit, accountIds, baseCurrency) =>
+    calculateDeposits(db, exchangeRateService, timezoneProvider, limit, accountIds, baseCurrency);
 }
 
 export function createContributionLimitService(
@@ -269,6 +294,301 @@ function zeroDepositsCalculation(baseCurrency: string): DepositsCalculation {
     baseCurrency,
     byAccount: {},
   };
+}
+
+function calculateDeposits(
+  db: Database,
+  exchangeRateService: Pick<ExchangeRateService, "convertCurrencyForDate">,
+  timezoneProvider: () => string | undefined,
+  limit: ContributionLimit,
+  accountIds: string[],
+  baseCurrency: string,
+): DepositsCalculation {
+  if (accountIds.length === 0) {
+    return zeroDepositsCalculation(baseCurrency);
+  }
+
+  const timezone = normalizeTimezone(timezoneProvider());
+  const [startUtc, endExclusiveUtc] =
+    limit.startDate && limit.endDate
+      ? explicitContributionRange(limit.startDate, limit.endDate)
+      : localYearUtcBounds(limit.contributionYear, timezone);
+  const activities = getContributionActivities(db, accountIds, startUtc, endExclusiveUtc);
+  const limitAccounts = new Set(accountIds);
+  const transferOutAccounts = new Map(
+    activities
+      .filter((activity) => activity.activity_type === "TRANSFER_OUT")
+      .flatMap((activity) =>
+        activity.source_group_id ? [[activity.source_group_id, activity.account_id]] : [],
+      ),
+  );
+
+  let total = new Decimal(0);
+  const byAccount = new Map<
+    string,
+    { amount: Decimal; currency: string; convertedAmount: Decimal }
+  >();
+
+  for (const activity of activities) {
+    if (!shouldCountContribution(activity, limitAccounts, transferOutAccounts)) {
+      continue;
+    }
+
+    const amount = parseDecimalOrNull(activity.amount);
+    if (!amount) {
+      throw new Error(`Amount missing in ${activity.activity_type} activity`);
+    }
+
+    const activityDate = activityDateInTimezone(
+      parseActivityInstant(activity.activity_date),
+      timezone,
+    );
+    const convertedAmount = new Decimal(
+      exchangeRateService.convertCurrencyForDate(
+        amount.toString(),
+        activity.currency,
+        baseCurrency,
+        activityDate,
+      ),
+    );
+    total = total.plus(convertedAmount);
+
+    const accountDeposit = byAccount.get(activity.account_id) ?? {
+      amount: new Decimal(0),
+      currency: activity.currency,
+      convertedAmount: new Decimal(0),
+    };
+    accountDeposit.amount = accountDeposit.amount.plus(amount);
+    accountDeposit.convertedAmount = accountDeposit.convertedAmount.plus(convertedAmount);
+    accountDeposit.currency = activity.currency;
+    byAccount.set(activity.account_id, accountDeposit);
+  }
+
+  return {
+    total: total.toNumber(),
+    baseCurrency,
+    byAccount: Object.fromEntries(
+      [...byAccount].map(([accountId, deposit]) => [
+        accountId,
+        {
+          amount: deposit.amount.toNumber(),
+          currency: deposit.currency,
+          convertedAmount: deposit.convertedAmount.toNumber(),
+        },
+      ]),
+    ),
+  };
+}
+
+function getContributionActivities(
+  db: Database,
+  accountIds: string[],
+  startUtc: Date,
+  endExclusiveUtc: Date,
+): ContributionActivityRow[] {
+  const accountPlaceholders = accountIds.map(() => "?").join(", ");
+  const typePlaceholders = CONTRIBUTION_ACTIVITY_TYPES.map(() => "?").join(", ");
+  return db
+    .query<ContributionActivityRow, string[]>(
+      `
+        SELECT
+          activities.account_id,
+          activities.activity_type,
+          activities.activity_date,
+          activities.amount,
+          activities.currency,
+          activities.metadata,
+          activities.source_group_id
+        FROM activities
+        INNER JOIN accounts ON activities.account_id = accounts.id
+        WHERE accounts.id IN (${accountPlaceholders})
+          AND accounts.is_archived = 0
+          AND activities.activity_type IN (${typePlaceholders})
+          AND activities.activity_date >= ?
+          AND activities.activity_date < ?
+      `,
+    )
+    .all(
+      ...accountIds,
+      ...CONTRIBUTION_ACTIVITY_TYPES,
+      toRustUtcRfc3339(startUtc),
+      toRustUtcRfc3339(endExclusiveUtc),
+    );
+}
+
+function shouldCountContribution(
+  activity: ContributionActivityRow,
+  limitAccounts: Set<string>,
+  transferOutAccounts: Map<string, string>,
+): boolean {
+  switch (activity.activity_type) {
+    case "DEPOSIT":
+      return true;
+    case "TRANSFER_IN":
+      if (activity.source_group_id) {
+        const sourceAccount = transferOutAccounts.get(activity.source_group_id);
+        return !sourceAccount || !limitAccounts.has(sourceAccount);
+      }
+      return isExternalActivity(activity);
+    case "CREDIT":
+      return isExternalActivity(activity);
+    default:
+      return false;
+  }
+}
+
+function isExternalActivity(activity: ContributionActivityRow): boolean {
+  if (!activity.metadata) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(activity.metadata) as {
+      flow?: { is_external?: unknown };
+    };
+    return parsed.flow?.is_external === true;
+  } catch {
+    return false;
+  }
+}
+
+function explicitContributionRange(startDate: string, endDate: string): [Date, Date] {
+  const start = parseRfc3339DateTime(startDate);
+  const endInclusive = parseRfc3339DateTime(endDate);
+  return [start, new Date(endInclusive.getTime() + 1_000)];
+}
+
+function localYearUtcBounds(year: number, timezone: string): [Date, Date] {
+  return [
+    zonedDateTimeToUtc(year, 1, 1, 0, 0, 0, timezone),
+    zonedDateTimeToUtc(year + 1, 1, 1, 0, 0, 0, timezone),
+  ];
+}
+
+function activityDateInTimezone(activityInstant: Date, timezone: string): string {
+  const parts = zonedDateParts(activityInstant, timezone);
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+function zonedDateTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timezone: string,
+): Date {
+  const targetUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  let utcMs = targetUtcMs;
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const parts = zonedDateParts(new Date(utcMs), timezone);
+    const actualUtcMs = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    const difference = targetUtcMs - actualUtcMs;
+    if (difference === 0) {
+      break;
+    }
+    utcMs += difference;
+  }
+  return new Date(utcMs);
+}
+
+function zonedDateParts(
+  date: Date,
+  timezone: string,
+): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+} {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    calendar: "iso8601",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZone: timezone,
+    year: "numeric",
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+}
+
+function normalizeTimezone(timezone: string | undefined): string {
+  const normalized = timezone?.trim();
+  if (!normalized) {
+    return "UTC";
+  }
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: normalized }).resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function parseActivityInstant(value: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return parseDateTime(`${value}T00:00:00Z`);
+  }
+  return parseDateTime(value);
+}
+
+function parseDateTime(value: string): Date {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new Error(`Invalid date: ${value}`);
+  }
+  return parsed;
+}
+
+function parseRfc3339DateTime(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    throw new Error(`Invalid date: ${value}`);
+  }
+  return parseDateTime(value);
+}
+
+function parseDecimalOrNull(value: string | null): Decimal | null {
+  if (!value || !isDecimalString(value)) {
+    return null;
+  }
+  return new Decimal(value);
+}
+
+function isDecimalString(value: string): boolean {
+  return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim());
+}
+
+function toRustUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  return iso.endsWith(".000Z") ? iso.replace(".000Z", "+00:00") : iso.replace("Z", "+00:00");
+}
+
+function pad2(value: number): string {
+  return value.toString().padStart(2, "0");
 }
 
 function resolveBaseCurrency(options: ContributionLimitServiceOptions): string | undefined {
