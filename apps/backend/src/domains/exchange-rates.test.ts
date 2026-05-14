@@ -2,10 +2,12 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import {
+  ASSETS_CREATED_EVENT,
   createExchangeRateRepository,
   createExchangeRateService,
   type ExchangeRateAssetSyncEvent,
 } from "./exchange-rates";
+import { createEventBus, type BackendEvent } from "../events";
 
 describe("TS exchange rates domain", () => {
   test("lists FX assets by display code with latest quote or provider fallback", () => {
@@ -178,6 +180,247 @@ describe("TS exchange rates domain", () => {
       db.close();
     }
   });
+
+  test("converts currencies with initialized nearest-date graph, inverse rates, and paths", () => {
+    const db = createExchangeRatesDb();
+    const warnings: string[] = [];
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      now: () => new Date("2023-10-27T12:00:00Z"),
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      seedFxAsset(db, { id: "usd-cad", from: "USD", to: "CAD" });
+      seedQuote(db, {
+        id: "usd-cad-old",
+        assetId: "usd-cad",
+        day: "2023-10-20",
+        close: "1.20",
+        source: "MANUAL",
+      });
+      seedQuote(db, {
+        id: "usd-cad-future",
+        assetId: "usd-cad",
+        day: "2023-10-30",
+        close: "1.50",
+        source: "MANUAL",
+      });
+      seedFxAsset(db, { id: "usd-eur", from: "USD", to: "EUR" });
+      seedQuote(db, {
+        id: "usd-eur",
+        assetId: "usd-eur",
+        day: "2023-10-25",
+        close: "0.5",
+        source: "MANUAL",
+      });
+      seedFxAsset(db, { id: "eur-chf", from: "EUR", to: "CHF" });
+      seedQuote(db, {
+        id: "eur-chf",
+        assetId: "eur-chf",
+        day: "2023-10-25",
+        close: "4",
+        source: "MANUAL",
+      });
+      seedFxAsset(db, { id: "eur-gbp", from: "EUR", to: "GBP" });
+      seedQuote(db, {
+        id: "eur-gbp",
+        assetId: "eur-gbp",
+        day: "2023-10-25",
+        close: "3",
+        source: "MANUAL",
+      });
+
+      service.initialize();
+
+      expect(service.getExchangeRateForDate("USD", "CAD", "2023-10-27")).toBe("1.5");
+      expect(service.getExchangeRateForDate("USD", "CAD", "2023-10-25")).toBe("1.2");
+      expect(service.getLatestExchangeRate("CAD", "USD")).toBe("0.6666666666666666666666666667");
+      expect(service.getExchangeRateForDate("USD", "CHF", "2023-10-26")).toBe("2");
+      expect(service.convertCurrencyForDate("10", "USD", "CHF", "2023-10-26")).toBe("20");
+      expect(service.convertCurrency("6", "EUR", "GBP")).toBe("18");
+      expect(() => service.convertCurrency("1", "USD", "NOK")).toThrow("Exchange rate not found");
+      expect(warnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("warns when dated conversion falls back to latest available rate", () => {
+    const db = createExchangeRatesDb();
+    const warnings: string[] = [];
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      seedFxAsset(db, { id: "usd-cad", from: "USD", to: "CAD" });
+      seedQuote(db, {
+        id: "usd-cad",
+        assetId: "usd-cad",
+        day: "2026-01-01",
+        close: "1.20",
+        source: "MANUAL",
+      });
+
+      expect(service.getExchangeRateForDate("USD", "CAD", "2026-02-01")).toBe("1.2");
+      expect(warnings).toEqual([
+        "No exchange rate found for USD/CAD on 2026-02-01. Using fallback rate from 2026-01-01",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("applies Rust-compatible minor currency normalization multipliers", () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db));
+
+    try {
+      seedFxAsset(db, { id: "gbp-usd", from: "GBP", to: "USD" });
+      seedQuote(db, {
+        id: "gbp-usd",
+        assetId: "gbp-usd",
+        day: "2026-01-01",
+        close: "1.25",
+        source: "MANUAL",
+      });
+      service.initialize();
+
+      expect(service.getLatestExchangeRate("GBp", "USD")).toBe("0.0125");
+      expect(service.getLatestExchangeRate("GBP", "GBp")).toBe("100");
+      expect(service.getExchangeRateForDate("GBp", "USD", "2026-01-01")).toBe("0.0125");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reads historical rates with full timestamp boundaries", () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      now: () => new Date("2026-05-04T16:00:00Z"),
+    });
+
+    try {
+      seedFxAsset(db, { id: "usd-cad", from: "USD", to: "CAD" });
+      seedQuote(db, {
+        id: "excluded",
+        assetId: "usd-cad",
+        day: "2026-05-02",
+        close: "1.10",
+        source: "MANUAL",
+      });
+      seedQuote(db, {
+        id: "included-start",
+        assetId: "usd-cad",
+        day: "2026-05-03",
+        close: "1.20",
+        source: "MANUAL",
+      });
+      seedQuote(db, {
+        id: "included-end",
+        assetId: "usd-cad",
+        day: "2026-05-04",
+        close: "1.30",
+        source: "MANUAL",
+      });
+
+      expect(service.getHistoricalRates("USD", "CAD", 1).map((rate) => rate.rate)).toEqual([
+        "1.20",
+        "1.30",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("registers missing FX pairs with provider source, events, and normalization skips", async () => {
+    const db = createExchangeRatesDb();
+    const eventBus = createEventBus();
+    const events: BackendEvent[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    const service = createExchangeRateService(createExchangeRateRepository(db), { eventBus });
+
+    try {
+      await service.registerCurrencyPair("GBp", "GBP");
+      expect(db.query("SELECT id FROM assets").all()).toEqual([]);
+
+      await service.registerCurrencyPair("USD", "CAD");
+      const yahooAsset = db
+        .query<
+          { id: string; provider_config: string },
+          []
+        >("SELECT id, provider_config FROM assets WHERE instrument_key = 'FX:USD/CAD'")
+        .get();
+      expect(yahooAsset?.provider_config).toContain('"preferred_provider":"YAHOO"');
+      expect(events).toEqual([
+        {
+          name: ASSETS_CREATED_EVENT,
+          payload: { type: ASSETS_CREATED_EVENT, asset_ids: [yahooAsset?.id] },
+        },
+      ]);
+
+      await service.registerCurrencyPairManual("EUR", "CHF");
+      const manualAsset = db
+        .query<
+          { provider_config: string },
+          []
+        >("SELECT provider_config FROM assets WHERE instrument_key = 'FX:EUR/CHF'")
+        .get();
+      expect(manualAsset?.provider_config).toBe('{"preferred_provider":"MANUAL"}');
+
+      await service.ensureFxPairs([
+        ["NOK", "SEK"],
+        ["NOK", "SEK"],
+        ["EUR", "EUR"],
+        ["GBp", "GBP"],
+      ]);
+      expect(
+        db
+          .query<
+            { count: number },
+            []
+          >("SELECT COUNT(*) AS count FROM assets WHERE instrument_key = 'FX:NOK/SEK'")
+          .get()?.count,
+      ).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips pair registration when inverse rates exist and refreshes converter after delete", async () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      now: () => new Date("2026-01-02T12:00:00Z"),
+    });
+
+    try {
+      seedFxAsset(db, { id: "cad-usd", from: "CAD", to: "USD" });
+      seedQuote(db, {
+        id: "cad-usd",
+        assetId: "cad-usd",
+        day: "2026-01-01",
+        close: "0.8",
+        source: "MANUAL",
+      });
+      service.initialize();
+
+      await service.registerCurrencyPair("USD", "CAD");
+      expect(
+        db
+          .query<
+            { count: number },
+            []
+          >("SELECT COUNT(*) AS count FROM assets WHERE instrument_key = 'FX:USD/CAD'")
+          .get()?.count,
+      ).toBe(0);
+      expect(service.getLatestExchangeRate("USD", "CAD")).toBe("1.25");
+
+      await service.deleteExchangeRate("cad-usd");
+      expect(() => service.getLatestExchangeRate("USD", "CAD")).toThrow("Exchange rate not found");
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createExchangeRatesDb(): Database {
@@ -266,9 +509,10 @@ function seedQuote(
     day: string;
     close: string;
     source: string;
+    timestamp?: string;
   },
 ): void {
-  const timestamp = `${quote.day}T16:00:00Z`;
+  const timestamp = quote.timestamp ?? `${quote.day}T16:00:00.000Z`;
   db.prepare(
     `
       INSERT INTO quotes (

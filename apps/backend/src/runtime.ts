@@ -134,6 +134,10 @@ function createServicesFromDatabase(
   const settingsService = createSettingsService(db);
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const accountService = createRuntimeAccountService(db, eventBus, baseCurrency);
+  const exchangeRateService = createExchangeRateService(createExchangeRateRepository(db), {
+    eventBus,
+  });
+  exchangeRateService.initialize();
   const appDataDir = runtimeOptions.appDataDir;
   const secretService = createRuntimeSecretService({
     appDataDir,
@@ -170,7 +174,7 @@ function createServicesFromDatabase(
       secretService,
     }),
     eventBus,
-    exchangeRateService: createExchangeRateService(createExchangeRateRepository(db)),
+    exchangeRateService,
     goalService: createGoalService(createGoalRepository(db), {
       accountProvider: accountService,
       baseCurrency,

@@ -151,6 +151,7 @@ export type {
   UpdateDeviceRequest,
 } from "./domains/device-sync";
 export {
+  ASSETS_CREATED_EVENT,
   createExchangeRateRepository,
   createExchangeRateService,
   type ExchangeRate,
@@ -159,6 +160,7 @@ export {
   type ExchangeRateRepository,
   type ExchangeRateRepositoryOptions,
   type ExchangeRateService,
+  type ExchangeRateServiceOptions,
   type FxAssetPayload,
   type NewExchangeRate,
 } from "./domains/exchange-rates";

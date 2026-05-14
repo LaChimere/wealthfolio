@@ -10,31 +10,31 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding custom provider `test-source` runtime
-parity to the standalone TS backend:
+PR 5 continues vertical slices by adding FX converter/register runtime parity to
+the standalone TS backend:
 
-- Implement `CustomProviderService.testSource` with Rust-compatible template
-  expansion, browser-like headers, optional secret-backed header resolution,
-  response-size guards, redirect limiting, JSONPath extraction, HTML detection,
-  HTML-table detection, CSV extraction, numeric locale parsing, factor/invert,
-  and OHLCV/date/currency result mapping.
-- Wire the existing guarded `/api/v1/custom-providers/test-source` route through
-  standalone runtime composition by passing the runtime secret service into the
-  custom provider service.
-- Keep broader market-data quote/history/import/sync execution deferred until
-  dedicated market-data and portfolio calculation runtime slices.
+- Initialize a Decimal-backed `CurrencyConverter` from SQLite FX quotes in
+  standalone runtime and preserve Rust-compatible add/update/delete refresh
+  behavior.
+- Implement nearest-date graph conversions, direct/inverse latest rate lookup,
+  historical range reads, minor currency normalization, Yahoo/manual pair
+  registration, and assets-created event emission.
+- Keep automatic market sync, provider HTTP clients, quote import/persistence,
+  and portfolio recalculation side effects deferred until dedicated market-data
+  and portfolio calculation runtime slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-keyring storage, AI chat runtime, alternative asset runtime, asset runtime, app
-utility restore runtime, portfolio metrics runtime, holdings runtime, add-on
-runtime, market-data runtime, activities/import runtime, sync-crypto/device-sync
-integration, real health status/check/fix runtime implementation, real Connect
-runtime implementation, real device-sync runtime implementation, or Rust runtime
-removal is in scope for this slice.
+provider sync, portfolio recalculation side effects, keyring storage, AI chat
+runtime, alternative asset runtime, asset runtime, app utility restore runtime,
+portfolio metrics runtime, holdings runtime, add-on runtime, market-data
+runtime, activities/import runtime, sync-crypto/device-sync integration, real
+health status/check/fix runtime implementation, real Connect runtime
+implementation, real device-sync runtime implementation, or Rust runtime removal
+is in scope for this slice.
 
 ## Next slices
 

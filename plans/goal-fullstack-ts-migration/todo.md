@@ -99,8 +99,9 @@
     runtime behavior through taxonomy endpoints, while broader health
     status/check/fix behavior is deferred to health/calculation service slices;
     custom provider `test-source` now has TS runtime behavior for external
-    source testing; goals plan writes and calculation endpoints are deferred to
-    calculation-heavy slices; FX converter/history and provider sync behavior
+    source testing; FX converter/history and register-pair behavior now have TS
+    runtime parity; goals plan writes and calculation endpoints are deferred to
+    calculation-heavy slices; automatic FX market sync/provider HTTP behavior
     plus broader market-data quote/search/import/sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event
     production are deferred to portfolio/calculation slices; TS file-backed
@@ -694,6 +695,16 @@ contract:
   numeric parsing, HTML CSS extraction with detected element previews,
   HTML-table header-row handling, detected table metadata, preview-only table
   success, and guarded HTTP/runtime route wiring.
+- `pr5-fx-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes initialized historical converter behavior, nearest-date
+  graph conversions, direct and inverse latest rates, Decimal-backed scalar
+  conversions, minor currency normalization, full-timestamp historical range
+  boundaries, Yahoo/manual pair registration, assets-created events, inverse
+  registration skips, dated fallback warnings, and converter refresh after FX
+  deletes. Focused review found and fixed the missing dated fallback warning
+  parity gap; re-review found no remaining actionable issues. Full repository
+  check passed with `bun run check`.
 
 ## Result
 
@@ -713,14 +724,14 @@ contract:
   standalone TS runtime composition for already-ported SQLite-backed domains,
   safe app utility runtime, file-backed secrets runtime, AI provider
   settings/catalog runtime, sync crypto runtime, legacy classification migration
-  runtime, and custom provider test-source runtime slices implemented; broader
-  migration remains active.
+  runtime, custom provider test-source runtime, and FX converter/register
+  runtime slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
-  with calculation-heavy goal slices; FX converter/history/register-pair and
-  provider sync plus broader market-data quote/search/import/sync behavior move
-  with calculation/market-data slices; actual portfolio job execution and event
+  with calculation-heavy goal slices; automatic FX market sync/provider HTTP
+  behavior plus broader market-data quote/search/import/sync behavior move with
+  calculation/market-data slices; actual portfolio job execution and event
   production move with portfolio/calculation slices; OS keyring integration
   moves with a dedicated runtime parity slice; AI chat execution and persistence
   move with AI runtime parity slices; alternative asset
