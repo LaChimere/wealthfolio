@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import { validateAndNormalizeRetirementPlanSettings } from "./retirement-plan";
+import { previewSaveUpOverview, type SaveUpOverview } from "./save-up";
 
 export interface Goal {
   id: string;
@@ -76,6 +77,10 @@ export interface SaveGoalPlan {
   summaryJson?: string | null;
 }
 
+export type GoalValuationMap =
+  | ReadonlyMap<string, number>
+  | Readonly<Record<string, number | undefined>>;
+
 export interface GoalAccount {
   id: string;
   accountType: string;
@@ -131,6 +136,7 @@ export interface GoalService {
   getGoalPlan(goalId: string): GoalPlan | null;
   saveGoalPlan(plan: SaveGoalPlan): Promise<GoalPlan>;
   deleteGoalPlan(goalId: string): Promise<number>;
+  computeSaveUpOverview(goalId: string, valuationMap: GoalValuationMap): Promise<SaveUpOverview>;
   getBaseCurrency(): string | undefined;
 }
 
@@ -540,6 +546,23 @@ export function createGoalService(
     async deleteGoalPlan(goalId) {
       return repository.deleteGoalPlan(goalId);
     },
+    async computeSaveUpOverview(goalId, valuationMap) {
+      const goal = repository.loadGoal(goalId);
+      const plan = repository.loadGoalPlan(goalId);
+      const fundingRules = repository.loadFundingRules(goalId);
+      const currentValue = computeSummaryCurrentValue(goal, fundingRules, valuationMap);
+      const settings = parseSaveUpPlanSettings(plan);
+      return previewSaveUpOverview(
+        {
+          currentValue,
+          targetAmount: goal.targetAmount ?? 0,
+          targetDate: goal.targetDate,
+          monthlyContribution: settings.monthlyContribution,
+          expectedAnnualReturn: settings.expectedAnnualReturn,
+        },
+        { now: options.now?.() },
+      );
+    },
     getBaseCurrency() {
       return resolveBaseCurrency(options);
     },
@@ -838,6 +861,68 @@ function validateDefinedContributionLinks(
       );
     }
   }
+}
+
+function parseSaveUpPlanSettings(plan: GoalPlan | null): {
+  monthlyContribution: number;
+  expectedAnnualReturn: number;
+} {
+  if (!plan) {
+    return { monthlyContribution: 0, expectedAnnualReturn: 0.07 };
+  }
+  const settings: unknown = JSON.parse(plan.settingsJson);
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+    return { monthlyContribution: 0, expectedAnnualReturn: 0.07 };
+  }
+  const object = settings as Record<string, unknown>;
+  return {
+    monthlyContribution:
+      typeof object.monthlyContribution === "number" ? object.monthlyContribution : 0,
+    expectedAnnualReturn:
+      typeof object.expectedAnnualReturn === "number" ? object.expectedAnnualReturn : 0.07,
+  };
+}
+
+function computeSummaryCurrentValue(
+  goal: Goal,
+  fundingRules: GoalFundingRule[],
+  valuationMap: GoalValuationMap,
+): number {
+  if (
+    (goal.statusLifecycle === GOAL_LIFECYCLE_ACHIEVED ||
+      goal.statusLifecycle === GOAL_LIFECYCLE_ARCHIVED) &&
+    goal.summaryCurrentValue !== null
+  ) {
+    return goal.summaryCurrentValue;
+  }
+  return computeGoalValueFromShares(fundingRules, valuationMap);
+}
+
+function computeGoalValueFromShares(
+  fundingRules: GoalFundingRule[],
+  valuationMap: GoalValuationMap,
+): number {
+  let value = 0;
+  for (const rule of fundingRules) {
+    const accountValue = accountValuation(valuationMap, rule.accountId);
+    if (accountValue !== undefined) {
+      value += (accountValue * rule.sharePercent) / 100;
+    }
+  }
+  return value === 0 ? 0 : value;
+}
+
+function accountValuation(valuationMap: GoalValuationMap, accountId: string): number | undefined {
+  if (isReadonlyMap(valuationMap)) {
+    return valuationMap.get(accountId);
+  }
+  return valuationMap[accountId];
+}
+
+function isReadonlyMap(
+  valuationMap: GoalValuationMap,
+): valuationMap is ReadonlyMap<string, number> {
+  return typeof (valuationMap as ReadonlyMap<string, number>).get === "function";
 }
 
 function validateGoalFundingCapacity(

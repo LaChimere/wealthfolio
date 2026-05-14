@@ -317,6 +317,194 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("computes save-up overviews from funding valuations and plan settings", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db), {
+      now: () => new Date(2024, 0, 1, 12),
+    });
+
+    try {
+      seedGoal(db, {
+        id: "save-up",
+        title: "House",
+        targetAmount: 100_000,
+        targetDate: "2034-01-01",
+      });
+      seedFundingRule(db, {
+        id: "brokerage-rule",
+        goalId: "save-up",
+        accountId: "brokerage",
+        sharePercent: 50,
+      });
+      seedFundingRule(db, {
+        id: "cash-rule",
+        goalId: "save-up",
+        accountId: "cash",
+        sharePercent: 25,
+      });
+      seedFundingRule(db, {
+        id: "missing-rule",
+        goalId: "save-up",
+        accountId: "missing",
+        sharePercent: 100,
+      });
+      seedGoalPlan(db, {
+        goalId: "save-up",
+        planKind: "save_up",
+        settingsJson: JSON.stringify({
+          monthlyContribution: 600,
+          expectedAnnualReturn: 0.07,
+        }),
+      });
+
+      const overview = await service.computeSaveUpOverview("save-up", {
+        brokerage: 80_000,
+        cash: 40_000,
+      });
+
+      expect(overview.currentValue).toBe(50_000);
+      expect(overview.targetAmount).toBe(100_000);
+      expect(overview.progress).toBe(0.5);
+      expect(overview.health).toBe("on_track");
+      expect(overview.projectedValueAtTargetDate).toBeGreaterThan(100_000);
+      expect(overview.trajectory.at(0)?.date).toBe("2024-01");
+      expect(overview.trajectory.at(-1)?.date).toBe("2034-01");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses Rust-compatible save-up overview defaults and settings parsing", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db), {
+      now: () => new Date(2024, 0, 1, 12),
+    });
+
+    try {
+      seedGoal(db, {
+        id: "default-plan",
+        title: "Defaults",
+        targetAmount: 10_000,
+        targetDate: null,
+      });
+      const defaultOverview = await service.computeSaveUpOverview(
+        "default-plan",
+        new Map([["cash", 10_000]]),
+      );
+      expect(defaultOverview).toMatchObject({
+        currentValue: 0,
+        targetAmount: 10_000,
+        health: "not_applicable",
+        projectedCompletionDate: null,
+      });
+
+      seedGoal(db, {
+        id: "nonnumeric-settings",
+        title: "Nonnumeric Settings",
+        targetAmount: 10_000,
+        targetDate: "2025-01-01",
+      });
+      seedGoalPlan(db, {
+        goalId: "nonnumeric-settings",
+        planKind: "save_up",
+        settingsJson: JSON.stringify({
+          monthlyContribution: "100",
+          expectedAnnualReturn: "0",
+        }),
+      });
+      const nonnumericOverview = await service.computeSaveUpOverview("nonnumeric-settings", {});
+      expect(nonnumericOverview.currentValue).toBe(0);
+      expect(nonnumericOverview.projectedValueAtTargetDate).toBe(0);
+      expect(nonnumericOverview.requiredMonthlyContribution).toBeGreaterThan(800);
+
+      seedGoal(db, {
+        id: "zero-settings",
+        title: "Zero Settings",
+        targetAmount: 10_000,
+        targetDate: "2025-01-01",
+      });
+      seedGoalPlan(db, {
+        goalId: "zero-settings",
+        planKind: "save_up",
+        settingsJson: JSON.stringify({
+          monthlyContribution: 0,
+          expectedAnnualReturn: 0,
+        }),
+      });
+      const zeroOverview = await service.computeSaveUpOverview("zero-settings", {});
+      expect(zeroOverview.requiredMonthlyContribution).toBe(834);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves archived save-up summary current value fallback semantics", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db), {
+      now: () => new Date(2024, 0, 1, 12),
+    });
+
+    try {
+      seedGoal(db, {
+        id: "archived-zero",
+        title: "Archived Zero",
+        statusLifecycle: "archived",
+        targetAmount: 10_000,
+        summaryCurrentValue: 0,
+      });
+      seedFundingRule(db, {
+        id: "archived-zero-rule",
+        goalId: "archived-zero",
+        accountId: "cash",
+        sharePercent: 100,
+      });
+      await expect(
+        service.computeSaveUpOverview("archived-zero", { cash: 5_000 }),
+      ).resolves.toMatchObject({
+        currentValue: 0,
+      });
+
+      seedGoal(db, {
+        id: "archived-null",
+        title: "Archived Null",
+        statusLifecycle: "archived",
+        targetAmount: 10_000,
+        summaryCurrentValue: null,
+      });
+      seedFundingRule(db, {
+        id: "archived-null-rule",
+        goalId: "archived-null",
+        accountId: "cash",
+        sharePercent: 100,
+      });
+      await expect(
+        service.computeSaveUpOverview("archived-null", { cash: 5_000 }),
+      ).resolves.toMatchObject({
+        currentValue: 5_000,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("propagates malformed save-up overview settings JSON", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, { id: "bad-plan", title: "Bad Plan" });
+      seedGoalPlan(db, {
+        goalId: "bad-plan",
+        planKind: "save_up",
+        settingsJson: "{",
+      });
+
+      await expect(service.computeSaveUpOverview("bad-plan", {})).rejects.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
   test("saves retirement goal plans with validation, age normalization, sync, and unknown preservation", async () => {
     const db = createGoalsDb();
     const syncEvents: GoalSyncEvent[] = [];
@@ -616,6 +804,8 @@ function seedGoal(
     statusLifecycle?: string;
     priority?: number;
     targetAmount?: number;
+    targetDate?: string | null;
+    summaryCurrentValue?: number | null;
     createdAt?: string;
     updatedAt?: string;
   },
@@ -624,9 +814,9 @@ function seedGoal(
     `
       INSERT INTO goals (
         id, title, description, target_amount, goal_type, status_lifecycle,
-        status_health, priority, created_at, updated_at
+        status_health, priority, target_date, summary_current_value, created_at, updated_at
       )
-      VALUES (?, ?, NULL, ?, ?, ?, 'not_applicable', ?, ?, ?)
+      VALUES (?, ?, NULL, ?, ?, ?, 'not_applicable', ?, ?, ?, ?, ?)
     `,
   ).run(
     goal.id,
@@ -635,6 +825,8 @@ function seedGoal(
     goal.goalType ?? "custom_save_up",
     goal.statusLifecycle ?? "active",
     goal.priority ?? 0,
+    goal.targetDate ?? null,
+    goal.summaryCurrentValue ?? null,
     goal.createdAt ?? "2026-01-01T00:00:00Z",
     goal.updatedAt ?? "2026-01-01T00:00:00Z",
   );
