@@ -11,7 +11,8 @@ SQLite data.
 ## Current execution slice
 
 PR 5 continues vertical slices by extending contained activity
-create/update/bulk and CSV parse runtime slices in the standalone TS backend:
+create/update/bulk, CSV parse, and read-only asset-preview runtime slices in the
+standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -28,9 +29,13 @@ create/update/bulk and CSV parse runtime slices in the standalone TS backend:
   empty-row filtering, UTF-8/UTF-16 BOM handling, Windows-1252 fallback
   warnings, quote characters, row normalization, structure warnings, detected
   config, and runtime route wiring.
+- Add read-only asset preview for `/api/v1/activities/import/preview-assets`
+  with existing-asset matches, bounded new-asset drafts, validation errors, and
+  ambiguity-safe duplicate-symbol handling without provider fetches or writes.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
-  activity import execution, asset preview, device-sync outbox emission, and
-  portfolio recalculation side effects for dedicated parity slices.
+  activity import execution, provider-backed asset resolution, device-sync
+  outbox emission, and portfolio recalculation side effects for dedicated parity
+  slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -43,10 +48,10 @@ portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
 lookups, read-only search, transfer link/unlink, single activity delete, and
 bounded existing-asset/cash/symbol-resolved activity create/update/bulk
-persistence plus CSV parse, sync-crypto/device-sync integration, real health
-status/check/fix runtime implementation, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+persistence plus CSV parse/read-only asset preview, sync-crypto/device-sync
+integration, real health status/check/fix runtime implementation, real Connect
+runtime implementation, real device-sync runtime implementation, or Rust runtime
+removal is in scope for this slice.
 
 ## Next slices
 

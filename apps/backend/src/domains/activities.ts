@@ -327,8 +327,13 @@ interface AccountRow {
 
 interface AssetRow {
   id: string;
+  kind: string;
+  name: string | null;
+  is_active: number;
   quote_ccy: string;
+  quote_mode: string;
   display_code: string | null;
+  notes: string | null;
   instrument_symbol: string | null;
   instrument_exchange_mic: string | null;
   instrument_type: string | null;
@@ -595,6 +600,10 @@ export function createActivityService(db: Database): ActivityService {
 
     parseCsv(request) {
       return parseActivityCsv(request);
+    },
+
+    previewImportAssets(candidates) {
+      return candidates.map((candidate, index) => previewImportAsset(db, candidate, index));
     },
 
     linkTransferActivities(activityAId, activityBId) {
@@ -1191,6 +1200,214 @@ function countCharacter(input: string, character: string): number {
   return count;
 }
 
+function previewImportAsset(db: Database, input: unknown, index: number): Record<string, unknown> {
+  const candidate = isRecord(input) ? input : {};
+  const key = optionalTrimmedString(candidate.key) ?? `candidate-${index + 1}`;
+  const accountId = optionalTrimmedString(candidate.accountId);
+  const symbol = optionalTrimmedString(candidate.symbol);
+  const exchangeMic = optionalTrimmedString(candidate.exchangeMic)?.toUpperCase();
+  const instrumentType = normalizeInstrumentType(optionalTrimmedString(candidate.instrumentType));
+  const quoteMode = normalizeQuoteMode(optionalTrimmedString(candidate.quoteMode));
+  const quoteCcy = normalizeImportQuoteCurrency(
+    optionalTrimmedString(candidate.quoteCcy) ?? optionalTrimmedString(candidate.currency),
+  );
+  const errors: Record<string, string[]> = {};
+
+  if (!accountId) {
+    addFieldMessage(errors, "accountId", "Account is required before running backend validation.");
+  } else {
+    try {
+      readAccountRow(db, accountId);
+    } catch (error) {
+      addFieldMessage(errors, "general", `Validation failed: ${errorMessage(error)}`);
+    }
+  }
+  if (!symbol) {
+    addFieldMessage(errors, "symbol", "Symbol is required for asset preview.");
+  }
+
+  if (Object.keys(errors).length > 0 || !symbol) {
+    return importAssetPreviewItem(key, "NEEDS_FIXING", "validation_error", { errors });
+  }
+
+  try {
+    const existingAsset = findExistingAssetBySymbol(db, {
+      symbol,
+      exchangeMic,
+      instrumentType,
+      quoteCcy,
+    });
+    if (existingAsset) {
+      return importAssetPreviewItem(key, "EXISTING_ASSET", "existing_asset", {
+        assetId: existingAsset.id,
+        draft: newAssetDraftFromAssetRow(existingAsset),
+      });
+    }
+  } catch (error) {
+    addFieldMessage(errors, "symbol", errorMessage(error));
+    return importAssetPreviewItem(key, "NEEDS_FIXING", "ambiguous_existing_asset", { errors });
+  }
+
+  if (!instrumentType) {
+    addFieldMessage(
+      errors,
+      "instrumentType",
+      "Instrument type is required to preview a new asset.",
+    );
+  }
+  if (!quoteCcy) {
+    addFieldMessage(errors, "quoteCcy", "Quote currency is required to preview a new asset.");
+  }
+  if (Object.keys(errors).length > 0 || !instrumentType || !quoteCcy) {
+    return importAssetPreviewItem(key, "NEEDS_FIXING", "validation_error", { errors });
+  }
+
+  const draft = newAssetDraftFromImport({
+    symbol,
+    quoteCcy,
+    instrumentType,
+    exchangeMic,
+    quoteMode: quoteMode ?? "MARKET",
+  });
+  if (instrumentType === "EQUITY" && !exchangeMic && quoteMode !== "MANUAL") {
+    addFieldMessage(
+      errors,
+      "symbol",
+      `Could not determine the exchange for '${symbol}'. Please search for the correct ticker.`,
+    );
+    return importAssetPreviewItem(key, "NEEDS_FIXING", "missing_exchange", { draft, errors });
+  }
+
+  return importAssetPreviewItem(key, "AUTO_RESOLVED_NEW_ASSET", "provider_resolution", { draft });
+}
+
+function importAssetPreviewItem(
+  key: string,
+  status: string,
+  resolutionSource: string,
+  options: {
+    assetId?: string;
+    draft?: Record<string, unknown>;
+    errors?: Record<string, string[]>;
+    warnings?: Record<string, string[]>;
+  } = {},
+): Record<string, unknown> {
+  return {
+    key,
+    status,
+    resolutionSource,
+    ...(options.assetId ? { assetId: options.assetId } : {}),
+    ...(options.draft ? { draft: options.draft } : {}),
+    ...(options.errors && Object.keys(options.errors).length > 0 ? { errors: options.errors } : {}),
+    ...(options.warnings && Object.keys(options.warnings).length > 0
+      ? { warnings: options.warnings }
+      : {}),
+  };
+}
+
+function newAssetDraftFromAssetRow(asset: AssetRow): Record<string, unknown> {
+  return {
+    id: asset.id,
+    kind: asset.kind,
+    name: asset.name ?? undefined,
+    displayCode: asset.display_code ?? undefined,
+    isActive: asset.is_active === 1,
+    quoteMode: asset.quote_mode,
+    quoteCcy: asset.quote_ccy,
+    instrumentType: asset.instrument_type ?? undefined,
+    instrumentSymbol: asset.instrument_symbol ?? undefined,
+    instrumentExchangeMic: asset.instrument_exchange_mic ?? undefined,
+    notes: asset.notes ?? undefined,
+  };
+}
+
+function newAssetDraftFromImport(input: {
+  symbol: string;
+  quoteCcy: string;
+  instrumentType: string;
+  exchangeMic?: string;
+  quoteMode: string;
+}): Record<string, unknown> {
+  return {
+    kind: input.instrumentType === "FX" ? "FX" : "INVESTMENT",
+    displayCode: input.symbol,
+    isActive: true,
+    quoteMode: input.quoteMode,
+    quoteCcy: input.quoteCcy,
+    instrumentType: input.instrumentType,
+    instrumentSymbol: input.symbol,
+    instrumentExchangeMic: input.exchangeMic,
+  };
+}
+
+function normalizeInstrumentType(value: string | undefined): string | undefined {
+  switch (value?.toUpperCase()) {
+    case "EQUITY":
+    case "STOCK":
+    case "ETF":
+    case "MUTUALFUND":
+    case "MUTUAL_FUND":
+    case "INDEX":
+    case "FUTURE":
+    case "FUTURES":
+      return "EQUITY";
+    case "CRYPTO":
+    case "CRYPTOCURRENCY":
+      return "CRYPTO";
+    case "FX":
+    case "FOREX":
+    case "CURRENCY":
+      return "FX";
+    case "OPTION":
+      return "OPTION";
+    case "METAL":
+    case "COMMODITY":
+      return "METAL";
+    case "BOND":
+    case "FIXEDINCOME":
+    case "FIXED_INCOME":
+    case "DEBT":
+    case "MONEYMARKET":
+      return "BOND";
+    default:
+      return undefined;
+  }
+}
+
+function normalizeQuoteMode(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.toUpperCase() === "MANUAL" ? "MANUAL" : "MARKET";
+}
+
+function normalizeImportQuoteCurrency(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  if (trimmed === "GBp") {
+    return "GBp";
+  }
+  if (trimmed.toUpperCase() === "GBX") {
+    return "GBX";
+  }
+  if (trimmed === "ZAc" || trimmed.toUpperCase() === "ZAC") {
+    return "ZAc";
+  }
+  if (!/^[A-Za-z]{3,5}$/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed.toUpperCase();
+}
+
+function addFieldMessage(messages: Record<string, string[]>, field: string, message: string): void {
+  messages[field] = [...(messages[field] ?? []), message];
+}
+
 function normalizeActivityCreateInput(
   db: Database,
   input: Record<string, unknown>,
@@ -1429,8 +1646,13 @@ function readAssetRow(db: Database, assetId: string): AssetRow {
       `
         SELECT
           id,
+          kind,
+          name,
+          is_active,
           quote_ccy,
+          quote_mode,
           display_code,
+          notes,
           instrument_symbol,
           instrument_exchange_mic,
           instrument_type
@@ -1476,8 +1698,13 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
       `
         SELECT
           id,
+          kind,
+          name,
+          is_active,
           quote_ccy,
+          quote_mode,
           display_code,
+          notes,
           instrument_symbol,
           instrument_exchange_mic,
           instrument_type

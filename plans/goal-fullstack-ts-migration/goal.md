@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 59
+turns_used: 60
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T20:22:37+08:00"
+updated_at: "2026-05-14T20:41:56+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -401,6 +401,12 @@ updated_at: "2026-05-14T20:22:37+08:00"
   config, and runtime route wiring. Import execution, asset preview resolution,
   asset creation, device-sync outbox, and portfolio recalculation remain
   deferred.
+- Turn 60: Added read-only activity import asset preview runtime for the
+  standalone TS backend: `/api/v1/activities/import/preview-assets` now returns
+  existing-asset matches, bounded new-asset drafts, validation errors for
+  missing accounts/metadata, and ambiguity-safe duplicate-symbol errors without
+  creating assets or fetching providers. Import execution, asset creation,
+  device-sync outbox, and portfolio recalculation remain deferred.
 
 ## Deferred items
 
@@ -474,18 +480,20 @@ updated_at: "2026-05-14T20:22:37+08:00"
 - Activity import mapping/template storage, duplicate lookups, read-only
   activity search, transfer link/unlink mutations, single activity deletes,
   bounded existing-asset/cash activity create/update/bulk persistence, and
-  bounded symbol-only resolution to existing assets, and CSV parse now have TS
-  runtime parity. reason=the standalone backend reads/writes `import_templates`,
-  `import_account_templates`, activity idempotency keys, activity search rows,
-  transfer source-group metadata, deleted activity rows, and bounded manual
-  create/update/bulk rows directly with Rust-compatible defaults, filters,
-  ordering, response mapping, transfer guards, decimal semantics, date
-  normalization, duplicate detection, created mappings, and no-write-on-error
-  bulk behavior, while existing symbol-only inputs are resolved locally with
-  ambiguity-safe errors and CSV bytes are parsed with Rust-compatible detected
-  config, structure warnings, UTF-16 BOM handling, and Windows-1252 fallback
-  warnings; symbol-only asset creation, quote fallback writes, import execution,
-  asset preview resolution, device-sync outbox emission for writes, and
+  bounded symbol-only resolution to existing assets, CSV parse, and read-only
+  import asset preview now have TS runtime parity. reason=the standalone backend
+  reads/writes `import_templates`, `import_account_templates`, activity
+  idempotency keys, activity search rows, transfer source-group metadata,
+  deleted activity rows, and bounded manual create/update/bulk rows directly
+  with Rust-compatible defaults, filters, ordering, response mapping, transfer
+  guards, decimal semantics, date normalization, duplicate detection, created
+  mappings, and no-write-on-error bulk behavior, while existing symbol-only
+  inputs are resolved locally with ambiguity-safe errors and CSV bytes are
+  parsed with Rust-compatible detected config, structure warnings, UTF-16 BOM
+  handling, and Windows-1252 fallback warnings, and import asset candidates are
+  previewed as existing matches, bounded drafts, or explicit fixing errors;
+  symbol-only asset creation, quote fallback writes, import execution,
+  provider-backed asset resolution, device-sync outbox emission for writes, and
   portfolio recalculation side effects remain active follow-ups for dedicated
   activities/import/portfolio parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag

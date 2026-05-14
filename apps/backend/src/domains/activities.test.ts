@@ -237,6 +237,124 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("previews import assets with existing matches and bounded new-asset drafts", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
+      insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
+
+      expect(
+        service.previewImportAssets?.([
+          {
+            key: "existing",
+            accountId: "account-1",
+            symbol: "aapl",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          },
+          {
+            key: "missing-exchange",
+            accountId: "account-1",
+            symbol: "SHOP",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          },
+          {
+            key: "manual",
+            accountId: "account-1",
+            symbol: "PRIVATE",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            quoteMode: "MANUAL",
+          },
+          {
+            key: "ambiguous",
+            accountId: "account-1",
+            symbol: "DUP",
+          },
+          {
+            key: "missing-account",
+            symbol: "MSFT",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "existing",
+          status: "EXISTING_ASSET",
+          resolutionSource: "existing_asset",
+          assetId: "AAPL",
+          draft: expect.objectContaining({
+            id: "AAPL",
+            displayCode: "AAPL",
+            instrumentSymbol: "AAPL",
+            instrumentExchangeMic: "XNAS",
+            quoteCcy: "USD",
+          }),
+        },
+        {
+          key: "missing-exchange",
+          status: "NEEDS_FIXING",
+          resolutionSource: "missing_exchange",
+          draft: expect.objectContaining({
+            displayCode: "SHOP",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+          errors: {
+            symbol: [
+              "Could not determine the exchange for 'SHOP'. Please search for the correct ticker.",
+            ],
+          },
+        },
+        {
+          key: "manual",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            displayCode: "PRIVATE",
+            quoteMode: "MANUAL",
+            instrumentType: "EQUITY",
+          }),
+        },
+        {
+          key: "ambiguous",
+          status: "NEEDS_FIXING",
+          resolutionSource: "ambiguous_existing_asset",
+          errors: {
+            symbol: [
+              "Multiple existing assets match symbol DUP; provide asset.id or more disambiguation",
+            ],
+          },
+        },
+        {
+          key: "missing-account",
+          status: "NEEDS_FIXING",
+          resolutionSource: "validation_error",
+          errors: {
+            accountId: ["Account is required before running backend validation."],
+          },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("creates activities with Rust-compatible defaults, normalization, and idempotency", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1096,8 +1214,11 @@ function createActivitiesDb(): Database {
 
     CREATE TABLE assets (
       id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'INVESTMENT',
       name TEXT,
       display_code TEXT,
+      notes TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
       instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       quote_mode TEXT,
@@ -1197,14 +1318,18 @@ function insertAsset(db: Database, asset: AssetFixture): void {
   db.query(
     `
       INSERT INTO assets (
-        id, name, display_code, instrument_symbol, instrument_exchange_mic, quote_mode, quote_ccy, instrument_type
+        id, kind, name, display_code, notes, is_active, instrument_symbol, instrument_exchange_mic,
+        quote_mode, quote_ccy, instrument_type
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
+    "INVESTMENT",
     asset.name,
     asset.displayCode,
+    null,
+    1,
     asset.instrumentSymbol ?? asset.displayCode,
     asset.exchangeMic ?? null,
     asset.quoteMode ?? "MARKET",
