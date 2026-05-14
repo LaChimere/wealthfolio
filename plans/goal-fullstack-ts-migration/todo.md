@@ -70,10 +70,11 @@
     provider, AI chat, sync crypto, Connect broker/session and device-sync
     enrollment/engine, device-sync device management, team-key/reset, and
     pairing, standalone runtime composition for already-ported SQLite-backed
-    domains, safe app utility runtime, alternative assets, assets, portfolio
-    metrics, holdings, add-ons, market-data, and activities TS
-    repository/service or route config implementations plus guarded/runtime
-    route tests in `apps/backend/src/domains/settings.ts`,
+    domains, safe app utility runtime, custom provider test-source runtime,
+    alternative assets, assets, portfolio metrics, holdings, add-ons,
+    market-data, and activities TS repository/service or route config
+    implementations plus guarded/runtime route tests in
+    `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -97,10 +98,10 @@
     runtime slices. Legacy classification migration status/run now has TS
     runtime behavior through taxonomy endpoints, while broader health
     status/check/fix behavior is deferred to health/calculation service slices;
-    custom provider `test-source` is deferred to an external-I/O slice; goals
-    plan writes and calculation endpoints are deferred to calculation-heavy
-    slices; FX converter/history and provider sync behavior plus broader
-    market-data quote/search/import/sync behavior are deferred to
+    custom provider `test-source` now has TS runtime behavior for external
+    source testing; goals plan writes and calculation endpoints are deferred to
+    calculation-heavy slices; FX converter/history and provider sync behavior
+    plus broader market-data quote/search/import/sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event
     production are deferred to portfolio/calculation slices; TS file-backed
     secret persistence is wired into standalone runtime while real keyring
@@ -683,6 +684,16 @@ contract:
   `NULL` cleanup, parse-error collection, and assets-processed accounting; the
   implementation and tests cover those cases. Focused code review then found no
   actionable issues.
+- `pr5-custom-provider-test-source-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes Rust-compatible template expansion, browser-like and
+  user-supplied headers, secret-backed header resolution, non-string header
+  skipping, redirect limiting, byte-based response-size guards, network and HTTP
+  failure result shapes, JSONPath extraction, factor/invert behavior, JSON
+  currency/date/OHLCV fields, CSV delimiter/last-row extraction, locale-aware
+  numeric parsing, HTML CSS extraction with detected element previews,
+  HTML-table header-row handling, detected table metadata, preview-only table
+  success, and guarded HTTP/runtime route wiring.
 
 ## Result
 
@@ -701,11 +712,11 @@ contract:
   seam, device-sync team-key/reset route seam, device-sync pairing route seam,
   standalone TS runtime composition for already-ported SQLite-backed domains,
   safe app utility runtime, file-backed secrets runtime, AI provider
-  settings/catalog runtime, sync crypto runtime, and legacy classification
-  migration runtime slices implemented; broader migration remains active.
+  settings/catalog runtime, sync crypto runtime, legacy classification migration
+  runtime, and custom provider test-source runtime slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
-  endpoints move with the health/calculation services; custom provider
-  `test-source` moves with external-I/O services; goals plan write/delete,
+  endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
   with calculation-heavy goal slices; FX converter/history/register-pair and
   provider sync plus broader market-data quote/search/import/sync behavior move

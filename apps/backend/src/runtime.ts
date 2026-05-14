@@ -166,7 +166,9 @@ function createServicesFromDatabase(
         baseCurrency,
       },
     ),
-    customProviderService: createCustomProviderService(createCustomProviderRepository(db)),
+    customProviderService: createCustomProviderService(createCustomProviderRepository(db), {
+      secretService,
+    }),
     eventBus,
     exchangeRateService: createExchangeRateService(createExchangeRateRepository(db)),
     goalService: createGoalService(createGoalRepository(db), {

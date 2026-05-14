@@ -49,6 +49,7 @@ import type {
   CustomProviderService,
   NewCustomProvider,
   NewCustomProviderSource,
+  TestSourceRequest,
   UpdateCustomProvider,
 } from "./domains/custom-providers";
 import type {
@@ -2088,6 +2089,12 @@ function routeCustomProviderRequest(
   if (request.method === "POST" && url.pathname === "/api/v1/custom-providers") {
     return handleJsonMutation(request, parseNewCustomProvider, (newProvider) =>
       customProviderService.create(newProvider),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/custom-providers/test-source") {
+    return handleJsonMutation(request, parseTestSourceRequest, (payload) =>
+      customProviderService.testSource(payload),
     );
   }
 
@@ -5059,6 +5066,112 @@ function forceGoalCurrency<TGoal extends NewGoal | Goal>(
     return goal;
   }
   return { ...goal, currency: baseCurrency };
+}
+
+function parseTestSourceRequest(payload: Record<string, unknown>): TestSourceRequest | Response {
+  const format = parseRequiredString(payload.format, "format");
+  if (format instanceof Response) {
+    return format;
+  }
+  const url = parseRequiredString(payload.url, "url");
+  if (url instanceof Response) {
+    return url;
+  }
+  const pricePath = parseRequiredString(payload.pricePath, "pricePath");
+  if (pricePath instanceof Response) {
+    return pricePath;
+  }
+  const symbol = parseRequiredString(payload.symbol, "symbol");
+  if (symbol instanceof Response) {
+    return symbol;
+  }
+  const datePath = parseOptionalStringOrNull(payload.datePath, "datePath");
+  if (datePath instanceof Response) {
+    return datePath;
+  }
+  const dateFormat = parseOptionalStringOrNull(payload.dateFormat, "dateFormat");
+  if (dateFormat instanceof Response) {
+    return dateFormat;
+  }
+  const currencyPath = parseOptionalStringOrNull(payload.currencyPath, "currencyPath");
+  if (currencyPath instanceof Response) {
+    return currencyPath;
+  }
+  const factor = parseOptionalNumberOrNull(payload.factor, "factor");
+  if (factor instanceof Response) {
+    return factor;
+  }
+  const invert = parseOptionalBooleanOrNull(payload.invert, "invert");
+  if (invert instanceof Response) {
+    return invert;
+  }
+  const locale = parseOptionalStringOrNull(payload.locale, "locale");
+  if (locale instanceof Response) {
+    return locale;
+  }
+  const headers = parseOptionalStringOrNull(payload.headers, "headers");
+  if (headers instanceof Response) {
+    return headers;
+  }
+  const currency = parseOptionalStringOrNull(payload.currency, "currency");
+  if (currency instanceof Response) {
+    return currency;
+  }
+  const from = parseOptionalStringOrNull(payload.from, "from");
+  if (from instanceof Response) {
+    return from;
+  }
+  const to = parseOptionalStringOrNull(payload.to, "to");
+  if (to instanceof Response) {
+    return to;
+  }
+  const openPath = parseOptionalStringOrNull(payload.openPath, "openPath");
+  if (openPath instanceof Response) {
+    return openPath;
+  }
+  const highPath = parseOptionalStringOrNull(payload.highPath, "highPath");
+  if (highPath instanceof Response) {
+    return highPath;
+  }
+  const lowPath = parseOptionalStringOrNull(payload.lowPath, "lowPath");
+  if (lowPath instanceof Response) {
+    return lowPath;
+  }
+  const volumePath = parseOptionalStringOrNull(payload.volumePath, "volumePath");
+  if (volumePath instanceof Response) {
+    return volumePath;
+  }
+  const defaultPrice = parseOptionalNumberOrNull(payload.defaultPrice, "defaultPrice");
+  if (defaultPrice instanceof Response) {
+    return defaultPrice;
+  }
+  const dateTimezone = parseOptionalStringOrNull(payload.dateTimezone, "dateTimezone");
+  if (dateTimezone instanceof Response) {
+    return dateTimezone;
+  }
+
+  return {
+    format: format as TestSourceRequest["format"],
+    url,
+    pricePath,
+    datePath,
+    dateFormat,
+    currencyPath,
+    factor,
+    invert,
+    locale,
+    headers,
+    symbol,
+    currency,
+    from,
+    to,
+    openPath,
+    highPath,
+    lowPath,
+    volumePath,
+    defaultPrice,
+    dateTimezone,
+  };
 }
 
 function parseNewCustomProvider(payload: Record<string, unknown>): NewCustomProvider | Response {

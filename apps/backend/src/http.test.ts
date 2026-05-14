@@ -1250,7 +1250,9 @@ describe("TS backend HTTP skeleton", () => {
   test("routes migrated custom provider CRUD only when a service is provided", async () => {
     const db = createCustomProvidersDb();
     const handler = createBackendRequestHandler(config, {
-      customProviderService: createCustomProviderService(createCustomProviderRepository(db)),
+      customProviderService: createCustomProviderService(createCustomProviderRepository(db), {
+        fetchImpl: () => Promise.resolve(new Response(JSON.stringify({ price: 12.34 }))),
+      }),
     });
 
     try {
@@ -1327,10 +1329,16 @@ describe("TS backend HTTP skeleton", () => {
             authorization: "Bearer sidecar-token",
             "content-type": "application/json",
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            format: "json",
+            url: "https://example.test/quote",
+            pricePath: "$.price",
+            symbol: "AAPL",
+          }),
         }),
       );
-      expect(testSourceResponse.status).toBe(404);
+      expect(testSourceResponse.status).toBe(200);
+      expect(await testSourceResponse.json()).toMatchObject({ success: true, price: 12.34 });
     } finally {
       db.close();
     }

@@ -20,6 +20,9 @@
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
-    "@noble/curves": "^2.2.0"
+    "@noble/curves": "^2.2.0",
+    "cheerio": "^1.2.0",
+    "domhandler": "^6.0.1",
+    "jsonpath-plus": "^10.4.0"
   }
 }

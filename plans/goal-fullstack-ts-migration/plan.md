@@ -10,18 +10,19 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding legacy classification migration runtime
+PR 5 continues vertical slices by adding custom provider `test-source` runtime
 parity to the standalone TS backend:
 
-- Implement `TaxonomyService.getMigrationStatus` and
-  `migrateLegacyClassifications` for Rust-compatible legacy sector/country
-  metadata detection, GICS/region assignment migration, and one-shot metadata
-  cleanup.
-- Wire the existing guarded `/api/v1/taxonomies/migration/{status,run}` routes
-  through standalone runtime composition by implementing the optional taxonomy
-  service methods.
-- Keep broader health status/check/fix execution, health caching, and market
-  sync fixes deferred until dedicated health/calculation runtime slices.
+- Implement `CustomProviderService.testSource` with Rust-compatible template
+  expansion, browser-like headers, optional secret-backed header resolution,
+  response-size guards, redirect limiting, JSONPath extraction, HTML detection,
+  HTML-table detection, CSV extraction, numeric locale parsing, factor/invert,
+  and OHLCV/date/currency result mapping.
+- Wire the existing guarded `/api/v1/custom-providers/test-source` route through
+  standalone runtime composition by passing the runtime secret service into the
+  custom provider service.
+- Keep broader market-data quote/history/import/sync execution deferred until
+  dedicated market-data and portfolio calculation runtime slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
