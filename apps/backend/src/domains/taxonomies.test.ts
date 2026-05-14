@@ -555,6 +555,139 @@ describe("TS taxonomies domain", () => {
       db.close();
     }
   });
+
+  test("reports legacy classification migration status with Rust-compatible counting", async () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      seedClassificationTaxonomies(db);
+      seedAsset(db, {
+        id: "inactive-empty-array",
+        isActive: false,
+        metadata: { legacy: { sectors: [] } },
+      });
+      seedAsset(db, {
+        id: "already-migrated",
+        metadata: { legacy: { sectors: [{ name: "Technology", weight: 1 }] } },
+      });
+      await service.assignAssetToCategory({
+        id: "existing-gics",
+        assetId: "already-migrated",
+        taxonomyId: "industries_gics",
+        categoryId: "45",
+        weight: 10_000,
+        source: "manual",
+      });
+      seedAsset(db, {
+        id: "null-legacy-value",
+        metadata: { legacy: { countries: null } },
+      });
+
+      await expect(service.getMigrationStatus?.()).resolves.toEqual({
+        needed: true,
+        assetsWithLegacyData: 1,
+        assetsAlreadyMigrated: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("migrates legacy sector and country assignments and cleans metadata", async () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      seedClassificationTaxonomies(db);
+      seedAsset(db, {
+        id: "asset-legacy",
+        name: "Apple Inc.",
+        displayCode: "AAPL",
+        metadata: {
+          identifiers: { isin: "US0378331005" },
+          legacy: {
+            sectors: JSON.stringify([{ name: "Technology", weight: 0.33336 }]),
+            countries: [{ name: "United States", weight: 1.5 }],
+          },
+        },
+      });
+
+      await expect(service.migrateLegacyClassifications?.()).resolves.toEqual({
+        sectorsMigrated: 1,
+        countriesMigrated: 1,
+        assetsProcessed: 1,
+        errors: [],
+      });
+      expect(service.getAssetAssignments("asset-legacy")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taxonomyId: "industries_gics",
+            categoryId: "45",
+            weight: 3334,
+            source: "migrated",
+          }),
+          expect.objectContaining({
+            taxonomyId: "regions",
+            categoryId: "country_US",
+            weight: 10_000,
+            source: "migrated",
+          }),
+        ]),
+      );
+      expect(readAssetMetadata(db, "asset-legacy")).toEqual({
+        identifiers: { isin: "US0378331005" },
+      });
+
+      await expect(service.migrateLegacyClassifications?.()).resolves.toEqual({
+        sectorsMigrated: 0,
+        countriesMigrated: 0,
+        assetsProcessed: 0,
+        errors: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("collects legacy migration parse errors while still cleaning metadata", async () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      seedClassificationTaxonomies(db);
+      seedAsset(db, {
+        id: "bad-weight",
+        metadata: { legacy: { sectors: [{ name: "Technology", weight: "bad" }] } },
+      });
+      seedAsset(db, {
+        id: "unknown-sector",
+        metadata: { legacy: { sectors: [{ name: "Unknown", weight: 0.75 }] } },
+      });
+      seedAsset(db, {
+        id: "null-key",
+        metadata: { identifiers: { cusip: "123" }, legacy: { sectors: null } },
+      });
+
+      const result = await service.migrateLegacyClassifications?.();
+
+      expect(result).toMatchObject({
+        sectorsMigrated: 0,
+        countriesMigrated: 0,
+        assetsProcessed: 0,
+      });
+      expect(result?.errors).toEqual([
+        expect.stringContaining("Failed to parse sectors for asset 'bad-weight'"),
+      ]);
+      expect(service.getAssetAssignments("bad-weight")).toEqual([]);
+      expect(service.getAssetAssignments("unknown-sector")).toEqual([]);
+      expect(readAssetMetadata(db, "bad-weight")).toBeNull();
+      expect(readAssetMetadata(db, "unknown-sector")).toBeNull();
+      expect(readAssetMetadata(db, "null-key")).toEqual({ identifiers: { cusip: "123" } });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createTaxonomiesDb(): Database {
@@ -595,6 +728,14 @@ function createTaxonomiesDb(): Database {
       source TEXT NOT NULL DEFAULT 'manual',
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+
+    CREATE TABLE assets (
+      id TEXT NOT NULL PRIMARY KEY,
+      name TEXT,
+      display_code TEXT,
+      metadata TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1
     );
   `);
   return db;
@@ -658,4 +799,70 @@ function seedCategory(
     category.description ?? null,
     category.sortOrder,
   );
+}
+
+function seedClassificationTaxonomies(db: Database): void {
+  seedTaxonomy(db, {
+    id: "industries_gics",
+    name: "Industries",
+    color: "#4385be",
+    isSystem: true,
+    isSingleSelect: false,
+    sortOrder: 20,
+  });
+  seedCategory(db, {
+    id: "45",
+    taxonomyId: "industries_gics",
+    name: "Information Technology",
+    key: "45",
+    color: "#4385be",
+    sortOrder: 1,
+  });
+  seedTaxonomy(db, {
+    id: "regions",
+    name: "Regions",
+    color: "#8b7ec8",
+    isSystem: true,
+    isSingleSelect: false,
+    sortOrder: 30,
+  });
+  seedCategory(db, {
+    id: "country_US",
+    taxonomyId: "regions",
+    name: "United States",
+    key: "country_US",
+    color: "#8b7ec8",
+    sortOrder: 1,
+  });
+}
+
+function seedAsset(
+  db: Database,
+  asset: {
+    id: string;
+    name?: string | null;
+    displayCode?: string | null;
+    metadata?: Record<string, unknown> | null;
+    isActive?: boolean;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO assets (id, name, display_code, metadata, is_active)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+  ).run(
+    asset.id,
+    asset.name ?? null,
+    asset.displayCode ?? null,
+    asset.metadata ? JSON.stringify(asset.metadata) : null,
+    asset.isActive === false ? 0 : 1,
+  );
+}
+
+function readAssetMetadata(db: Database, assetId: string): Record<string, unknown> | null {
+  const row = db
+    .query<{ metadata: string | null }, [string]>("SELECT metadata FROM assets WHERE id = ?")
+    .get(assetId);
+  return row?.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : null;
 }

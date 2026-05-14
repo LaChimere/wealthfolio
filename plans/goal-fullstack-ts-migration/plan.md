@@ -10,17 +10,18 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding sync crypto runtime parity to the
-standalone TS backend:
+PR 5 continues vertical slices by adding legacy classification migration runtime
+parity to the standalone TS backend:
 
-- Implement `createSyncCryptoService` for Rust-compatible root key generation,
-  DEK/session/SAS HKDF derivation, X25519 key exchange, nonce-prefixed
-  XChaCha20-Poly1305 encryption/decryption, pairing code hashing, HMAC-SHA256,
-  and UUID device IDs.
-- Wire the sync crypto service into TS runtime composition so existing guarded
-  `/api/v1/sync/crypto/*` routes have real TS behavior.
-- Keep device-sync cloud/client integration and key material side effects
-  deferred until dedicated device-sync runtime slices.
+- Implement `TaxonomyService.getMigrationStatus` and
+  `migrateLegacyClassifications` for Rust-compatible legacy sector/country
+  metadata detection, GICS/region assignment migration, and one-shot metadata
+  cleanup.
+- Wire the existing guarded `/api/v1/taxonomies/migration/{status,run}` routes
+  through standalone runtime composition by implementing the optional taxonomy
+  service methods.
+- Keep broader health status/check/fix execution, health caching, and market
+  sync fixes deferred until dedicated health/calculation runtime slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -30,7 +31,7 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 keyring storage, AI chat runtime, alternative asset runtime, asset runtime, app
 utility restore runtime, portfolio metrics runtime, holdings runtime, add-on
 runtime, market-data runtime, activities/import runtime, sync-crypto/device-sync
-integration, real health/classification runtime implementation, real Connect
+integration, real health status/check/fix runtime implementation, real Connect
 runtime implementation, real device-sync runtime implementation, or Rust runtime
 removal is in scope for this slice.
 

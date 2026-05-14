@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 37
+turns_used: 38
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T07:50:27+08:00"
+updated_at: "2026-05-14T08:06:42+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -263,12 +263,19 @@ updated_at: "2026-05-14T07:50:27+08:00"
   pairing-code hashing, HMAC-SHA256, SAS computation, UUID device IDs, runtime
   `/api/v1/sync/crypto/*` wiring, and deterministic Rust/RFC-compatible test
   vectors.
+- Turn 38: Added legacy classification migration runtime parity for the
+  standalone TS backend: taxonomy migration status/run methods now scan existing
+  assets for legacy sector/country metadata, map Rust-compatible GICS/region
+  categories, create migrated taxonomy assignments, clean legacy metadata with
+  Rust-compatible identifier preservation, collect per-asset migration errors,
+  and activate `/api/v1/taxonomies/migration/{status,run}` in runtime.
 
 ## Deferred items
 
-- Taxonomy migration/health endpoints remain active follow-ups. reason=they
-  depend on health/assets/classification services and should move with that
-  higher-risk slice.
+- Health status/check/fix endpoints remain active follow-ups. reason=taxonomy
+  classification migration status/run now has TS runtime parity, while broader
+  health checks, market sync fixes, caching, and `/health/fix` dispatch depend
+  on holdings, quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` remains an active follow-up. reason=it depends
   on external HTTP fetches, secrets, parser/extractor behavior, and response
   safety limits that belong in a dedicated external-I/O slice.
@@ -279,10 +286,11 @@ updated_at: "2026-05-14T07:50:27+08:00"
 - FX currency converter, historical lookup, register-pair, and automatic market
   sync behavior remain active follow-ups. reason=they depend on calculation,
   quote history, and provider sync parity beyond local exchange-rate CRUD.
-- Health status/check/fix endpoints and classification migration behavior remain
-  active follow-ups. reason=they depend on holdings, quotes, FX, assets,
-  valuation, taxonomy, market sync, and classification migration parity beyond
-  local health dismissal/config state.
+- Health status/check/fix endpoints remain active follow-ups. reason=legacy
+  classification migration now has TS runtime parity through taxonomy endpoints,
+  while broader health checks and fix execution depend on holdings, quotes, FX,
+  assets, valuation, and market sync parity beyond local health dismissal/config
+  state.
 - Market-data search, quote history/latest/update/delete/import, Yahoo
   dividends, symbol resolution, exchange list, and sync endpoints remain active
   follow-ups. reason=they depend on provider HTTP clients, quote import parsing,
@@ -327,11 +335,10 @@ updated_at: "2026-05-14T07:50:27+08:00"
 - Device-sync integration for sync crypto remains an active follow-up.
   reason=this slice adds the local TS crypto primitives, while cloud/client key
   material side effects must move with dedicated device-sync runtime slices.
-- Real health checks, classification migration, market sync fix execution,
-  health cache behavior, and taxonomy/asset side effects remain active
-  follow-ups. reason=this slice only adds optional guarded HTTP seams, while
-  runtime behavior must move with a dedicated health/classification parity
-  slice.
+- Real health checks, market sync fix execution, health cache behavior, and
+  `/health/fix` dispatch remain active follow-ups. reason=taxonomy migration
+  endpoints now have TS runtime parity, while broader health runtime behavior
+  must move with dedicated health/calculation parity slices.
 - Real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
   local sync repositories, subscription entitlement checks, event production,
   and device-sync enrollment/engine behavior remain active follow-ups.

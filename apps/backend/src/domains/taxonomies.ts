@@ -99,6 +99,19 @@ export interface InstrumentMappingJson {
   }[];
 }
 
+export interface ClassificationMigrationStatus {
+  needed: boolean;
+  assetsWithLegacyData: number;
+  assetsAlreadyMigrated: number;
+}
+
+export interface ClassificationMigrationResult {
+  sectorsMigrated: number;
+  countriesMigrated: number;
+  assetsProcessed: number;
+  errors: string[];
+}
+
 export type TaxonomySyncOperation = "Create" | "Update" | "Delete";
 
 export interface TaxonomySyncEvent {
@@ -144,6 +157,8 @@ export interface TaxonomyRepository extends TaxonomyReadRepository {
   createCategory(newCategory: NewTaxonomyCategory): TaxonomyCategory;
   updateCategory(category: TaxonomyCategory): TaxonomyCategory;
   deleteCategory(taxonomyId: string, categoryId: string): number;
+  getMigrationStatus(): ClassificationMigrationStatus;
+  migrateLegacyClassifications(): ClassificationMigrationResult;
 }
 
 export interface TaxonomyReadService {
@@ -169,8 +184,10 @@ export interface TaxonomyService extends TaxonomyReadService {
   removeAssetAssignment(id: string): Promise<number>;
   importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
   exportTaxonomyJson(id: string): string;
-  getMigrationStatus?(): Promise<unknown> | unknown;
-  migrateLegacyClassifications?(): Promise<unknown> | unknown;
+  getMigrationStatus?(): Promise<ClassificationMigrationStatus> | ClassificationMigrationStatus;
+  migrateLegacyClassifications?():
+    | Promise<ClassificationMigrationResult>
+    | ClassificationMigrationResult;
 }
 
 interface TaxonomyRow {
@@ -207,6 +224,25 @@ interface AssetTaxonomyAssignmentRow {
   source: string;
   created_at: string;
   updated_at: string;
+}
+
+interface ClassificationAssetRow {
+  id: string;
+  name: string | null;
+  display_code: string | null;
+  metadata: string | null;
+}
+
+interface ClassificationAsset {
+  id: string;
+  name: string | null;
+  displayCode: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+interface LegacyClassification {
+  name: string;
+  weight: number;
 }
 
 export function createTaxonomyReadRepository(db: Database): TaxonomyReadRepository {
@@ -564,6 +600,12 @@ export function createTaxonomyRepository(
       })();
       return affected;
     },
+    getMigrationStatus() {
+      return getClassificationMigrationStatus(db);
+    },
+    migrateLegacyClassifications() {
+      return migrateLegacyClassifications(db, this);
+    },
   };
 }
 
@@ -669,6 +711,12 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
         null,
         2,
       );
+    },
+    async getMigrationStatus() {
+      return repository.getMigrationStatus();
+    },
+    async migrateLegacyClassifications() {
+      return repository.migrateLegacyClassifications();
     },
   };
 }
@@ -821,6 +869,422 @@ function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetT
     createdAt: toApiDate(row.created_at),
     updatedAt: toApiDate(row.updated_at),
   };
+}
+
+function getClassificationMigrationStatus(db: Database): ClassificationMigrationStatus {
+  const assets = readClassificationAssets(db);
+  const gicsTaxonomy = readTaxonomyWithCategoriesNullable(db, "industries_gics");
+  const regionsTaxonomy = readTaxonomyWithCategoriesNullable(db, "regions");
+  let assetsWithLegacyData = 0;
+  let assetsAlreadyMigrated = 0;
+
+  for (const asset of assets) {
+    const legacy = getLegacyClassificationRecord(asset.metadata);
+    const hasLegacySectors = hasLegacyClassificationValue(legacy?.sectors);
+    const hasLegacyCountries = hasLegacyClassificationValue(legacy?.countries);
+    if (!hasLegacySectors && !hasLegacyCountries) {
+      continue;
+    }
+
+    const assignments = getAssetAssignmentsForDb(db, asset.id);
+    const hasGicsAssignment =
+      gicsTaxonomy !== null &&
+      assignments.some((assignment) => assignment.taxonomyId === gicsTaxonomy.taxonomy.id);
+    const hasRegionsAssignment =
+      regionsTaxonomy !== null &&
+      assignments.some((assignment) => assignment.taxonomyId === regionsTaxonomy.taxonomy.id);
+
+    if ((hasLegacySectors && !hasGicsAssignment) || (hasLegacyCountries && !hasRegionsAssignment)) {
+      assetsWithLegacyData += 1;
+    } else if (hasGicsAssignment || hasRegionsAssignment) {
+      assetsAlreadyMigrated += 1;
+    }
+  }
+
+  return {
+    needed: assetsWithLegacyData > 0,
+    assetsWithLegacyData,
+    assetsAlreadyMigrated,
+  };
+}
+
+function migrateLegacyClassifications(
+  db: Database,
+  repository: Pick<
+    TaxonomyRepository,
+    | "getAssetAssignments"
+    | "getCategories"
+    | "getTaxonomy"
+    | "upsertAssignment"
+    | "deleteAssetAssignments"
+  >,
+): ClassificationMigrationResult {
+  const result: ClassificationMigrationResult = {
+    sectorsMigrated: 0,
+    countriesMigrated: 0,
+    assetsProcessed: 0,
+    errors: [],
+  };
+  const sectorMapping = buildSectorMapping();
+  const countryMapping = buildCountryMapping();
+  const gicsCategories = new Set(
+    repository.getCategories("industries_gics").map((category) => category.id),
+  );
+  const regionsCategories = new Set(
+    repository.getCategories("regions").map((category) => category.id),
+  );
+
+  for (const asset of readClassificationAssets(db)) {
+    const legacy = getLegacyClassificationRecord(asset.metadata);
+    if (!legacy) {
+      continue;
+    }
+
+    const existingAssignments = repository.getAssetAssignments(asset.id);
+    const hasGics = existingAssignments.some(
+      (assignment) => assignment.taxonomyId === "industries_gics",
+    );
+    const hasRegions = existingAssignments.some(
+      (assignment) => assignment.taxonomyId === "regions",
+    );
+    let processed = false;
+
+    if (!hasGics && Object.prototype.hasOwnProperty.call(legacy, "sectors")) {
+      try {
+        for (const sector of parseLegacyClassifications(legacy.sectors, "sectors")) {
+          const categoryId = findMappedCategory(sector.name, sectorMapping);
+          if (categoryId && gicsCategories.has(categoryId)) {
+            try {
+              assignAssetWithSingleSelectReplacement(repository, {
+                assetId: asset.id,
+                taxonomyId: "industries_gics",
+                categoryId,
+                weight: classificationWeight(sector.weight),
+                source: "migrated",
+              });
+              result.sectorsMigrated += 1;
+              processed = true;
+            } catch (error) {
+              result.errors.push(
+                `Failed to assign sector '${sector.name}' to asset '${asset.id}': ${errorMessage(error)}`,
+              );
+            }
+          }
+        }
+      } catch (error) {
+        result.errors.push(
+          `Failed to parse sectors for asset '${asset.id}': ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    if (!hasRegions && Object.prototype.hasOwnProperty.call(legacy, "countries")) {
+      try {
+        for (const country of parseLegacyClassifications(legacy.countries, "countries")) {
+          const categoryId = findMappedCategory(country.name, countryMapping);
+          if (categoryId && regionsCategories.has(categoryId)) {
+            try {
+              assignAssetWithSingleSelectReplacement(repository, {
+                assetId: asset.id,
+                taxonomyId: "regions",
+                categoryId,
+                weight: classificationWeight(country.weight),
+                source: "migrated",
+              });
+              result.countriesMigrated += 1;
+              processed = true;
+            } catch (error) {
+              result.errors.push(
+                `Failed to assign country '${country.name}' to asset '${asset.id}': ${errorMessage(error)}`,
+              );
+            }
+          }
+        }
+      } catch (error) {
+        result.errors.push(
+          `Failed to parse countries for asset '${asset.id}': ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(legacy, "sectors") ||
+      Object.prototype.hasOwnProperty.call(legacy, "countries")
+    ) {
+      cleanupLegacyAssetMetadata(db, asset);
+    }
+
+    if (processed) {
+      result.assetsProcessed += 1;
+    }
+  }
+
+  return result;
+}
+
+function assignAssetWithSingleSelectReplacement(
+  repository: Pick<
+    TaxonomyRepository,
+    "deleteAssetAssignments" | "getTaxonomy" | "upsertAssignment"
+  >,
+  assignment: NewAssetTaxonomyAssignment,
+): AssetTaxonomyAssignment {
+  const taxonomy = repository.getTaxonomy(assignment.taxonomyId);
+  if (taxonomy?.isSingleSelect) {
+    repository.deleteAssetAssignments(assignment.assetId, assignment.taxonomyId);
+  }
+  return repository.upsertAssignment(assignment);
+}
+
+function readClassificationAssets(db: Database): ClassificationAsset[] {
+  return db
+    .query<ClassificationAssetRow, []>(
+      `
+        SELECT id, name, display_code, metadata
+        FROM assets
+      `,
+    )
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      displayCode: row.display_code,
+      metadata: row.metadata ? parseMetadata(row.metadata, row.id) : null,
+    }));
+}
+
+function parseMetadata(rawMetadata: string, assetId: string): Record<string, unknown> {
+  const parsed = JSON.parse(rawMetadata) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`Invalid metadata for asset ${assetId}`);
+  }
+  return parsed;
+}
+
+function getLegacyClassificationRecord(
+  metadata: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const legacy = metadata?.legacy;
+  return isRecord(legacy) ? legacy : null;
+}
+
+function hasLegacyClassificationValue(value: unknown): boolean {
+  return value !== undefined && value !== null && (typeof value !== "string" || value.length > 0);
+}
+
+function parseLegacyClassifications(
+  value: unknown,
+  label: "sectors" | "countries",
+): LegacyClassification[] {
+  if (typeof value === "string") {
+    if (value.length === 0) {
+      return [];
+    }
+    try {
+      return parseLegacyClassificationArray(JSON.parse(value), label);
+    } catch (error) {
+      throw new Error(`Failed to parse ${label} JSON: ${errorMessage(error)}`);
+    }
+  }
+  if (Array.isArray(value)) {
+    return parseLegacyClassificationArray(value, label);
+  }
+  if (value === null) {
+    return [];
+  }
+  throw new Error(`Unexpected ${label} value type`);
+}
+
+function parseLegacyClassificationArray(
+  value: unknown,
+  label: "sectors" | "countries",
+): LegacyClassification[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`${label}[${index}] must be an object`);
+    }
+    if (typeof entry.name !== "string") {
+      throw new Error(`${label}[${index}].name must be a string`);
+    }
+    if (typeof entry.weight !== "number" || !Number.isFinite(entry.weight)) {
+      throw new Error(`${label}[${index}].weight must be a finite number`);
+    }
+    return { name: entry.name, weight: entry.weight };
+  });
+}
+
+function cleanupLegacyAssetMetadata(db: Database, asset: ClassificationAsset): void {
+  const identifiers = asset.metadata?.identifiers;
+  const nextMetadata = identifiers === undefined ? null : JSON.stringify({ identifiers });
+  db.prepare("UPDATE assets SET metadata = ? WHERE id = ?").run(nextMetadata, asset.id);
+}
+
+function getAssetAssignmentsForDb(db: Database, assetId: string): AssetTaxonomyAssignment[] {
+  return db
+    .query<AssetTaxonomyAssignmentRow, [string]>(
+      `
+        SELECT ${assetTaxonomyAssignmentColumns()}
+        FROM asset_taxonomy_assignments
+        WHERE asset_id = ?
+      `,
+    )
+    .all(assetId)
+    .map(assetTaxonomyAssignmentFromRow);
+}
+
+function readTaxonomyWithCategoriesNullable(
+  db: Database,
+  id: string,
+): TaxonomyWithCategories | null {
+  const taxonomy = db
+    .query<TaxonomyRow, [string]>(
+      `
+        SELECT ${taxonomyColumns()}
+        FROM taxonomies
+        WHERE id = ?
+      `,
+    )
+    .get(id);
+  if (!taxonomy) {
+    return null;
+  }
+  return {
+    taxonomy: taxonomyFromRow(taxonomy),
+    categories: db
+      .query<TaxonomyCategoryRow, [string]>(
+        `
+          SELECT ${taxonomyCategoryColumns()}
+          FROM taxonomy_categories
+          WHERE taxonomy_id = ?
+          ORDER BY sort_order ASC
+        `,
+      )
+      .all(id)
+      .map(taxonomyCategoryFromRow),
+  };
+}
+
+function classificationWeight(weight: number): number {
+  return Math.max(0, Math.min(10_000, Math.round(weight * 10_000)));
+}
+
+function findMappedCategory(name: string, mapping: Map<string, string>): string | undefined {
+  return mapping.get(name.toLowerCase().trim());
+}
+
+function buildSectorMapping(): Map<string, string> {
+  return new Map([
+    ["energy", "10"],
+    ["basic materials", "15"],
+    ["materials", "15"],
+    ["industrials", "20"],
+    ["consumer cyclical", "25"],
+    ["consumer discretionary", "25"],
+    ["consumer defensive", "30"],
+    ["consumer staples", "30"],
+    ["healthcare", "35"],
+    ["health care", "35"],
+    ["financial services", "40"],
+    ["financial", "40"],
+    ["financials", "40"],
+    ["technology", "45"],
+    ["information technology", "45"],
+    ["communication services", "50"],
+    ["telecommunications", "50"],
+    ["utilities", "55"],
+    ["real estate", "60"],
+  ]);
+}
+
+function buildCountryMapping(): Map<string, string> {
+  return new Map([
+    ["united states", "country_US"],
+    ["usa", "country_US"],
+    ["us", "country_US"],
+    ["u.s.", "country_US"],
+    ["u.s.a.", "country_US"],
+    ["america", "country_US"],
+    ["canada", "country_CA"],
+    ["mexico", "country_MX"],
+    ["bermuda", "country_BM"],
+    ["united kingdom", "country_GB"],
+    ["uk", "country_GB"],
+    ["great britain", "country_GB"],
+    ["britain", "country_GB"],
+    ["england", "country_GB"],
+    ["germany", "country_DE"],
+    ["france", "country_FR"],
+    ["netherlands", "country_NL"],
+    ["holland", "country_NL"],
+    ["switzerland", "country_CH"],
+    ["belgium", "country_BE"],
+    ["austria", "country_AT"],
+    ["luxembourg", "country_LU"],
+    ["ireland", "country_IE"],
+    ["sweden", "country_SE"],
+    ["norway", "country_NO"],
+    ["denmark", "country_DK"],
+    ["finland", "country_FI"],
+    ["iceland", "country_IS"],
+    ["spain", "country_ES"],
+    ["italy", "country_IT"],
+    ["portugal", "country_PT"],
+    ["greece", "country_GR"],
+    ["poland", "country_PL"],
+    ["russia", "country_RU"],
+    ["czech republic", "country_CZ"],
+    ["czechia", "country_CZ"],
+    ["hungary", "country_HU"],
+    ["romania", "country_RO"],
+    ["ukraine", "country_UA"],
+    ["japan", "country_JP"],
+    ["china", "country_CN"],
+    ["hong kong", "country_HK"],
+    ["south korea", "country_KR"],
+    ["korea", "country_KR"],
+    ["taiwan", "country_TW"],
+    ["mongolia", "country_MN"],
+    ["singapore", "country_SG"],
+    ["indonesia", "country_ID"],
+    ["malaysia", "country_MY"],
+    ["thailand", "country_TH"],
+    ["vietnam", "country_VN"],
+    ["philippines", "country_PH"],
+    ["india", "country_IN"],
+    ["pakistan", "country_PK"],
+    ["bangladesh", "country_BD"],
+    ["sri lanka", "country_LK"],
+    ["israel", "country_IL"],
+    ["turkey", "country_TR"],
+    ["saudi arabia", "country_SA"],
+    ["united arab emirates", "country_AE"],
+    ["uae", "country_AE"],
+    ["qatar", "country_QA"],
+    ["kuwait", "country_KW"],
+    ["australia", "country_AU"],
+    ["new zealand", "country_NZ"],
+    ["brazil", "country_BR"],
+    ["argentina", "country_AR"],
+    ["chile", "country_CL"],
+    ["colombia", "country_CO"],
+    ["peru", "country_PE"],
+    ["venezuela", "country_VE"],
+    ["south africa", "country_ZA"],
+    ["egypt", "country_EG"],
+    ["nigeria", "country_NG"],
+    ["kenya", "country_KE"],
+    ["morocco", "country_MA"],
+    ["cayman islands", "country_KY"],
+    ["puerto rico", "country_PR"],
+    ["bahamas", "country_BS"],
+  ]);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseTaxonomyJson(jsonStr: string): TaxonomyJson {

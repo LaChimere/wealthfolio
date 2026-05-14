@@ -112,6 +112,16 @@ describe("TS backend runtime composition", () => {
       expect(rootKeyResponse.status).toBe(200);
       const rootKey = (await rootKeyResponse.json()) as { value: string };
       expect(Buffer.from(rootKey.value, "base64").byteLength).toBe(32);
+
+      const classificationMigrationResponse = await fetch(
+        `${server.baseUrl}/api/v1/taxonomies/migration/status`,
+      );
+      expect(classificationMigrationResponse.status).toBe(200);
+      await expect(classificationMigrationResponse.json()).resolves.toEqual({
+        needed: false,
+        assetsWithLegacyData: 0,
+        assetsAlreadyMigrated: 0,
+      });
     } finally {
       server.stop();
       runtime.close();

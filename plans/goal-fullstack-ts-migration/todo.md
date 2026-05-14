@@ -94,46 +94,47 @@
     `apps/backend/src/runtime.ts`, and `apps/backend/src/http.test.ts`. Sync
     crypto now has a standalone TS runtime implementation for local primitives,
     while device-sync key material side effects remain deferred to device-sync
-    runtime slices. Health status/check/fix and taxonomy migration endpoints are
-    deferred to the health/classification service slice; custom provider
-    `test-source` is deferred to an external-I/O slice; goals plan writes and
-    calculation endpoints are deferred to calculation-heavy slices; FX
-    converter/history and provider sync behavior plus broader market-data
-    quote/search/import/sync behavior are deferred to calculation/market-data
-    slices; actual portfolio job execution and event production are deferred to
-    portfolio/calculation slices; TS file-backed secret persistence is wired
-    into standalone runtime while real keyring integration is deferred to a
-    runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior is wired into standalone runtime while AI chat execution is
-    deferred to AI runtime parity slices; alternative asset
-    persistence/quotes/holdings/job behavior is deferred to asset/portfolio
-    parity slices; asset persistence/profile/quote-mode behavior is deferred to
-    asset/market-data/portfolio parity slices; app utility database restore is
-    deferred until TS runtime restart/service-rebuild support exists; portfolio
-    metric calculations are deferred to portfolio calculation parity slices;
-    holdings fan-out, valuations, allocations, snapshots, imports, and portfolio
-    recalculation side effects are deferred to holdings/portfolio parity slices;
-    add-on filesystem extraction, runtime loading, store HTTP, staging I/O, and
-    update behavior are deferred to add-on runtime parity slices; exchange
-    metadata, provider HTTP, Yahoo dividends, quote import/persistence, market
-    sync, and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; activity persistence, import
-    parsing/mapping/template storage, duplicate lookups, transfer mutation
-    behavior, asset preview resolution, and portfolio recalculation side effects
-    are deferred to activities/import runtime parity slices; AI chat
-    persistence, provider streaming, tool execution, thread storage, tag
+    runtime slices. Legacy classification migration status/run now has TS
+    runtime behavior through taxonomy endpoints, while broader health
+    status/check/fix behavior is deferred to health/calculation service slices;
+    custom provider `test-source` is deferred to an external-I/O slice; goals
+    plan writes and calculation endpoints are deferred to calculation-heavy
+    slices; FX converter/history and provider sync behavior plus broader
+    market-data quote/search/import/sync behavior are deferred to
+    calculation/market-data slices; actual portfolio job execution and event
+    production are deferred to portfolio/calculation slices; TS file-backed
+    secret persistence is wired into standalone runtime while real keyring
+    integration is deferred to a runtime/keyring parity slice; AI provider
+    catalog/settings/model-listing runtime behavior is wired into standalone
+    runtime while AI chat execution is deferred to AI runtime parity slices;
+    alternative asset persistence/quotes/holdings/job behavior is deferred to
+    asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
+    is deferred to asset/market-data/portfolio parity slices; app utility
+    database restore is deferred until TS runtime restart/service-rebuild
+    support exists; portfolio metric calculations are deferred to portfolio
+    calculation parity slices; holdings fan-out, valuations, allocations,
+    snapshots, imports, and portfolio recalculation side effects are deferred to
+    holdings/portfolio parity slices; add-on filesystem extraction, runtime
+    loading, store HTTP, staging I/O, and update behavior are deferred to add-on
+    runtime parity slices; exchange metadata, provider HTTP, Yahoo dividends,
+    quote import/persistence, market sync, and portfolio recalculation behavior
+    are deferred to market-data/portfolio parity slices; activity persistence,
+    import parsing/mapping/template storage, duplicate lookups, transfer
+    mutation behavior, asset preview resolution, and portfolio recalculation
+    side effects are deferred to activities/import runtime parity slices; AI
+    chat persistence, provider streaming, tool execution, thread storage, tag
     persistence, and tool-result mutation behavior are deferred to AI runtime
     parity slices; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; real health checks, classification
-    migration, market sync fix execution, health cache behavior, and
-    taxonomy/asset side effects are deferred to health/classification parity
-    slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    feature-flag errors, background workers, device-sync cloud clients, token
-    lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    device-sync runtime parity slices; real health checks, market sync fix
+    execution, health cache behavior, and `/health/fix` dispatch are deferred to
+    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, local sync repositories, subscription
+    entitlement checks, event production, E2EE enrollment, sync engine,
+    snapshot/upload runtime, feature-flag errors, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -668,6 +669,20 @@ contract:
   v2.2.0. No code change was needed.
 - `pr5-sync-crypto-runtime-repo-check`: full repo check passed with
   `bun run check`.
+- `pr5-classification-migration-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
+  Coverage includes Rust-compatible legacy sector/country status counting
+  without active-asset filtering, non-string legacy value handling, migrated
+  GICS/region assignment creation, JSON-string and raw-array parsing, weight
+  rounding/clamping, existing-assignment skips, parse-error collection,
+  idempotent cleanup, metadata `identifiers` preservation, metadata `NULL`
+  cleanup when identifiers are absent, and standalone runtime route wiring for
+  `/api/v1/taxonomies/migration/status`.
+- `pr5-classification-migration-runtime-review`: rubber-duck critique identified
+  parity risks around active-asset filtering, key-presence cleanup, metadata
+  `NULL` cleanup, parse-error collection, and assets-processed accounting; the
+  implementation and tests cover those cases. Focused code review then found no
+  actionable issues.
 
 ## Result
 
@@ -686,10 +701,10 @@ contract:
   seam, device-sync team-key/reset route seam, device-sync pairing route seam,
   standalone TS runtime composition for already-ported SQLite-backed domains,
   safe app utility runtime, file-backed secrets runtime, AI provider
-  settings/catalog runtime, and sync crypto runtime slices implemented; broader
-  migration remains active.
-- Follow-ups: continue other low-risk domain slices; taxonomy migration/health
-  endpoints move with the health/classification services; custom provider
+  settings/catalog runtime, sync crypto runtime, and legacy classification
+  migration runtime slices implemented; broader migration remains active.
+- Follow-ups: continue other low-risk domain slices; health status/check/fix
+  endpoints move with the health/calculation services; custom provider
   `test-source` moves with external-I/O services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
   with calculation-heavy goal slices; FX converter/history/register-pair and
@@ -715,12 +730,12 @@ contract:
   provider streaming, tool execution, thread storage, tag persistence, and
   tool-result mutation behavior move with AI runtime parity slices; device-sync
   integration for sync crypto moves with device-sync parity slices; real health
-  checks, classification migration, market sync fix execution, health cache
-  behavior, and taxonomy/asset side effects move with health/classification
-  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-  orchestration, local sync repositories, subscription entitlement checks, event
-  production, E2EE enrollment, sync engine, snapshot/upload runtime,
-  feature-flag errors, background workers, device-sync cloud clients, token
-  lifecycle, team-key operations, key material handling, pairing flows,
-  freshness gate persistence, bootstrap transfer, and secret side effects move
-  with Connect/device-sync parity slices.
+  checks, market sync fix execution, health cache behavior, and `/health/fix`
+  dispatch move with health/calculation parity slices; real Connect token
+  lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+  repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

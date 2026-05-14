@@ -242,6 +242,8 @@ export {
   createTaxonomyReadService,
   createTaxonomyService,
   type AssetTaxonomyAssignment,
+  type ClassificationMigrationResult,
+  type ClassificationMigrationStatus,
   type NewAssetTaxonomyAssignment,
   type NewTaxonomy,
   type NewTaxonomyCategory,
