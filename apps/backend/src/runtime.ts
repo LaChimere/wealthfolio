@@ -180,6 +180,7 @@ function createServicesFromDatabase(
     env: runtimeOptions.env,
     secretKey: runtimeOptions.secretKey,
   });
+  const taxonomyService = createTaxonomyService(createTaxonomyRepository(db));
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -232,6 +233,7 @@ function createServicesFromDatabase(
     }),
     healthService: createHealthService(createHealthRepository(db), undefined, {
       accountProvider: accountService,
+      classificationMigrationProvider: taxonomyService,
       settingsProvider: settingsService,
     }),
     marketDataProviderService: createMarketDataProviderService(
@@ -245,7 +247,7 @@ function createServicesFromDatabase(
     secretService,
     settingsService,
     syncCryptoService: createSyncCryptoService(),
-    taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
+    taxonomyService,
   };
 
   return {

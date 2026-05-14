@@ -14,7 +14,7 @@ PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
 validation, bounded import-apply, save-up goal-plan persistence, local AI chat
 thread/message persistence, bounded health status/check runtime, and bounded
-health classification-fix runtime slices in the standalone TS backend:
+health legacy-classification runtime slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -60,6 +60,9 @@ health classification-fix runtime slices in the standalone TS backend:
 - Add bounded health fix runtime for `migrate_legacy_classifications` by
   dispatching `/api/v1/health/fix` through the migrated taxonomy runtime while
   keeping price sync, retry sync, FX fetch, and other fix actions deferred.
+- Add bounded legacy-classification health issue generation by surfacing
+  migrated taxonomy migration status as `classification:legacy_migration:*`
+  health issues with a `migrate_legacy_classifications` fix action.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
@@ -81,11 +84,11 @@ link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, local AI chat thread/message persistence, bounded health account/timezone
-status/checks, sync-crypto/device-sync integration, retirement goal-plan
-validation/persistence or summary refresh, calculation-heavy health checks or
-non-classification `/health/fix` execution, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, retirement goal-plan validation/persistence
+or summary refresh, calculation-heavy health checks or non-classification
+`/health/fix` execution, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 68
+turns_used: 69
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T22:55:48+08:00"
+updated_at: "2026-05-14T23:04:40+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -455,15 +455,22 @@ updated_at: "2026-05-14T22:55:48+08:00"
   `/api/v1/health/fix` now dispatches `migrate_legacy_classifications` through
   the migrated taxonomy runtime in standalone TS, while price sync, retry sync,
   FX fetch, and other health fix actions remain deferred.
+- Turn 69: Added bounded legacy-classification health issue generation: the TS
+  health status/check runtime now consumes migrated taxonomy migration status
+  and emits `classification:legacy_migration:*` warning issues with
+  `migrate_legacy_classifications` fix actions. Full affected-item parity and
+  Rust-generated dismissal hashes remain deferred.
 
 ## Deferred items
 
 - Full health status/fix coverage remains an active follow-up. reason=taxonomy
-  classification migration status/run and bounded account/timezone status/checks
-  now have TS runtime parity, while price staleness, quote sync, FX,
-  classification, data-consistency checks, market sync fixes, non-classification
-  `/health/fix` dispatch, and Rust-generated dismissal-hash carryover depend on
-  holdings, quotes, FX, assets, valuation, and market sync parity.
+  classification migration status/run, bounded account/timezone status/checks,
+  and legacy-classification health issue generation now have TS runtime parity,
+  while price staleness, quote sync, FX, broader classification,
+  data-consistency checks, market sync fixes, non-classification `/health/fix`
+  dispatch, full affected-item parity, and Rust-generated dismissal-hash
+  carryover depend on holdings, quotes, FX, assets, valuation, and market sync
+  parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the
@@ -486,9 +493,10 @@ updated_at: "2026-05-14T22:55:48+08:00"
   portfolio recalculation side effects remain deferred to portfolio parity
   slices.
 - Full health status/fix coverage remains an active follow-up. reason=legacy
-  classification migration now has TS runtime parity through taxonomy endpoints
-  and bounded account/timezone status/checks are wired into standalone runtime,
-  while price, quote sync, FX, classification, consistency checks, and
+  classification migration now has TS runtime parity through taxonomy endpoints,
+  bounded account/timezone status/checks are wired into standalone runtime, and
+  legacy classification migration issues are surfaced in health status, while
+  price, quote sync, FX, broader classification, consistency checks, and
   non-classification fix execution depend on holdings, quotes, FX, assets,
   valuation, and market sync parity beyond local health dismissal/config state.
 - Market-data exchange list, local quote history/update/delete, latest quote
@@ -563,10 +571,10 @@ updated_at: "2026-05-14T22:55:48+08:00"
   material side effects must move with dedicated device-sync runtime slices.
 - Full health checks, market sync fix execution, and non-classification
   `/health/fix` dispatch remain active follow-ups. reason=taxonomy migration
-  endpoints, bounded account/timezone status/checks, and the classification
-  migration health fix now have TS runtime parity, while calculation-heavy
-  health runtime behavior must move with dedicated health/calculation parity
-  slices.
+  endpoints, bounded account/timezone status/checks, legacy-classification
+  health issues, and the classification migration health fix now have TS runtime
+  parity, while calculation-heavy health runtime behavior must move with
+  dedicated health/calculation parity slices.
 - Real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
   local sync repositories, subscription entitlement checks, event production,
   and device-sync enrollment/engine behavior remain active follow-ups.

@@ -108,6 +108,46 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds bounded legacy classification migration issue from taxonomy status", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      classificationMigrationProvider: {
+        getMigrationStatus: async () => ({
+          needed: true,
+          assetsWithLegacyData: 2,
+          assetsAlreadyMigrated: 1,
+        }),
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      expect(status).toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { WARNING: 1 },
+      });
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^classification:legacy_migration:/),
+          severity: "WARNING",
+          category: "CLASSIFICATION",
+          title: "2 assets have legacy classification data",
+          affectedCount: 2,
+          fixAction: {
+            id: "migrate_legacy_classifications",
+            label: "Start Migration",
+            payload: null,
+          },
+          navigateAction: { route: "/settings/taxonomies", label: "View Classifications" },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches Rust timezone validity and offset-equivalence behavior", async () => {
     const db = createHealthDb();
     try {

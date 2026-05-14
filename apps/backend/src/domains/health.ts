@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
 import type { SettingsService } from "./settings";
+import type { TaxonomyService } from "./taxonomies";
 
 export interface IssueDismissal {
   issueId: string;
@@ -73,6 +74,7 @@ export interface HealthStatus {
 
 export interface HealthServiceOptions {
   accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
+  classificationMigrationProvider?: Pick<TaxonomyService, "getMigrationStatus">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
   now?: () => Date;
   cacheTtlMs?: number;
@@ -198,7 +200,7 @@ export function createHealthService(
       config = { ...nextConfig };
       clearCache();
     },
-    getHealthStatus(clientTimezone) {
+    async getHealthStatus(clientTimezone) {
       const cacheKey = clientTimezone?.trim() ?? "";
       const cached = cachedStatuses.get(cacheKey);
       if (cached) {
@@ -207,22 +209,23 @@ export function createHealthService(
       }
       return runChecks(repository, options, now, clientTimezone, cachedStatuses);
     },
-    runHealthChecks(clientTimezone) {
+    async runHealthChecks(clientTimezone) {
       return runChecks(repository, options, now, clientTimezone, cachedStatuses);
     },
   };
 }
 
-function runChecks(
+async function runChecks(
   repository: HealthRepository,
   options: HealthServiceOptions,
   now: () => Date,
   clientTimezone: string | undefined,
   cache: Map<string, { status: HealthStatus; cachedAt: Date }>,
-): HealthStatus {
+): Promise<HealthStatus> {
   const checkedAt = now();
   const issues = filterDismissedIssues(repository, [
     ...analyzeUnconfiguredAccounts(options, checkedAt),
+    ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
     ...analyzeTimezone(options, clientTimezone, checkedAt),
   ]);
   const status = buildStatus(issues, checkedAt);
@@ -328,6 +331,46 @@ function analyzeTimezone(
       message: `Configured timezone is "${configured}" but browser timezone is "${client}". Dates follow the configured timezone.`,
       affectedCount: 1,
       navigateAction: { route: "/settings/general", label: "Open General Settings" },
+      dataHash,
+      timestamp: timestamp.toISOString(),
+    },
+  ];
+}
+
+async function analyzeLegacyClassificationMigration(
+  options: HealthServiceOptions,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (!options.classificationMigrationProvider?.getMigrationStatus) {
+    return [];
+  }
+
+  const status = await options.classificationMigrationProvider.getMigrationStatus();
+  if (!status.needed || status.assetsWithLegacyData <= 0) {
+    return [];
+  }
+
+  const count = status.assetsWithLegacyData;
+  const dataHash = computeDataHash([
+    "legacy_migration",
+    String(status.assetsWithLegacyData),
+    String(status.assetsAlreadyMigrated),
+  ]);
+
+  return [
+    {
+      id: `classification:legacy_migration:${dataHash}`,
+      severity: "WARNING",
+      category: "CLASSIFICATION",
+      title:
+        count === 1
+          ? "1 asset has legacy classification data"
+          : `${count} assets have legacy classification data`,
+      message:
+        "Some assets have sector/country data from the old format. Migrate to the new taxonomy system for better allocation tracking.",
+      affectedCount: count,
+      fixAction: { id: "migrate_legacy_classifications", label: "Start Migration", payload: null },
+      navigateAction: { route: "/settings/taxonomies", label: "View Classifications" },
       dataHash,
       timestamp: timestamp.toISOString(),
     },
