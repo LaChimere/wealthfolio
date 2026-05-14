@@ -48,6 +48,7 @@ export {
   CSV_HOLDINGS_CONTEXT_KIND,
   createActivityService,
   normalizeContextKindValue,
+  type Activity,
   type ActivityDetails,
   type ActivityParseCsvRequest,
   type ActivitySearchRequest,

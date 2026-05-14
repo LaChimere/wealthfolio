@@ -99,6 +99,36 @@ export interface ActivitySearchResponse {
   meta: { totalRowCount: number };
 }
 
+export interface Activity {
+  id: string;
+  accountId: string;
+  assetId: string | null;
+  activityType: string;
+  activityTypeOverride: string | null;
+  sourceType: string | null;
+  subtype: string | null;
+  status: string;
+  activityDate: string;
+  settlementDate: string | null;
+  quantity: string | null;
+  unitPrice: string | null;
+  amount: string | null;
+  fee: string | null;
+  currency: string;
+  fxRate: string | null;
+  notes: string | null;
+  metadata: unknown | null;
+  sourceSystem: string | null;
+  sourceRecordId: string | null;
+  sourceGroupId: string | null;
+  idempotencyKey: string | null;
+  importRunId: string | null;
+  isUserModified: boolean;
+  needsReview: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ActivityService {
   searchActivities?(
     request: ActivitySearchRequest,
@@ -107,11 +137,14 @@ export interface ActivityService {
   updateActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
   bulkMutateActivities?(request: Record<string, unknown>): Promise<unknown> | unknown;
   deleteActivity?(id: string): Promise<unknown> | unknown;
-  linkTransferActivities?(activityAId: string, activityBId: string): Promise<unknown[]> | unknown[];
+  linkTransferActivities?(
+    activityAId: string,
+    activityBId: string,
+  ): Promise<[Activity, Activity]> | [Activity, Activity];
   unlinkTransferActivities?(
     activityAId: string,
     activityBId: string,
-  ): Promise<unknown[]> | unknown[];
+  ): Promise<[Activity, Activity]> | [Activity, Activity];
   checkActivitiesImport?(activities: unknown[]): Promise<unknown[]> | unknown[];
   previewImportAssets?(candidates: unknown[]): Promise<unknown[]> | unknown[];
   importActivities?(activities: unknown[]): Promise<unknown> | unknown;
@@ -206,6 +239,36 @@ interface ActivityDetailsRow {
   metadata: string | null;
 }
 
+interface ActivityRow {
+  id: string;
+  account_id: string;
+  asset_id: string | null;
+  activity_type: string;
+  activity_type_override: string | null;
+  source_type: string | null;
+  subtype: string | null;
+  status: string;
+  activity_date: string;
+  settlement_date: string | null;
+  quantity: string | null;
+  unit_price: string | null;
+  amount: string | null;
+  fee: string | null;
+  currency: string;
+  fx_rate: string | null;
+  notes: string | null;
+  metadata: string | null;
+  source_system: string | null;
+  source_record_id: string | null;
+  source_group_id: string | null;
+  idempotency_key: string | null;
+  import_run_id: string | null;
+  is_user_modified: number;
+  needs_review: number;
+  created_at: string;
+  updated_at: string;
+}
+
 const SQLITE_MAX_PARAMS_CHUNK = 500;
 const ACTIVITY_TYPES = [
   "BUY",
@@ -290,6 +353,95 @@ export function createActivityService(db: Database): ActivityService {
         data: rows.map(activityDetailsFromRow),
         meta: { totalRowCount: totalRow },
       };
+    },
+
+    linkTransferActivities(activityAId, activityBId) {
+      if (activityAId === activityBId) {
+        throw new Error("Cannot link an activity to itself");
+      }
+
+      return db.transaction(() => {
+        const activityA = readActivityRow(db, activityAId);
+        const activityB = readActivityRow(db, activityBId);
+        const [transferIn, transferOut] = transferPairByType(
+          activityA,
+          activityB,
+          "Linking requires one TRANSFER_IN and one TRANSFER_OUT activity",
+        );
+
+        if (transferIn.source_group_id !== null || transferOut.source_group_id !== null) {
+          throw new Error("One or both activities are already linked to another transfer");
+        }
+        if (transferIn.account_id === transferOut.account_id) {
+          throw new Error("Both transfer legs share the same account");
+        }
+
+        const groupId = crypto.randomUUID();
+        const now = activityTimestampNow();
+        updateTransferLink(
+          db,
+          transferIn.id,
+          groupId,
+          setTransferFlowExternal(transferIn.metadata, false),
+          now,
+        );
+        updateTransferLink(
+          db,
+          transferOut.id,
+          groupId,
+          setTransferFlowExternal(transferOut.metadata, false),
+          now,
+        );
+        const updatedPair: [Activity, Activity] = [
+          activityFromRow(readActivityRow(db, transferIn.id)),
+          activityFromRow(readActivityRow(db, transferOut.id)),
+        ];
+        return updatedPair;
+      })();
+    },
+
+    unlinkTransferActivities(activityAId, activityBId) {
+      if (activityAId === activityBId) {
+        throw new Error("Cannot unlink an activity from itself");
+      }
+
+      return db.transaction(() => {
+        const activityA = readActivityRow(db, activityAId);
+        const activityB = readActivityRow(db, activityBId);
+        const [transferIn, transferOut] = transferPairByType(
+          activityA,
+          activityB,
+          "Unlinking requires one TRANSFER_IN and one TRANSFER_OUT activity",
+        );
+
+        if (transferIn.source_group_id === null || transferOut.source_group_id === null) {
+          throw new Error("Both activities must already be linked");
+        }
+        if (transferIn.source_group_id !== transferOut.source_group_id) {
+          throw new Error("Selected activities belong to different linked transfers");
+        }
+
+        const now = activityTimestampNow();
+        updateTransferLink(
+          db,
+          transferIn.id,
+          null,
+          setTransferFlowExternal(transferIn.metadata, true),
+          now,
+        );
+        updateTransferLink(
+          db,
+          transferOut.id,
+          null,
+          setTransferFlowExternal(transferOut.metadata, true),
+          now,
+        );
+        const updatedPair: [Activity, Activity] = [
+          activityFromRow(readActivityRow(db, transferIn.id)),
+          activityFromRow(readActivityRow(db, transferOut.id)),
+        ];
+        return updatedPair;
+      })();
     },
 
     async getImportMapping(accountId, contextKind) {
@@ -556,6 +708,102 @@ function activitySearchOrderBy(sort: ActivitySearchRequest["sort"]): string {
     default:
       return "ORDER BY activities.activity_date DESC, activities.created_at ASC";
   }
+}
+
+function readActivityRow(db: Database, activityId: string): ActivityRow {
+  const row = db
+    .query<ActivityRow, [string]>(
+      `
+        SELECT ${activitySelectColumns()}
+        FROM activities
+        WHERE id = ?
+      `,
+    )
+    .get(activityId);
+  if (!row) {
+    throw new Error(`Record not found: activity ${activityId}`);
+  }
+  return row;
+}
+
+function activitySelectColumns(): string {
+  return `
+    id, account_id, asset_id, activity_type, activity_type_override, source_type, subtype,
+    status, activity_date, settlement_date, quantity, unit_price, amount, fee, currency,
+    fx_rate, notes, metadata, source_system, source_record_id, source_group_id,
+    idempotency_key, import_run_id, is_user_modified, needs_review, created_at, updated_at
+  `;
+}
+
+function transferPairByType(
+  activityA: ActivityRow,
+  activityB: ActivityRow,
+  errorMessage: string,
+): [ActivityRow, ActivityRow] {
+  if (activityA.activity_type === "TRANSFER_IN" && activityB.activity_type === "TRANSFER_OUT") {
+    return [activityA, activityB];
+  }
+  if (activityA.activity_type === "TRANSFER_OUT" && activityB.activity_type === "TRANSFER_IN") {
+    return [activityB, activityA];
+  }
+  throw new Error(errorMessage);
+}
+
+function updateTransferLink(
+  db: Database,
+  activityId: string,
+  sourceGroupId: string | null,
+  metadata: string,
+  updatedAt: string,
+): void {
+  db.query(
+    `
+      UPDATE activities
+      SET source_group_id = ?, metadata = ?, is_user_modified = 1, updated_at = ?
+      WHERE id = ?
+    `,
+  ).run(sourceGroupId, metadata, updatedAt, activityId);
+}
+
+function setTransferFlowExternal(metadata: string | null, isExternal: boolean): string {
+  const parsed = parseJsonOrNull(metadata);
+  const value: Record<string, unknown> = isRecord(parsed) ? { ...parsed } : {};
+  const flow = isRecord(value.flow) ? { ...value.flow } : {};
+  flow.is_external = isExternal;
+  value.flow = flow;
+  return JSON.stringify(value);
+}
+
+function activityFromRow(row: ActivityRow): Activity {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    assetId: row.asset_id,
+    activityType: row.activity_type,
+    activityTypeOverride: row.activity_type_override,
+    sourceType: row.source_type,
+    subtype: row.subtype,
+    status: normalizeActivityStatus(row.status),
+    activityDate: row.activity_date,
+    settlementDate: row.settlement_date,
+    quantity: row.quantity,
+    unitPrice: row.unit_price,
+    amount: row.amount,
+    fee: row.fee,
+    currency: row.currency,
+    fxRate: row.fx_rate,
+    notes: row.notes,
+    metadata: parseJsonOrNull(row.metadata),
+    sourceSystem: row.source_system,
+    sourceRecordId: row.source_record_id,
+    sourceGroupId: row.source_group_id,
+    idempotencyKey: row.idempotency_key,
+    importRunId: row.import_run_id,
+    isUserModified: row.is_user_modified !== 0,
+    needsReview: row.needs_review !== 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function activityDetailsFromRow(row: ActivityDetailsRow): ActivityDetails {
@@ -925,6 +1173,10 @@ function chunkForSqlite<T>(items: T[]): T[][] {
 
 function sqliteNow(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+function activityTimestampNow(): string {
+  return new Date().toISOString();
 }
 
 function errorMessage(error: unknown): string {

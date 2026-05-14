@@ -105,46 +105,47 @@
     runtime parity; market-data exchange list, local quote
     history/update/delete, latest quote snapshots, quote CSV check/import, Yahoo
     dividends, symbol search, and resolve-currency now have TS runtime parity;
-    activities import mapping/template storage, duplicate lookup, and read-only
-    search behavior now have TS runtime parity; goals plan writes and
-    calculation endpoints are deferred to calculation-heavy slices; automatic FX
-    market sync/provider HTTP behavior plus broader market-data sync behavior
-    are deferred to calculation/market-data slices; actual portfolio job
-    execution and event production are deferred to portfolio/calculation slices;
-    TS file-backed secret persistence is wired into standalone runtime while
-    real keyring integration is deferred to a runtime/keyring parity slice; AI
-    provider catalog/settings/model-listing runtime behavior is wired into
-    standalone runtime while AI chat execution is deferred to AI runtime parity
-    slices; alternative asset persistence, manual valuation quotes, liability
-    link/unlink metadata behavior, and holdings reads now have TS runtime
-    parity, while portfolio job enqueue and recalculation side effects are
-    deferred to portfolio parity slices; asset read/create/profile/quote-mode
-    and delete behavior now have TS runtime parity, while quote-provider
-    interactions, auto-classification, and portfolio recalculation side effects
-    are deferred to asset/market-data/portfolio parity slices; app utility
-    database restore now has TS runtime parity with restart-required readiness
-    after file restore; contribution-limit deposit calculation now has TS
-    runtime parity with SQLite activity reads, Rust-compatible contribution
-    rules, user-timezone year ranges, and FX conversion dates; portfolio metric
-    calculations are deferred to portfolio calculation parity slices; holdings
-    fan-out, valuations, allocations, snapshots, imports, and portfolio
-    recalculation side effects are deferred to holdings/portfolio parity slices;
-    add-on filesystem extraction, runtime loading, store HTTP, staging I/O, and
-    update behavior are deferred to add-on runtime parity slices; market-data
-    market sync and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; activity persistence, CSV parse/import
-    execution, transfer mutation behavior, asset preview resolution, device-sync
-    outbox emission for activity import template writes, and portfolio
-    recalculation side effects are deferred to activities/import runtime parity
-    slices; AI chat persistence, provider streaming, tool execution, thread
-    storage, tag persistence, and tool-result mutation behavior are deferred to
-    AI runtime parity slices; device-sync integration for sync crypto is
-    deferred to device-sync runtime parity slices; real health checks, market
-    sync fix execution, health cache behavior, and `/health/fix` dispatch are
-    deferred to health/calculation parity slices; real Connect token lifecycle,
-    cloud HTTP clients, broker sync orchestration, local sync repositories,
-    subscription entitlement checks, event production, E2EE enrollment, sync
-    engine, snapshot/upload runtime, feature-flag errors, background workers,
+    activities import mapping/template storage, duplicate lookup, read-only
+    search, and transfer link/unlink behavior now have TS runtime parity; goals
+    plan writes and calculation endpoints are deferred to calculation-heavy
+    slices; automatic FX market sync/provider HTTP behavior plus broader
+    market-data sync behavior are deferred to calculation/market-data slices;
+    actual portfolio job execution and event production are deferred to
+    portfolio/calculation slices; TS file-backed secret persistence is wired
+    into standalone runtime while real keyring integration is deferred to a
+    runtime/keyring parity slice; AI provider catalog/settings/model-listing
+    runtime behavior is wired into standalone runtime while AI chat execution is
+    deferred to AI runtime parity slices; alternative asset persistence, manual
+    valuation quotes, liability link/unlink metadata behavior, and holdings
+    reads now have TS runtime parity, while portfolio job enqueue and
+    recalculation side effects are deferred to portfolio parity slices; asset
+    read/create/profile/quote-mode and delete behavior now have TS runtime
+    parity, while quote-provider interactions, auto-classification, and
+    portfolio recalculation side effects are deferred to
+    asset/market-data/portfolio parity slices; app utility database restore now
+    has TS runtime parity with restart-required readiness after file restore;
+    contribution-limit deposit calculation now has TS runtime parity with SQLite
+    activity reads, Rust-compatible contribution rules, user-timezone year
+    ranges, and FX conversion dates; portfolio metric calculations are deferred
+    to portfolio calculation parity slices; holdings fan-out, valuations,
+    allocations, snapshots, imports, and portfolio recalculation side effects
+    are deferred to holdings/portfolio parity slices; add-on filesystem
+    extraction, runtime loading, store HTTP, staging I/O, and update behavior
+    are deferred to add-on runtime parity slices; market-data market sync and
+    portfolio recalculation behavior are deferred to market-data/portfolio
+    parity slices; activity create/update/delete persistence, CSV parse/import
+    execution, bulk mutation behavior, asset preview resolution, device-sync
+    outbox emission for activity writes, and portfolio recalculation side
+    effects are deferred to activities/import runtime parity slices; AI chat
+    persistence, provider streaming, tool execution, thread storage, tag
+    persistence, and tool-result mutation behavior are deferred to AI runtime
+    parity slices; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; real health checks, market sync fix
+    execution, health cache behavior, and `/health/fix` dispatch are deferred to
+    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, local sync repositories, subscription
+    entitlement checks, event production, E2EE enrollment, sync engine,
+    snapshot/upload runtime, feature-flag errors, background workers,
     device-sync cloud clients, token lifecycle, team-key operations, key
     material handling, pairing flows, freshness gate persistence, bootstrap
     transfer, and secret side effects are deferred to Connect/device-sync parity
@@ -862,6 +863,16 @@ contract:
   away from create/update/delete/bulk/transfer writes so asset resolution,
   decimal patch semantics, device-sync outbox, and portfolio recalculation stay
   deferred to dedicated parity slices.
+- `pr5-activities-transfer-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/http.test.ts apps/backend/src/runtime.test.ts`,
+  backend type-check with
+  `bun run --cwd apps/backend type-check -- --pretty false`, and full backend
+  tests with `bun run --cwd apps/backend test`. Coverage includes same-ID,
+  same-account, wrong-type, already-linked, unlinked, and mismatched-group
+  guards; transfer-in/out return ordering; shared `sourceGroupId` assignment;
+  unlink clearing; metadata `flow.is_external` mutation with sibling-key
+  preservation; `isUserModified` flags; and route/runtime wiring while
+  create/update/delete/bulk/import side effects stay deferred.
 
 ## Result
 
@@ -888,8 +899,9 @@ contract:
   runtime, market-data latest snapshot runtime, market-data quote CSV
   check/import runtime, market-data Yahoo dividends runtime, market-data symbol
   search and resolve-currency runtime, activities import
-  mapping/template/duplicate lookup runtime, and read-only activity search
-  runtime slices implemented; broader migration remains active.
+  mapping/template/duplicate lookup runtime, read-only activity search runtime,
+  and transfer link/unlink runtime slices implemented; broader migration remains
+  active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -908,18 +920,19 @@ contract:
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
-  parity slices; activity persistence, CSV parse/import execution, transfer
-  mutation behavior, asset preview resolution, device-sync outbox emission for
-  activity import template writes, and portfolio recalculation side effects move
-  with activities/import runtime parity slices; AI chat persistence, provider
-  streaming, tool execution, thread storage, tag persistence, and tool-result
-  mutation behavior move with AI runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; real health checks,
-  market sync fix execution, health cache behavior, and `/health/fix` dispatch
-  move with health/calculation parity slices; real Connect token lifecycle,
-  cloud HTTP clients, broker sync orchestration, local sync repositories,
-  subscription entitlement checks, event production, E2EE enrollment, sync
-  engine, snapshot/upload runtime, feature-flag errors, background workers,
-  device-sync cloud clients, token lifecycle, team-key operations, key material
-  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
-  secret side effects move with Connect/device-sync parity slices.
+  parity slices; activity create/update/delete persistence, CSV parse/import
+  execution, bulk mutation behavior, asset preview resolution, device-sync
+  outbox emission for activity writes, and portfolio recalculation side effects
+  move with activities/import runtime parity slices; AI chat persistence,
+  provider streaming, tool execution, thread storage, tag persistence, and
+  tool-result mutation behavior move with AI runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; real health
+  checks, market sync fix execution, health cache behavior, and `/health/fix`
+  dispatch move with health/calculation parity slices; real Connect token
+  lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+  repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

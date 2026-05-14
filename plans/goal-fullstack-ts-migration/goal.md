@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 53
+turns_used: 54
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T13:08:51+08:00"
+updated_at: "2026-05-14T13:17:04+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -360,6 +360,12 @@ updated_at: "2026-05-14T13:08:51+08:00"
   `needsReview` status semantics, sort/pagination behavior, and
   `ActivityDetails` response mapping while write/import side effects remain
   deferred.
+- Turn 54: Added the activities transfer link/unlink runtime for the standalone
+  TS backend: `/api/v1/activities/link` and `/unlink` now persist transfer
+  source-group links in SQLite with Rust-compatible type/same-account/linked
+  guards, transfer-in/out return ordering, metadata `flow.is_external` mutation,
+  user-modified flags, and partial-route inertness for remaining activity
+  write/import operations.
 
 ## Deferred items
 
@@ -430,13 +436,14 @@ updated_at: "2026-05-14T13:08:51+08:00"
   remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
   while runtime behavior must move with dedicated portfolio calculation parity
   slices.
-- Activity import mapping/template storage, duplicate lookups, and read-only
-  activity search now have TS runtime parity. reason=the standalone backend
-  reads/writes `import_templates`, `import_account_templates`, activity
-  idempotency keys, and activity search rows directly with Rust-compatible
-  defaults, filters, ordering, response mapping, and route inertness; activity
-  persistence, CSV parse/import execution, transfer mutation behavior, asset
-  preview resolution, device-sync outbox emission for writes, and portfolio
+- Activity import mapping/template storage, duplicate lookups, read-only
+  activity search, and transfer link/unlink mutations now have TS runtime
+  parity. reason=the standalone backend reads/writes `import_templates`,
+  `import_account_templates`, activity idempotency keys, activity search rows,
+  and transfer source-group metadata directly with Rust-compatible defaults,
+  filters, ordering, response mapping, transfer guards, and route inertness;
+  activity create/update/delete, CSV parse/import execution, asset preview
+  resolution, device-sync outbox emission for writes, and portfolio
   recalculation side effects remain active follow-ups for dedicated
   activities/import/portfolio parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createActivityService, type ActivitySearchRequest } from "./activities";
+import { createActivityService, type Activity, type ActivitySearchRequest } from "./activities";
 
 describe("TS activities import domain", () => {
   test("searches activities with Rust-compatible filters, ordering, and detail mapping", async () => {
@@ -128,6 +128,110 @@ describe("TS activities import domain", () => {
           needsReview: true,
         }),
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("links and unlinks transfer pairs with Rust-compatible metadata behavior", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+    const linkTransfers = (activityAId: string, activityBId: string) =>
+      service.linkTransferActivities!(activityAId, activityBId) as [Activity, Activity];
+    const unlinkTransfers = (activityAId: string, activityBId: string) =>
+      service.unlinkTransferActivities!(activityAId, activityBId) as [Activity, Activity];
+
+    try {
+      insertActivity(db, {
+        id: "transfer-in",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        metadata: JSON.stringify({ custom: "keep", flow: { origin: "import" } }),
+      });
+      insertActivity(db, {
+        id: "transfer-out",
+        accountId: "account-2",
+        activityType: "TRANSFER_OUT",
+        metadata: JSON.stringify({ other: true }),
+      });
+
+      const [linkedIn, linkedOut] = linkTransfers("transfer-out", "transfer-in");
+
+      expect(linkedIn).toMatchObject({
+        id: "transfer-in",
+        activityType: "TRANSFER_IN",
+        isUserModified: true,
+        metadata: { custom: "keep", flow: { origin: "import", is_external: false } },
+      });
+      expect(linkedOut).toMatchObject({
+        id: "transfer-out",
+        activityType: "TRANSFER_OUT",
+        isUserModified: true,
+        metadata: { other: true, flow: { is_external: false } },
+      });
+      expect(linkedIn.sourceGroupId).toBeTruthy();
+      expect(linkedIn.sourceGroupId).toBe(linkedOut.sourceGroupId);
+      expect(linkedIn.updatedAt).toContain("T");
+      expect(readActivityValue(db, "transfer-in", "source_group_id")).toBe(linkedIn.sourceGroupId);
+
+      expect(() => service.linkTransferActivities?.("transfer-in", "transfer-out")).toThrow(
+        "One or both activities are already linked to another transfer",
+      );
+
+      const [unlinkedIn, unlinkedOut] = unlinkTransfers("transfer-in", "transfer-out");
+
+      expect(unlinkedIn).toMatchObject({
+        id: "transfer-in",
+        sourceGroupId: null,
+        metadata: { custom: "keep", flow: { origin: "import", is_external: true } },
+      });
+      expect(unlinkedOut).toMatchObject({
+        id: "transfer-out",
+        sourceGroupId: null,
+        metadata: { other: true, flow: { is_external: true } },
+      });
+      expect(readActivityValue(db, "transfer-in", "source_group_id")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects invalid transfer link and unlink requests", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertActivity(db, { id: "in-1", accountId: "account-1", activityType: "TRANSFER_IN" });
+      insertActivity(db, { id: "in-2", accountId: "account-2", activityType: "TRANSFER_IN" });
+      insertActivity(db, { id: "out-same", accountId: "account-1", activityType: "TRANSFER_OUT" });
+      insertActivity(db, {
+        id: "out-linked-a",
+        accountId: "account-2",
+        activityType: "TRANSFER_OUT",
+        sourceGroupId: "group-a",
+      });
+      insertActivity(db, {
+        id: "in-linked-b",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        sourceGroupId: "group-b",
+      });
+
+      expect(() => service.linkTransferActivities?.("in-1", "in-1")).toThrow(
+        "Cannot link an activity to itself",
+      );
+      expect(() => service.linkTransferActivities?.("in-1", "in-2")).toThrow(
+        "Linking requires one TRANSFER_IN and one TRANSFER_OUT activity",
+      );
+      expect(() => service.linkTransferActivities?.("in-1", "out-same")).toThrow(
+        "Both transfer legs share the same account",
+      );
+      expect(() => service.unlinkTransferActivities?.("in-1", "out-same")).toThrow(
+        "Both activities must already be linked",
+      );
+      expect(() => service.unlinkTransferActivities?.("in-linked-b", "out-linked-a")).toThrow(
+        "Selected activities belong to different linked transfers",
+      );
     } finally {
       db.close();
     }
@@ -549,6 +653,20 @@ function insertActivity(
     activity.createdAt ?? "2024-01-01T00:00:00Z",
     activity.updatedAt ?? "2024-01-01T00:00:00Z",
   );
+}
+
+function readActivityValue(
+  db: Database,
+  activityId: string,
+  column: "source_group_id",
+): string | null {
+  const row = db
+    .query<
+      { value: string | null },
+      [string]
+    >(`SELECT ${column} AS value FROM activities WHERE id = ?`)
+    .get(activityId);
+  return row?.value ?? null;
 }
 
 function readLinkId(db: Database, accountId: string, contextKind: string): string | null {
