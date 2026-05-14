@@ -73,6 +73,7 @@ import type {
   Goal,
   GoalFundingRuleInput,
   GoalService,
+  GoalValuationMap,
   NewGoal,
   SaveGoalPlan,
 } from "./domains/goals";
@@ -128,6 +129,7 @@ export interface BackendRequestHandlerOptions {
   customProviderService?: CustomProviderService;
   exchangeRateService?: ExchangeRateService;
   goalService?: GoalService;
+  goalValuationProvider?: GoalValuationProvider;
   healthService?: HealthService;
   holdingsService?: HoldingsService;
   marketDataService?: MarketDataService;
@@ -139,6 +141,10 @@ export interface BackendRequestHandlerOptions {
   settingsService?: SettingsService;
   syncCryptoService?: SyncCryptoService;
   taxonomyService?: TaxonomyService;
+}
+
+export interface GoalValuationProvider {
+  getGoalValuationMap(): Promise<GoalValuationMap>;
 }
 
 export function createBackendRequestHandler(
@@ -313,7 +319,13 @@ async function routeRequest(
   }
 
   if (options.goalService && url.pathname.startsWith("/api/v1/goals")) {
-    return routeGoalRequest(request, url, config, options.goalService);
+    return routeGoalRequest(
+      request,
+      url,
+      config,
+      options.goalService,
+      options.goalValuationProvider,
+    );
   }
 
   if (options.healthService && url.pathname.startsWith("/api/v1/health")) {
@@ -2174,6 +2186,7 @@ function routeGoalRequest(
   url: URL,
   config: BackendRuntimeConfig,
   goalService: GoalService,
+  goalValuationProvider?: GoalValuationProvider,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -2212,6 +2225,20 @@ function routeGoalRequest(
     );
   }
 
+  const refreshGoalId = goalRefreshSummaryIdFromPath(url.pathname);
+  if (refreshGoalId && request.method === "POST") {
+    return handleGoalValuationRequest(goalValuationProvider, (valuationMap) =>
+      goalService.refreshGoalSummary(refreshGoalId, valuationMap),
+    );
+  }
+
+  const saveUpOverviewGoalId = goalSaveUpOverviewIdFromPath(url.pathname);
+  if (saveUpOverviewGoalId && request.method === "GET") {
+    return handleGoalValuationRequest(goalValuationProvider, (valuationMap) =>
+      goalService.computeSaveUpOverview(saveUpOverviewGoalId, valuationMap),
+    );
+  }
+
   if (request.method === "GET" && url.pathname === "/api/v1/goals") {
     return jsonResponse(goalService.getGoals());
   }
@@ -2241,6 +2268,35 @@ function routeGoalRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function handleGoalValuationRequest<T>(
+  provider: GoalValuationProvider | undefined,
+  handle: (valuationMap: GoalValuationMap) => Promise<T>,
+): Promise<Response> {
+  if (!provider) {
+    return jsonResponse(
+      {
+        code: 501,
+        message: "Goal valuation provider is not available in the TS backend runtime yet",
+      },
+      501,
+    );
+  }
+  let valuationMap: GoalValuationMap;
+  try {
+    valuationMap = await provider.getGoalValuationMap();
+  } catch (error) {
+    return jsonResponse(
+      { code: 503, message: error instanceof Error ? error.message : String(error) },
+      503,
+    );
+  }
+  try {
+    return jsonResponse(await handle(valuationMap));
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
 }
 
 function routeCustomProviderRequest(
@@ -2727,6 +2783,16 @@ function goalFundingIdFromPath(pathname: string): string | undefined {
 
 function goalPlanIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/goals\/([^/]+)\/plan$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function goalRefreshSummaryIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)\/refresh-summary$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function goalSaveUpOverviewIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)\/save-up\/overview$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 

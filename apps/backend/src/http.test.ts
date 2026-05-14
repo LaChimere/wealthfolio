@@ -5441,6 +5441,132 @@ describe("TS backend HTTP skeleton", () => {
       db.close();
     }
   });
+
+  test("routes migrated goal valuation-backed calculations only with a provider", async () => {
+    const db = createGoalsDb();
+    const goalService = createGoalService(createGoalRepository(db), {
+      now: () => new Date(2024, 0, 1, 12),
+    });
+    let providerCalls = 0;
+    const handler = createBackendRequestHandler(config, {
+      goalService,
+      goalValuationProvider: {
+        async getGoalValuationMap() {
+          providerCalls += 1;
+          return { cash: 1000 };
+        },
+      },
+    });
+
+    try {
+      seedHttpGoal(db, {
+        id: "goal 1",
+        title: "Goal",
+        targetAmount: 1000,
+        projectedCompletionDate: "2026-06-01",
+        projectedValueAtTargetDate: 950,
+      });
+      seedHttpFundingRule(db, {
+        id: "funding-1",
+        goalId: "goal 1",
+        accountId: "cash",
+        sharePercent: 50,
+      });
+
+      expect(
+        (
+          await handler(
+            new Request("http://127.0.0.1/api/v1/goals/goal%201/refresh-summary", {
+              method: "POST",
+            }),
+          )
+        ).status,
+      ).toBe(401);
+
+      const refreshResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/goal%201/refresh-summary", {
+          method: "POST",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(refreshResponse.status).toBe(200);
+      await expect(refreshResponse.json()).resolves.toMatchObject({
+        id: "goal 1",
+        summaryCurrentValue: 500,
+        summaryProgress: 0.5,
+        statusHealth: "at_risk",
+      });
+      expect(providerCalls).toBe(1);
+
+      const overviewResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/goal%201/save-up/overview", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(overviewResponse.status).toBe(200);
+      await expect(overviewResponse.json()).resolves.toMatchObject({
+        currentValue: 500,
+        targetAmount: 1000,
+        progress: 0.5,
+      });
+      expect(providerCalls).toBe(2);
+
+      const domainErrorResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/missing/save-up/overview", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(domainErrorResponse.status).toBe(400);
+      expect(providerCalls).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps goal valuation-backed routes explicitly deferred without a provider", async () => {
+    const db = createGoalsDb();
+    const goalService = createGoalService(createGoalRepository(db));
+    const handler = createBackendRequestHandler(config, { goalService });
+    const failingHandler = createBackendRequestHandler(config, {
+      goalService,
+      goalValuationProvider: {
+        async getGoalValuationMap() {
+          throw new Error("valuation unavailable");
+        },
+      },
+    });
+
+    try {
+      for (const [method, path] of [
+        ["POST", "/api/v1/goals/goal-1/refresh-summary"],
+        ["GET", "/api/v1/goals/goal-1/save-up/overview"],
+      ] as const) {
+        const response = await handler(
+          new Request(`http://127.0.0.1${path}`, {
+            method,
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        );
+        expect(response.status).toBe(501);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "Goal valuation provider is not available in the TS backend runtime yet",
+        });
+      }
+
+      const providerErrorResponse = await failingHandler(
+        new Request("http://127.0.0.1/api/v1/goals/goal-1/refresh-summary", {
+          method: "POST",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(providerErrorResponse.status).toBe(503);
+      await expect(providerErrorResponse.json()).resolves.toMatchObject({
+        message: "valuation unavailable",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createAccountsDb(): Database {
@@ -5654,6 +5780,62 @@ function createGoalsDb(): Database {
     );
   `);
   return db;
+}
+
+function seedHttpGoal(
+  db: Database,
+  goal: {
+    id: string;
+    title: string;
+    targetAmount?: number;
+    projectedCompletionDate?: string | null;
+    projectedValueAtTargetDate?: number | null;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO goals (
+        id, title, description, target_amount, goal_type, status_lifecycle,
+        status_health, priority, projected_completion_date, projected_value_at_target_date,
+        created_at, updated_at
+      )
+      VALUES (?, ?, NULL, ?, 'custom_save_up', 'active', 'not_applicable', 0, ?, ?, ?, ?)
+    `,
+  ).run(
+    goal.id,
+    goal.title,
+    goal.targetAmount ?? 100,
+    goal.projectedCompletionDate ?? null,
+    goal.projectedValueAtTargetDate ?? null,
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z",
+  );
+}
+
+function seedHttpFundingRule(
+  db: Database,
+  rule: {
+    id: string;
+    goalId: string;
+    accountId: string;
+    sharePercent: number;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO goals_allocation (
+        id, goal_id, account_id, share_percent, tax_bucket, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, NULL, ?, ?)
+    `,
+  ).run(
+    rule.id,
+    rule.goalId,
+    rule.accountId,
+    rule.sharePercent,
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z",
+  );
 }
 
 function createTaxonomiesDb(): Database {

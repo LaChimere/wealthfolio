@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 73
+turns_used: 74
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-15T00:10:53+08:00"
+updated_at: "2026-05-15T00:18:24+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -485,6 +485,14 @@ updated_at: "2026-05-15T00:10:53+08:00"
   projected/target health thresholds, and keeps plan-backed retirement refresh
   explicitly deferred. HTTP summary refresh routing remains deferred. Targeted
   tests, backend type-check, and focused review passed.
+- Turn 74: Added guarded valuation-backed goal calculation route seams:
+  `POST /api/v1/goals/{id}/refresh-summary` and
+  `GET /api/v1/goals/{id}/save-up/overview` now run through an injectable goal
+  valuation provider, preserve sidecar auth/path decoding, return explicit 501
+  when the runtime provider is absent, and return 503 for valuation-provider
+  failures. Standalone runtime valuation-map construction remains deferred.
+  Targeted tests, backend type-check, full `bun run check`, and focused review
+  passed.
 
 ## Deferred items
 
@@ -501,14 +509,14 @@ updated_at: "2026-05-15T00:10:53+08:00"
   behavior, response safety limits, and preview metadata are implemented in the
   standalone TS backend; broader market-data provider quote/import/sync runtime
   remains deferred below.
-- HTTP summary refresh routing, HTTP goal-id save-up overview routing,
-  plan-backed retirement summary refresh, and retirement simulation endpoints
-  remain active follow-ups. reason=save-up preview calculations, save-up goal
-  overview service logic, non-retirement summary refresh service logic, no-plan
-  retirement summary refresh service logic, and save-up/retirement goal-plan
-  writes now have bounded TS runtime parity, while valuation-map construction
-  and plan-backed retirement calculations should move in dedicated
-  calculation-heavy slices.
+- Standalone runtime goal valuation-map construction, plan-backed retirement
+  summary refresh, and retirement simulation endpoints remain active follow-ups.
+  reason=save-up preview calculations, save-up goal overview service logic,
+  non-retirement summary refresh service logic, no-plan retirement summary
+  refresh service logic, injectable HTTP calculation route seams, and
+  save-up/retirement goal-plan writes now have bounded TS runtime parity, while
+  valuation-map construction and plan-backed retirement calculations should move
+  in dedicated calculation-heavy slices.
 - FX currency converter, historical lookup, and register-pair behavior now have
   TS runtime parity. reason=the standalone TS exchange-rate service initializes
   the historical converter and can register required FX assets; automatic market

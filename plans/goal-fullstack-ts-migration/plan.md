@@ -63,6 +63,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   retirement goals, including six-field summary updates, projected-field
   preservation/clearing, achieved health overrides, and projected/target health
   thresholds.
+- Add guarded valuation-backed goal calculation route seams for
+  `/api/v1/goals/{id}/refresh-summary` and `/api/v1/goals/{id}/save-up/overview`
+  through an injectable valuation provider while keeping standalone runtime
+  valuation-map construction deferred.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -82,9 +86,8 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep HTTP goal summary refresh routing, HTTP goal-id save-up overview routing,
-  and plan-backed retirement calculations deferred to dedicated goal/calculation
-  parity slices.
+- Keep standalone runtime goal valuation-map construction and plan-backed
+  retirement calculations deferred to dedicated goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -102,11 +105,11 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, HTTP goal summary refresh
-routing, HTTP goal-id save-up overview routing, plan-backed retirement summary
-refresh, retirement simulations, calculation-heavy health checks or
-non-classification `/health/fix` execution, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+routing without a valuation provider, HTTP goal-id save-up overview routing
+without a valuation provider, plan-backed retirement summary refresh, retirement
+simulations, calculation-heavy health checks or non-classification `/health/fix`
+execution, real Connect runtime implementation, real device-sync runtime
+implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 
