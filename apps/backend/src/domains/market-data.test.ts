@@ -232,6 +232,213 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("checks quote CSV imports with Rust-compatible validation and asset matching", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
+
+    try {
+      insertAsset(db, {
+        id: "asset-shop",
+        display_code: "SHOP",
+        instrument_exchange_mic: "XTSE",
+      });
+      insertAsset(db, { id: "asset-aapl", display_code: "AAPL", instrument_exchange_mic: "XNAS" });
+
+      const quotes = await Promise.resolve(
+        service.checkQuotesImport?.(
+          bytes(
+            [
+              "Symbol,Date,Open,High,Low,Close,Volume,Currency",
+              'SHOP.TO,2026-01-05,9,10,8,"1,234.56",100,CAD',
+              "AAPL,2026-01-06,11,10,9,9.5,,",
+              "UNKNOWN,2026-01-07,,,,12,,USD",
+              "SHOP,2026-13-01,,,,12,,CAD",
+              "SHOP,2026-01-08,,,,,100,CAD",
+            ].join("\n"),
+          ),
+          true,
+        ),
+      );
+
+      expect(quotes).toEqual([
+        {
+          symbol: "asset-shop",
+          displaySymbol: "SHOP",
+          date: "2026-01-05",
+          open: 9,
+          high: 10,
+          low: 8,
+          close: 1234.56,
+          volume: 100,
+          currency: "CAD",
+          validationStatus: { warning: "Close price is outside high-low range" },
+          errorMessage: null,
+        },
+        {
+          symbol: "asset-aapl",
+          displaySymbol: "AAPL",
+          date: "2026-01-06",
+          open: 11,
+          high: 10,
+          low: 9,
+          close: 9.5,
+          volume: null,
+          currency: "USD",
+          validationStatus: { warning: "Open price is outside high-low range" },
+          errorMessage: null,
+        },
+        expect.objectContaining({
+          symbol: "UNKNOWN",
+          validationStatus: { error: "Asset not found: 'UNKNOWN'" },
+          errorMessage: "Asset not found: 'UNKNOWN'",
+        }),
+        expect.objectContaining({
+          symbol: "SHOP",
+          validationStatus: { error: "Invalid date format. Expected YYYY-MM-DD" },
+          errorMessage: "Invalid date format. Expected YYYY-MM-DD",
+        }),
+        expect.objectContaining({
+          symbol: "SHOP",
+          close: 0,
+          validationStatus: { error: "Close price must be greater than 0" },
+          errorMessage: "Close price must be greater than 0",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("checks quote CSV imports without headers and rejects invalid files", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
+
+    try {
+      insertAsset(db, { id: "asset-aapl", display_code: "AAPL", instrument_exchange_mic: "XNAS" });
+
+      await expect(
+        Promise.resolve(service.checkQuotesImport?.(bytes("AAPL,2026-01-05,.5"), false)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "asset-aapl",
+          displaySymbol: "AAPL",
+          close: 0.5,
+          currency: "USD",
+          validationStatus: "valid",
+        }),
+      ]);
+      expect(() =>
+        service.checkQuotesImport?.(bytes("symbol,date\nAAPL,2026-01-05"), true),
+      ).toThrow("Missing required columns: close");
+      expect(() => service.checkQuotesImport?.(bytes("symbol,date,close\n"), true)).toThrow(
+        "CSV file must contain at least one data row",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("imports manual quote CSV rows with Rust-compatible upsert semantics", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db);
+
+    try {
+      insertQuote(db, {
+        id: "provider-existing",
+        asset_id: "asset-1",
+        day: "2026-01-05",
+        source: "YAHOO",
+        close: "9.00",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "legacy-manual-id",
+        asset_id: "asset-1",
+        day: "2026-01-06",
+        source: "MANUAL",
+        close: "10.00",
+        currency: "USD",
+      });
+
+      await expect(
+        Promise.resolve(
+          service.importQuotesCsv?.(
+            [
+              {
+                symbol: "asset-1",
+                date: "2026-01-05",
+                close: 11,
+                currency: "USD",
+                validationStatus: "valid",
+              },
+            ],
+            false,
+          ),
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "asset-1",
+          validationStatus: { warning: "Quote already exists" },
+          errorMessage: null,
+        }),
+      ]);
+      expect(readQuote(db, "asset-1_2026-01-05_MANUAL")).toBeNull();
+
+      await expect(
+        Promise.resolve(
+          service.importQuotesCsv?.(
+            [
+              {
+                symbol: "asset-1",
+                date: "2026-01-05",
+                open: 0,
+                high: 12,
+                low: 10,
+                close: 11,
+                volume: 0,
+                currency: "USD",
+                validationStatus: "valid",
+              },
+              {
+                symbol: "asset-1",
+                date: "2026-01-06",
+                close: 12.5,
+                currency: "USD",
+                validationStatus: "valid",
+              },
+            ],
+            true,
+          ),
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({ symbol: "asset-1", validationStatus: "valid" }),
+        expect.objectContaining({ symbol: "asset-1", validationStatus: "valid" }),
+      ]);
+      expect(readQuote(db, "provider-existing")).toMatchObject({ source: "YAHOO" });
+      expect(readQuote(db, "asset-1_2026-01-05_MANUAL")).toMatchObject({
+        id: "asset-1_2026-01-05_MANUAL",
+        asset_id: "asset-1",
+        day: "2026-01-05",
+        source: "MANUAL",
+        open: null,
+        high: "12",
+        low: "10",
+        close: "11",
+        adjclose: "11",
+        volume: null,
+        timestamp: "2026-01-05T12:00:00.000Z",
+      });
+      expect(readQuote(db, "legacy-manual-id")).toMatchObject({
+        id: "legacy-manual-id",
+        close: "12.5",
+        timestamp: "2026-01-06T12:00:00.000Z",
+      });
+      expect(readQuote(db, "asset-1_2026-01-06_MANUAL")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("updates and deletes manual quotes with deterministic Rust-compatible IDs", () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db);
@@ -357,6 +564,7 @@ function createMarketDataDb(): Database {
     CREATE UNIQUE INDEX uq_quotes_asset_day_source ON quotes(asset_id, day, source);
     CREATE TABLE assets (
       id TEXT NOT NULL PRIMARY KEY,
+      display_code TEXT,
       quote_ccy TEXT NOT NULL,
       quote_mode TEXT NOT NULL,
       is_active INTEGER NOT NULL,
@@ -378,6 +586,7 @@ function insertAsset(
   db: Database,
   asset: {
     id: string;
+    display_code?: string | null;
     quote_ccy?: string;
     quote_mode?: string;
     is_active?: number;
@@ -389,13 +598,14 @@ function insertAsset(
   db.query(
     `
       INSERT INTO assets (
-        id, quote_ccy, quote_mode, is_active, instrument_exchange_mic,
+        id, display_code, quote_ccy, quote_mode, is_active, instrument_exchange_mic,
         instrument_type, metadata
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
+    asset.display_code ?? null,
     asset.quote_ccy ?? "USD",
     asset.quote_mode ?? "MARKET",
     asset.is_active ?? 1,
@@ -476,6 +686,10 @@ function readQuote(db: Database, id: string): Record<string, unknown> | null {
   return db.query<Record<string, unknown>, [string]>("SELECT * FROM quotes WHERE id = ?").get(id);
 }
 
+function bytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
 function testExchangeCatalogJson(): string {
   return JSON.stringify({
     exchanges: [
@@ -486,6 +700,7 @@ function testExchangeCatalogJson(): string {
         currency: "USD",
         timezone: "America/New_York",
         close: [16, 0],
+        yahoo: { suffix: "" },
       },
       {
         mic: "XTSE",
@@ -493,6 +708,7 @@ function testExchangeCatalogJson(): string {
         currency: "CAD",
         timezone: "America/Toronto",
         close: [16, 0],
+        yahoo: { suffix: "TO" },
       },
       {
         mic: "XLON",
@@ -500,6 +716,7 @@ function testExchangeCatalogJson(): string {
         currency: "GBP",
         timezone: "Europe/London",
         close: [16, 30],
+        yahoo: { suffix: "L" },
       },
       {
         mic: "NOCCY",

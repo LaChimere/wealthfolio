@@ -10,33 +10,35 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data latest quote
-snapshot runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained market-data quote CSV
+check/import runtime slice to the standalone TS backend:
 
-- Add SQLite-backed `/api/v1/market-data/quotes/latest` behavior with the Rust
-  latest-quote source priority (`MANUAL`, then `BROKER`, then providers).
-- Read asset and quote-sync context to compute snapshot staleness, market
-  effective dates, quote dates, and contextual no-quote reasons.
-- Preserve Rust market-date behavior for exchange timezone, close-time grace,
-  weekend rollback, and UTC fallback.
-- Preserve Rust quote-currency reconciliation, including minor-unit currency
-  spelling, and the no-quote reason priority ladder.
+- Add SQLite-backed `/api/v1/market-data/quotes/check` parsing/validation with
+  Rust-compatible required/optional columns, decimal handling, validation status
+  JSON, asset-ID/display-code/Yahoo-suffix matching, and empty/missing-header
+  errors.
+- Add `/api/v1/market-data/quotes/import` behavior for validated manual quote
+  rows with Rust-compatible revalidation, overwrite/duplicate handling, noon UTC
+  timestamps, deterministic manual IDs, same-day manual ID preservation, and
+  decimal-to-NULL storage semantics.
+- Reuse a shared backend CSV parser so custom-provider CSV source tests and
+  quote import share one quoted-field/line-ending parser.
 - Keep remaining high-risk market-data methods optional so provider
-  search/resolve, Yahoo dividends, CSV import/check, sync, and recalculation
-  side effects remain `404` until their dedicated parity slices.
+  search/resolve, Yahoo dividends, sync, and recalculation side effects remain
+  `404` until their dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-provider sync, quote CSV import/check, portfolio recalculation side effects,
-keyring storage, AI chat runtime, quote-provider interactions,
-auto-classification side effects, portfolio metrics runtime, holdings runtime,
-add-on runtime, broader market-data runtime, activities/import runtime,
-sync-crypto/device-sync integration, real health status/check/fix runtime
-implementation, real Connect runtime implementation, real device-sync runtime
-implementation, or Rust runtime removal is in scope for this slice.
+provider sync, portfolio recalculation side effects, keyring storage, AI chat
+runtime, quote-provider interactions, auto-classification side effects,
+portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
+runtime, activities/import runtime, sync-crypto/device-sync integration, real
+health status/check/fix runtime implementation, real Connect runtime
+implementation, real device-sync runtime implementation, or Rust runtime removal
+is in scope for this slice.
 
 ## Next slices
 

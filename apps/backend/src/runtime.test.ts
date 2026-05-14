@@ -265,6 +265,50 @@ describe("TS backend runtime composition", () => {
           quoteDate: "2026-05-14",
         },
       });
+      const checkQuotesResponse = await fetch(`${server.baseUrl}/api/v1/market-data/quotes/check`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          content: Array.from(
+            new TextEncoder().encode("symbol,date,close,currency\nSHOP.TO,2026-05-15,43.5,CAD"),
+          ),
+          hasHeaderRow: true,
+        }),
+      });
+      expect(checkQuotesResponse.status).toBe(200);
+      const checkedQuotes = (await checkQuotesResponse.json()) as unknown[];
+      expect(checkedQuotes).toEqual([
+        expect.objectContaining({
+          symbol: createdAsset.id,
+          displaySymbol: "SHOP",
+          validationStatus: "valid",
+        }),
+      ]);
+      const importQuotesResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/import`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ quotes: checkedQuotes, overwriteExisting: true }),
+        },
+      );
+      expect(importQuotesResponse.status).toBe(200);
+      await expect(importQuotesResponse.json()).resolves.toEqual([
+        expect.objectContaining({ symbol: createdAsset.id, validationStatus: "valid" }),
+      ]);
+      const importedQuoteId = `${createdAsset.id}_2026-05-15_MANUAL`;
+      const importedQuoteHistoryResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/history?symbol=${createdAsset.id}`,
+      );
+      expect(importedQuoteHistoryResponse.status).toBe(200);
+      await expect(importedQuoteHistoryResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: importedQuoteId,
+          close: 43.5,
+          currency: "CAD",
+        }),
+        expect.objectContaining({ id: manualQuoteId }),
+      ]);
       expect((await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`)).status).toBe(
         404,
       );

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { parseCsvRecords } from "../csv";
 import type { MarketSyncMode } from "./portfolio-jobs";
 
 export interface ExchangeInfo {
@@ -38,6 +39,22 @@ export interface NoQuoteReason {
   message: string;
 }
 
+export type ImportValidationStatus = "valid" | { warning: string } | { error: string };
+
+export interface QuoteImport {
+  symbol: string;
+  displaySymbol: string | null;
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number;
+  volume: number | null;
+  currency: string;
+  validationStatus: ImportValidationStatus;
+  errorMessage: string | null;
+}
+
 export interface ResolveSymbolQuoteRequest {
   symbol: string;
   exchangeMic?: string;
@@ -57,8 +74,14 @@ export interface MarketDataService {
   ): Promise<Record<string, LatestQuoteSnapshot>> | Record<string, LatestQuoteSnapshot>;
   updateQuote?(symbol: string, quote: Record<string, unknown>): Promise<void> | void;
   deleteQuote?(id: string): Promise<void> | void;
-  checkQuotesImport?(content: Uint8Array, hasHeaderRow: boolean): Promise<unknown[]> | unknown[];
-  importQuotesCsv?(quotes: unknown[], overwriteExisting: boolean): Promise<unknown[]> | unknown[];
+  checkQuotesImport?(
+    content: Uint8Array,
+    hasHeaderRow: boolean,
+  ): Promise<QuoteImport[]> | QuoteImport[];
+  importQuotesCsv?(
+    quotes: unknown[],
+    overwriteExisting: boolean,
+  ): Promise<QuoteImport[]> | QuoteImport[];
   syncHistoryQuotes?(): Promise<void> | void;
   syncMarketData?(marketSyncMode: MarketSyncMode): Promise<void> | void;
 }
@@ -106,6 +129,7 @@ interface ExchangeCatalog {
   exchanges: ExchangeInfo[];
   timezoneByMic: ReadonlyMap<string, string>;
   closeByMic: ReadonlyMap<string, readonly [number, number]>;
+  yahooSuffixByMic: ReadonlyMap<string, string>;
 }
 
 interface AssetQuoteStateRow {
@@ -123,6 +147,26 @@ interface QuoteSyncStateRow {
   last_synced_at: string | null;
   error_count: number;
   last_error: string | null;
+}
+
+interface QuoteImportAssetRow {
+  id: string;
+  display_code: string | null;
+  instrument_exchange_mic: string | null;
+}
+
+interface NormalizedQuoteImport {
+  symbol: string;
+  displaySymbol: string | null;
+  date: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string;
+  volume: string | null;
+  currency: string;
+  validationStatus: ImportValidationStatus;
+  errorMessage: string | null;
 }
 
 const MAX_SYNC_ERRORS = 10;
@@ -184,58 +228,20 @@ export function createMarketDataService(
             db.query("DELETE FROM quotes WHERE id = ?").run(oldId);
           }
         }
-
-        const existing = db
-          .query<
-            { id: string },
-            [string, string, string]
-          >("SELECT id FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
-          .get(payload.assetId, payload.day, payload.source);
-        if (existing) {
-          payload.id = existing.id;
-        }
-
-        db.query(
-          `
-            INSERT INTO quotes (
-              id, asset_id, day, source, open, high, low, close, adjclose,
-              volume, currency, notes, created_at, timestamp
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(asset_id, day, source) DO UPDATE SET
-              id = excluded.id,
-              open = excluded.open,
-              high = excluded.high,
-              low = excluded.low,
-              close = excluded.close,
-              adjclose = excluded.adjclose,
-              volume = excluded.volume,
-              currency = excluded.currency,
-              notes = excluded.notes,
-              created_at = excluded.created_at,
-              timestamp = excluded.timestamp
-          `,
-        ).run(
-          payload.id,
-          payload.assetId,
-          payload.day,
-          payload.source,
-          payload.open,
-          payload.high,
-          payload.low,
-          payload.close,
-          payload.adjclose,
-          payload.volume,
-          payload.currency,
-          payload.notes,
-          payload.createdAt,
-          payload.timestamp,
-        );
+        upsertQuoteWrite(db, payload);
       })();
     },
 
     deleteQuote(id) {
       db.query("DELETE FROM quotes WHERE id = ?").run(id);
+    },
+
+    checkQuotesImport(content, hasHeaderRow) {
+      return checkQuoteImports(db, content, hasHeaderRow, exchangeCatalog);
+    },
+
+    importQuotesCsv(quotes, overwriteExisting) {
+      return importQuoteRows(db, quotes, overwriteExisting);
     },
   };
 }
@@ -252,6 +258,7 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
   const exchanges: ExchangeInfo[] = [];
   const timezoneByMic = new Map<string, string>();
   const closeByMic = new Map<string, readonly [number, number]>();
+  const yahooSuffixByMic = new Map<string, string>();
   for (const entry of parsed.exchanges) {
     if (!isRecord(entry) || typeof entry.mic !== "string") {
       continue;
@@ -275,8 +282,14 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
         currency: entry.currency,
       });
     }
+    if (isRecord(entry.yahoo) && typeof entry.yahoo.suffix === "string") {
+      const suffix = entry.yahoo.suffix.trim().replace(/^\./, "");
+      if (suffix) {
+        yahooSuffixByMic.set(mic, suffix);
+      }
+    }
   }
-  return { exchanges, timezoneByMic, closeByMic };
+  return { exchanges, timezoneByMic, closeByMic, yahooSuffixByMic };
 }
 
 function emptyExchangeCatalog(): ExchangeCatalog {
@@ -284,6 +297,7 @@ function emptyExchangeCatalog(): ExchangeCatalog {
     exchanges: [],
     timezoneByMic: new Map(),
     closeByMic: new Map(),
+    yahooSuffixByMic: new Map(),
   };
 }
 
@@ -459,6 +473,255 @@ function noQuoteReason(
   return { code: "NO_DATA", message: "No data available from provider yet" };
 }
 
+function checkQuoteImports(
+  db: Database,
+  content: Uint8Array,
+  hasHeaderRow: boolean,
+  exchangeCatalog: ExchangeCatalog,
+): QuoteImport[] {
+  const text = new TextDecoder().decode(content);
+  const records = parseCsvRecords(text, { delimiter: "," });
+  const [rawHeaders, ...rawRows] = hasHeaderRow
+    ? records
+    : [["symbol", "date", "close"], ...records];
+  const headers = (rawHeaders ?? []).map((header) => header.trim().toLowerCase());
+  const missing = ["symbol", "date", "close"].filter((header) => !headers.includes(header));
+  if (missing.length > 0) {
+    throw new Error(`Missing required columns: ${missing.join(", ")}`);
+  }
+
+  const columnIndex = (name: string) => headers.indexOf(name);
+  const symbolIndex = columnIndex("symbol");
+  const dateIndex = columnIndex("date");
+  const closeIndex = columnIndex("close");
+  const openIndex = optionalColumnIndex(headers, "open");
+  const highIndex = optionalColumnIndex(headers, "high");
+  const lowIndex = optionalColumnIndex(headers, "low");
+  const volumeIndex = optionalColumnIndex(headers, "volume");
+  const currencyIndex = optionalColumnIndex(headers, "currency");
+
+  const quotes = rawRows.map((row): NormalizedQuoteImport => {
+    const getField = (index: number | null): string | null => {
+      if (index === null) {
+        return null;
+      }
+      const value = row[index]?.trim();
+      return value ? value : null;
+    };
+    return {
+      symbol: getField(symbolIndex) ?? "",
+      displaySymbol: null,
+      date: getField(dateIndex) ?? "",
+      open: parseCsvDecimal(getField(openIndex)),
+      high: parseCsvDecimal(getField(highIndex)),
+      low: parseCsvDecimal(getField(lowIndex)),
+      close: parseCsvDecimal(getField(closeIndex)) ?? "0",
+      volume: parseCsvDecimal(getField(volumeIndex)),
+      currency: getField(currencyIndex) ?? "USD",
+      validationStatus: "valid",
+      errorMessage: null,
+    };
+  });
+
+  if (quotes.length === 0) {
+    throw new Error("CSV file must contain at least one data row");
+  }
+
+  const assets = readQuoteImportAssets(db);
+  const assetById = new Map(assets.map((asset) => [asset.id.toLowerCase(), asset]));
+  const assetByDisplayCode = new Map<string, QuoteImportAssetRow>();
+  const assetByDisplayCodeExchange = new Map<string, QuoteImportAssetRow>();
+  for (const asset of assets) {
+    const displayCode = asset.display_code ?? "";
+    assetByDisplayCode.set(displayCode.toLowerCase(), asset);
+    const suffix = asset.instrument_exchange_mic
+      ? exchangeCatalog.yahooSuffixByMic.get(asset.instrument_exchange_mic.toUpperCase())
+      : undefined;
+    if (suffix) {
+      assetByDisplayCodeExchange.set(`${displayCode}.${suffix}`.toLowerCase(), asset);
+    }
+  }
+
+  for (const quote of quotes) {
+    quote.validationStatus = validateQuoteImport(quote);
+    if (!isImportable(quote.validationStatus)) {
+      const message = validationMessage(quote.validationStatus);
+      if (message) {
+        quote.errorMessage = message;
+      }
+      continue;
+    }
+
+    const symbol = quote.symbol.toLowerCase();
+    const asset =
+      assetById.get(symbol) ??
+      assetByDisplayCode.get(symbol) ??
+      assetByDisplayCodeExchange.get(symbol);
+    if (asset) {
+      quote.displaySymbol = asset.display_code ?? quote.symbol;
+      quote.symbol = asset.id;
+    } else {
+      const message = `Asset not found: '${quote.symbol}'`;
+      quote.validationStatus = { error: message };
+      quote.errorMessage = message;
+    }
+  }
+
+  return quotes.map(quoteImportResponse);
+}
+
+function importQuoteRows(
+  db: Database,
+  quotes: unknown[],
+  overwriteExisting: boolean,
+): QuoteImport[] {
+  const normalizedQuotes = quotes.map(normalizeQuoteImportInput);
+  db.transaction(() => {
+    for (const quote of normalizedQuotes) {
+      quote.validationStatus = validateQuoteImport(quote);
+      if (!isImportable(quote.validationStatus)) {
+        continue;
+      }
+
+      if (!overwriteExisting && quoteExistsForDay(db, quote.symbol, quote.date)) {
+        quote.validationStatus = { warning: "Quote already exists" };
+        continue;
+      }
+
+      const payload = quoteImportToQuoteWrite(quote);
+      upsertQuoteWrite(db, payload);
+      quote.validationStatus = "valid";
+    }
+  })();
+  return normalizedQuotes.map(quoteImportResponse);
+}
+
+function readQuoteImportAssets(db: Database): QuoteImportAssetRow[] {
+  return db
+    .query<QuoteImportAssetRow, []>("SELECT id, display_code, instrument_exchange_mic FROM assets")
+    .all();
+}
+
+function optionalColumnIndex(headers: string[], name: string): number | null {
+  const index = headers.indexOf(name);
+  return index >= 0 ? index : null;
+}
+
+function normalizeQuoteImportInput(value: unknown): NormalizedQuoteImport {
+  if (!isRecord(value)) {
+    throw new Error("Invalid quote import row");
+  }
+  return {
+    symbol: requiredString(value.symbol, "symbol"),
+    displaySymbol: optionalString(value.displaySymbol),
+    date: requiredString(value.date, "date"),
+    open: parseCsvDecimal(value.open),
+    high: parseCsvDecimal(value.high),
+    low: parseCsvDecimal(value.low),
+    close: parseCsvDecimal(value.close) ?? "0",
+    volume: parseCsvDecimal(value.volume),
+    currency: requiredString(value.currency, "currency"),
+    validationStatus: "valid",
+    errorMessage: optionalString(value.errorMessage),
+  };
+}
+
+function validateQuoteImport(quote: NormalizedQuoteImport): ImportValidationStatus {
+  if (quote.symbol.trim() === "") {
+    return { error: "Symbol is required" };
+  }
+  if (!isIsoDate(quote.date)) {
+    return { error: "Invalid date format. Expected YYYY-MM-DD" };
+  }
+  if (compareDecimals(quote.close, "0") <= 0) {
+    return { error: "Close price must be greater than 0" };
+  }
+  if (quote.open !== null && quote.high !== null && quote.low !== null) {
+    if (compareDecimals(quote.high, quote.low) < 0) {
+      return { error: "High price cannot be less than low price" };
+    }
+    if (compareDecimals(quote.open, quote.high) > 0 || compareDecimals(quote.open, quote.low) < 0) {
+      return { warning: "Open price is outside high-low range" };
+    }
+    if (
+      compareDecimals(quote.close, quote.high) > 0 ||
+      compareDecimals(quote.close, quote.low) < 0
+    ) {
+      return { warning: "Close price is outside high-low range" };
+    }
+  }
+  return "valid";
+}
+
+function isImportable(status: ImportValidationStatus): boolean {
+  return status === "valid" || isWarningStatus(status);
+}
+
+function validationMessage(status: ImportValidationStatus): string | null {
+  if (isWarningStatus(status)) {
+    return status.warning;
+  }
+  return isErrorStatus(status) ? status.error : null;
+}
+
+function isWarningStatus(status: ImportValidationStatus): status is { warning: string } {
+  return typeof status === "object" && status !== null && "warning" in status;
+}
+
+function isErrorStatus(status: ImportValidationStatus): status is { error: string } {
+  return typeof status === "object" && status !== null && "error" in status;
+}
+
+function quoteImportToQuoteWrite(quote: NormalizedQuoteImport): QuoteWrite {
+  const timestamp = `${quote.date}T12:00:00.000Z`;
+  return {
+    id: quoteId(quote.symbol, quote.date, "MANUAL"),
+    assetId: quote.symbol,
+    day: quote.date,
+    source: "MANUAL",
+    open: optionalStoredDecimal(quote.open ?? quote.close),
+    high: optionalStoredDecimal(quote.high ?? quote.close),
+    low: optionalStoredDecimal(quote.low ?? quote.close),
+    close: quote.close,
+    adjclose: optionalStoredDecimal(quote.close),
+    volume: optionalStoredDecimal(quote.volume),
+    currency: quote.currency,
+    notes: null,
+    createdAt: timestampNow(),
+    timestamp,
+  };
+}
+
+function optionalStoredDecimal(value: string | null): string | null {
+  return value !== null && compareDecimals(value, "0") !== 0 ? value : null;
+}
+
+function quoteExistsForDay(db: Database, assetId: string, day: string): boolean {
+  const row = db
+    .query<
+      { id: string },
+      [string, string]
+    >("SELECT id FROM quotes WHERE asset_id = ? AND day = ? LIMIT 1")
+    .get(assetId, day);
+  return row !== null && row !== undefined;
+}
+
+function quoteImportResponse(quote: NormalizedQuoteImport): QuoteImport {
+  return {
+    symbol: quote.symbol,
+    displaySymbol: quote.displaySymbol,
+    date: quote.date,
+    open: decimalToJsonNumber(quote.open),
+    high: decimalToJsonNumber(quote.high),
+    low: decimalToJsonNumber(quote.low),
+    close: decimalToJsonNumber(quote.close) ?? 0,
+    volume: decimalToJsonNumber(quote.volume),
+    currency: quote.currency,
+    validationStatus: quote.validationStatus,
+    errorMessage: quote.errorMessage,
+  };
+}
+
 function normalizeQuoteWrite(symbol: string, quote: Record<string, unknown>): QuoteWrite {
   const timestamp = normalizeQuoteTimestamp(requiredString(quote.timestamp, "timestamp"));
   const day = timestamp.slice(0, 10);
@@ -490,6 +753,55 @@ function normalizeQuoteWrite(symbol: string, quote: Record<string, unknown>): Qu
     createdAt: normalizeQuoteTimestamp(optionalString(quote.createdAt) ?? timestampNow()),
     timestamp,
   };
+}
+
+function upsertQuoteWrite(db: Database, payload: QuoteWrite): void {
+  const existing = db
+    .query<
+      { id: string },
+      [string, string, string]
+    >("SELECT id FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
+    .get(payload.assetId, payload.day, payload.source);
+  if (existing) {
+    payload.id = existing.id;
+  }
+
+  db.query(
+    `
+      INSERT INTO quotes (
+        id, asset_id, day, source, open, high, low, close, adjclose, volume,
+        currency, notes, created_at, timestamp
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(asset_id, day, source) DO UPDATE SET
+        id = excluded.id,
+        open = excluded.open,
+        high = excluded.high,
+        low = excluded.low,
+        close = excluded.close,
+        adjclose = excluded.adjclose,
+        volume = excluded.volume,
+        currency = excluded.currency,
+        notes = excluded.notes,
+        created_at = excluded.created_at,
+        timestamp = excluded.timestamp
+    `,
+  ).run(
+    payload.id,
+    payload.assetId,
+    payload.day,
+    payload.source,
+    payload.open,
+    payload.high,
+    payload.low,
+    payload.close,
+    payload.adjclose,
+    payload.volume,
+    payload.currency,
+    payload.notes,
+    payload.createdAt,
+    payload.timestamp,
+  );
 }
 
 function rowToQuote(row: QuoteRow): Quote {
@@ -575,6 +887,14 @@ function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && isoDate(date) === value;
+}
+
 function today(now: Date): string {
   return isoDate(now);
 }
@@ -647,6 +967,75 @@ function decimalString(value: unknown): string | null {
     return null;
   }
   return trimmed;
+}
+
+function parseCsvDecimal(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const raw = typeof value === "number" ? String(value) : typeof value === "string" ? value : null;
+  if (raw === null) {
+    return null;
+  }
+  const trimmed = raw.trim().replaceAll(",", "");
+  if (trimmed === "" || !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) {
+    return null;
+  }
+  const sign = trimmed.startsWith("-") ? "-" : "";
+  const unsigned = sign ? trimmed.slice(1) : trimmed;
+  const [rawInteger, rawFraction = ""] = unsigned.split(".");
+  const integer = rawInteger === "" ? "0" : rawInteger.replace(/^0+(?=\d)/, "");
+  const fraction = rawFraction.replace(/0+$/, "");
+  const normalized = `${sign}${integer || "0"}${fraction ? `.${fraction}` : ""}`;
+  return normalized === "-0" ? "0" : normalized;
+}
+
+function compareDecimals(left: string, right: string): number {
+  const leftParts = decimalParts(left);
+  const rightParts = decimalParts(right);
+  if (leftParts.sign !== rightParts.sign) {
+    return leftParts.sign > rightParts.sign ? 1 : -1;
+  }
+  const abs = compareDecimalAbs(leftParts, rightParts);
+  return leftParts.sign > 0 ? abs : -abs;
+}
+
+function decimalParts(value: string): { sign: 1 | -1; integer: string; fraction: string } {
+  const sign = value.startsWith("-") ? -1 : 1;
+  const unsigned = sign < 0 ? value.slice(1) : value;
+  const [rawInteger, rawFraction = ""] = unsigned.split(".");
+  return {
+    sign,
+    integer: rawInteger.replace(/^0+(?=\d)/, "") || "0",
+    fraction: rawFraction.replace(/0+$/, ""),
+  };
+}
+
+function compareDecimalAbs(
+  left: { integer: string; fraction: string },
+  right: { integer: string; fraction: string },
+): number {
+  if (left.integer.length !== right.integer.length) {
+    return left.integer.length > right.integer.length ? 1 : -1;
+  }
+  if (left.integer !== right.integer) {
+    return left.integer > right.integer ? 1 : -1;
+  }
+  const maxFractionLength = Math.max(left.fraction.length, right.fraction.length);
+  const leftFraction = left.fraction.padEnd(maxFractionLength, "0");
+  const rightFraction = right.fraction.padEnd(maxFractionLength, "0");
+  if (leftFraction === rightFraction) {
+    return 0;
+  }
+  return leftFraction > rightFraction ? 1 : -1;
+}
+
+function decimalToJsonNumber(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function decimalToNumber(value: string | null): number {

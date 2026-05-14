@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 47
+turns_used: 48
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -324,6 +324,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   with Rust-compatible source priority, asset quote-currency reconciliation,
   exchange timezone/close/weekend effective dates, stale flags, quote sync-state
   no-quote reasons, duplicate asset-ID de-duplication, and runtime route wiring.
+- Turn 48: Added market-data quote CSV check/import runtime for the standalone
+  TS backend: `/api/v1/market-data/quotes/check` and `/import` now parse
+  Rust-compatible CSV rows, validate quote imports, match assets by ID/display
+  code/Yahoo suffix, import manual quotes with overwrite/duplicate semantics,
+  preserve existing manual row IDs, and share CSV parsing with custom providers.
 
 ## Deferred items
 
@@ -356,11 +361,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   while broader health checks and fix execution depend on holdings, quotes, FX,
   assets, valuation, and market sync parity beyond local health dismissal/config
   state.
-- Market-data exchange list, local quote history/update/delete, and latest quote
-  snapshots now have TS runtime parity. reason=the standalone backend reads the
-  Rust exchange catalog and writes local quote rows directly; provider
-  search/symbol resolution, Yahoo dividends, quote CSV import/check, market
-  sync, and portfolio recalculation side effects remain active follow-ups.
+- Market-data exchange list, local quote history/update/delete, latest quote
+  snapshots, and quote CSV check/import now have TS runtime parity. reason=the
+  standalone backend reads the Rust exchange catalog and writes local quote rows
+  directly; provider search/symbol resolution, Yahoo dividends, market sync, and
+  portfolio recalculation side effects remain active follow-ups.
 - Actual portfolio job execution and event production remain active follow-ups.
   reason=they depend on market sync, holdings, snapshot, valuation, account,
   health, and FX service parity beyond route-level job enqueue and SSE transport

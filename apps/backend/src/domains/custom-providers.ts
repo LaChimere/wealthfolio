@@ -4,6 +4,7 @@ import { load, type CheerioAPI } from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 import { JSONPath } from "jsonpath-plus";
 
+import { parseCsvRecords } from "../csv";
 import type { SecretService } from "./secrets";
 
 export type CustomProviderSourceKind = "latest" | "historical";
@@ -1310,61 +1311,6 @@ function extractCsvString(body: string, column: string): string | null {
   const columnIndex = resolveCsvColumn(headers, column);
   const value = columnIndex === null ? undefined : lastRow[columnIndex]?.trim();
   return value ? value : null;
-}
-
-function parseCsvRecords(body: string): string[][] {
-  const commaRecords = tryParseCsv(body, ",");
-  if (commaRecords[0] && commaRecords[0].length > 1) {
-    return commaRecords;
-  }
-  return tryParseCsv(body, ";");
-}
-
-function tryParseCsv(body: string, delimiter: "," | ";"): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < body.length; index += 1) {
-    const char = body[index];
-    if (char === '"') {
-      if (inQuotes && body[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (char === delimiter && !inQuotes) {
-      row.push(field);
-      field = "";
-      continue;
-    }
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && body[index + 1] === "\n") {
-        index += 1;
-      }
-      row.push(field);
-      pushCsvRow(rows, row);
-      row = [];
-      field = "";
-      continue;
-    }
-    field += char;
-  }
-
-  row.push(field);
-  pushCsvRow(rows, row);
-  return rows;
-}
-
-function pushCsvRow(rows: string[][], row: string[]): void {
-  if (row.length === 1 && row[0] === "") {
-    return;
-  }
-  rows.push(row);
 }
 
 function resolveCsvColumn(headers: string[], column: string): number | null {
