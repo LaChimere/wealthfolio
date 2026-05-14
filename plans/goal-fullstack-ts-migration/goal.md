@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 40
+turns_used: 41
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T08:42:04+08:00"
+updated_at: "2026-05-14T09:17:10+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -281,6 +281,11 @@ updated_at: "2026-05-14T08:42:04+08:00"
   rate fallback, minor-unit normalization, historical range reads, register
   Yahoo/manual FX pairs, emit assets-created events, and refresh converter state
   after FX deletes.
+- Turn 41: Added app utility database restore runtime parity for the standalone
+  TS backend: restore now normalizes file paths, validates backup files before
+  closing the live SQLite handle, performs best-effort WAL checkpoint/journal
+  cleanup, waits for file handles to settle, restores the backup, and puts the
+  HTTP runtime into restart-required `503` mode until the app restarts.
 
 ## Deferred items
 
@@ -331,10 +336,11 @@ updated_at: "2026-05-14T08:42:04+08:00"
   interactions, activity guards, and portfolio recalculation behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/market-data/portfolio parity slices.
-- App utility database restore runtime remains an active follow-up. reason=app
-  info, update-check cache/HTTP, backup file I/O, and path normalization now
-  have safe TS runtime parity, but restore must wait for a restart or
-  service-rebuild strategy after replacing the active database.
+- App utility database restore runtime now has TS runtime parity. reason=the
+  standalone backend performs file-level restore after closing the live database
+  handle and explicitly reports restart-required readiness afterward; future
+  polish can improve long-running file-copy offload but no Rust route behavior
+  remains blocked on a `501`.
 - Net-worth, performance, income, holdings, FX, and valuation calculations
   remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
   while runtime behavior must move with dedicated portfolio calculation parity

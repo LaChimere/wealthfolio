@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { backupDatabaseToFile } from "../storage/sqlite";
+import { backupDatabaseToFile, restoreDatabase as restoreSqliteDatabase } from "../storage/sqlite";
 
 export interface AppInfoResponse {
   version: string;
@@ -46,6 +46,8 @@ export interface AppUtilityServiceOptions {
   fetchUpdate?: FetchUpdate;
   instanceId?: string | (() => string | undefined);
   now?: () => Date;
+  prepareDatabaseRestore?: () => void;
+  restoreSettleDelayMs?: number;
   target?: string;
   updateCacheTtlMs?: number;
   updateEndpointBase?: string;
@@ -70,6 +72,7 @@ interface UpdateCheckResponseRaw {
 type FetchUpdate = (input: string, init?: RequestInit) => Promise<Response>;
 
 const WEB_RUNTIME_TARGET = "web-docker";
+const DEFAULT_RESTORE_SETTLE_DELAY_MS = 150;
 const DEFAULT_UPDATE_CACHE_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_UPDATE_ENDPOINT_BASE = "https://wealthfolio.app/releases";
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
@@ -127,6 +130,15 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
       const backupPath = path.join(normalizedBackupDir, backupFilename(now()));
       backupDatabaseToFile(options.appDataDir, backupPath, options.env);
       return { path: backupPath };
+    },
+    async restoreDatabase(backupFilePath) {
+      const normalizedBackupPath = normalizeFilePath(backupFilePath);
+      if (!existsSync(normalizedBackupPath)) {
+        throw new Error("Backup file not found");
+      }
+      options.prepareDatabaseRestore?.();
+      await sleep(options.restoreSettleDelayMs ?? DEFAULT_RESTORE_SETTLE_DELAY_MS);
+      restoreSqliteDatabase(options.appDataDir, normalizedBackupPath, options.env);
     },
   };
 }
@@ -264,4 +276,8 @@ function versionParts(value: string): number[] {
 
 function normalizeFilePath(filePath: string): string {
   return filePath.startsWith("file://") ? filePath.slice("file://".length) : filePath;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }

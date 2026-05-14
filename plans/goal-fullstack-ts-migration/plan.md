@@ -10,18 +10,17 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding FX converter/register runtime parity to
-the standalone TS backend:
+PR 5 continues vertical slices by adding app utility database restore runtime
+parity to the standalone TS backend:
 
-- Initialize a Decimal-backed `CurrencyConverter` from SQLite FX quotes in
-  standalone runtime and preserve Rust-compatible add/update/delete refresh
-  behavior.
-- Implement nearest-date graph conversions, direct/inverse latest rate lookup,
-  historical range reads, minor currency normalization, Yahoo/manual pair
-  registration, and assets-created event emission.
-- Keep automatic market sync, provider HTTP clients, quote import/persistence,
-  and portfolio recalculation side effects deferred until dedicated market-data
-  and portfolio calculation runtime slices.
+- Implement `AppUtilityService.restoreDatabase` with Rust-compatible file-path
+  normalization, backup existence validation, file-level restore, and a settle
+  delay after database prepare.
+- Before replacing the active database, checkpoint and close the live Bun SQLite
+  handle, then put the HTTP runtime into restart-required readiness mode so
+  stale services cannot keep using the replaced database.
+- Keep broader service rebuild/hot-reload behavior deferred; the existing
+  frontend already instructs users to restart after restore.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -29,12 +28,11 @@ the standalone TS backend:
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
-runtime, alternative asset runtime, asset runtime, app utility restore runtime,
-portfolio metrics runtime, holdings runtime, add-on runtime, market-data
-runtime, activities/import runtime, sync-crypto/device-sync integration, real
-health status/check/fix runtime implementation, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+runtime, alternative asset runtime, asset runtime, portfolio metrics runtime,
+holdings runtime, add-on runtime, market-data runtime, activities/import
+runtime, sync-crypto/device-sync integration, real health status/check/fix
+runtime implementation, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

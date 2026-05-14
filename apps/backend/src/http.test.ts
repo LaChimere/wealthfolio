@@ -70,6 +70,65 @@ describe("TS backend HTTP skeleton", () => {
     ).resolves.toEqual({ requiresPassword: true });
   });
 
+  test("returns restart-required while database restore is still settling", async () => {
+    let restartRequired = false;
+    let releaseRestore: () => void = () => {};
+    const restoreBlocked = new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    const appUtilityService: AppUtilityService = {
+      getAppInfo() {
+        return { version: "1.0.0", dbPath: "/tmp/wealthfolio.db", logsDir: "/tmp/logs" };
+      },
+      checkUpdate() {
+        return {
+          updateAvailable: false,
+          latestVersion: "1.0.0",
+          notes: null,
+          pubDate: null,
+          downloadUrl: null,
+          changelogUrl: null,
+          screenshots: null,
+        };
+      },
+      backupDatabase() {
+        return { filename: "wealthfolio_backup.db", dataB64: "" };
+      },
+      backupDatabaseToPath() {
+        return { path: "/tmp/wealthfolio_backup.db" };
+      },
+      async restoreDatabase() {
+        restartRequired = true;
+        await restoreBlocked;
+      },
+    };
+    const handler = createBackendRequestHandler(config, {
+      appUtilityService,
+      restartRequired: () => restartRequired,
+    });
+
+    const restorePromise = handler(
+      new Request("http://127.0.0.1/api/v1/utilities/database/restore", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ backupFilePath: "/tmp/backup.db" }),
+      }),
+    );
+    for (let attempt = 0; attempt < 10 && !restartRequired; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(restartRequired).toBe(true);
+    expect((await handler(new Request("http://127.0.0.1/api/v1/readyz"))).status).toBe(503);
+    expect((await handler(new Request("http://127.0.0.1/api/v1/auth/status"))).status).toBe(503);
+
+    releaseRestore();
+    expect((await restorePromise).status).toBe(204);
+  });
+
   test("enforces sidecar bearer token on guarded debug routes", async () => {
     const handler = createBackendRequestHandler(config, { includeDebugRoutes: true });
     const handlerWithoutToken = createBackendRequestHandler(

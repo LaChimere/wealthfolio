@@ -112,8 +112,8 @@
     alternative asset persistence/quotes/holdings/job behavior is deferred to
     asset/portfolio parity slices; asset persistence/profile/quote-mode behavior
     is deferred to asset/market-data/portfolio parity slices; app utility
-    database restore is deferred until TS runtime restart/service-rebuild
-    support exists; portfolio metric calculations are deferred to portfolio
+    database restore now has TS runtime parity with restart-required readiness
+    after file restore; portfolio metric calculations are deferred to portfolio
     calculation parity slices; holdings fan-out, valuations, allocations,
     snapshots, imports, and portfolio recalculation side effects are deferred to
     holdings/portfolio parity slices; add-on filesystem extraction, runtime
@@ -705,6 +705,18 @@ contract:
   deletes. Focused review found and fixed the missing dated fallback warning
   parity gap; re-review found no remaining actionable issues. Full repository
   check passed with `bun run check`.
+- `pr5-app-utility-restore-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test`. Coverage includes normalized `file://`
+  restore paths, missing-backup validation before runtime prepare, live-runtime
+  restore through HTTP, restored SQLite file contents after restart, `readyz`
+  and route-level restart-required `503` behavior, and in-flight restore guard
+  behavior during the settle window. Rubber-duck critique identified the live
+  Bun SQLite handle risk, so the implementation closes the handle and gates
+  subsequent requests instead of reusing stale services. Focused review found
+  and fixed restore settle-delay and best-effort checkpoint/journal parity gaps;
+  final review found no remaining actionable issues. Full repository check
+  passed with `bun run check`.
 
 ## Result
 
@@ -724,8 +736,9 @@ contract:
   standalone TS runtime composition for already-ported SQLite-backed domains,
   safe app utility runtime, file-backed secrets runtime, AI provider
   settings/catalog runtime, sync crypto runtime, legacy classification migration
-  runtime, custom provider test-source runtime, and FX converter/register
-  runtime slices implemented; broader migration remains active.
+  runtime, custom provider test-source runtime, FX converter/register runtime,
+  and app utility database restore runtime slices implemented; broader migration
+  remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -737,9 +750,8 @@ contract:
   move with AI runtime parity slices; alternative asset
   persistence/quotes/holdings/job behavior moves with asset/portfolio parity
   slices; asset persistence/profile/quote-mode behavior moves with
-  asset/market-data/portfolio parity slices; app utility database restore moves
-  with restart-safe runtime parity; portfolio metric calculations move with
-  portfolio calculation parity slices; holdings fan-out, valuations,
+  asset/market-data/portfolio parity slices; portfolio metric calculations move
+  with portfolio calculation parity slices; holdings fan-out, valuations,
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime

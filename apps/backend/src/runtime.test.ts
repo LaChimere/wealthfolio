@@ -11,6 +11,7 @@ import {
   resolveBackendMigrationsDir,
 } from "./runtime";
 import { startBackendServer } from "./server";
+import { openSqliteDatabase } from "./storage/sqlite";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 const config: BackendRuntimeConfig = {
@@ -86,13 +87,6 @@ describe("TS backend runtime composition", () => {
         version: "3.4.0",
       });
 
-      const restoreResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/restore`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ backupFilePath: "file:///tmp/backup.db" }),
-      });
-      expect(restoreResponse.status).toBe(501);
-
       const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -122,12 +116,56 @@ describe("TS backend runtime composition", () => {
         assetsWithLegacyData: 0,
         assetsAlreadyMigrated: 0,
       });
+
+      const backupDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-backup-"));
+      const backupResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/database/backup-to-path`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ backupDir }),
+        },
+      );
+      expect(backupResponse.status).toBe(200);
+      const backup = (await backupResponse.json()) as { path: string };
+
+      const mutateAfterBackupResponse = await fetch(`${server.baseUrl}/api/v1/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseCurrency: "CAD", timezone: "UTC" }),
+      });
+      expect(mutateAfterBackupResponse.status).toBe(200);
+
+      const restoreResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backupFilePath: `file://${backup.path}` }),
+      });
+      expect(restoreResponse.status).toBe(204);
+
+      const readyAfterRestoreResponse = await fetch(`${server.baseUrl}/api/v1/readyz`);
+      expect(readyAfterRestoreResponse.status).toBe(503);
+      const settingsAfterRestoreResponse = await fetch(`${server.baseUrl}/api/v1/settings`);
+      expect(settingsAfterRestoreResponse.status).toBe(503);
     } finally {
       server.stop();
       runtime.close();
     }
 
     expect(() => runtime.close()).not.toThrow();
+    const restoredDb = openSqliteDatabase(path.join(appDataDir, "app.db"));
+    try {
+      expect(
+        restoredDb
+          .query<
+            { setting_value: string },
+            []
+          >("SELECT setting_value FROM app_settings WHERE setting_key = 'base_currency'")
+          .get()?.setting_value,
+      ).toBe("USD");
+    } finally {
+      restoredDb.close();
+    }
   });
 
   test("fails startup explicitly when TS runtime keyring secrets are requested", () => {

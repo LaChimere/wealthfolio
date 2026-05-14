@@ -127,6 +127,7 @@ export interface BackendRequestHandlerOptions {
   marketDataProviderService?: MarketDataProviderService;
   portfolioMetricsService?: PortfolioMetricsService;
   portfolioJobService?: PortfolioJobService;
+  restartRequired?: () => boolean;
   secretService?: SecretService;
   settingsService?: SettingsService;
   syncCryptoService?: SyncCryptoService;
@@ -181,7 +182,13 @@ async function routeRequest(
     return new Response("ok", { status: 200 });
   }
   if (request.method === "GET" && url.pathname === "/api/v1/readyz") {
+    if (options.restartRequired?.()) {
+      return jsonResponse({ code: 503, message: "Backend restart required" }, 503);
+    }
     return new Response("ok", { status: 200 });
+  }
+  if (options.restartRequired?.()) {
+    return jsonResponse({ code: 503, message: "Backend restart required" }, 503);
   }
   if (request.method === "GET" && url.pathname === "/api/v1/auth/status") {
     return jsonResponse({ requiresPassword: Boolean(config.authPasswordHash) });

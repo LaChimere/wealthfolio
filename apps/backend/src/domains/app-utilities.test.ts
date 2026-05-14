@@ -125,4 +125,63 @@ describe("TS app utility domain", () => {
       backupDb.close();
     }
   });
+
+  test("restores database from normalized backup paths after preparing runtime", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-restore-"));
+    const dbPath = path.join(appDataDir, "app.db");
+    let db = openSqliteDatabase(dbPath);
+    db.exec("CREATE TABLE entries (id TEXT PRIMARY KEY, value TEXT NOT NULL);");
+    db.query("INSERT INTO entries (id, value) VALUES (?, ?)").run("entry-1", "before");
+    db.close();
+
+    const backupDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-restore-backup-"));
+    let prepareCalls = 0;
+    const service = createAppUtilityService({
+      appDataDir,
+      appVersion: "3.4.0",
+      dbPath,
+      logsDir: path.join(appDataDir, "logs"),
+      now: fixedNow,
+      prepareDatabaseRestore: () => {
+        prepareCalls += 1;
+      },
+      restoreSettleDelayMs: 0,
+    });
+
+    const backup = await service.backupDatabaseToPath(backupDir);
+
+    db = openSqliteDatabase(dbPath);
+    db.query("UPDATE entries SET value = ? WHERE id = ?").run("after", "entry-1");
+    db.close();
+
+    await service.restoreDatabase?.(`file://${backup.path}`);
+
+    const restored = openSqliteDatabase(dbPath);
+    try {
+      expect(prepareCalls).toBe(1);
+      expect(
+        restored
+          .query<{ value: string }, []>("SELECT value FROM entries WHERE id = 'entry-1';")
+          .get()?.value,
+      ).toBe("before");
+    } finally {
+      restored.close();
+    }
+  });
+
+  test("does not prepare runtime when restore backup is missing", async () => {
+    const service = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      logsDir: "/tmp/wealthfolio-data/logs",
+      prepareDatabaseRestore: () => {
+        throw new Error("should not prepare");
+      },
+    });
+
+    await expect(service.restoreDatabase?.("/tmp/wealthfolio-missing-backup.db")).rejects.toThrow(
+      "Backup file not found",
+    );
+  });
 });

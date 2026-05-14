@@ -131,6 +131,33 @@ function createServicesFromDatabase(
 ): SqliteBackedBackendServices {
   const eventBus = runtimeOptions.eventBus ?? createEventBus();
   const { db } = initialized;
+  let closed = false;
+  let restartRequired = false;
+  const closeDatabase = () => {
+    if (!closed) {
+      db.close();
+      closed = true;
+    }
+  };
+  const prepareDatabaseRestore = () => {
+    if (!closed) {
+      try {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch (error) {
+        console.warn("WAL checkpoint before database restore failed:", errorMessage(error));
+      }
+      try {
+        db.exec("PRAGMA journal_mode = DELETE;");
+      } catch (error) {
+        console.warn(
+          "Switching SQLite journal mode before database restore failed:",
+          errorMessage(error),
+        );
+      }
+      closeDatabase();
+    }
+    restartRequired = true;
+  };
   const settingsService = createSettingsService(db);
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const accountService = createRuntimeAccountService(db, eventBus, baseCurrency);
@@ -163,6 +190,7 @@ function createServicesFromDatabase(
       env: runtimeOptions.env,
       instanceId: () => settingsService.getSettings().instanceId,
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
+      prepareDatabaseRestore,
     }),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db),
@@ -183,22 +211,19 @@ function createServicesFromDatabase(
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),
+    restartRequired: () => restartRequired,
     secretService,
     settingsService,
     syncCryptoService: createSyncCryptoService(),
     taxonomyService: createTaxonomyService(createTaxonomyRepository(db)),
   };
 
-  let closed = false;
   return {
     options,
     dbPath: initialized.dbPath,
     appliedMigrations: initialized.appliedMigrations,
     close() {
-      if (!closed) {
-        db.close();
-        closed = true;
-      }
+      closeDatabase();
     },
   };
 }
@@ -261,6 +286,10 @@ function readPackageVersion(repositoryRoot: string): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function readAiProviderCatalogJson(repositoryRoot: string): string {
