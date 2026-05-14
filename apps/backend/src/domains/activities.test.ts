@@ -133,6 +133,215 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("creates activities with Rust-compatible defaults, normalization, and idempotency", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+      });
+      insertAsset(db, {
+        id: "LSE",
+        displayCode: "LSE",
+        name: "London",
+        quoteCcy: "GBP",
+      });
+
+      const created = service.createActivity?.({
+        id: "client-temp-id",
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15T10:30:00Z",
+        quantity: "-100.00",
+        unitPrice: "150.0",
+        amount: "15000.00",
+        currency: "USD",
+        fee: "-1.5",
+      }) as Activity;
+
+      expect(created).toMatchObject({
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        status: "POSTED",
+        activityDate: "2025-01-15T10:30:00+00:00",
+        quantity: "100",
+        unitPrice: "150",
+        amount: "15000",
+        fee: "1.5",
+        sourceSystem: "MANUAL",
+        isUserModified: false,
+        needsReview: false,
+        idempotencyKey: "b1f49d68f26eee140ec8198d64cb1552865f71848e924922b5aceeac0fdee5bf",
+      });
+      expect(created.id).not.toBe("client-temp-id");
+
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { id: "AAPL" },
+          activityType: "BUY",
+          activityDate: "2025-01-15T23:59:59Z",
+          quantity: "100.0",
+          unitPrice: "150",
+          amount: "15000",
+          currency: "USD",
+        }),
+      ).toThrow("Duplicate activity detected");
+
+      const minorCurrency = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "LSE" },
+        activityType: "BUY",
+        activityDate: "2025-01-16",
+        quantity: "1",
+        unitPrice: "250",
+        amount: "250",
+        currency: "GBp",
+        fee: "10",
+      }) as Activity;
+
+      expect(minorCurrency).toMatchObject({
+        activityDate: "2025-01-16T00:00:00+00:00",
+        unitPrice: "2.5",
+        amount: "2.5",
+        fee: "0.1",
+        currency: "GBP",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects unsupported or invalid activity creates before persistence", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          currency: "USD",
+        }),
+      ).toThrow("Asset-backed activities need either asset_id or symbol");
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "AAPL" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          currency: "USD",
+        }),
+      ).toThrow("Symbol-based activity asset resolution is not yet implemented");
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          activityType: "SPLIT",
+          activityDate: "2025-01-15",
+          currency: "USD",
+          amount: "0",
+        }),
+      ).toThrow("Split activities require a positive amount ratio");
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          activityDate: "2025/01/15",
+          currency: "USD",
+        }),
+      ).toThrow("Invalid date format");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("updates activities with Rust-compatible patch preservation and clearing", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, { id: "AAPL", displayCode: "AAPL", name: "Apple", quoteCcy: "USD" });
+      insertAsset(db, { id: "MSFT", displayCode: "MSFT", name: "Microsoft", quoteCcy: "USD" });
+      insertActivity(db, {
+        id: "update-me",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        subtype: "BONUS",
+        status: "DRAFT",
+        activityDate: "2024-01-01T00:00:00Z",
+        quantity: "10",
+        unitPrice: "5",
+        amount: "50",
+        fee: "1",
+        fxRate: "1.2",
+        notes: "old note",
+        metadata: JSON.stringify({ keep: true }),
+        sourceSystem: "SNAPTRADE",
+        sourceRecordId: "provider-record",
+        sourceGroupId: "provider-group",
+        idempotencyKey: "stable-key",
+        importRunId: "import-run",
+        isUserModified: false,
+        needsReview: true,
+        createdAt: "2024-01-01T00:00:00Z",
+      });
+
+      const updated = service.updateActivity?.({
+        id: "update-me",
+        accountId: "account-1",
+        asset: { id: "MSFT" },
+        activityType: "TRANSFER_IN",
+        subtype: "",
+        activityDate: "2024-02-01",
+        unitPrice: "-7",
+        amount: "999",
+        fee: null,
+        currency: "GBp",
+        comment: "new note",
+      }) as Activity;
+
+      expect(updated).toMatchObject({
+        id: "update-me",
+        accountId: "account-1",
+        assetId: "MSFT",
+        activityType: "TRANSFER_IN",
+        subtype: null,
+        status: "POSTED",
+        activityDate: "2024-02-01T00:00:00+00:00",
+        quantity: "10",
+        unitPrice: "0.07",
+        amount: null,
+        fee: null,
+        currency: "GBP",
+        fxRate: "1.2",
+        notes: "new note",
+        metadata: { keep: true },
+        sourceSystem: "SNAPTRADE",
+        sourceRecordId: "provider-record",
+        sourceGroupId: "provider-group",
+        idempotencyKey: "stable-key",
+        importRunId: "import-run",
+        isUserModified: true,
+        needsReview: false,
+        createdAt: "2024-01-01T00:00:00Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("links and unlinks transfer pairs with Rust-compatible metadata behavior", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -533,6 +742,7 @@ function createActivitiesDb(): Database {
       display_code TEXT,
       instrument_exchange_mic TEXT,
       quote_mode TEXT,
+      quote_ccy TEXT NOT NULL DEFAULT 'USD',
       instrument_type TEXT
     );
 
@@ -583,6 +793,7 @@ interface AssetFixture {
   name: string;
   instrumentType?: string | null;
   quoteMode?: string | null;
+  quoteCcy?: string;
   exchangeMic?: string | null;
 }
 
@@ -626,9 +837,9 @@ function insertAsset(db: Database, asset: AssetFixture): void {
   db.query(
     `
       INSERT INTO assets (
-        id, name, display_code, instrument_exchange_mic, quote_mode, instrument_type
+        id, name, display_code, instrument_exchange_mic, quote_mode, quote_ccy, instrument_type
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
@@ -636,6 +847,7 @@ function insertAsset(db: Database, asset: AssetFixture): void {
     asset.displayCode,
     asset.exchangeMic ?? null,
     asset.quoteMode ?? "MARKET",
+    asset.quoteCcy ?? "USD",
     asset.instrumentType ?? null,
   );
 }

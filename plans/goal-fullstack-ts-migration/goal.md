@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 55
+turns_used: 56
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T13:26:34+08:00"
+updated_at: "2026-05-14T19:25:25+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -371,6 +371,14 @@ updated_at: "2026-05-14T13:26:34+08:00"
   removed SQLite activity row with Rust-compatible not-found behavior, metadata
   parsing, source identity preservation in the response, and deferred portfolio
   recalculation/device-sync side effects.
+- Turn 56: Added bounded activity create/update runtime for the standalone TS
+  backend: `POST`/`PUT /api/v1/activities` now persist existing-asset and cash
+  activities in SQLite with Rust-compatible generated IDs, strict date
+  normalization, idempotency-key computation and duplicate errors, source
+  preservation, decimal patch semantics, minor-currency normalization,
+  securities-transfer amount clearing, metadata behavior, and tests. Symbol-only
+  asset resolution/creation, quote fallback writes, bulk/import execution,
+  device-sync outbox, and portfolio recalculation remain deferred.
 
 ## Deferred items
 
@@ -442,15 +450,18 @@ updated_at: "2026-05-14T13:26:34+08:00"
   while runtime behavior must move with dedicated portfolio calculation parity
   slices.
 - Activity import mapping/template storage, duplicate lookups, read-only
-  activity search, transfer link/unlink mutations, and single activity deletes
-  now have TS runtime parity. reason=the standalone backend reads/writes
-  `import_templates`, `import_account_templates`, activity idempotency keys,
-  activity search rows, transfer source-group metadata, and deleted activity
-  rows directly with Rust-compatible defaults, filters, ordering, response
-  mapping, transfer guards, and route inertness; activity create/update, bulk
-  mutation, CSV parse/import execution, asset preview resolution, device-sync
-  outbox emission for writes, and portfolio recalculation side effects remain
-  active follow-ups for dedicated activities/import/portfolio parity slices.
+  activity search, transfer link/unlink mutations, single activity deletes, and
+  bounded existing-asset/cash activity create/update persistence now have TS
+  runtime parity. reason=the standalone backend reads/writes `import_templates`,
+  `import_account_templates`, activity idempotency keys, activity search rows,
+  transfer source-group metadata, deleted activity rows, and bounded manual
+  create/update rows directly with Rust-compatible defaults, filters, ordering,
+  response mapping, transfer guards, decimal semantics, date normalization, and
+  duplicate detection; symbol-only asset resolution/creation, quote fallback
+  writes, bulk mutation, CSV parse/import execution, asset preview resolution,
+  device-sync outbox emission for writes, and portfolio recalculation side
+  effects remain active follow-ups for dedicated activities/import/portfolio
+  parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag
   persistence, and tool-result mutation behavior remain active follow-ups.
   reason=this slice only adds the guarded HTTP seam, while runtime behavior must

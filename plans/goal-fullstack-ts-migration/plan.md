@@ -10,16 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained single activity delete
+PR 5 continues vertical slices by adding a contained activity create/update
 runtime slice to the standalone TS backend:
 
-- Add TS SQLite runtime behavior for `DELETE /api/v1/activities/{id}`.
-- Preserve Rust-compatible read-before-delete behavior, deleted activity
-  response mapping, metadata parsing, source identity return fields, and
-  missing-row errors.
-- Keep still-deferred activity create/update/import/CSV parse, bulk mutation,
-  asset preview, device-sync outbox emission, and portfolio recalculation side
-  effects optional/404 until dedicated parity slices.
+- Add TS SQLite runtime behavior for `POST /api/v1/activities` and
+  `PUT /api/v1/activities` when requests provide cash activity data or an
+  existing `asset.id`.
+- Preserve Rust-compatible generated activity IDs, strict date handling,
+  subtype/status defaults, decimal patch semantics, absolute economic signs,
+  minor-currency normalization, securities-transfer amount clearing,
+  source/idempotency preservation, duplicate detection, and response mapping.
+- Keep still-deferred symbol-only asset resolution/creation, quote fallback
+  writes, activity import/CSV parse, bulk mutation, asset preview, device-sync
+  outbox emission, and portfolio recalculation side effects for dedicated parity
+  slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -30,7 +34,8 @@ provider sync, portfolio recalculation side effects, keyring storage, AI chat
 runtime, quote-provider interactions, auto-classification side effects,
 portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
-lookups, read-only search, transfer link/unlink, and single activity delete,
+lookups, read-only search, transfer link/unlink, single activity delete, and
+bounded existing-asset/cash activity create/update persistence,
 sync-crypto/device-sync integration, real health status/check/fix runtime
 implementation, real Connect runtime implementation, real device-sync runtime
 implementation, or Rust runtime removal is in scope for this slice.
