@@ -10,35 +10,33 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data quote CRUD
-runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained market-data latest quote
+snapshot runtime slice to the standalone TS backend:
 
-- Wire `/api/v1/exchanges` from the existing Rust exchange catalog and expose
-  only entries with exchange name and currency, matching the Rust
-  `get_exchange_list` shape.
-- Add SQLite-backed quote history reads, manual quote update/upsert behavior,
-  and quote deletion for the standalone runtime.
-- Preserve Rust quote storage semantics for path-owned `asset_id`, deterministic
-  manual quote IDs, existing same-day/source ID preservation, zero optional
-  OHLCV values as `NULL`, invalid stored timestamp fallback, and idempotent
-  deletes.
-- Keep high-risk market-data methods optional so provider search/resolve, latest
-  snapshots, Yahoo dividends, CSV import/check, sync, and recalculation side
-  effects remain `404` until their dedicated parity slices.
+- Add SQLite-backed `/api/v1/market-data/quotes/latest` behavior with the Rust
+  latest-quote source priority (`MANUAL`, then `BROKER`, then providers).
+- Read asset and quote-sync context to compute snapshot staleness, market
+  effective dates, quote dates, and contextual no-quote reasons.
+- Preserve Rust market-date behavior for exchange timezone, close-time grace,
+  weekend rollback, and UTC fallback.
+- Preserve Rust quote-currency reconciliation, including minor-unit currency
+  spelling, and the no-quote reason priority ladder.
+- Keep remaining high-risk market-data methods optional so provider
+  search/resolve, Yahoo dividends, CSV import/check, sync, and recalculation
+  side effects remain `404` until their dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-provider sync, latest quote snapshot/staleness behavior, quote CSV import/check,
-portfolio recalculation side effects, keyring storage, AI chat runtime,
-quote-provider interactions, auto-classification side effects, portfolio metrics
-runtime, holdings runtime, add-on runtime, broader market-data runtime,
-activities/import runtime, sync-crypto/device-sync integration, real health
-status/check/fix runtime implementation, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+provider sync, quote CSV import/check, portfolio recalculation side effects,
+keyring storage, AI chat runtime, quote-provider interactions,
+auto-classification side effects, portfolio metrics runtime, holdings runtime,
+add-on runtime, broader market-data runtime, activities/import runtime,
+sync-crypto/device-sync integration, real health status/check/fix runtime
+implementation, real Connect runtime implementation, real device-sync runtime
+implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

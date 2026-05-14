@@ -25,6 +25,19 @@ export interface Quote {
   notes: string | null;
 }
 
+export interface LatestQuoteSnapshot {
+  quote: Quote | null;
+  isStale: boolean;
+  effectiveMarketDate: string;
+  quoteDate: string | null;
+  noQuoteReason?: NoQuoteReason;
+}
+
+export interface NoQuoteReason {
+  code: string;
+  message: string;
+}
+
 export interface ResolveSymbolQuoteRequest {
   symbol: string;
   exchangeMic?: string;
@@ -39,7 +52,9 @@ export interface MarketDataService {
   resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<unknown> | unknown;
   getQuoteHistory?(symbol: string): Promise<Quote[]> | Quote[];
   fetchYahooDividends?(symbol: string): Promise<unknown[]> | unknown[];
-  getLatestQuotes?(assetIds: string[]): Promise<unknown> | unknown;
+  getLatestQuotes?(
+    assetIds: string[],
+  ): Promise<Record<string, LatestQuoteSnapshot>> | Record<string, LatestQuoteSnapshot>;
   updateQuote?(symbol: string, quote: Record<string, unknown>): Promise<void> | void;
   deleteQuote?(id: string): Promise<void> | void;
   checkQuotesImport?(content: Uint8Array, hasHeaderRow: boolean): Promise<unknown[]> | unknown[];
@@ -50,6 +65,7 @@ export interface MarketDataService {
 
 export interface MarketDataServiceOptions {
   exchangeCatalogJson?: string;
+  now?: () => Date;
 }
 
 interface QuoteRow {
@@ -86,17 +102,53 @@ interface QuoteWrite {
   timestamp: string;
 }
 
+interface ExchangeCatalog {
+  exchanges: ExchangeInfo[];
+  timezoneByMic: ReadonlyMap<string, string>;
+  closeByMic: ReadonlyMap<string, readonly [number, number]>;
+}
+
+interface AssetQuoteStateRow {
+  id: string;
+  quote_ccy: string;
+  quote_mode: string;
+  is_active: number;
+  instrument_exchange_mic: string | null;
+  instrument_type: string | null;
+  metadata: string | null;
+}
+
+interface QuoteSyncStateRow {
+  asset_id: string;
+  last_synced_at: string | null;
+  error_count: number;
+  last_error: string | null;
+}
+
+const MAX_SYNC_ERRORS = 10;
+const MARKET_CLOSE_GRACE_MINUTES = 60;
+const MINOR_CURRENCY_MAJOR: Record<string, string> = {
+  GBp: "GBP",
+  GBX: "GBP",
+  KWF: "KWD",
+  ZAc: "ZAR",
+  ZAC: "ZAR",
+  ILA: "ILS",
+};
+
 export function createMarketDataService(
   db: Database,
   options: MarketDataServiceOptions = {},
 ): MarketDataService {
-  const exchanges = options.exchangeCatalogJson
-    ? parseExchangeList(options.exchangeCatalogJson)
-    : [];
+  const exchangeCatalog = options.exchangeCatalogJson
+    ? parseExchangeCatalog(options.exchangeCatalogJson)
+    : emptyExchangeCatalog();
+  const quoteSyncStateExists = tableExists(db, "quote_sync_state");
+  const now = options.now ?? (() => new Date());
 
   return {
     getExchanges() {
-      return exchanges;
+      return exchangeCatalog.exchanges;
     },
 
     getQuoteHistory(symbol) {
@@ -111,6 +163,16 @@ export function createMarketDataService(
         )
         .all(symbol)
         .map(rowToQuote);
+    },
+
+    getLatestQuotes(assetIds) {
+      return latestQuoteSnapshots(
+        db,
+        dedupe(assetIds),
+        exchangeCatalog,
+        quoteSyncStateExists,
+        now(),
+      );
     },
 
     updateQuote(symbol, quote) {
@@ -179,28 +241,222 @@ export function createMarketDataService(
 }
 
 export function parseExchangeList(json: string): ExchangeInfo[] {
+  return parseExchangeCatalog(json).exchanges;
+}
+
+function parseExchangeCatalog(json: string): ExchangeCatalog {
   const parsed: unknown = JSON.parse(json);
   if (!isRecord(parsed) || !Array.isArray(parsed.exchanges)) {
     throw new Error("Invalid exchange metadata catalog");
   }
-  return parsed.exchanges.flatMap((entry): ExchangeInfo[] => {
-    if (
-      !isRecord(entry) ||
-      typeof entry.mic !== "string" ||
-      typeof entry.name !== "string" ||
-      typeof entry.currency !== "string"
-    ) {
-      return [];
+  const exchanges: ExchangeInfo[] = [];
+  const timezoneByMic = new Map<string, string>();
+  const closeByMic = new Map<string, readonly [number, number]>();
+  for (const entry of parsed.exchanges) {
+    if (!isRecord(entry) || typeof entry.mic !== "string") {
+      continue;
     }
-    return [
-      {
+    const mic = entry.mic.toUpperCase();
+    if (typeof entry.timezone === "string") {
+      timezoneByMic.set(mic, entry.timezone);
+    }
+    if (
+      Array.isArray(entry.close) &&
+      typeof entry.close[0] === "number" &&
+      typeof entry.close[1] === "number"
+    ) {
+      closeByMic.set(mic, [entry.close[0], entry.close[1]]);
+    }
+    if (typeof entry.name === "string" && typeof entry.currency === "string") {
+      exchanges.push({
         mic: entry.mic,
         name: entry.name,
         longName: typeof entry.long_name === "string" ? entry.long_name : entry.name,
         currency: entry.currency,
-      },
-    ];
-  });
+      });
+    }
+  }
+  return { exchanges, timezoneByMic, closeByMic };
+}
+
+function emptyExchangeCatalog(): ExchangeCatalog {
+  return {
+    exchanges: [],
+    timezoneByMic: new Map(),
+    closeByMic: new Map(),
+  };
+}
+
+function latestQuoteSnapshots(
+  db: Database,
+  assetIds: string[],
+  exchangeCatalog: ExchangeCatalog,
+  quoteSyncStateExists: boolean,
+  now: Date,
+): Record<string, LatestQuoteSnapshot> {
+  if (assetIds.length === 0) {
+    return {};
+  }
+
+  const latestQuotes = readLatestQuotes(db, assetIds);
+  const assets = readAssetsForQuotes(db, assetIds);
+  const syncStates = quoteSyncStateExists ? readQuoteSyncStates(db, assetIds) : new Map();
+  const snapshots: Record<string, LatestQuoteSnapshot> = {};
+
+  for (const assetId of assetIds) {
+    const asset = assets.get(assetId) ?? null;
+    const effectiveMarketDate = marketEffectiveDate(
+      now,
+      asset?.instrument_exchange_mic ?? null,
+      exchangeCatalog,
+    );
+    const quote = latestQuotes.get(assetId) ?? null;
+    if (quote) {
+      const reconciledQuote = asset ? reconcileQuoteCurrency(quote, asset) : quote;
+      const quoteDate = reconciledQuote.timestamp.slice(0, 10);
+      snapshots[assetId] = {
+        quote: reconciledQuote,
+        isStale: asset?.is_active === 0 || quoteDate < effectiveMarketDate,
+        effectiveMarketDate,
+        quoteDate,
+      };
+    } else {
+      snapshots[assetId] = {
+        quote: null,
+        isStale: true,
+        effectiveMarketDate,
+        quoteDate: null,
+        noQuoteReason: noQuoteReason(asset, syncStates.get(assetId) ?? null, now),
+      };
+    }
+  }
+
+  return snapshots;
+}
+
+function readLatestQuotes(db: Database, assetIds: string[]): Map<string, Quote> {
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<QuoteRow, string[]>(
+      `
+        WITH ranked_quotes AS (
+          SELECT
+            q.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY q.asset_id
+              ORDER BY
+                q.day DESC,
+                CASE q.source WHEN 'MANUAL' THEN 1 WHEN 'BROKER' THEN 2 ELSE 3 END ASC
+            ) AS rn
+          FROM quotes q
+          WHERE q.asset_id IN (${placeholders})
+        )
+        SELECT *
+        FROM ranked_quotes
+        WHERE rn = 1
+        ORDER BY asset_id
+      `,
+    )
+    .all(...assetIds);
+  return new Map(rows.map((row) => [row.asset_id, rowToQuote(row)]));
+}
+
+function readAssetsForQuotes(db: Database, assetIds: string[]): Map<string, AssetQuoteStateRow> {
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<AssetQuoteStateRow, string[]>(
+      `
+        SELECT
+          id, quote_ccy, quote_mode, is_active, instrument_exchange_mic,
+          instrument_type, metadata
+        FROM assets
+        WHERE id IN (${placeholders})
+      `,
+    )
+    .all(...assetIds);
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function readQuoteSyncStates(db: Database, assetIds: string[]): Map<string, QuoteSyncStateRow> {
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<QuoteSyncStateRow, string[]>(
+      `
+        SELECT asset_id, last_synced_at, error_count, last_error
+        FROM quote_sync_state
+        WHERE asset_id IN (${placeholders})
+      `,
+    )
+    .all(...assetIds);
+  return new Map(rows.map((row) => [row.asset_id, row]));
+}
+
+function reconcileQuoteCurrency(quote: Quote, asset: AssetQuoteStateRow): Quote {
+  const effectiveCurrency = resolveEffectiveQuoteCurrency(asset.quote_ccy, quote.currency);
+  return effectiveCurrency ? { ...quote, currency: effectiveCurrency } : quote;
+}
+
+function resolveEffectiveQuoteCurrency(
+  assetQuoteCcy: string,
+  quoteCurrency: string,
+): string | null {
+  if (!assetQuoteCcy || !quoteCurrency || assetQuoteCcy === quoteCurrency) {
+    return null;
+  }
+  if (normalizeCurrencyCode(assetQuoteCcy) !== normalizeCurrencyCode(quoteCurrency)) {
+    return null;
+  }
+  const assetIsMinor = isMinorCurrency(assetQuoteCcy);
+  const quoteIsMinor = isMinorCurrency(quoteCurrency);
+  if (assetIsMinor && !quoteIsMinor) {
+    return assetQuoteCcy;
+  }
+  if (quoteIsMinor && !assetIsMinor) {
+    return quoteCurrency;
+  }
+  return assetQuoteCcy;
+}
+
+function noQuoteReason(
+  asset: AssetQuoteStateRow | null,
+  state: QuoteSyncStateRow | null,
+  now: Date,
+): NoQuoteReason {
+  if (asset) {
+    if (asset.quote_mode === "MANUAL") {
+      return { code: "MANUAL_PRICING", message: "Quote mode is Manual" };
+    }
+    if (asset.is_active === 0) {
+      return { code: "INACTIVE", message: "Asset is inactive" };
+    }
+    const bondMaturity = metadataDate(asset.metadata, "bond", "maturityDate");
+    if (asset.instrument_type === "BOND" && bondMaturity !== null && bondMaturity < today(now)) {
+      return { code: "MATURED_BOND", message: "Bond has matured" };
+    }
+    const optionExpiration = metadataDate(asset.metadata, "option", "expiration");
+    if (
+      asset.instrument_type === "OPTION" &&
+      optionExpiration !== null &&
+      optionExpiration < today(now)
+    ) {
+      return { code: "EXPIRED_OPTION", message: "Option has expired" };
+    }
+  }
+
+  if (state) {
+    if (state.error_count >= MAX_SYNC_ERRORS) {
+      return { code: "TOO_MANY_ERRORS", message: "Sync paused after repeated errors" };
+    }
+    const lastError = state.last_error?.trim();
+    if (lastError) {
+      return { code: "LAST_ERROR", message: `Last sync error: ${lastError}` };
+    }
+    if (state.last_synced_at === null) {
+      return { code: "PENDING_SYNC", message: "No provider quote has been synced yet" };
+    }
+  }
+
+  return { code: "NO_DATA", message: "No data available from provider yet" };
 }
 
 function normalizeQuoteWrite(symbol: string, quote: Record<string, unknown>): QuoteWrite {
@@ -252,6 +508,92 @@ function rowToQuote(row: QuoteRow): Quote {
     currency: row.currency,
     notes: row.notes,
   };
+}
+
+function marketEffectiveDate(
+  now: Date,
+  mic: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): string {
+  const normalizedMic = mic?.toUpperCase() ?? null;
+  const timezone = normalizedMic ? exchangeCatalog.timezoneByMic.get(normalizedMic) : undefined;
+  if (!timezone) {
+    return isoDate(now);
+  }
+
+  const local = localTimeParts(now, timezone);
+  if (isWeekend(local.date)) {
+    return previousTradingDay(local.date);
+  }
+
+  const close = normalizedMic ? exchangeCatalog.closeByMic.get(normalizedMic) : undefined;
+  if (!close) {
+    return local.date;
+  }
+
+  const localMinutes = local.hour * 60 + local.minute;
+  const closeMinutes = close[0] * 60 + close[1] + MARKET_CLOSE_GRACE_MINUTES;
+  return localMinutes < closeMinutes ? previousTradingDay(local.date) : local.date;
+}
+
+function localTimeParts(
+  instant: Date,
+  timeZone: string,
+): { date: string; hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "00";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    hour: Number(value("hour")),
+    minute: Number(value("minute")),
+  };
+}
+
+function previousTradingDay(date: string): string {
+  const current = new Date(`${date}T00:00:00Z`);
+  do {
+    current.setUTCDate(current.getUTCDate() - 1);
+  } while (isWeekend(isoDate(current)));
+  return isoDate(current);
+}
+
+function isWeekend(date: string): boolean {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function today(now: Date): string {
+  return isoDate(now);
+}
+
+function metadataDate(metadata: string | null, section: string, key: string): string | null {
+  const parsed = parseJsonValue(metadata);
+  if (!isRecord(parsed) || !isRecord(parsed[section])) {
+    return null;
+  }
+  const value = parsed[section][key] ?? parsed[section][snakeCase(key)];
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function normalizeCurrencyCode(currency: string): string {
+  return MINOR_CURRENCY_MAJOR[currency] ?? currency;
+}
+
+function isMinorCurrency(currency: string): boolean {
+  return MINOR_CURRENCY_MAJOR[currency] !== undefined;
 }
 
 function quoteId(assetId: string, day: string, source: string): string {
@@ -332,8 +674,37 @@ function timestampNow(): string {
   return new Date().toISOString();
 }
 
+function dedupe(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 function firstDefined(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined && value !== null);
+}
+
+function parseJsonValue(value: string | null): unknown | null {
+  if (value === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function snakeCase(value: string): string {
+  return value.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`);
+}
+
+function tableExists(db: Database, tableName: string): boolean {
+  const row = db
+    .query<
+      { count: number },
+      [string]
+    >("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName);
+  return (row?.count ?? 0) > 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

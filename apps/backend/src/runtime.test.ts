@@ -244,6 +244,27 @@ describe("TS backend runtime composition", () => {
           currency: "CAD",
         }),
       ]);
+      const latestQuotesResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/latest`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assetIds: [createdAsset.id] }),
+        },
+      );
+      expect(latestQuotesResponse.status).toBe(200);
+      await expect(latestQuotesResponse.json()).resolves.toMatchObject({
+        [createdAsset.id]: {
+          quote: {
+            id: manualQuoteId,
+            assetId: createdAsset.id,
+            dataSource: "MANUAL",
+            close: 42.5,
+            currency: "CAD",
+          },
+          quoteDate: "2026-05-14",
+        },
+      });
       expect((await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`)).status).toBe(
         404,
       );

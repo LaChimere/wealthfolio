@@ -22,6 +22,12 @@ describe("TS market data domain", () => {
           longName: "TSX",
           currency: "CAD",
         },
+        {
+          mic: "XLON",
+          name: "LSE",
+          longName: "LSE",
+          currency: "GBP",
+        },
       ]);
 
       insertQuote(db, {
@@ -72,6 +78,155 @@ describe("TS market data domain", () => {
           notes: null,
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns latest quote snapshots with source priority and market dates", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      now: () => new Date("2026-01-06T18:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        quote_ccy: "GBp",
+        instrument_exchange_mic: "XLON",
+      });
+      insertQuote(db, {
+        id: "asset-1_2026-01-06_YAHOO",
+        asset_id: "asset-1",
+        day: "2026-01-06",
+        source: "YAHOO",
+        close: "30.00",
+        currency: "GBP",
+        timestamp: "2026-01-06T16:00:00Z",
+      });
+      insertQuote(db, {
+        id: "asset-1_2026-01-06_BROKER",
+        asset_id: "asset-1",
+        day: "2026-01-06",
+        source: "BROKER",
+        close: "35.00",
+        currency: "GBP",
+        timestamp: "2026-01-06T16:00:00Z",
+      });
+      insertQuote(db, {
+        id: "asset-1_2026-01-06_MANUAL",
+        asset_id: "asset-1",
+        day: "2026-01-06",
+        source: "MANUAL",
+        close: "40.00",
+        currency: "GBP",
+        timestamp: "2026-01-06T16:00:00Z",
+      });
+
+      const snapshots = await Promise.resolve(service.getLatestQuotes?.(["asset-1", "asset-1"]));
+      expect(snapshots).toEqual({
+        "asset-1": {
+          quote: expect.objectContaining({
+            id: "asset-1_2026-01-06_MANUAL",
+            close: 40,
+            currency: "GBp",
+          }),
+          isStale: false,
+          effectiveMarketDate: "2026-01-06",
+          quoteDate: "2026-01-06",
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks latest quote snapshots stale before market close and on weekends", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      now: () => new Date("2026-01-10T12:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, { id: "asset-1", instrument_exchange_mic: "XNAS" });
+      insertQuote(db, {
+        id: "asset-1_2026-01-08_YAHOO",
+        asset_id: "asset-1",
+        day: "2026-01-08",
+        source: "YAHOO",
+        close: "10.00",
+        currency: "USD",
+        timestamp: "2026-01-08T21:00:00Z",
+      });
+
+      const snapshots = await Promise.resolve(service.getLatestQuotes?.(["asset-1"]));
+      expect(snapshots).toMatchObject({
+        "asset-1": {
+          isStale: true,
+          effectiveMarketDate: "2026-01-09",
+          quoteDate: "2026-01-08",
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns Rust-compatible no quote reasons", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, { now: () => new Date("2026-01-06T00:00:00Z") });
+
+    try {
+      insertAsset(db, { id: "manual", quote_mode: "MANUAL" });
+      insertAsset(db, { id: "inactive", is_active: 0 });
+      insertAsset(db, {
+        id: "matured-bond",
+        instrument_type: "BOND",
+        metadata: JSON.stringify({ bond: { maturityDate: "2026-01-05" } }),
+      });
+      insertAsset(db, {
+        id: "expired-option",
+        instrument_type: "OPTION",
+        metadata: JSON.stringify({ option: { expiration: "2026-01-05" } }),
+      });
+      insertAsset(db, { id: "too-many-errors" });
+      insertSyncState(db, { asset_id: "too-many-errors", error_count: 10 });
+      insertAsset(db, { id: "last-error" });
+      insertSyncState(db, { asset_id: "last-error", error_count: 1, last_error: "rate limited" });
+      insertAsset(db, { id: "pending-sync" });
+      insertSyncState(db, { asset_id: "pending-sync" });
+
+      const snapshots = await Promise.resolve(
+        service.getLatestQuotes?.([
+          "manual",
+          "inactive",
+          "matured-bond",
+          "expired-option",
+          "too-many-errors",
+          "last-error",
+          "pending-sync",
+          "missing",
+        ]),
+      );
+      expect(
+        Object.fromEntries(
+          Object.entries(snapshots ?? {}).map(([id, snapshot]) => [
+            id,
+            snapshot.noQuoteReason?.code,
+          ]),
+        ),
+      ).toEqual({
+        manual: "MANUAL_PRICING",
+        inactive: "INACTIVE",
+        "matured-bond": "MATURED_BOND",
+        "expired-option": "EXPIRED_OPTION",
+        "too-many-errors": "TOO_MANY_ERRORS",
+        "last-error": "LAST_ERROR",
+        "pending-sync": "PENDING_SYNC",
+        missing: "NO_DATA",
+      });
     } finally {
       db.close();
     }
@@ -200,8 +355,76 @@ function createMarketDataDb(): Database {
       timestamp TEXT NOT NULL
     );
     CREATE UNIQUE INDEX uq_quotes_asset_day_source ON quotes(asset_id, day, source);
+    CREATE TABLE assets (
+      id TEXT NOT NULL PRIMARY KEY,
+      quote_ccy TEXT NOT NULL,
+      quote_mode TEXT NOT NULL,
+      is_active INTEGER NOT NULL,
+      instrument_exchange_mic TEXT,
+      instrument_type TEXT,
+      metadata TEXT
+    );
+    CREATE TABLE quote_sync_state (
+      asset_id TEXT NOT NULL PRIMARY KEY,
+      last_synced_at TEXT,
+      error_count INTEGER NOT NULL,
+      last_error TEXT
+    );
   `);
   return db;
+}
+
+function insertAsset(
+  db: Database,
+  asset: {
+    id: string;
+    quote_ccy?: string;
+    quote_mode?: string;
+    is_active?: number;
+    instrument_exchange_mic?: string | null;
+    instrument_type?: string | null;
+    metadata?: string | null;
+  },
+) {
+  db.query(
+    `
+      INSERT INTO assets (
+        id, quote_ccy, quote_mode, is_active, instrument_exchange_mic,
+        instrument_type, metadata
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    asset.id,
+    asset.quote_ccy ?? "USD",
+    asset.quote_mode ?? "MARKET",
+    asset.is_active ?? 1,
+    asset.instrument_exchange_mic ?? null,
+    asset.instrument_type ?? "EQUITY",
+    asset.metadata ?? null,
+  );
+}
+
+function insertSyncState(
+  db: Database,
+  state: {
+    asset_id: string;
+    last_synced_at?: string | null;
+    error_count?: number;
+    last_error?: string | null;
+  },
+) {
+  db.query(
+    `
+      INSERT INTO quote_sync_state (asset_id, last_synced_at, error_count, last_error)
+      VALUES (?, ?, ?, ?)
+    `,
+  ).run(
+    state.asset_id,
+    state.last_synced_at ?? null,
+    state.error_count ?? 0,
+    state.last_error ?? null,
+  );
 }
 
 function insertQuote(
@@ -261,11 +484,22 @@ function testExchangeCatalogJson(): string {
         name: "NASDAQ",
         long_name: "NASDAQ Stock Market",
         currency: "USD",
+        timezone: "America/New_York",
+        close: [16, 0],
       },
       {
         mic: "XTSE",
         name: "TSX",
         currency: "CAD",
+        timezone: "America/Toronto",
+        close: [16, 0],
+      },
+      {
+        mic: "XLON",
+        name: "LSE",
+        currency: "GBP",
+        timezone: "Europe/London",
+        close: [16, 30],
       },
       {
         mic: "NOCCY",
