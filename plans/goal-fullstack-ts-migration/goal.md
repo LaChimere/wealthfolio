@@ -329,6 +329,12 @@ updated_at: "2026-05-14T11:02:29+08:00"
   Rust-compatible CSV rows, validate quote imports, match assets by ID/display
   code/Yahoo suffix, import manual quotes with overwrite/duplicate semantics,
   preserve existing manual row IDs, and share CSV parsing with custom providers.
+- Turn 49: Added the addon-compatible Yahoo dividends runtime for the standalone
+  TS backend: `/api/v1/market-data/yahoo/dividends/{symbol}` now uses an
+  injectable Yahoo HTTP client path with Rust-compatible cookie/crumb reuse,
+  two-year daily chart query parameters, dividend event extraction, 401 crumb
+  reset, symbol-not-found/no-data errors, and Yahoo chart provider-error
+  mapping.
 
 ## Deferred items
 
@@ -362,10 +368,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   assets, valuation, and market sync parity beyond local health dismissal/config
   state.
 - Market-data exchange list, local quote history/update/delete, latest quote
-  snapshots, and quote CSV check/import now have TS runtime parity. reason=the
-  standalone backend reads the Rust exchange catalog and writes local quote rows
-  directly; provider search/symbol resolution, Yahoo dividends, market sync, and
-  portfolio recalculation side effects remain active follow-ups.
+  snapshots, quote CSV check/import, and addon-compatible Yahoo dividends now
+  have TS runtime parity. reason=the standalone backend reads the Rust exchange
+  catalog, writes local quote rows directly, and can call Yahoo dividends
+  through an injectable HTTP path; provider search/symbol resolution, market
+  sync, and portfolio recalculation side effects remain active follow-ups.
 - Actual portfolio job execution and event production remain active follow-ups.
   reason=they depend on market sync, holdings, snapshot, valuation, account,
   health, and FX service parity beyond route-level job enqueue and SSE transport
@@ -446,11 +453,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
   behavior must move with dedicated add-on parity slices.
-- Exchange metadata, provider HTTP clients, Yahoo dividends, quote
-  persistence/import parsing, market sync execution, and portfolio recalculation
-  side effects remain active follow-ups. reason=this slice only adds the guarded
-  HTTP seam, while runtime behavior must move with dedicated market-data and
-  portfolio parity slices.
+- Market-data provider search/resolve, market sync execution, and portfolio
+  recalculation side effects remain active follow-ups. reason=exchange metadata,
+  local quote persistence/import, and Yahoo dividends have TS runtime coverage,
+  while provider discovery/sync and recalculation behavior must move with
+  dedicated market-data and portfolio parity slices.
 
 ## Blockers
 

@@ -10,22 +10,18 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data quote CSV
-check/import runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained market-data Yahoo dividends
+runtime slice to the standalone TS backend:
 
-- Add SQLite-backed `/api/v1/market-data/quotes/check` parsing/validation with
-  Rust-compatible required/optional columns, decimal handling, validation status
-  JSON, asset-ID/display-code/Yahoo-suffix matching, and empty/missing-header
-  errors.
-- Add `/api/v1/market-data/quotes/import` behavior for validated manual quote
-  rows with Rust-compatible revalidation, overwrite/duplicate handling, noon UTC
-  timestamps, deterministic manual IDs, same-day manual ID preservation, and
-  decimal-to-NULL storage semantics.
-- Reuse a shared backend CSV parser so custom-provider CSV source tests and
-  quote import share one quoted-field/line-ending parser.
+- Add `/api/v1/market-data/yahoo/dividends/{symbol}` behavior through the TS
+  market-data service, preserving the Rust Yahoo crumb/cookie handshake,
+  two-year daily chart query, dividend event extraction, 401 crumb reset, and
+  provider/symbol/no-data error mapping.
+- Keep Yahoo dividends injectable/testable so unit coverage does not depend on
+  live Yahoo network calls.
 - Keep remaining high-risk market-data methods optional so provider
-  search/resolve, Yahoo dividends, sync, and recalculation side effects remain
-  `404` until their dedicated parity slices.
+  search/resolve, sync, and recalculation side effects remain `404` until their
+  dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

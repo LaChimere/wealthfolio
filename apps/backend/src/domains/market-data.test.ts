@@ -540,6 +540,144 @@ describe("TS market data domain", () => {
       db.close();
     }
   });
+
+  test("fetches Yahoo dividends with Rust-compatible crumb reuse", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url === "https://fc.yahoo.com") {
+        return Promise.resolve(
+          new Response("", { headers: { "set-cookie": "B=yahoo-cookie; Path=/; Secure" } }),
+        );
+      }
+
+      if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+        expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-cookie");
+        return Promise.resolve(new Response("crumb value"));
+      }
+
+      if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+        expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-cookie");
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("period1")).toBe("1704153600");
+        expect(parsed.searchParams.get("period2")).toBe("1767225600");
+        expect(parsed.searchParams.get("interval")).toBe("1d");
+        expect(parsed.searchParams.get("events")).toBe("div");
+        expect(parsed.searchParams.get("crumb")).toBe("crumb value");
+        return Promise.resolve(
+          Response.json({
+            chart: {
+              result: [
+                {
+                  events: {
+                    dividends: {
+                      latest: { amount: 0.24, date: 1735689600 },
+                      earlier: { amount: 0.22, date: 1704067200 },
+                    },
+                  },
+                },
+              ],
+              error: null,
+            },
+          }),
+        );
+      }
+
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-01T00:00:00Z"),
+    });
+
+    try {
+      expect(await service.fetchYahooDividends?.("AAPL")).toEqual([
+        { amount: 0.22, date: 1704067200 },
+        { amount: 0.24, date: 1735689600 },
+      ]);
+      expect(await service.fetchYahooDividends?.("AAPL")).toHaveLength(2);
+      expect(calls.filter((url) => url === "https://fc.yahoo.com")).toHaveLength(1);
+      expect(
+        calls.filter((url) => url === "https://query1.finance.yahoo.com/v1/test/getcrumb"),
+      ).toHaveLength(1);
+      expect(
+        calls.filter((url) =>
+          url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?"),
+        ),
+      ).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("maps Yahoo dividend errors and clears unauthorized crumbs", async () => {
+    const db = createMarketDataDb();
+    let chartCallCount = 0;
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url === "https://fc.yahoo.com") {
+        return Promise.resolve(
+          new Response("", { headers: { "set-cookie": `B=yahoo-cookie-${chartCallCount}` } }),
+        );
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+        return Promise.resolve(new Response(`crumb-${chartCallCount}`));
+      }
+      if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+        chartCallCount += 1;
+        if (chartCallCount === 1) {
+          return Promise.resolve(new Response("", { status: 401, statusText: "Unauthorized" }));
+        }
+        if (chartCallCount === 2) {
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: null,
+                error: { code: "Not Found", description: "No data found, symbol may be delisted" },
+              },
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            chart: {
+              result: null,
+              error: {
+                code: "Bad Request",
+                description: "Data doesn't exist for startDate = 1704153600",
+              },
+            },
+          }),
+        );
+      }
+
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-01T00:00:00Z"),
+    });
+
+    try {
+      await expect(service.fetchYahooDividends?.("AAPL")).rejects.toThrow(
+        "Provider error: YAHOO - Yahoo returned 401 Unauthorized",
+      );
+      await expect(service.fetchYahooDividends?.("AAPL")).rejects.toThrow("Symbol not found: AAPL");
+      await expect(service.fetchYahooDividends?.("AAPL")).rejects.toThrow("No data for date range");
+      expect(calls.filter((url) => url === "https://fc.yahoo.com")).toHaveLength(2);
+      expect(
+        calls.filter((url) => url === "https://query1.finance.yahoo.com/v1/test/getcrumb"),
+      ).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createMarketDataDb(): Database {

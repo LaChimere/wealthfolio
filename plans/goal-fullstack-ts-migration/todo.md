@@ -128,9 +128,9 @@
     fan-out, valuations, allocations, snapshots, imports, and portfolio
     recalculation side effects are deferred to holdings/portfolio parity slices;
     add-on filesystem extraction, runtime loading, store HTTP, staging I/O, and
-    update behavior are deferred to add-on runtime parity slices; provider HTTP,
-    Yahoo dividends, market sync, and portfolio recalculation behavior are
-    deferred to market-data/portfolio parity slices; activity persistence,
+    update behavior are deferred to add-on runtime parity slices; market-data
+    provider search/resolve, market sync, and portfolio recalculation behavior
+    are deferred to market-data/portfolio parity slices; activity persistence,
     import parsing/mapping/template storage, duplicate lookups, transfer
     mutation behavior, asset preview resolution, and portfolio recalculation
     side effects are deferred to activities/import runtime parity slices; AI
@@ -802,6 +802,16 @@ contract:
   wiring. Focused code review found no actionable issues. Full backend tests and
   full repository check passed with `bun run --cwd apps/backend test` and
   `bun run check`.
+- `pr5-market-data-yahoo-dividends-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend test src/domains/market-data.test.ts`, plus
+  backend type-check and full backend test with
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test`. Coverage includes Rust-compatible Yahoo
+  cookie/crumb reuse, two-year daily chart query parameters, dividend event
+  extraction/order, cached crumb reuse, 401 crumb invalidation, symbol-not-found
+  mapping, and Yahoo chart no-data mapping. Follow-up code review found no
+  remaining actionable issues. Full repository check passed with
+  `bun run check`.
 
 ## Result
 
@@ -825,8 +835,9 @@ contract:
   app utility database restore runtime, contribution-limit deposit calculation
   runtime, alternative-assets runtime, contained asset read/quote-mode/delete
   runtime, asset create/profile mutation runtime, market-data quote CRUD
-  runtime, market-data latest snapshot runtime, and market-data quote CSV
-  check/import runtime slices implemented; broader migration remains active.
+  runtime, market-data latest snapshot runtime, market-data quote CSV
+  check/import runtime, and market-data Yahoo dividends runtime slices
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -839,13 +850,13 @@ contract:
   and recalculation side effects move with portfolio parity slices; asset
   quote-provider interactions, auto-classification, and portfolio recalculation
   side effects move with asset/market-data/portfolio parity slices; market-data
-  provider search/resolve, Yahoo dividends, market sync, and quote-triggered
-  recalculation side effects move with market-data/portfolio parity slices;
-  portfolio metric calculations move with portfolio calculation parity slices;
-  holdings fan-out, valuations, allocations, snapshots, imports, and portfolio
-  recalculation side effects move with holdings/portfolio parity slices; add-on
-  filesystem extraction, runtime loading, store HTTP, staging I/O, and update
-  behavior move with add-on runtime parity slices; activity persistence, import
+  provider search/resolve, market sync, and quote-triggered recalculation side
+  effects move with market-data/portfolio parity slices; portfolio metric
+  calculations move with portfolio calculation parity slices; holdings fan-out,
+  valuations, allocations, snapshots, imports, and portfolio recalculation side
+  effects move with holdings/portfolio parity slices; add-on filesystem
+  extraction, runtime loading, store HTTP, staging I/O, and update behavior move
+  with add-on runtime parity slices; activity persistence, import
   parsing/mapping/template storage, duplicate lookups, transfer mutation
   behavior, asset preview resolution, and portfolio recalculation side effects
   move with activities/import runtime parity slices; AI chat persistence,

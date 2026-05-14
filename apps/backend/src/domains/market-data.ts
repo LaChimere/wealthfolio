@@ -55,6 +55,11 @@ export interface QuoteImport {
   errorMessage: string | null;
 }
 
+export interface YahooDividend {
+  amount: number;
+  date: number;
+}
+
 export interface ResolveSymbolQuoteRequest {
   symbol: string;
   exchangeMic?: string;
@@ -68,7 +73,7 @@ export interface MarketDataService {
   searchSymbol?(query: string): Promise<unknown[]> | unknown[];
   resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<unknown> | unknown;
   getQuoteHistory?(symbol: string): Promise<Quote[]> | Quote[];
-  fetchYahooDividends?(symbol: string): Promise<unknown[]> | unknown[];
+  fetchYahooDividends?(symbol: string): Promise<YahooDividend[]> | YahooDividend[];
   getLatestQuotes?(
     assetIds: string[],
   ): Promise<Record<string, LatestQuoteSnapshot>> | Record<string, LatestQuoteSnapshot>;
@@ -88,6 +93,7 @@ export interface MarketDataService {
 
 export interface MarketDataServiceOptions {
   exchangeCatalogJson?: string;
+  fetch?: typeof fetch;
   now?: () => Date;
 }
 
@@ -169,6 +175,11 @@ interface NormalizedQuoteImport {
   errorMessage: string | null;
 }
 
+interface YahooCrumbData {
+  cookie: string;
+  crumb: string;
+}
+
 const MAX_SYNC_ERRORS = 10;
 const MARKET_CLOSE_GRACE_MINUTES = 60;
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
@@ -188,7 +199,9 @@ export function createMarketDataService(
     ? parseExchangeCatalog(options.exchangeCatalogJson)
     : emptyExchangeCatalog();
   const quoteSyncStateExists = tableExists(db, "quote_sync_state");
+  const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? (() => new Date());
+  let yahooCrumb: YahooCrumbData | null = null;
 
   return {
     getExchanges() {
@@ -217,6 +230,18 @@ export function createMarketDataService(
         quoteSyncStateExists,
         now(),
       );
+    },
+
+    fetchYahooDividends(symbol) {
+      return fetchYahooDividends(symbol, fetchImpl, now(), {
+        get: () => yahooCrumb,
+        set: (crumb) => {
+          yahooCrumb = crumb;
+        },
+        clear: () => {
+          yahooCrumb = null;
+        },
+      });
     },
 
     updateQuote(symbol, quote) {
@@ -471,6 +496,168 @@ function noQuoteReason(
   }
 
   return { code: "NO_DATA", message: "No data available from provider yet" };
+}
+
+async function fetchYahooDividends(
+  symbol: string,
+  fetchImpl: typeof fetch,
+  now: Date,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+    clear: () => void;
+  },
+): Promise<YahooDividend[]> {
+  const period2 = Math.floor(now.getTime() / 1000);
+  const period1 = period2 - 2 * 365 * 24 * 60 * 60;
+  const crumb = await getYahooCrumb(fetchImpl, crumbCache);
+  const url = new URL(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`,
+  );
+  url.searchParams.set("period1", String(period1));
+  url.searchParams.set("period2", String(period2));
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("events", "div");
+  url.searchParams.set("crumb", crumb.crumb);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: yahooHeaders(crumb.cookie),
+    });
+  } catch (error) {
+    throw yahooProviderError(`Failed to fetch dividends: ${errorMessage(error)}`);
+  }
+
+  if (response.status === 401) {
+    crumbCache.clear();
+    throw yahooProviderError(yahooStatusMessage(response));
+  }
+  if (!response.ok) {
+    throw yahooProviderError(yahooStatusMessage(response));
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw yahooProviderError(`Failed to parse dividends: ${errorMessage(error)}`);
+  }
+
+  return parseYahooDividends(payload, symbol);
+}
+
+async function getYahooCrumb(
+  fetchImpl: typeof fetch,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+  },
+): Promise<YahooCrumbData> {
+  const cached = crumbCache.get();
+  if (cached) {
+    return cached;
+  }
+
+  let cookieResponse: Response;
+  try {
+    cookieResponse = await fetchImpl("https://fc.yahoo.com");
+  } catch (error) {
+    throw yahooProviderError(`Failed to get cookie: ${errorMessage(error)}`);
+  }
+  const setCookie = cookieResponse.headers.get("set-cookie");
+  const cookie = setCookie?.split(";")[0]?.trim();
+  if (!cookie) {
+    throw yahooProviderError("Failed to parse Yahoo cookie");
+  }
+
+  let crumbResponse: Response;
+  try {
+    crumbResponse = await fetchImpl("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+      headers: yahooHeaders(cookie),
+    });
+  } catch (error) {
+    throw yahooProviderError(`Failed to get crumb: ${errorMessage(error)}`);
+  }
+  let crumb: string;
+  try {
+    crumb = (await crumbResponse.text()).trim();
+  } catch (error) {
+    throw yahooProviderError(`Failed to read crumb: ${errorMessage(error)}`);
+  }
+  if (!crumb) {
+    throw yahooProviderError("Failed to parse Yahoo crumb");
+  }
+
+  const crumbData = { cookie, crumb };
+  crumbCache.set(crumbData);
+  return crumbData;
+}
+
+function yahooHeaders(cookie: string): HeadersInit {
+  return {
+    Accept: "application/json",
+    Cookie: cookie,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  };
+}
+
+function parseYahooDividends(payload: unknown, symbol: string): YahooDividend[] {
+  if (!isRecord(payload) || !isRecord(payload.chart)) {
+    throw yahooProviderError("Failed to parse dividends: missing chart");
+  }
+
+  const chartError = payload.chart.error;
+  if (isRecord(chartError)) {
+    const code = typeof chartError.code === "string" ? chartError.code : "";
+    const description = typeof chartError.description === "string" ? chartError.description : null;
+    const codeLower = code.toLowerCase();
+    if (description?.includes("Data doesn't exist for startDate")) {
+      throw new Error("No data for date range");
+    }
+    if (codeLower.includes("not found") || codeLower.includes("no data")) {
+      throw new Error(`Symbol not found: ${symbol}`);
+    }
+    const displayDescription = description && description !== "" ? description : code;
+    throw yahooProviderError(`chart error ${code}: ${displayDescription}`);
+  }
+
+  if (!Array.isArray(payload.chart.result) || payload.chart.result.length === 0) {
+    return [];
+  }
+
+  const [firstResult] = payload.chart.result;
+  if (!isRecord(firstResult) || !isRecord(firstResult.events)) {
+    return [];
+  }
+  const { dividends } = firstResult.events;
+  if (!isRecord(dividends)) {
+    return [];
+  }
+
+  return Object.values(dividends)
+    .map((value) => {
+      if (!isRecord(value) || typeof value.amount !== "number" || typeof value.date !== "number") {
+        throw yahooProviderError("Failed to parse dividends: invalid dividend event");
+      }
+      return { amount: value.amount, date: value.date };
+    })
+    .sort((left, right) => left.date - right.date);
+}
+
+function yahooStatusMessage(response: Response): string {
+  const reason = response.statusText.trim();
+  return reason
+    ? `Yahoo returned ${response.status} ${reason}`
+    : `Yahoo returned ${response.status}`;
+}
+
+function yahooProviderError(message: string): Error {
+  return new Error(`Provider error: YAHOO - ${message}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function checkQuoteImports(
