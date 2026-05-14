@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createHealthRepository, createHealthService, DEFAULT_HEALTH_CONFIG } from "./health";
+import type { Account } from "./accounts";
+import type { Settings } from "./settings";
 
 describe("TS health domain", () => {
   test("dismisses, replaces, restores, and lists health issue dismissals", async () => {
@@ -57,6 +59,180 @@ describe("TS health domain", () => {
       db.close();
     }
   });
+
+  test("runs bounded account and timezone health checks with severity rollup", async () => {
+    const db = createHealthDb();
+    const accounts = [
+      account({ id: "account-2", name: "Two", trackingMode: "NOT_SET" }),
+      account({ id: "account-1", name: "One", trackingMode: "NOT_SET" }),
+      account({ id: "inactive", isActive: false, trackingMode: "NOT_SET" }),
+      account({ id: "archived", isArchived: true, trackingMode: "NOT_SET" }),
+      account({ id: "configured", trackingMode: "TRANSACTIONS" }),
+    ];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveNonArchivedAccounts: () =>
+          accounts.filter((candidate) => candidate.isActive && !candidate.isArchived),
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.();
+      expect(status).toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { WARNING: 2 },
+        checkedAt: "2026-05-14T12:00:00.000Z",
+        isStale: false,
+      });
+      expect(status?.issues).toHaveLength(2);
+      expect(status?.issues[0]).toMatchObject({
+        id: expect.stringMatching(/^unconfigured_accounts:/),
+        category: "ACCOUNT_CONFIGURATION",
+        title: "2 accounts need setup",
+        affectedCount: 2,
+        affectedItems: [
+          { id: "account-2", name: "Two", route: "/accounts/account-2" },
+          { id: "account-1", name: "One", route: "/accounts/account-1" },
+        ],
+        navigateAction: { route: "/connect", label: "Configure Accounts" },
+      });
+      expect(status?.issues[1]).toMatchObject({
+        id: expect.stringMatching(/^timezone_missing:/),
+        category: "SETTINGS_CONFIGURATION",
+        title: "Timezone not configured",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches Rust timezone validity and offset-equivalence behavior", async () => {
+    const db = createHealthDb();
+    try {
+      const invalidTimezoneService = createHealthService(
+        createHealthRepository(db),
+        DEFAULT_HEALTH_CONFIG,
+        {
+          settingsProvider: { getSettings: () => settings({ timezone: "Mars/Phobos" }) },
+          now: () => new Date("2026-01-01T12:00:00.000Z"),
+        },
+      );
+      const invalidStatus = await invalidTimezoneService.runHealthChecks?.();
+      expect(invalidStatus?.overallSeverity).toBe("ERROR");
+      expect(invalidStatus?.issues[0]).toMatchObject({
+        id: expect.stringMatching(/^timezone_invalid:/),
+        severity: "ERROR",
+      });
+
+      const equivalentTimezoneService = createHealthService(
+        createHealthRepository(db),
+        DEFAULT_HEALTH_CONFIG,
+        {
+          settingsProvider: { getSettings: () => settings({ timezone: "Europe/Berlin" }) },
+          now: () => new Date("2026-01-01T12:00:00.000Z"),
+        },
+      );
+      const equivalentStatus = await equivalentTimezoneService.runHealthChecks?.("Europe/Paris");
+      expect(equivalentStatus).toMatchObject({
+        overallSeverity: "INFO",
+        issues: [],
+      });
+
+      const mismatchTimezoneService = createHealthService(
+        createHealthRepository(db),
+        DEFAULT_HEALTH_CONFIG,
+        {
+          settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+          now: () => new Date("2026-01-01T12:00:00.000Z"),
+        },
+      );
+      const mismatchStatus = await mismatchTimezoneService.runHealthChecks?.("America/Toronto");
+      expect(mismatchStatus?.issues[0]).toMatchObject({
+        id: expect.stringMatching(/^timezone_mismatch:/),
+        severity: "WARNING",
+        title: "Browser and app timezones differ",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("filters matching dismissals and restores stale dismissal hashes", async () => {
+    const db = createHealthDb();
+    let accounts = [account({ id: "account-1", trackingMode: "NOT_SET" })];
+    const repository = createHealthRepository(db);
+    const service = createHealthService(repository, DEFAULT_HEALTH_CONFIG, {
+      accountProvider: { getActiveNonArchivedAccounts: () => accounts },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      const initialStatus = await service.runHealthChecks?.();
+      const issue = initialStatus?.issues[0];
+      expect(issue).toBeDefined();
+
+      await service.dismissIssue(issue!.id, "stale-hash");
+      const restoredStatus = await service.runHealthChecks?.();
+      expect(restoredStatus?.issues).toHaveLength(1);
+      expect(readDismissalHash(db, issue!.id)).toBeNull();
+
+      await service.dismissIssue(issue!.id, issue!.dataHash);
+      const dismissedStatus = await service.getHealthStatus?.();
+      expect(dismissedStatus).toMatchObject({ issues: [] });
+
+      accounts = [...accounts, account({ id: "account-2", trackingMode: "NOT_SET" })];
+      const changedDataStatus = await service.runHealthChecks?.();
+      expect(changedDataStatus?.issues).toHaveLength(1);
+      expect(changedDataStatus?.issues[0]?.id).not.toBe(issue!.id);
+      expect(changedDataStatus?.issues[0]?.dataHash).not.toBe(issue!.dataHash);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("caches status per client timezone and invalidates cache after mutations", async () => {
+    const db = createHealthDb();
+    let nowMs = Date.parse("2026-05-14T12:00:00.000Z");
+    let settingsReads = 0;
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date(nowMs),
+    });
+
+    try {
+      const first = await service.getHealthStatus?.("America/Toronto");
+      const second = await service.getHealthStatus?.("America/Toronto");
+      expect(settingsReads).toBe(1);
+      expect(second?.checkedAt).toBe(first?.checkedAt);
+
+      await service.getHealthStatus?.("Europe/London");
+      expect(settingsReads).toBe(2);
+
+      nowMs += 6 * 60 * 1000;
+      const stale = await service.getHealthStatus?.("America/Toronto");
+      expect(settingsReads).toBe(2);
+      expect(stale?.isStale).toBe(true);
+
+      const refreshed = await service.runHealthChecks?.("America/Toronto");
+      expect(settingsReads).toBe(3);
+      expect(refreshed?.isStale).toBe(false);
+      expect(refreshed?.checkedAt).toBe("2026-05-14T12:06:00.000Z");
+
+      await service.dismissIssue("not-real", "hash");
+      await service.getHealthStatus?.("America/Toronto");
+      expect(settingsReads).toBe(4);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createHealthDb(): Database {
@@ -79,4 +255,41 @@ function readDismissalHash(db: Database, issueId: string): string | null {
     >("SELECT data_hash FROM health_issue_dismissals WHERE issue_id = ?")
     .get(issueId);
   return row?.data_hash ?? null;
+}
+
+function settings(update: Partial<Settings>): Settings {
+  return {
+    theme: "light",
+    font: "font-mono",
+    baseCurrency: "USD",
+    timezone: "UTC",
+    instanceId: "",
+    onboardingCompleted: false,
+    autoUpdateCheckEnabled: true,
+    menuBarVisible: true,
+    syncEnabled: true,
+    ...update,
+  };
+}
+
+function account(update: Partial<Account>): Account {
+  return {
+    id: "account",
+    name: "Account",
+    accountType: "INVESTMENT",
+    group: null,
+    currency: "USD",
+    isDefault: false,
+    isActive: true,
+    isArchived: false,
+    trackingMode: "TRANSACTIONS",
+    createdAt: "2026-05-14T12:00:00.000Z",
+    updatedAt: "2026-05-14T12:00:00.000Z",
+    platformId: null,
+    accountNumber: null,
+    meta: null,
+    provider: null,
+    providerAccountId: null,
+    ...update,
+  };
 }

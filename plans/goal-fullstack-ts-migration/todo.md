@@ -97,9 +97,10 @@
     `apps/backend/src/runtime.ts`, and `apps/backend/src/http.test.ts`. Sync
     crypto now has a standalone TS runtime implementation for local primitives,
     while device-sync key material side effects remain deferred to device-sync
-    runtime slices. Legacy classification migration status/run now has TS
-    runtime behavior through taxonomy endpoints, while broader health
-    status/check/fix behavior is deferred to health/calculation service slices;
+    runtime slices. Legacy classification migration status/run and bounded
+    account/timezone health status/check behavior now have TS runtime behavior,
+    while broader price/FX/classification/consistency health checks and
+    `/health/fix` behavior are deferred to health/calculation service slices;
     custom provider `test-source` now has TS runtime behavior for external
     source testing; FX converter/history and register-pair behavior now have TS
     runtime parity; market-data exchange list, local quote
@@ -138,19 +139,21 @@
     market-data/portfolio parity slices; symbol-only activity asset creation,
     import execution, provider-backed asset resolution, device-sync outbox
     emission for activity writes, and portfolio recalculation side effects are
-    deferred to activities/import runtime parity slices; AI chat persistence,
-    provider streaming, tool execution, thread storage, tag persistence, and
-    tool-result mutation behavior are deferred to AI runtime parity slices;
-    device-sync integration for sync crypto is deferred to device-sync runtime
-    parity slices; real health checks, market sync fix execution, health cache
-    behavior, and `/health/fix` dispatch are deferred to health/calculation
-    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    feature-flag errors, background workers, device-sync cloud clients, token
-    lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    deferred to activities/import runtime parity slices; AI chat persistence and
+    tool-result mutation now have TS runtime parity, while provider streaming,
+    tool execution, tag persistence, and attachments are deferred to AI runtime
+    parity slices; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; bounded account/timezone health
+    status/checks and cache behavior now have TS runtime parity, while
+    calculation-heavy health checks, market sync fix execution, and
+    `/health/fix` dispatch are deferred to health/calculation parity slices;
+    real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
+    local sync repositories, subscription entitlement checks, event production,
+    E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+    background workers, device-sync cloud clients, token lifecycle, team-key
+    operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -985,6 +988,17 @@ contract:
   AI chat streaming while provider streaming, title generation, tool execution,
   attachment handling, tag mutations, and device-sync outbox writes remain
   deferred.
+- `pr5-health-status-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes bounded account tracking-mode and timezone
+  missing/invalid/mismatch status checks, Rust-compatible timezone
+  offset-equivalence behavior, severity rollups, issue-count response shape,
+  dismissal filtering and cache invalidation, stale-cache responses keyed by
+  client timezone, standalone runtime route wiring for `/api/v1/health/status`
+  and `/api/v1/health/check`, and deferred `/health/fix` behavior while
+  price/quote/FX/classification/consistency checks, market-sync fixes, and
+  Rust-generated dismissal-hash carryover remain deferred.
 
 ## Result
 
@@ -1016,11 +1030,12 @@ contract:
   existing-asset/cash activity create/update/bulk runtime, and existing-asset
   symbol resolution, CSV parse, read-only import asset preview, and read-only
   import validation plus bounded import apply and import transfer-pair auto-link
-  plus import FX pair ensure, save-up goal-plan persistence, and AI chat
-  thread/message persistence slices implemented; broader migration remains
-  active.
-- Follow-ups: continue other low-risk domain slices; health status/check/fix
-  endpoints move with the health/calculation services; retirement goal-plan
+  plus import FX pair ensure, save-up goal-plan persistence, AI chat
+  thread/message persistence, and bounded health status/check slices
+  implemented; broader migration remains active.
+- Follow-ups: continue other low-risk domain slices; broader health
+  price/quote/FX/classification/consistency checks and `/health/fix` execution
+  move with the health/calculation services; retirement goal-plan
   validation/persistence, summary refresh, save-up overview, and retirement
   simulation endpoints move with calculation-heavy goal slices; automatic FX
   market sync/provider HTTP behavior plus broader market-data provider
@@ -1043,12 +1058,11 @@ contract:
   resolution, device-sync outbox emission for activity writes, and portfolio
   recalculation side effects move with activities/import runtime parity slices;
   device-sync integration for sync crypto moves with device-sync parity slices;
-  real health checks, market sync fix execution, health cache behavior, and
-  `/health/fix` dispatch move with health/calculation parity slices; real
-  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
-  sync repositories, subscription entitlement checks, event production, E2EE
-  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  broader health checks, market sync fix execution, and `/health/fix` dispatch
+  move with health/calculation parity slices; real Connect token lifecycle,
+  cloud HTTP clients, broker sync orchestration, local sync repositories,
+  subscription entitlement checks, event production, E2EE enrollment, sync
+  engine, snapshot/upload runtime, feature-flag errors, background workers,
+  device-sync cloud clients, token lifecycle, team-key operations, key material
+  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
+  secret side effects move with Connect/device-sync parity slices.

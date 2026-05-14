@@ -230,7 +230,10 @@ function createServicesFromDatabase(
       accountProvider: accountService,
       baseCurrency,
     }),
-    healthService: createHealthService(createHealthRepository(db)),
+    healthService: createHealthService(createHealthRepository(db), undefined, {
+      accountProvider: accountService,
+      settingsProvider: settingsService,
+    }),
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 66
+turns_used: 67
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T22:29:41+08:00"
+updated_at: "2026-05-14T22:35:54+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -444,13 +444,22 @@ updated_at: "2026-05-14T22:29:41+08:00"
   with Rust-compatible sort/search/cursor pagination, direct-thread empty tag
   behavior, tool-result patch merging, and explicit 501 responses for deferred
   chat streaming.
+- Turn 67: Added bounded health status/check runtime for the standalone TS
+  backend: `/api/v1/health/status` and `/api/v1/health/check` now return
+  SQLite-backed account-configuration and timezone issues with severity rollups,
+  dismissal filtering, stale-cache behavior, client-timezone cache keys, and
+  runtime wiring. Calculation-heavy price/FX/classification/consistency checks,
+  market-sync fixes, `/health/fix` dispatch, and Rust-generated dismissal-hash
+  carryover remain deferred.
 
 ## Deferred items
 
-- Health status/check/fix endpoints remain active follow-ups. reason=taxonomy
-  classification migration status/run now has TS runtime parity, while broader
-  health checks, market sync fixes, caching, and `/health/fix` dispatch depend
-  on holdings, quotes, FX, assets, valuation, and market sync parity.
+- Full health status/fix coverage remains an active follow-up. reason=taxonomy
+  classification migration status/run and bounded account/timezone status/checks
+  now have TS runtime parity, while price staleness, quote sync, FX,
+  classification, data-consistency checks, market sync fixes, `/health/fix`
+  dispatch, and Rust-generated dismissal-hash carryover depend on holdings,
+  quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the
@@ -472,11 +481,12 @@ updated_at: "2026-05-14T22:29:41+08:00"
   preserves Rust response/metadata behavior; portfolio job enqueue and broader
   portfolio recalculation side effects remain deferred to portfolio parity
   slices.
-- Health status/check/fix endpoints remain active follow-ups. reason=legacy
-  classification migration now has TS runtime parity through taxonomy endpoints,
-  while broader health checks and fix execution depend on holdings, quotes, FX,
-  assets, valuation, and market sync parity beyond local health dismissal/config
-  state.
+- Full health status/fix coverage remains an active follow-up. reason=legacy
+  classification migration now has TS runtime parity through taxonomy endpoints
+  and bounded account/timezone status/checks are wired into standalone runtime,
+  while price, quote sync, FX, classification, consistency checks, and fix
+  execution depend on holdings, quotes, FX, assets, valuation, and market sync
+  parity beyond local health dismissal/config state.
 - Market-data exchange list, local quote history/update/delete, latest quote
   snapshots, quote CSV check/import, addon-compatible Yahoo dividends, symbol
   search, and Yahoo-backed symbol quote resolution now have TS runtime parity.
@@ -547,10 +557,11 @@ updated_at: "2026-05-14T22:29:41+08:00"
 - Device-sync integration for sync crypto remains an active follow-up.
   reason=this slice adds the local TS crypto primitives, while cloud/client key
   material side effects must move with dedicated device-sync runtime slices.
-- Real health checks, market sync fix execution, health cache behavior, and
-  `/health/fix` dispatch remain active follow-ups. reason=taxonomy migration
-  endpoints now have TS runtime parity, while broader health runtime behavior
-  must move with dedicated health/calculation parity slices.
+- Full health checks, market sync fix execution, and `/health/fix` dispatch
+  remain active follow-ups. reason=taxonomy migration endpoints and bounded
+  account/timezone status/checks now have TS runtime parity, while
+  calculation-heavy health runtime behavior must move with dedicated
+  health/calculation parity slices.
 - Real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
   local sync repositories, subscription entitlement checks, event production,
   and device-sync enrollment/engine behavior remain active follow-ups.

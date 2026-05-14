@@ -207,10 +207,17 @@ export {
   DEFAULT_HEALTH_CONFIG,
   createHealthRepository,
   createHealthService,
+  type AffectedItem,
   type HealthConfig,
+  type HealthCategory,
+  type HealthIssue,
   type HealthRepository,
   type HealthService,
+  type HealthServiceOptions,
+  type HealthSeverity,
+  type HealthStatus,
   type IssueDismissal,
+  type NavigateAction,
 } from "./domains/health";
 export type {
   HoldingInput,

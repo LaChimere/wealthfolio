@@ -216,6 +216,28 @@ describe("TS backend runtime composition", () => {
         code: "not_implemented",
       });
 
+      const healthStatusResponse = await fetch(`${server.baseUrl}/api/v1/health/status`, {
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(healthStatusResponse.status).toBe(200);
+      await expect(healthStatusResponse.json()).resolves.toMatchObject({
+        overallSeverity: "INFO",
+        issueCounts: {},
+        issues: [],
+        isStale: false,
+      });
+
+      const healthCheckResponse = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "America/Toronto" },
+      });
+      expect(healthCheckResponse.status).toBe(200);
+      await expect(healthCheckResponse.json()).resolves.toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { WARNING: 1 },
+        issues: [expect.objectContaining({ id: expect.stringMatching(/^timezone_mismatch:/) })],
+      });
+
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);
       await expect(appInfoResponse.json()).resolves.toMatchObject({

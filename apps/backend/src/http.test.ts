@@ -1564,12 +1564,29 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(restoreResponse.status).toBe(200);
 
-      const deferredStatusResponse = await handler(
+      const statusResponse = await handler(
         new Request("http://127.0.0.1/api/v1/health/status", {
           headers: { authorization: "Bearer sidecar-token" },
         }),
       );
-      expect(deferredStatusResponse.status).toBe(404);
+      expect(statusResponse.status).toBe(200);
+      await expect(statusResponse.json()).resolves.toMatchObject({
+        overallSeverity: "INFO",
+        issueCounts: {},
+        issues: [],
+      });
+
+      const deferredFixResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/health/fix", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: [] }),
+        }),
+      );
+      expect(deferredFixResponse.status).toBe(404);
     } finally {
       db.close();
     }

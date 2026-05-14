@@ -12,8 +12,9 @@ SQLite data.
 
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
-validation, bounded import-apply, save-up goal-plan persistence, and local AI
-chat thread/message persistence runtime slices in the standalone TS backend:
+validation, bounded import-apply, save-up goal-plan persistence, local AI chat
+thread/message persistence, and bounded health status/check runtime slices in
+the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -51,6 +52,11 @@ chat thread/message persistence runtime slices in the standalone TS backend:
   including thread sort/search/cursor pagination, message reads, thread
   update/delete behavior, tool-result patch merging, and an explicit 501 for
   still-deferred AI chat streaming.
+- Add bounded health status/check runtime for `/api/v1/health/status` and
+  `/api/v1/health/check`, including account tracking-mode issues, timezone
+  missing/invalid/mismatch issues with offset-equivalence parity, severity
+  rollups, dismissal filtering, stale cache behavior, and standalone runtime
+  wiring.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
@@ -71,11 +77,11 @@ beyond mapping/templates/duplicate lookups, read-only search, transfer
 link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
-apply, local AI chat thread/message persistence, sync-crypto/device-sync
-integration, retirement goal-plan validation/persistence or summary refresh,
-real health status/check/fix runtime implementation, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+apply, local AI chat thread/message persistence, bounded health account/timezone
+status/checks, sync-crypto/device-sync integration, retirement goal-plan
+validation/persistence or summary refresh, calculation-heavy health checks or
+`/health/fix` execution, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 
