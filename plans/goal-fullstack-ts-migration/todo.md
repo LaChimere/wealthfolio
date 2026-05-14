@@ -105,17 +105,17 @@
     runtime parity; market-data exchange list, local quote
     history/update/delete, latest quote snapshots, quote CSV check/import, Yahoo
     dividends, symbol search, and resolve-currency now have TS runtime parity;
-    activities import mapping/template storage and duplicate lookup behavior now
-    have TS runtime parity; goals plan writes and calculation endpoints are
-    deferred to calculation-heavy slices; automatic FX market sync/provider HTTP
-    behavior plus broader market-data sync behavior are deferred to
-    calculation/market-data slices; actual portfolio job execution and event
-    production are deferred to portfolio/calculation slices; TS file-backed
-    secret persistence is wired into standalone runtime while real keyring
-    integration is deferred to a runtime/keyring parity slice; AI provider
-    catalog/settings/model-listing runtime behavior is wired into standalone
-    runtime while AI chat execution is deferred to AI runtime parity slices;
-    alternative asset persistence, manual valuation quotes, liability
+    activities import mapping/template storage, duplicate lookup, and read-only
+    search behavior now have TS runtime parity; goals plan writes and
+    calculation endpoints are deferred to calculation-heavy slices; automatic FX
+    market sync/provider HTTP behavior plus broader market-data sync behavior
+    are deferred to calculation/market-data slices; actual portfolio job
+    execution and event production are deferred to portfolio/calculation slices;
+    TS file-backed secret persistence is wired into standalone runtime while
+    real keyring integration is deferred to a runtime/keyring parity slice; AI
+    provider catalog/settings/model-listing runtime behavior is wired into
+    standalone runtime while AI chat execution is deferred to AI runtime parity
+    slices; alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, and holdings reads now have TS runtime
     parity, while portfolio job enqueue and recalculation side effects are
     deferred to portfolio parity slices; asset read/create/profile/quote-mode
@@ -850,6 +850,18 @@ contract:
   identity risks; the implementation guards each activities route method and
   tests row-ID preservation. Device-sync outbox emission for these writes
   remains deferred to sync parity slices.
+- `pr5-activities-search-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/runtime.test.ts`
+  and backend type-check with
+  `bun run --cwd apps/backend type-check -- --pretty false`. Coverage includes
+  Rust-compatible archived-account filtering, keyword/date/instrument/status
+  filters, `needsReview` status semantics, date sorting with created-at
+  tiebreaks, asset-id sort behavior, pagination metadata, cash-activity empty
+  asset mapping, status fallback, amount fallback, invalid metadata fallback,
+  and standalone runtime route wiring. Rubber-duck critique narrowed the slice
+  away from create/update/delete/bulk/transfer writes so asset resolution,
+  decimal patch semantics, device-sync outbox, and portfolio recalculation stay
+  deferred to dedicated parity slices.
 
 ## Result
 
@@ -875,9 +887,9 @@ contract:
   runtime, asset create/profile mutation runtime, market-data quote CRUD
   runtime, market-data latest snapshot runtime, market-data quote CSV
   check/import runtime, market-data Yahoo dividends runtime, market-data symbol
-  search and resolve-currency runtime, and activities import
-  mapping/template/duplicate lookup runtime slices implemented; broader
-  migration remains active.
+  search and resolve-currency runtime, activities import
+  mapping/template/duplicate lookup runtime, and read-only activity search
+  runtime slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move

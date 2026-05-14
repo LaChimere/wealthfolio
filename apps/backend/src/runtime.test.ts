@@ -128,7 +128,11 @@ describe("TS backend runtime composition", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ page: 0, pageSize: 25 }),
       });
-      expect(activitySearchResponse.status).toBe(404);
+      expect(activitySearchResponse.status).toBe(200);
+      await expect(activitySearchResponse.json()).resolves.toEqual({
+        data: [],
+        meta: { totalRowCount: 0 },
+      });
 
       const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
       expect(aiProvidersResponse.status).toBe(200);

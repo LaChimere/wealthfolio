@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import Decimal from "decimal.js";
+
+Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 export const ACTIVITY_IMPORT_CONTEXT_KIND = "ACTIVITY";
 export const CSV_ACTIVITY_CONTEXT_KIND = "CSV_ACTIVITY";
@@ -57,8 +60,49 @@ export interface ActivityParseCsvRequest {
   config: Record<string, unknown>;
 }
 
+export interface ActivityDetails {
+  id: string;
+  accountId: string;
+  assetId: string;
+  activityType: string;
+  subtype: string | null;
+  status: string;
+  date: string;
+  quantity: string | null;
+  unitPrice: string | null;
+  currency: string;
+  fee: string | null;
+  amount: string | null;
+  needsReview: boolean;
+  comment: string | null;
+  fxRate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  accountName: string;
+  accountCurrency: string;
+  assetSymbol: string;
+  assetName: string | null;
+  exchangeMic: string | null;
+  assetPricingMode: string;
+  instrumentType: string | null;
+  sourceSystem: string | null;
+  sourceRecordId: string | null;
+  sourceGroupId: string | null;
+  idempotencyKey: string | null;
+  importRunId: string | null;
+  isUserModified: boolean;
+  metadata: unknown | null;
+}
+
+export interface ActivitySearchResponse {
+  data: ActivityDetails[];
+  meta: { totalRowCount: number };
+}
+
 export interface ActivityService {
-  searchActivities?(request: ActivitySearchRequest): Promise<unknown> | unknown;
+  searchActivities?(
+    request: ActivitySearchRequest,
+  ): Promise<ActivitySearchResponse> | ActivitySearchResponse;
   createActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
   updateActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
   bulkMutateActivities?(request: Record<string, unknown>): Promise<unknown> | unknown;
@@ -128,6 +172,40 @@ interface DuplicateRow {
   idempotency_key: string | null;
 }
 
+interface ActivityDetailsRow {
+  id: string;
+  account_id: string;
+  asset_id: string | null;
+  activity_type: string;
+  subtype: string | null;
+  status: string;
+  date: string;
+  quantity: string | null;
+  unit_price: string | null;
+  currency: string;
+  fee: string | null;
+  amount: string | null;
+  notes: string | null;
+  fx_rate: string | null;
+  needs_review: number;
+  is_user_modified: number;
+  source_system: string | null;
+  source_record_id: string | null;
+  source_group_id: string | null;
+  idempotency_key: string | null;
+  import_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+  account_name: string;
+  account_currency: string;
+  asset_symbol: string | null;
+  asset_name: string | null;
+  exchange_mic: string | null;
+  asset_pricing_mode: string | null;
+  instrument_type: string | null;
+  metadata: string | null;
+}
+
 const SQLITE_MAX_PARAMS_CHUNK = 500;
 const ACTIVITY_TYPES = [
   "BUY",
@@ -147,6 +225,73 @@ const ACTIVITY_TYPES = [
 
 export function createActivityService(db: Database): ActivityService {
   return {
+    searchActivities(request) {
+      const pageSize = request.pageSize;
+      const offset = request.page * pageSize;
+      const { whereSql, params } = activitySearchWhereClause(request);
+      const totalRow =
+        db
+          .query<{ count: number }, (string | number)[]>(
+            `
+              SELECT COUNT(*) AS count
+              FROM activities
+              INNER JOIN accounts ON activities.account_id = accounts.id
+              LEFT JOIN assets ON activities.asset_id = assets.id
+              ${whereSql}
+            `,
+          )
+          .get(...params)?.count ?? 0;
+      const rows = db
+        .query<ActivityDetailsRow, (string | number)[]>(
+          `
+            SELECT
+              activities.id,
+              activities.account_id,
+              activities.asset_id,
+              activities.activity_type,
+              activities.subtype,
+              activities.status,
+              activities.activity_date AS date,
+              activities.quantity,
+              activities.unit_price,
+              activities.currency,
+              activities.fee,
+              activities.amount,
+              activities.notes,
+              activities.fx_rate,
+              activities.needs_review,
+              activities.is_user_modified,
+              activities.source_system,
+              activities.source_record_id,
+              activities.source_group_id,
+              activities.idempotency_key,
+              activities.import_run_id,
+              activities.created_at,
+              activities.updated_at,
+              accounts.name AS account_name,
+              accounts.currency AS account_currency,
+              assets.display_code AS asset_symbol,
+              assets.name AS asset_name,
+              assets.instrument_exchange_mic AS exchange_mic,
+              assets.quote_mode AS asset_pricing_mode,
+              assets.instrument_type,
+              activities.metadata
+            FROM activities
+            INNER JOIN accounts ON activities.account_id = accounts.id
+            LEFT JOIN assets ON activities.asset_id = assets.id
+            ${whereSql}
+            ${activitySearchOrderBy(request.sort)}
+            LIMIT ? OFFSET ?
+          `,
+        )
+        .all(...params, pageSize, offset);
+
+      return {
+        data: rows.map(activityDetailsFromRow),
+        meta: { totalRowCount: totalRow },
+      };
+    },
+
     async getImportMapping(accountId, contextKind) {
       const normalizedContextKind = normalizeContextKindValue(contextKind);
       const row = db
@@ -341,6 +486,144 @@ export function normalizeContextKindValue(raw: string): string {
     return CSV_HOLDINGS_CONTEXT_KIND;
   }
   return raw;
+}
+
+function activitySearchWhereClause(request: ActivitySearchRequest): {
+  whereSql: string;
+  params: (string | number)[];
+} {
+  const clauses = ["accounts.is_archived = 0"];
+  const params: (string | number)[] = [];
+
+  addInClause(clauses, params, "activities.account_id", request.accountIds);
+  addInClause(clauses, params, "activities.activity_type", request.activityTypes);
+  if (request.assetIdKeyword !== undefined) {
+    const pattern = `%${request.assetIdKeyword}%`;
+    clauses.push(
+      "(assets.id LIKE ? OR assets.name LIKE ? OR assets.display_code LIKE ? OR activities.notes LIKE ?)",
+    );
+    params.push(pattern, pattern, pattern, pattern);
+  }
+  if (request.needsReview !== undefined) {
+    clauses.push(
+      request.needsReview ? "activities.status = 'DRAFT'" : "activities.status != 'DRAFT'",
+    );
+  }
+  if (request.dateFrom !== undefined) {
+    clauses.push("activities.activity_date >= ?");
+    params.push(`${request.dateFrom}T00:00:00`);
+  }
+  if (request.dateTo !== undefined) {
+    clauses.push("activities.activity_date <= ?");
+    params.push(`${request.dateTo}T23:59:59`);
+  }
+  addInClause(clauses, params, "assets.instrument_type", request.instrumentTypes);
+
+  return { whereSql: `WHERE ${clauses.join(" AND ")}`, params };
+}
+
+function addInClause(
+  clauses: string[],
+  params: (string | number)[],
+  column: string,
+  values: string[] | undefined,
+): void {
+  if (values === undefined) {
+    return;
+  }
+  if (values.length === 0) {
+    clauses.push("1 = 0");
+    return;
+  }
+  clauses.push(`${column} IN (${values.map(() => "?").join(", ")})`);
+  params.push(...values);
+}
+
+function activitySearchOrderBy(sort: ActivitySearchRequest["sort"]): string {
+  if (!sort) {
+    return "ORDER BY activities.activity_date DESC, activities.created_at ASC";
+  }
+  const direction = sort.desc ? "DESC" : "ASC";
+  switch (sort.id) {
+    case "date":
+      return `ORDER BY activities.activity_date ${direction}, activities.created_at ASC`;
+    case "activityType":
+      return `ORDER BY activities.activity_type ${direction}`;
+    case "assetSymbol":
+      return `ORDER BY activities.asset_id ${direction}`;
+    case "accountName":
+      return `ORDER BY accounts.name ${direction}`;
+    default:
+      return "ORDER BY activities.activity_date DESC, activities.created_at ASC";
+  }
+}
+
+function activityDetailsFromRow(row: ActivityDetailsRow): ActivityDetails {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    assetId: row.asset_id ?? "",
+    activityType: row.activity_type,
+    subtype: row.subtype,
+    status: normalizeActivityStatus(row.status),
+    date: row.date,
+    quantity: row.quantity,
+    unitPrice: row.unit_price,
+    currency: row.currency,
+    fee: row.fee,
+    amount: row.amount ?? fallbackActivityAmount(row.quantity, row.unit_price),
+    needsReview: row.needs_review !== 0,
+    comment: row.notes,
+    fxRate: row.fx_rate,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    accountName: row.account_name,
+    accountCurrency: row.account_currency,
+    assetSymbol: row.asset_symbol ?? "",
+    assetName: row.asset_name,
+    exchangeMic: row.exchange_mic,
+    assetPricingMode: row.asset_pricing_mode ?? "MARKET",
+    instrumentType: row.instrument_type,
+    sourceSystem: row.source_system,
+    sourceRecordId: row.source_record_id,
+    sourceGroupId: row.source_group_id,
+    idempotencyKey: row.idempotency_key,
+    importRunId: row.import_run_id,
+    isUserModified: row.is_user_modified !== 0,
+    metadata: parseJsonOrNull(row.metadata),
+  };
+}
+
+function normalizeActivityStatus(status: string): string {
+  return status === "POSTED" || status === "PENDING" || status === "DRAFT" || status === "VOID"
+    ? status
+    : "POSTED";
+}
+
+function fallbackActivityAmount(quantity: string | null, unitPrice: string | null): string | null {
+  if (quantity === null || unitPrice === null) {
+    return null;
+  }
+  return decimalOrZero(quantity).mul(decimalOrZero(unitPrice)).toString();
+}
+
+function decimalOrZero(value: string): Decimal {
+  try {
+    return new Decimal(value);
+  } catch {
+    return new Decimal(0);
+  }
+}
+
+function parseJsonOrNull(value: string | null): unknown | null {
+  if (value === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeImportMappingInput(input: Record<string, unknown>): ImportMappingData {

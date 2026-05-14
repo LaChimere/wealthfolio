@@ -10,17 +10,15 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained activities import
-mapping/template runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a read-only activities search runtime
+slice to the standalone TS backend:
 
-- Add TS SQLite runtime behavior for `/api/v1/activities/import/mapping`,
-  `/templates`, `/templates/item`, `/templates/link`, and `/check-duplicates`.
-- Preserve Rust-compatible legacy context normalization, default mapping data,
-  camelCase config JSON storage, account-local template IDs, link row-id
-  preservation, template kind filtering/order, missing-template default
-  responses, and duplicate idempotency-key lookup behavior.
-- Keep still-deferred activity search/create/update/delete/import/CSV parse,
-  transfer mutation, asset preview, device-sync outbox emission, and portfolio
+- Add TS SQLite runtime behavior for `/api/v1/activities/search`.
+- Preserve Rust-compatible archived-account filtering, account/type/keyword/date
+  and instrument filters, `needsReview` status semantics, sort behavior,
+  pagination metadata, and `ActivityDetails` response mapping.
+- Keep still-deferred activity create/update/delete/import/CSV parse, transfer
+  mutation, asset preview, device-sync outbox emission, and portfolio
   recalculation side effects optional/404 until dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
@@ -32,9 +30,10 @@ provider sync, portfolio recalculation side effects, keyring storage, AI chat
 runtime, quote-provider interactions, auto-classification side effects,
 portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
-lookups, sync-crypto/device-sync integration, real health status/check/fix
-runtime implementation, real Connect runtime implementation, real device-sync
-runtime implementation, or Rust runtime removal is in scope for this slice.
+lookups and read-only search, sync-crypto/device-sync integration, real health
+status/check/fix runtime implementation, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 

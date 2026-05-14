@@ -1,9 +1,138 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createActivityService } from "./activities";
+import { createActivityService, type ActivitySearchRequest } from "./activities";
 
 describe("TS activities import domain", () => {
+  test("searches activities with Rust-compatible filters, ordering, and detail mapping", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+    const search = (request: ActivitySearchRequest) =>
+      Promise.resolve(service.searchActivities!(request));
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAccount(db, { id: "account-2", name: "Beta", currency: "CAD" });
+      insertAccount(db, { id: "archived", name: "Archived", currency: "USD", isArchived: true });
+      insertAsset(db, {
+        id: "asset-z",
+        displayCode: "AAA",
+        name: "Alphabet Alias",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, {
+        id: "asset-a",
+        displayCode: "ZZZ",
+        name: "Zulu Alias",
+        instrumentType: "EQUITY",
+      });
+      insertActivity(db, {
+        id: "posted-needs-review-column",
+        accountId: "account-1",
+        assetId: "asset-z",
+        activityType: "BUY",
+        status: "POSTED",
+        activityDate: "2024-01-15T10:00:00Z",
+        quantity: "2.5",
+        unitPrice: "4",
+        amount: null,
+        notes: "provider note",
+        needsReview: true,
+        metadata: JSON.stringify({ custom: true }),
+        createdAt: "2024-01-15T10:00:02Z",
+      });
+      insertActivity(db, {
+        id: "unknown-status",
+        accountId: "account-1",
+        assetId: "asset-a",
+        activityType: "SELL",
+        status: "BROKEN",
+        activityDate: "2024-01-15T10:00:00Z",
+        notes: "other note",
+        metadata: "not-json",
+        createdAt: "2024-01-15T10:00:01Z",
+      });
+      insertActivity(db, {
+        id: "draft-cash",
+        accountId: "account-1",
+        assetId: null,
+        activityType: "DEPOSIT",
+        status: "DRAFT",
+        activityDate: "2024-01-15T23:59:58Z",
+        amount: "100",
+        notes: "cash memo",
+      });
+      insertActivity(db, {
+        id: "archived-row",
+        accountId: "archived",
+        activityType: "BUY",
+        status: "POSTED",
+        activityDate: "2024-01-15T11:00:00Z",
+      });
+
+      await expect(
+        search({
+          page: 0,
+          pageSize: 2,
+          dateFrom: "2024-01-15",
+          dateTo: "2024-01-15",
+        }),
+      ).resolves.toEqual({
+        data: [
+          expect.objectContaining({
+            id: "draft-cash",
+            assetId: "",
+            assetSymbol: "",
+            status: "DRAFT",
+            metadata: null,
+          }),
+          expect.objectContaining({
+            id: "unknown-status",
+            status: "POSTED",
+            assetSymbol: "ZZZ",
+            assetPricingMode: "MARKET",
+            metadata: null,
+          }),
+        ],
+        meta: { totalRowCount: 3 },
+      });
+
+      await expect(
+        search({
+          page: 0,
+          pageSize: 10,
+          sort: { id: "assetSymbol", desc: false },
+          instrumentTypes: ["EQUITY"],
+        }).then((response) => response.data.map((activity) => activity.id)),
+      ).resolves.toEqual(["unknown-status", "posted-needs-review-column"]);
+
+      await expect(
+        search({
+          page: 0,
+          pageSize: 10,
+          needsReview: true,
+        }).then((response) => response.data.map((activity) => activity.id)),
+      ).resolves.toEqual(["draft-cash"]);
+
+      await expect(
+        search({
+          page: 0,
+          pageSize: 10,
+          assetIdKeyword: "provider note",
+        }).then((response) => response.data),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: "posted-needs-review-column",
+          amount: "10",
+          metadata: { custom: true },
+          needsReview: true,
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns Rust-compatible default import mapping with legacy context normalization", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -229,7 +358,48 @@ function createActivitiesDb(): Database {
 
     CREATE TABLE activities (
       id TEXT PRIMARY KEY NOT NULL,
-      idempotency_key TEXT
+      account_id TEXT NOT NULL,
+      asset_id TEXT,
+      activity_type TEXT NOT NULL,
+      activity_type_override TEXT,
+      source_type TEXT,
+      subtype TEXT,
+      status TEXT NOT NULL DEFAULT 'POSTED',
+      activity_date TEXT NOT NULL,
+      settlement_date TEXT,
+      quantity TEXT,
+      unit_price TEXT,
+      amount TEXT,
+      fee TEXT,
+      currency TEXT NOT NULL,
+      fx_rate TEXT,
+      notes TEXT,
+      metadata TEXT,
+      source_system TEXT,
+      source_record_id TEXT,
+      source_group_id TEXT,
+      idempotency_key TEXT,
+      import_run_id TEXT,
+      is_user_modified INTEGER NOT NULL DEFAULT 0,
+      needs_review INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE accounts (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      is_archived INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE assets (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT,
+      display_code TEXT,
+      instrument_exchange_mic TEXT,
+      quote_mode TEXT,
+      instrument_type TEXT
     );
 
     CREATE UNIQUE INDEX ux_activities_idempotency_key
@@ -266,8 +436,119 @@ function insertTemplate(
   );
 }
 
-function insertActivity(db: Database, id: string, idempotencyKey: string | null): void {
-  db.query("INSERT INTO activities (id, idempotency_key) VALUES (?, ?)").run(id, idempotencyKey);
+interface AccountFixture {
+  id: string;
+  name: string;
+  currency: string;
+  isArchived?: boolean;
+}
+
+interface AssetFixture {
+  id: string;
+  displayCode: string;
+  name: string;
+  instrumentType?: string | null;
+  quoteMode?: string | null;
+  exchangeMic?: string | null;
+}
+
+interface ActivityFixture {
+  id: string;
+  accountId?: string;
+  assetId?: string | null;
+  activityType?: string;
+  subtype?: string | null;
+  status?: string;
+  activityDate?: string;
+  quantity?: string | null;
+  unitPrice?: string | null;
+  amount?: string | null;
+  fee?: string | null;
+  currency?: string;
+  fxRate?: string | null;
+  notes?: string | null;
+  metadata?: string | null;
+  sourceSystem?: string | null;
+  sourceRecordId?: string | null;
+  sourceGroupId?: string | null;
+  idempotencyKey?: string | null;
+  importRunId?: string | null;
+  isUserModified?: boolean;
+  needsReview?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+function insertAccount(db: Database, account: AccountFixture): void {
+  db.query(
+    `
+      INSERT INTO accounts (id, name, currency, is_archived)
+      VALUES (?, ?, ?, ?)
+    `,
+  ).run(account.id, account.name, account.currency, account.isArchived ? 1 : 0);
+}
+
+function insertAsset(db: Database, asset: AssetFixture): void {
+  db.query(
+    `
+      INSERT INTO assets (
+        id, name, display_code, instrument_exchange_mic, quote_mode, instrument_type
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    asset.id,
+    asset.name,
+    asset.displayCode,
+    asset.exchangeMic ?? null,
+    asset.quoteMode ?? "MARKET",
+    asset.instrumentType ?? null,
+  );
+}
+
+function insertActivity(
+  db: Database,
+  activityOrId: ActivityFixture | string,
+  idempotencyKey?: string | null,
+): void {
+  const activity =
+    typeof activityOrId === "string" ? { id: activityOrId, idempotencyKey } : activityOrId;
+  db.query(
+    `
+      INSERT INTO activities (
+        id, account_id, asset_id, activity_type, subtype, status, activity_date,
+        quantity, unit_price, amount, fee, currency, fx_rate, notes, metadata,
+        source_system, source_record_id, source_group_id, idempotency_key, import_run_id,
+        is_user_modified, needs_review, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    activity.id,
+    activity.accountId ?? "account-1",
+    activity.assetId ?? null,
+    activity.activityType ?? "BUY",
+    activity.subtype ?? null,
+    activity.status ?? "POSTED",
+    activity.activityDate ?? "2024-01-01T00:00:00Z",
+    activity.quantity ?? null,
+    activity.unitPrice ?? null,
+    activity.amount ?? null,
+    activity.fee ?? null,
+    activity.currency ?? "USD",
+    activity.fxRate ?? null,
+    activity.notes ?? null,
+    activity.metadata ?? null,
+    activity.sourceSystem ?? "MANUAL",
+    activity.sourceRecordId ?? null,
+    activity.sourceGroupId ?? null,
+    activity.idempotencyKey ?? null,
+    activity.importRunId ?? null,
+    activity.isUserModified ? 1 : 0,
+    activity.needsReview ? 1 : 0,
+    activity.createdAt ?? "2024-01-01T00:00:00Z",
+    activity.updatedAt ?? "2024-01-01T00:00:00Z",
+  );
 }
 
 function readLinkId(db: Database, accountId: string, contextKind: string): string | null {
