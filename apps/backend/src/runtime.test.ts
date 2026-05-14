@@ -152,6 +152,24 @@ describe("TS backend runtime composition", () => {
         rowCount: 1,
       });
 
+      const activityImportCheckResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/check`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            activities: [{ activityType: "DEPOSIT", date: "2025-01-01", amount: "10" }],
+          }),
+        },
+      );
+      expect(activityImportCheckResponse.status).toBe(200);
+      await expect(activityImportCheckResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          isValid: false,
+          errors: { accountId: ["Account is required before running backend validation."] },
+        }),
+      ]);
+
       const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
       expect(aiProvidersResponse.status).toBe(200);
       await expect(aiProvidersResponse.json()).resolves.toMatchObject({

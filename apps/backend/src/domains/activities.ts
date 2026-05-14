@@ -322,6 +322,7 @@ interface ActivityRow {
 
 interface AccountRow {
   id: string;
+  name: string;
   currency: string;
 }
 
@@ -604,6 +605,10 @@ export function createActivityService(db: Database): ActivityService {
 
     previewImportAssets(candidates) {
       return candidates.map((candidate, index) => previewImportAsset(db, candidate, index));
+    },
+
+    checkActivitiesImport(activities) {
+      return checkActivitiesImportRows(db, activities);
     },
 
     linkTransferActivities(activityAId, activityBId) {
@@ -1408,6 +1413,212 @@ function addFieldMessage(messages: Record<string, string[]>, field: string, mess
   messages[field] = [...(messages[field] ?? []), message];
 }
 
+function checkActivitiesImportRows(
+  db: Database,
+  activities: unknown[],
+): Array<Record<string, unknown>> {
+  const checked = activities.map((activity, index) => checkActivityImportRow(db, activity, index));
+  const firstIndexByKey = new Map<string, number>();
+  const existingByKey = new Map<string, string>();
+
+  for (const [index, row] of checked.entries()) {
+    if (!row.idempotencyKey || hasMessageMapEntries(row.activity.errors)) {
+      continue;
+    }
+    const key = row.idempotencyKey;
+    if (!firstIndexByKey.has(key)) {
+      firstIndexByKey.set(key, index);
+      const existingId = findActivityIdByIdempotencyKey(db, key);
+      if (existingId) {
+        existingByKey.set(key, existingId);
+      }
+    }
+  }
+
+  for (const [index, row] of checked.entries()) {
+    if (!row.idempotencyKey || hasMessageMapEntries(row.activity.errors)) {
+      continue;
+    }
+    const existingId = existingByKey.get(row.idempotencyKey);
+    if (existingId) {
+      addImportWarning(row.activity, "_duplicate", "Duplicate activity already exists");
+      row.activity.duplicateOfId = existingId;
+      continue;
+    }
+    const firstIndex = firstIndexByKey.get(row.idempotencyKey);
+    if (firstIndex !== undefined && firstIndex !== index) {
+      const duplicateLineNumber =
+        numericField(checked[firstIndex]?.activity.lineNumber) ?? firstIndex + 1;
+      addImportWarning(
+        row.activity,
+        "_duplicate",
+        `Duplicate of line ${duplicateLineNumber} in this import batch`,
+      );
+      row.activity.duplicateOfLineNumber = duplicateLineNumber;
+    }
+  }
+
+  return checked.map(({ activity }) => finalizeImportActivity(activity));
+}
+
+function checkActivityImportRow(
+  db: Database,
+  input: unknown,
+  index: number,
+): { activity: Record<string, unknown>; idempotencyKey: string | null } {
+  const activity = isRecord(input) ? { ...input } : {};
+  const errors = cloneMessageMap(activity.errors);
+  const accountId = optionalTrimmedString(activity.accountId);
+  const activityType = optionalTrimmedString(activity.activityType);
+  const subtype = optionalTrimmedString(activity.subtype);
+  const symbol = optionalTrimmedString(activity.symbol);
+  const assetId = optionalTrimmedString(activity.assetId);
+  let account: AccountRow | null = null;
+
+  activity.lineNumber = numericField(activity.lineNumber) ?? index + 1;
+
+  if (!accountId) {
+    addFieldMessage(errors, "accountId", "Account is required before running backend validation.");
+  } else {
+    try {
+      account = readAccountRow(db, accountId);
+      activity.accountId = account.id;
+      if (!optionalTrimmedString(activity.accountName)) {
+        activity.accountName = account.name;
+      }
+    } catch (error) {
+      addFieldMessage(errors, "general", `Validation failed: ${errorMessage(error)}`);
+    }
+  }
+  if (!activityType) {
+    addFieldMessage(errors, "activityType", "Activity type is required.");
+  }
+
+  if (Object.keys(errors).length > 0 || !accountId || !activityType) {
+    activity.isValid = false;
+    activity.errors = errors;
+    return { activity, idempotencyKey: null };
+  }
+
+  const needsAsset = requiresAssetIdentity(activityType, subtype ?? null);
+  const createInput: Record<string, unknown> = {
+    id: optionalTrimmedString(activity.id),
+    accountId,
+    activityType,
+    subtype,
+    activityDate: activity.date ?? activity.activityDate,
+    quantity: activity.quantity,
+    unitPrice: activity.unitPrice,
+    amount: activity.amount,
+    fee: activity.fee,
+    currency: optionalTrimmedString(activity.currency) ?? account?.currency,
+    comment: activity.comment,
+    fxRate: activity.fxRate,
+  };
+  if (assetId) {
+    createInput.asset = { id: assetId };
+  } else if (needsAsset && symbol) {
+    createInput.asset = {
+      symbol,
+      exchangeMic: optionalTrimmedString(activity.exchangeMic),
+      instrumentType: optionalTrimmedString(activity.instrumentType),
+      quoteCcy: optionalTrimmedString(activity.quoteCcy),
+    };
+  }
+
+  try {
+    const normalized = normalizeActivityCreateInput(db, createInput);
+    activity.id = optionalTrimmedString(activity.id) ?? normalized.id;
+    activity.accountId = normalized.accountId;
+    activity.date = normalized.activityDate;
+    activity.currency = normalized.currency;
+    activity.amount = normalized.amount?.toString() ?? null;
+    activity.quantity = normalized.quantity?.toString() ?? null;
+    activity.unitPrice = normalized.unitPrice?.toString() ?? null;
+    activity.fee = normalized.fee?.toString() ?? null;
+    activity.fxRate = normalized.fxRate?.toString() ?? null;
+    activity.assetId = normalized.assetId ?? undefined;
+    if (normalized.assetId === null && !needsAsset) {
+      activity.symbol = "";
+      activity.exchangeMic = undefined;
+      activity.quoteCcy = undefined;
+      activity.instrumentType = undefined;
+    }
+    activity.isValid = true;
+    activity.errors = errors;
+    return { activity, idempotencyKey: normalized.idempotencyKey };
+  } catch (error) {
+    addFieldMessage(errors, importValidationField(error), errorMessage(error));
+    activity.isValid = false;
+    activity.errors = errors;
+    return { activity, idempotencyKey: null };
+  }
+}
+
+function finalizeImportActivity(activity: Record<string, unknown>): Record<string, unknown> {
+  if (!hasMessageMapEntries(activity.errors)) {
+    delete activity.errors;
+    activity.isValid = true;
+  } else {
+    activity.isValid = false;
+  }
+  if (!hasMessageMapEntries(activity.warnings)) {
+    delete activity.warnings;
+  }
+  return activity;
+}
+
+function addImportWarning(activity: Record<string, unknown>, field: string, message: string): void {
+  const warnings = cloneMessageMap(activity.warnings);
+  addFieldMessage(warnings, field, message);
+  activity.warnings = warnings;
+}
+
+function cloneMessageMap(value: unknown): Record<string, string[]> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const messages: Record<string, string[]> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!Array.isArray(entry)) {
+      continue;
+    }
+    const strings = entry.filter((message): message is string => typeof message === "string");
+    if (strings.length > 0) {
+      messages[key] = strings;
+    }
+  }
+  return messages;
+}
+
+function hasMessageMapEntries(value: unknown): boolean {
+  return Object.keys(cloneMessageMap(value)).length > 0;
+}
+
+function numericField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function importValidationField(error: unknown): string {
+  const message = errorMessage(error);
+  if (/account/i.test(message)) {
+    return "accountId";
+  }
+  if (/symbol|asset/i.test(message)) {
+    return "symbol";
+  }
+  if (/date/i.test(message)) {
+    return "date";
+  }
+  if (/quantity/i.test(message)) {
+    return "quantity";
+  }
+  if (/price|amount|cash|split/i.test(message)) {
+    return "amount";
+  }
+  return "general";
+}
+
 function normalizeActivityCreateInput(
   db: Database,
   input: Record<string, unknown>,
@@ -1628,7 +1839,7 @@ function readAccountRow(db: Database, accountId: string): AccountRow {
   const row = db
     .query<AccountRow, [string]>(
       `
-        SELECT id, currency
+        SELECT id, name, currency
         FROM accounts
         WHERE id = ?
       `,

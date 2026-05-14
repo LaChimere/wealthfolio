@@ -355,6 +355,127 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("checks import activities read-only with asset resolution and duplicate warnings", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      const existing = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+
+      const checked = service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "aapl",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "25",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 2,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "25",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 3,
+        },
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-17",
+          symbol: "UNKNOWN",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 4,
+        },
+        {
+          activityType: "DEPOSIT",
+          date: "2025-01-18",
+          amount: "10",
+          isDraft: true,
+          lineNumber: 5,
+        },
+      ]);
+
+      expect(checked).toHaveLength(5);
+      expect(checked?.[0]).toMatchObject({
+        accountId: "account-1",
+        accountName: "Alpha",
+        assetId: "AAPL",
+        isValid: true,
+        duplicateOfId: existing.id,
+        warnings: { _duplicate: ["Duplicate activity already exists"] },
+      });
+      expect(checked?.[1]).toMatchObject({
+        accountId: "account-1",
+        accountName: "Alpha",
+        symbol: "",
+        isValid: true,
+      });
+      expect(checked?.[1]).not.toHaveProperty("errors");
+      expect(checked?.[1]).not.toHaveProperty("warnings");
+      expect(checked?.[2]).toMatchObject({
+        accountId: "account-1",
+        accountName: "Alpha",
+        symbol: "",
+        isValid: true,
+        duplicateOfLineNumber: 2,
+        warnings: { _duplicate: ["Duplicate of line 2 in this import batch"] },
+      });
+      expect(checked?.[3]).toMatchObject({
+        isValid: false,
+        errors: {
+          symbol: ["Symbol-based asset creation is not yet implemented in the TS runtime"],
+        },
+      });
+      expect(checked?.[4]).toMatchObject({
+        isValid: false,
+        errors: { accountId: ["Account is required before running backend validation."] },
+      });
+      expect(readActivityCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("creates activities with Rust-compatible defaults, normalization, and idempotency", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1404,6 +1525,12 @@ function readActivityValue(
     >(`SELECT ${column} AS value FROM activities WHERE id = ?`)
     .get(activityId);
   return row?.value ?? null;
+}
+
+function readActivityCount(db: Database): number {
+  return (
+    db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count ?? 0
+  );
 }
 
 function readLinkId(db: Database, accountId: string, contextKind: string): string | null {

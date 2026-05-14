@@ -930,6 +930,14 @@ contract:
   ambiguity-safe duplicate-symbol errors, and no provider fetches or writes
   while import execution, asset creation, device-sync outbox, and portfolio
   recalculation remain deferred.
+- `pr5-activities-import-check-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/runtime.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check`. Coverage includes
+  mapped-row account validation, existing-asset use, bounded symbol resolution,
+  Rust-compatible create normalization, existing duplicate idempotency-key
+  warnings, in-batch duplicate warnings, and standalone runtime route wiring
+  while import execution, asset creation, device-sync outbox, and portfolio
+  recalculation remain deferred.
 
 ## Result
 
@@ -959,8 +967,8 @@ contract:
   mapping/template/duplicate lookup runtime, read-only activity search runtime,
   transfer link/unlink runtime, single activity delete runtime, bounded
   existing-asset/cash activity create/update/bulk runtime, and existing-asset
-  symbol resolution, CSV parse, and read-only import asset preview slices
-  implemented; broader migration remains active.
+  symbol resolution, CSV parse, read-only import asset preview, and read-only
+  import validation slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
