@@ -61,6 +61,35 @@ export interface ActivityParseCsvRequest {
   config: Record<string, unknown>;
 }
 
+interface ActivityParseConfig {
+  hasHeaderRow?: boolean;
+  headerRowIndex?: number;
+  delimiter?: string;
+  quoteChar?: string;
+  skipTopRows?: number;
+  skipBottomRows?: number;
+  skipEmptyRows?: boolean;
+  dateFormat?: string | null;
+  decimalSeparator?: string | null;
+  thousandsSeparator?: string | null;
+  defaultCurrency?: string | null;
+}
+
+interface ActivityParseError {
+  rowIndex: number | null;
+  columnIndex: number | null;
+  message: string;
+  errorType: string;
+}
+
+interface ActivityParsedCsvResult {
+  headers: string[];
+  rows: string[][];
+  detectedConfig: ActivityParseConfig;
+  errors: ActivityParseError[];
+  rowCount: number;
+}
+
 export interface ActivityDetails {
   id: string;
   accountId: string;
@@ -564,6 +593,10 @@ export function createActivityService(db: Database): ActivityService {
       };
     },
 
+    parseCsv(request) {
+      return parseActivityCsv(request);
+    },
+
     linkTransferActivities(activityAId, activityBId) {
       if (activityAId === activityBId) {
         throw new Error("Cannot link an activity to itself");
@@ -855,6 +888,307 @@ export function normalizeContextKindValue(raw: string): string {
     return CSV_HOLDINGS_CONTEXT_KIND;
   }
   return raw;
+}
+
+function parseActivityCsv(request: ActivityParseCsvRequest): ActivityParsedCsvResult {
+  const config = normalizeActivityParseConfig(request.config);
+  const errors: ActivityParseError[] = [];
+  const text = decodeActivityCsvContent(request.content, errors);
+  const delimiter = detectActivityCsvDelimiter(text, config);
+  const { headers, rows } = parseActivityCsvContent(text, delimiter, config, errors);
+
+  return {
+    headers,
+    rows,
+    detectedConfig: {
+      ...config,
+      delimiter,
+      hasHeaderRow: effectiveHasHeaderRow(config),
+      headerRowIndex: effectiveHeaderRowIndex(config),
+      skipTopRows: effectiveSkipTopRows(config),
+      skipBottomRows: effectiveSkipBottomRows(config),
+      skipEmptyRows: effectiveSkipEmptyRows(config),
+      quoteChar: effectiveQuoteChar(config),
+    },
+    errors,
+    rowCount: rows.length,
+  };
+}
+
+function normalizeActivityParseConfig(input: Record<string, unknown>): ActivityParseConfig {
+  return {
+    hasHeaderRow: optionalBooleanConfig(input, "hasHeaderRow"),
+    headerRowIndex: optionalNonNegativeIntegerConfig(input, "headerRowIndex"),
+    delimiter: optionalStringConfig(input, "delimiter"),
+    quoteChar: optionalStringConfig(input, "quoteChar"),
+    skipTopRows: optionalNonNegativeIntegerConfig(input, "skipTopRows"),
+    skipBottomRows: optionalNonNegativeIntegerConfig(input, "skipBottomRows"),
+    skipEmptyRows: optionalBooleanConfig(input, "skipEmptyRows"),
+    dateFormat: optionalNullableStringConfig(input, "dateFormat"),
+    decimalSeparator: optionalNullableStringConfig(input, "decimalSeparator"),
+    thousandsSeparator: optionalNullableStringConfig(input, "thousandsSeparator"),
+    defaultCurrency: optionalNullableStringConfig(input, "defaultCurrency"),
+  };
+}
+
+function decodeActivityCsvContent(content: Uint8Array, errors: ActivityParseError[]): string {
+  if (content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf) {
+    return new TextDecoder("utf-8").decode(content.subarray(3));
+  }
+  if (content[0] === 0xff && content[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(content.subarray(2));
+  }
+  if (content[0] === 0xfe && content[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(content.subarray(2));
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch {
+    errors.push({
+      rowIndex: null,
+      columnIndex: null,
+      message: "Detected non-UTF-8 CSV content; decoded as windows-1252.",
+      errorType: "encoding",
+    });
+    return new TextDecoder("windows-1252").decode(content);
+  }
+}
+
+function detectActivityCsvDelimiter(content: string, config: ActivityParseConfig): string {
+  const delimiter = config.delimiter ?? "auto";
+  if (delimiter !== "auto") {
+    if (delimiter === "\\t" || delimiter === "\t") {
+      return "\t";
+    }
+    return delimiter === "" ? "," : (delimiter[0] ?? ",");
+  }
+
+  const candidates = [",", ";", "\t"];
+  let bestDelimiter = ",";
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const score = scoreActivityCsvDelimiter(content, candidate);
+    if (score > bestScore) {
+      bestScore = score;
+      bestDelimiter = candidate;
+    }
+  }
+  return bestDelimiter;
+}
+
+function scoreActivityCsvDelimiter(content: string, delimiter: string): number {
+  const lines = content.split(/\r?\n/).slice(0, 10);
+  if (lines.length === 0) {
+    return 0;
+  }
+  const counts = lines.map((line) => countCharacter(line, delimiter));
+  const firstCount = counts[0] ?? 0;
+  if (firstCount === 0) {
+    return 0;
+  }
+  return firstCount * counts.filter((count) => count === firstCount).length;
+}
+
+function parseActivityCsvContent(
+  content: string,
+  delimiter: string,
+  config: ActivityParseConfig,
+  errors: ActivityParseError[],
+): { headers: string[]; rows: string[][] } {
+  const allRecords = readActivityCsvRecords(content, delimiter, effectiveQuoteChar(config));
+  if (allRecords.length === 0) {
+    throw new Error("CSV file is empty or contains no valid records");
+  }
+
+  const skipTopRows = effectiveSkipTopRows(config);
+  if (skipTopRows >= allRecords.length) {
+    throw new Error(`Cannot skip ${skipTopRows} rows from a file with ${allRecords.length} rows`);
+  }
+  const endIndex =
+    effectiveSkipBottomRows(config) > 0
+      ? allRecords.length - effectiveSkipBottomRows(config)
+      : allRecords.length;
+  if (skipTopRows >= endIndex) {
+    throw new Error("No rows remaining after applying skip settings");
+  }
+
+  const workingRecords = allRecords.slice(skipTopRows, endIndex);
+  const filteredRecords = effectiveSkipEmptyRows(config)
+    ? workingRecords.filter((row) => !row.every((cell) => cell.trim() === ""))
+    : workingRecords;
+  if (filteredRecords.length === 0) {
+    throw new Error("No non-empty rows found in CSV");
+  }
+
+  const hasHeader = effectiveHasHeaderRow(config);
+  if (!hasHeader) {
+    const maxColumns = Math.max(...filteredRecords.map((row) => row.length), 0);
+    return {
+      headers: Array.from({ length: maxColumns }, (_, index) => `Column${index + 1}`),
+      rows: filteredRecords,
+    };
+  }
+
+  const headerIndex = Math.min(effectiveHeaderRowIndex(config), filteredRecords.length - 1);
+  const headers = (filteredRecords[headerIndex] ?? []).map((header) => header.trim());
+  const dataRows = filteredRecords.filter((_, index) => index !== headerIndex);
+  return { headers, rows: normalizeActivityCsvRows(dataRows, headers.length, errors) };
+}
+
+function readActivityCsvRecords(content: string, delimiter: string, quoteChar: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  let lastWasTerminator = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    if (char === quoteChar) {
+      if (inQuotes && content[index + 1] === quoteChar) {
+        field += quoteChar;
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      lastWasTerminator = false;
+      continue;
+    }
+    if (char === delimiter && !inQuotes) {
+      row.push(field);
+      field = "";
+      lastWasTerminator = false;
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && content[index + 1] === "\n") {
+        index += 1;
+      }
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      lastWasTerminator = true;
+      continue;
+    }
+    field += char;
+    lastWasTerminator = false;
+  }
+
+  row.push(field);
+  if (!lastWasTerminator && (row.length > 1 || row[0] !== "" || content.length > 0)) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+function normalizeActivityCsvRows(
+  rows: string[][],
+  headerCount: number,
+  errors: ActivityParseError[],
+): string[][] {
+  return rows.map((row, index) => {
+    if (row.length < headerCount) {
+      return [...row, ...Array.from({ length: headerCount - row.length }, () => "")];
+    }
+    if (row.length > headerCount) {
+      errors.push({
+        rowIndex: null,
+        columnIndex: null,
+        message: `Row ${index + 1} has ${row.length} columns, expected ${headerCount}. Extra columns ignored.`,
+        errorType: "structure",
+      });
+      return row.slice(0, headerCount);
+    }
+    return row;
+  });
+}
+
+function effectiveHasHeaderRow(config: ActivityParseConfig): boolean {
+  return config.hasHeaderRow ?? true;
+}
+
+function effectiveHeaderRowIndex(config: ActivityParseConfig): number {
+  return config.headerRowIndex ?? 0;
+}
+
+function effectiveSkipTopRows(config: ActivityParseConfig): number {
+  return config.skipTopRows ?? 0;
+}
+
+function effectiveSkipBottomRows(config: ActivityParseConfig): number {
+  return config.skipBottomRows ?? 0;
+}
+
+function effectiveSkipEmptyRows(config: ActivityParseConfig): boolean {
+  return config.skipEmptyRows ?? true;
+}
+
+function effectiveQuoteChar(config: ActivityParseConfig): string {
+  return config.quoteChar?.[0] ?? '"';
+}
+
+function optionalBooleanConfig(input: Record<string, unknown>, field: string): boolean | undefined {
+  const value = input[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid input: config.${field} must be a boolean`);
+  }
+  return value;
+}
+
+function optionalNonNegativeIntegerConfig(
+  input: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const value = input[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Invalid input: config.${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function optionalStringConfig(input: Record<string, unknown>, field: string): string | undefined {
+  const value = input[field];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid input: config.${field} must be a string`);
+  }
+  return value;
+}
+
+function optionalNullableStringConfig(
+  input: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  const value = input[field];
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid input: config.${field} must be a string`);
+  }
+  return value;
+}
+
+function countCharacter(input: string, character: string): number {
+  let count = 0;
+  for (const value of input) {
+    if (value === character) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function normalizeActivityCreateInput(

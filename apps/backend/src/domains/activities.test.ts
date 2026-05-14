@@ -138,6 +138,105 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("parses activity CSV files with Rust-compatible detection and row normalization", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      const parsed = service.parseCsv?.({
+        content: new TextEncoder().encode(
+          "\uFEFFName;Amount;Note\nAlice;10;ok\nBob;20;extra;ignored\n",
+        ),
+        config: { delimiter: "auto" },
+      });
+
+      expect(parsed).toMatchObject({
+        headers: ["Name", "Amount", "Note"],
+        rows: [
+          ["Alice", "10", "ok"],
+          ["Bob", "20", "extra"],
+        ],
+        detectedConfig: {
+          delimiter: ";",
+          hasHeaderRow: true,
+          headerRowIndex: 0,
+          skipTopRows: 0,
+          skipBottomRows: 0,
+          skipEmptyRows: true,
+          quoteChar: '"',
+        },
+        errors: [
+          {
+            rowIndex: null,
+            columnIndex: null,
+            message: "Row 2 has 4 columns, expected 3. Extra columns ignored.",
+            errorType: "structure",
+          },
+        ],
+        rowCount: 2,
+      });
+
+      const tabDelimited = service.parseCsv?.({
+        content: new TextEncoder().encode("A\t1\nB\t2"),
+        config: { hasHeaderRow: false, delimiter: "\\t" },
+      });
+
+      expect(tabDelimited).toMatchObject({
+        headers: ["Column1", "Column2"],
+        rows: [
+          ["A", "1"],
+          ["B", "2"],
+        ],
+        detectedConfig: { delimiter: "\t", hasHeaderRow: false },
+        errors: [],
+        rowCount: 2,
+      });
+
+      const utf16 = service.parseCsv?.({
+        content: utf16LeWithBom("Name,City\nAlice,Zürich"),
+        config: {},
+      });
+      expect(utf16).toMatchObject({
+        headers: ["Name", "City"],
+        rows: [["Alice", "Zürich"]],
+        errors: [],
+        rowCount: 1,
+      });
+
+      const windows1252 = service.parseCsv?.({
+        content: new Uint8Array([0x4e, 0x61, 0x6d, 0x65, 0x0a, 0x63, 0x61, 0x66, 0xe9]),
+        config: {},
+      });
+      expect(windows1252).toMatchObject({
+        headers: ["Name"],
+        rows: [["café"]],
+        errors: [
+          {
+            rowIndex: null,
+            columnIndex: null,
+            errorType: "encoding",
+          },
+        ],
+        rowCount: 1,
+      });
+
+      expect(() =>
+        service.parseCsv?.({
+          content: new TextEncoder().encode(""),
+          config: {},
+        }),
+      ).toThrow("CSV file is empty or contains no valid records");
+      expect(() =>
+        service.parseCsv?.({
+          content: new TextEncoder().encode("a,b"),
+          config: { skipTopRows: 1 },
+        }),
+      ).toThrow("Cannot skip 1 rows from a file with 1 rows");
+    } finally {
+      db.close();
+    }
+  });
+
   test("creates activities with Rust-compatible defaults, normalization, and idempotency", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1112,6 +1211,15 @@ function insertAsset(db: Database, asset: AssetFixture): void {
     asset.quoteCcy ?? "USD",
     asset.instrumentType ?? null,
   );
+}
+
+function utf16LeWithBom(text: string): Uint8Array {
+  const bytes = [0xff, 0xfe];
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    bytes.push(code & 0xff, code >> 8);
+  }
+  return new Uint8Array(bytes);
 }
 
 function insertActivity(

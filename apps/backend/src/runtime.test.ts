@@ -134,6 +134,24 @@ describe("TS backend runtime composition", () => {
         meta: { totalRowCount: 0 },
       });
 
+      const activityCsvForm = new FormData();
+      activityCsvForm.append("file", new File(["Symbol;Amount\nSHOP;10"], "activities.csv"));
+      activityCsvForm.append("config", JSON.stringify({ delimiter: "auto" }));
+      const activityCsvParseResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/parse`,
+        {
+          method: "POST",
+          body: activityCsvForm,
+        },
+      );
+      expect(activityCsvParseResponse.status).toBe(200);
+      await expect(activityCsvParseResponse.json()).resolves.toMatchObject({
+        headers: ["Symbol", "Amount"],
+        rows: [["SHOP", "10"]],
+        detectedConfig: { delimiter: ";" },
+        rowCount: 1,
+      });
+
       const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
       expect(aiProvidersResponse.status).toBe(200);
       await expect(aiProvidersResponse.json()).resolves.toMatchObject({
