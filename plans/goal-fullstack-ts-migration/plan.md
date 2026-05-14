@@ -10,19 +10,18 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data
-`resolve-currency` runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained activities import
+mapping/template runtime slice to the standalone TS backend:
 
-- Add `/api/v1/market-data/resolve-currency` behavior through the TS market-data
-  service for Yahoo-backed latest quote resolution.
-- Preserve Rust-compatible empty/default responses, provider preference
-  handling, Yahoo suffix stripping, candidate fallback, equity/crypto/FX
-  provider-symbol construction, quoteSummary price/currency extraction, 401
-  crumb retry, and BOND default behavior.
-- Keep Yahoo resolve calls injectable/testable so runtime tests do not depend on
-  live Yahoo network calls.
-- Keep remaining high-risk market-data methods optional so sync and
-  recalculation side effects remain `404` until their dedicated parity slices.
+- Add TS SQLite runtime behavior for `/api/v1/activities/import/mapping`,
+  `/templates`, `/templates/item`, `/templates/link`, and `/check-duplicates`.
+- Preserve Rust-compatible legacy context normalization, default mapping data,
+  camelCase config JSON storage, account-local template IDs, link row-id
+  preservation, template kind filtering/order, missing-template default
+  responses, and duplicate idempotency-key lookup behavior.
+- Keep still-deferred activity search/create/update/delete/import/CSV parse,
+  transfer mutation, asset preview, device-sync outbox emission, and portfolio
+  recalculation side effects optional/404 until dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -32,10 +31,10 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
 runtime, quote-provider interactions, auto-classification side effects,
 portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
-runtime, activities/import runtime, sync-crypto/device-sync integration, real
-health status/check/fix runtime implementation, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+runtime, broader activities/import runtime beyond mapping/templates/duplicate
+lookups, sync-crypto/device-sync integration, real health status/check/fix
+runtime implementation, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

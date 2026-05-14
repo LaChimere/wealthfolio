@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 48
+turns_used: 52
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T11:02:29+08:00"
+updated_at: "2026-05-14T12:54:12+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -347,6 +347,13 @@ updated_at: "2026-05-14T11:02:29+08:00"
   latest quote currency/price with suffix stripping, candidate fallback,
   equity/crypto/FX provider-symbol construction, provider preference handling,
   quoteSummary parsing, BOND default behavior, and 401 crumb retry.
+- Turn 52: Added the activities import mapping/template runtime for the
+  standalone TS backend: import mapping reads/writes, reusable template
+  list/get/save/delete, account-template links, and duplicate idempotency-key
+  lookups now use SQLite directly with Rust-compatible context normalization,
+  config JSON casing/defaults, account-local template IDs, link row-id
+  preservation, template ordering/filtering, and partial-route inertness for
+  still-deferred activity operations.
 
 ## Deferred items
 
@@ -417,11 +424,14 @@ updated_at: "2026-05-14T11:02:29+08:00"
   remain active follow-ups. reason=this slice only adds the guarded HTTP seam,
   while runtime behavior must move with dedicated portfolio calculation parity
   slices.
-- Activity persistence, import parsing/mapping/template storage, duplicate
-  lookups, transfer mutation behavior, asset preview resolution, and portfolio
-  recalculation side effects remain active follow-ups. reason=this slice only
-  adds the guarded HTTP seam, while runtime behavior must move with dedicated
-  activities/import/portfolio parity slices.
+- Activity import mapping/template storage and duplicate lookups now have TS
+  runtime parity. reason=the standalone backend reads/writes `import_templates`,
+  `import_account_templates`, and activity idempotency keys directly with
+  Rust-compatible defaults and route inertness; activity persistence, CSV
+  parse/import execution, transfer mutation behavior, asset preview resolution,
+  device-sync outbox emission for these writes, and portfolio recalculation side
+  effects remain active follow-ups for dedicated activities/import/portfolio
+  parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag
   persistence, and tool-result mutation behavior remain active follow-ups.
   reason=this slice only adds the guarded HTTP seam, while runtime behavior must

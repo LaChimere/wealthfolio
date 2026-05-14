@@ -15,6 +15,7 @@ import {
   createContributionLimitRepository,
   createContributionLimitService,
 } from "./domains/contribution-limits";
+import { createActivityService } from "./domains/activities";
 import {
   createCustomProviderRepository,
   createCustomProviderService,
@@ -181,6 +182,7 @@ function createServicesFromDatabase(
 
   const options: BackendRequestHandlerOptions = {
     accountService,
+    activityService: createActivityService(db),
     alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
     assetService: createAssetService(db, {
       eventBus,

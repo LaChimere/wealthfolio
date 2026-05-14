@@ -105,9 +105,10 @@
     runtime parity; market-data exchange list, local quote
     history/update/delete, latest quote snapshots, quote CSV check/import, Yahoo
     dividends, symbol search, and resolve-currency now have TS runtime parity;
-    goals plan writes and calculation endpoints are deferred to
-    calculation-heavy slices; automatic FX market sync/provider HTTP behavior
-    plus broader market-data sync behavior are deferred to
+    activities import mapping/template storage and duplicate lookup behavior now
+    have TS runtime parity; goals plan writes and calculation endpoints are
+    deferred to calculation-heavy slices; automatic FX market sync/provider HTTP
+    behavior plus broader market-data sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event
     production are deferred to portfolio/calculation slices; TS file-backed
     secret persistence is wired into standalone runtime while real keyring
@@ -131,19 +132,19 @@
     add-on filesystem extraction, runtime loading, store HTTP, staging I/O, and
     update behavior are deferred to add-on runtime parity slices; market-data
     market sync and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; activity persistence, import
-    parsing/mapping/template storage, duplicate lookups, transfer mutation
-    behavior, asset preview resolution, and portfolio recalculation side effects
-    are deferred to activities/import runtime parity slices; AI chat
-    persistence, provider streaming, tool execution, thread storage, tag
-    persistence, and tool-result mutation behavior are deferred to AI runtime
-    parity slices; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; real health checks, market sync fix
-    execution, health cache behavior, and `/health/fix` dispatch are deferred to
-    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, local sync repositories, subscription
-    entitlement checks, event production, E2EE enrollment, sync engine,
-    snapshot/upload runtime, feature-flag errors, background workers,
+    market-data/portfolio parity slices; activity persistence, CSV parse/import
+    execution, transfer mutation behavior, asset preview resolution, device-sync
+    outbox emission for activity import template writes, and portfolio
+    recalculation side effects are deferred to activities/import runtime parity
+    slices; AI chat persistence, provider streaming, tool execution, thread
+    storage, tag persistence, and tool-result mutation behavior are deferred to
+    AI runtime parity slices; device-sync integration for sync crypto is
+    deferred to device-sync runtime parity slices; real health checks, market
+    sync fix execution, health cache behavior, and `/health/fix` dispatch are
+    deferred to health/calculation parity slices; real Connect token lifecycle,
+    cloud HTTP clients, broker sync orchestration, local sync repositories,
+    subscription entitlement checks, event production, E2EE enrollment, sync
+    engine, snapshot/upload runtime, feature-flag errors, background workers,
     device-sync cloud clients, token lifecycle, team-key operations, key
     material handling, pairing flows, freshness gate persistence, bootstrap
     transfer, and secret side effects are deferred to Connect/device-sync parity
@@ -835,6 +836,20 @@ contract:
   behavior. Rubber-duck critique and code review found no remaining actionable
   issues after locking Rust-compatible case-sensitive provider matching. Full
   repository check passed with `bun run check`.
+- `pr5-activities-import-template-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/http.test.ts apps/backend/src/runtime.test.ts`
+  and backend type-check with
+  `bun run --cwd apps/backend type-check -- --pretty false`. Coverage includes
+  Rust-compatible default import mappings, ACTIVITY/HOLDINGS context
+  normalization, account-local template IDs, template config JSON
+  casing/defaults, shared-template relinking with stable link row IDs, CSV
+  template filtering/order, missing-template defaults, template link/delete
+  cascade, duplicate idempotency-key lookups including empty and chunked input,
+  partial activities route inertness, and standalone runtime route wiring.
+  Rubber-duck critique identified the partial-route interception and link-row
+  identity risks; the implementation guards each activities route method and
+  tests row-ID preservation. Device-sync outbox emission for these writes
+  remains deferred to sync parity slices.
 
 ## Result
 
@@ -859,8 +874,9 @@ contract:
   runtime, alternative-assets runtime, contained asset read/quote-mode/delete
   runtime, asset create/profile mutation runtime, market-data quote CRUD
   runtime, market-data latest snapshot runtime, market-data quote CSV
-  check/import runtime, market-data Yahoo dividends runtime, and market-data
-  symbol search and resolve-currency runtime slices implemented; broader
+  check/import runtime, market-data Yahoo dividends runtime, market-data symbol
+  search and resolve-currency runtime, and activities import
+  mapping/template/duplicate lookup runtime slices implemented; broader
   migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
@@ -880,18 +896,18 @@ contract:
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
-  parity slices; activity persistence, import parsing/mapping/template storage,
-  duplicate lookups, transfer mutation behavior, asset preview resolution, and
-  portfolio recalculation side effects move with activities/import runtime
-  parity slices; AI chat persistence, provider streaming, tool execution, thread
-  storage, tag persistence, and tool-result mutation behavior move with AI
-  runtime parity slices; device-sync integration for sync crypto moves with
-  device-sync parity slices; real health checks, market sync fix execution,
-  health cache behavior, and `/health/fix` dispatch move with health/calculation
-  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-  orchestration, local sync repositories, subscription entitlement checks, event
-  production, E2EE enrollment, sync engine, snapshot/upload runtime,
-  feature-flag errors, background workers, device-sync cloud clients, token
-  lifecycle, team-key operations, key material handling, pairing flows,
-  freshness gate persistence, bootstrap transfer, and secret side effects move
-  with Connect/device-sync parity slices.
+  parity slices; activity persistence, CSV parse/import execution, transfer
+  mutation behavior, asset preview resolution, device-sync outbox emission for
+  activity import template writes, and portfolio recalculation side effects move
+  with activities/import runtime parity slices; AI chat persistence, provider
+  streaming, tool execution, thread storage, tag persistence, and tool-result
+  mutation behavior move with AI runtime parity slices; device-sync integration
+  for sync crypto moves with device-sync parity slices; real health checks,
+  market sync fix execution, health cache behavior, and `/health/fix` dispatch
+  move with health/calculation parity slices; real Connect token lifecycle,
+  cloud HTTP clients, broker sync orchestration, local sync repositories,
+  subscription entitlement checks, event production, E2EE enrollment, sync
+  engine, snapshot/upload runtime, feature-flag errors, background workers,
+  device-sync cloud clients, token lifecycle, team-key operations, key material
+  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
+  secret side effects move with Connect/device-sync parity slices.

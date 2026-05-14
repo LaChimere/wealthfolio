@@ -44,9 +44,20 @@ export {
 } from "./domains/accounts";
 export {
   ACTIVITY_IMPORT_CONTEXT_KIND,
+  CSV_ACTIVITY_CONTEXT_KIND,
+  CSV_HOLDINGS_CONTEXT_KIND,
+  createActivityService,
+  normalizeContextKindValue,
   type ActivityParseCsvRequest,
   type ActivitySearchRequest,
   type ActivityService,
+  type FieldMappingValue,
+  type ImportMappingConfig,
+  type ImportMappingData,
+  type ImportTemplateData,
+  type ImportTemplateScope,
+  type SymbolMappingMeta,
+  type TemplateKind,
 } from "./domains/activities";
 export {
   AI_CHAT_ERROR_STATUS_BY_CODE,

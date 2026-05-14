@@ -79,6 +79,57 @@ describe("TS backend runtime composition", () => {
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);
 
+      const activityTemplatesResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/templates`,
+      );
+      expect(activityTemplatesResponse.status).toBe(200);
+      await expect(activityTemplatesResponse.json()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "system_schwab", kind: "CSV_ACTIVITY" }),
+        ]),
+      );
+
+      const saveActivityMappingResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/mapping`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mapping: {
+              accountId: "runtime-account",
+              contextKind: "ACTIVITY",
+              name: "Runtime CSV",
+              fieldMappings: { date: "Trade Date" },
+              activityMappings: { BUY: ["Buy"] },
+            },
+          }),
+        },
+      );
+      expect(saveActivityMappingResponse.status).toBe(200);
+      await expect(saveActivityMappingResponse.json()).resolves.toMatchObject({
+        accountId: "runtime-account",
+        contextKind: "CSV_ACTIVITY",
+        name: "Runtime CSV",
+      });
+
+      const activityMappingResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/mapping?accountId=runtime-account&contextKind=ACTIVITY`,
+      );
+      expect(activityMappingResponse.status).toBe(200);
+      await expect(activityMappingResponse.json()).resolves.toMatchObject({
+        accountId: "runtime-account",
+        contextKind: "CSV_ACTIVITY",
+        templateId: "acct_runtime-account",
+        fieldMappings: { date: "Trade Date" },
+      });
+
+      const activitySearchResponse = await fetch(`${server.baseUrl}/api/v1/activities/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ page: 0, pageSize: 25 }),
+      });
+      expect(activitySearchResponse.status).toBe(404);
+
       const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
       expect(aiProvidersResponse.status).toBe(200);
       await expect(aiProvidersResponse.json()).resolves.toMatchObject({
