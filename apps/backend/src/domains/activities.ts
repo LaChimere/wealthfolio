@@ -194,6 +194,10 @@ interface ImportActivitiesResult {
   summary: ImportActivitiesSummary;
 }
 
+export interface ActivityServiceOptions {
+  ensureFxPairs?: (pairs: Array<[string, string]>) => Promise<void> | void;
+}
+
 export interface ActivityService {
   searchActivities?(
     request: ActivitySearchRequest,
@@ -427,7 +431,10 @@ const CANONICAL_ACTIVITY_SUBTYPES = [
   "OPTION_EXPIRY",
 ] as const;
 
-export function createActivityService(db: Database): ActivityService {
+export function createActivityService(
+  db: Database,
+  options: ActivityServiceOptions = {},
+): ActivityService {
   return {
     createActivity(input) {
       return db.transaction(() => {
@@ -629,7 +636,7 @@ export function createActivityService(db: Database): ActivityService {
     },
 
     importActivities(activities) {
-      return importActivityRows(db, activities);
+      return importActivityRows(db, activities, options);
     },
 
     linkTransferActivities(activityAId, activityBId) {
@@ -1647,175 +1654,181 @@ interface PreparedImportActivity {
   forceImport: boolean;
 }
 
-function importActivityRows(db: Database, activities: unknown[]): ImportActivitiesResult {
-  return db.transaction(() => {
-    const total = activities.length;
-    const ordered: Array<Record<string, unknown> | null> = Array.from(
-      { length: total },
-      () => null,
-    );
-    const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
-    let hasValidationErrors = false;
+async function importActivityRows(
+  db: Database,
+  activities: unknown[],
+  options: ActivityServiceOptions,
+): Promise<ImportActivitiesResult> {
+  const total = activities.length;
+  const ordered: Array<Record<string, unknown> | null> = Array.from({ length: total }, () => null);
+  const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
+  let hasValidationErrors = false;
 
-    for (const [index, input] of activities.entries()) {
-      const activity = isRecord(input) ? { ...input } : {};
-      activity.lineNumber = numericField(activity.lineNumber) ?? index + 1;
-      const accountId = optionalTrimmedString(activity.accountId);
-      if (!accountId) {
-        addImportError(activity, "accountId", "Account is required before importing activities.");
-        activity.isValid = false;
-        ordered[index] = activity;
-        hasValidationErrors = true;
-        continue;
-      }
-      activity.accountId = accountId;
-      validInputs.push({ index, activity });
+  for (const [index, input] of activities.entries()) {
+    const activity = isRecord(input) ? { ...input } : {};
+    activity.lineNumber = numericField(activity.lineNumber) ?? index + 1;
+    const accountId = optionalTrimmedString(activity.accountId);
+    if (!accountId) {
+      addImportError(activity, "accountId", "Account is required before importing activities.");
+      activity.isValid = false;
+      ordered[index] = activity;
+      hasValidationErrors = true;
+      continue;
     }
+    activity.accountId = accountId;
+    validInputs.push({ index, activity });
+  }
 
-    if (validInputs.length === 0) {
-      return {
-        activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
-        importRunId: "",
-        summary: {
-          total,
-          imported: 0,
-          skipped: total,
-          duplicates: 0,
-          assetsCreated: 0,
-          success: false,
-          errorMessage: "Account is required for all activities.",
-        },
-      };
-    }
-
-    const prepared: PreparedImportActivity[] = [];
-    for (const { index, activity } of validInputs) {
-      const errors = cloneMessageMap(activity.errors);
-      const createInput = importActivityCreateInput(activity);
-      collectImportApplyPreflightErrors(activity, errors);
-
-      if (hasMessageMapEntries(errors)) {
-        activity.errors = errors;
-        activity.isValid = false;
-        ordered[index] = activity;
-        hasValidationErrors = true;
-        continue;
-      }
-
-      try {
-        const create = normalizeActivityCreateInput(db, createInput);
-        const explicitId = optionalTrimmedString(activity.id);
-        if (explicitId) {
-          create.id = explicitId;
-        }
-        create.sourceSystem = "CSV";
-        create.importRunId = null;
-        copyNormalizedImportFields(activity, create);
-        prepared.push({
-          index,
-          activity,
-          create,
-          forceImport: activity.forceImport === true,
-        });
-        ordered[index] = activity;
-      } catch (error) {
-        addFieldMessage(errors, importValidationField(error), errorMessage(error));
-        activity.errors = errors;
-        activity.isValid = false;
-        ordered[index] = activity;
-        hasValidationErrors = true;
-      }
-    }
-
-    if (hasValidationErrors) {
-      return {
-        activities: ordered.flatMap((activity) =>
-          activity === null ? [] : [finalizeImportActivity(activity)],
-        ),
-        importRunId: "",
-        summary: {
-          total,
-          imported: 0,
-          skipped: ordered.filter(
-            (activity) => activity === null || !finalizeImportActivity(activity).isValid,
-          ).length,
-          duplicates: 0,
-          assetsCreated: 0,
-          success: false,
-          errorMessage: "Validation errors found in activities.",
-        },
-      };
-    }
-
-    const firstPositionByKey = new Map<string, number>();
-    const existingByKey = new Map<string, string>();
-    for (const [position, row] of prepared.entries()) {
-      const key = row.create.idempotencyKey;
-      if (!key || firstPositionByKey.has(key)) {
-        continue;
-      }
-      firstPositionByKey.set(key, position);
-      const existingId = findActivityIdByIdempotencyKey(db, key);
-      if (existingId) {
-        existingByKey.set(key, existingId);
-      }
-    }
-
-    let duplicateCount = 0;
-    const insertable: PreparedImportActivity[] = [];
-    for (const [position, row] of prepared.entries()) {
-      const key = row.create.idempotencyKey;
-      if (!key) {
-        insertable.push(row);
-        continue;
-      }
-
-      const existingId = existingByKey.get(key);
-      if (existingId) {
-        if (row.forceImport) {
-          row.create.idempotencyKey = null;
-          insertable.push(row);
-        } else {
-          addImportWarning(row.activity, "_duplicate", "Duplicate activity already exists");
-          row.activity.duplicateOfId = existingId;
-          duplicateCount += 1;
-        }
-        continue;
-      }
-
-      const firstPosition = firstPositionByKey.get(key);
-      if (firstPosition !== undefined && firstPosition !== position) {
-        if (row.forceImport) {
-          row.create.idempotencyKey = null;
-          insertable.push(row);
-        } else {
-          const duplicateLineNumber =
-            numericField(prepared[firstPosition]?.activity.lineNumber) ?? firstPosition + 1;
-          addImportWarning(
-            row.activity,
-            "_duplicate",
-            `Duplicate of line ${duplicateLineNumber} in this import batch`,
-          );
-          row.activity.duplicateOfLineNumber = duplicateLineNumber;
-          duplicateCount += 1;
-        }
-        continue;
-      }
-
-      insertable.push(row);
-    }
-
-    linkImportedTransferPairs(insertable);
-
-    const summary: ImportActivitiesSummary = {
-      total,
-      imported: insertable.length,
-      skipped: duplicateCount,
-      duplicates: duplicateCount,
-      assetsCreated: 0,
-      success: true,
-      errorMessage: null,
+  if (validInputs.length === 0) {
+    return {
+      activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
+      importRunId: "",
+      summary: {
+        total,
+        imported: 0,
+        skipped: total,
+        duplicates: 0,
+        assetsCreated: 0,
+        success: false,
+        errorMessage: "Account is required for all activities.",
+      },
     };
+  }
+
+  const prepared: PreparedImportActivity[] = [];
+  for (const { index, activity } of validInputs) {
+    const errors = cloneMessageMap(activity.errors);
+    const createInput = importActivityCreateInput(activity);
+    collectImportApplyPreflightErrors(activity, errors);
+
+    if (hasMessageMapEntries(errors)) {
+      activity.errors = errors;
+      activity.isValid = false;
+      ordered[index] = activity;
+      hasValidationErrors = true;
+      continue;
+    }
+
+    try {
+      const create = normalizeActivityCreateInput(db, createInput);
+      const explicitId = optionalTrimmedString(activity.id);
+      if (explicitId) {
+        create.id = explicitId;
+      }
+      create.sourceSystem = "CSV";
+      create.importRunId = null;
+      copyNormalizedImportFields(activity, create);
+      prepared.push({
+        index,
+        activity,
+        create,
+        forceImport: activity.forceImport === true,
+      });
+      ordered[index] = activity;
+    } catch (error) {
+      addFieldMessage(errors, importValidationField(error), errorMessage(error));
+      activity.errors = errors;
+      activity.isValid = false;
+      ordered[index] = activity;
+      hasValidationErrors = true;
+    }
+  }
+
+  if (hasValidationErrors) {
+    return {
+      activities: ordered.flatMap((activity) =>
+        activity === null ? [] : [finalizeImportActivity(activity)],
+      ),
+      importRunId: "",
+      summary: {
+        total,
+        imported: 0,
+        skipped: ordered.filter(
+          (activity) => activity === null || !finalizeImportActivity(activity).isValid,
+        ).length,
+        duplicates: 0,
+        assetsCreated: 0,
+        success: false,
+        errorMessage: "Validation errors found in activities.",
+      },
+    };
+  }
+
+  const firstPositionByKey = new Map<string, number>();
+  const existingByKey = new Map<string, string>();
+  for (const [position, row] of prepared.entries()) {
+    const key = row.create.idempotencyKey;
+    if (!key || firstPositionByKey.has(key)) {
+      continue;
+    }
+    firstPositionByKey.set(key, position);
+    const existingId = findActivityIdByIdempotencyKey(db, key);
+    if (existingId) {
+      existingByKey.set(key, existingId);
+    }
+  }
+
+  let duplicateCount = 0;
+  const insertable: PreparedImportActivity[] = [];
+  for (const [position, row] of prepared.entries()) {
+    const key = row.create.idempotencyKey;
+    if (!key) {
+      insertable.push(row);
+      continue;
+    }
+
+    const existingId = existingByKey.get(key);
+    if (existingId) {
+      if (row.forceImport) {
+        row.create.idempotencyKey = null;
+        insertable.push(row);
+      } else {
+        addImportWarning(row.activity, "_duplicate", "Duplicate activity already exists");
+        row.activity.duplicateOfId = existingId;
+        duplicateCount += 1;
+      }
+      continue;
+    }
+
+    const firstPosition = firstPositionByKey.get(key);
+    if (firstPosition !== undefined && firstPosition !== position) {
+      if (row.forceImport) {
+        row.create.idempotencyKey = null;
+        insertable.push(row);
+      } else {
+        const duplicateLineNumber =
+          numericField(prepared[firstPosition]?.activity.lineNumber) ?? firstPosition + 1;
+        addImportWarning(
+          row.activity,
+          "_duplicate",
+          `Duplicate of line ${duplicateLineNumber} in this import batch`,
+        );
+        row.activity.duplicateOfLineNumber = duplicateLineNumber;
+        duplicateCount += 1;
+      }
+      continue;
+    }
+
+    insertable.push(row);
+  }
+
+  linkImportedTransferPairs(insertable);
+  const fxPairs = collectImportFxPairs(db, insertable);
+  if (fxPairs.length > 0 && options.ensureFxPairs) {
+    await options.ensureFxPairs(fxPairs);
+  }
+
+  const summary: ImportActivitiesSummary = {
+    total,
+    imported: insertable.length,
+    skipped: duplicateCount,
+    duplicates: duplicateCount,
+    assetsCreated: 0,
+    success: true,
+    errorMessage: null,
+  };
+
+  return db.transaction(() => {
     const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
 
     try {
@@ -2066,6 +2079,42 @@ function applyImportedTransferLink(row: PreparedImportActivity, sourceGroupId: s
   row.create.sourceGroupId = sourceGroupId;
   row.create.metadata = setTransferFlowExternal(row.create.metadata, false);
   row.activity.sourceGroupId = sourceGroupId;
+}
+
+function collectImportFxPairs(
+  db: Database,
+  rows: PreparedImportActivity[],
+): Array<[string, string]> {
+  const pairs = new Map<string, [string, string]>();
+  for (const row of rows) {
+    const account = readAccountRow(db, row.create.accountId);
+    const accountCurrency = resolveCurrency([account.currency]);
+    const activityCurrency = row.create.currency;
+    addImportFxPair(pairs, activityCurrency, accountCurrency);
+
+    if (row.create.assetId) {
+      const asset = readAssetRow(db, row.create.assetId);
+      addImportFxPair(pairs, asset.quote_ccy, accountCurrency, activityCurrency);
+    }
+  }
+  return [...pairs.values()];
+}
+
+function addImportFxPair(
+  pairs: Map<string, [string, string]>,
+  fromCurrency: string,
+  toCurrency: string,
+  skipCurrency?: string,
+): void {
+  if (
+    !fromCurrency ||
+    !toCurrency ||
+    fromCurrency === toCurrency ||
+    fromCurrency === skipCurrency
+  ) {
+    return;
+  }
+  pairs.set(`${fromCurrency}\0${toCurrency}`, [fromCurrency, toCurrency]);
 }
 
 function addImportError(activity: Record<string, unknown>, field: string, message: string): void {

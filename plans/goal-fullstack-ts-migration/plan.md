@@ -40,10 +40,11 @@ backend:
 - Add bounded import apply for `/api/v1/activities/import` with validation
   gating, existing-asset/cash activity inserts, CSV import-run metadata,
   duplicate skipping, `forceImport`, import summaries, and cross-account
-  transfer-pair auto-linking.
+  transfer-pair auto-linking plus FX pair ensure through the migrated
+  exchange-rate runtime.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
-  provider-backed asset resolution, FX pair ensure, device-sync outbox emission,
-  and portfolio recalculation side effects for dedicated parity slices.
+  provider-backed asset resolution, device-sync outbox emission, and portfolio
+  recalculation side effects for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

@@ -476,7 +476,7 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("imports checked activities with import run metadata", () => {
+  test("imports checked activities with import run metadata", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -492,7 +492,7 @@ describe("TS activities import domain", () => {
         instrumentType: "EQUITY",
       });
 
-      const result = service.importActivities?.([
+      const result = (await service.importActivities?.([
         {
           accountId: "account-1",
           assetId: "AAPL",
@@ -514,7 +514,7 @@ describe("TS activities import domain", () => {
           isDraft: true,
           lineNumber: 2,
         },
-      ]) as {
+      ])) as {
         activities: Array<Record<string, unknown>>;
         importRunId: string;
         summary: Record<string, unknown>;
@@ -566,7 +566,7 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("auto-links imported transfer pairs across accounts", () => {
+  test("auto-links imported transfer pairs across accounts", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -574,7 +574,7 @@ describe("TS activities import domain", () => {
       insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
       insertAccount(db, { id: "account-2", name: "Beta", currency: "USD" });
 
-      const result = service.importActivities?.([
+      const result = (await service.importActivities?.([
         {
           accountId: "account-1",
           activityType: "TRANSFER_OUT",
@@ -595,7 +595,7 @@ describe("TS activities import domain", () => {
           isExternal: true,
           lineNumber: 2,
         },
-      ]) as {
+      ])) as {
         activities: Array<Record<string, unknown>>;
         summary: Record<string, unknown>;
       };
@@ -615,7 +615,57 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("skips import duplicates unless force importing", () => {
+  test("ensures import FX pairs before writing activities", async () => {
+    const db = createActivitiesDb();
+    const ensuredPairs: Array<[string, string]> = [];
+    const service = createActivityService(db, {
+      ensureFxPairs: (pairs) => {
+        ensuredPairs.push(...pairs);
+        throw new Error("fx unavailable");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "EUR",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      await expect(
+        service.importActivities?.([
+          {
+            accountId: "account-1",
+            assetId: "AAPL",
+            activityType: "BUY",
+            date: "2025-01-15",
+            quantity: "1",
+            unitPrice: "10",
+            amount: "10",
+            currency: "USD",
+            isDraft: false,
+            lineNumber: 1,
+          },
+        ]),
+      ).rejects.toThrow("fx unavailable");
+
+      expect(ensuredPairs).toEqual([
+        ["USD", "CAD"],
+        ["EUR", "CAD"],
+      ]);
+      expect(readActivityCount(db)).toBe(0);
+      expect(readImportRunCount(db)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips import duplicates unless force importing", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -629,7 +679,7 @@ describe("TS activities import domain", () => {
         currency: "USD",
       }) as Activity;
 
-      const result = service.importActivities?.([
+      const result = (await service.importActivities?.([
         {
           accountId: "account-1",
           activityType: "DEPOSIT",
@@ -659,7 +709,7 @@ describe("TS activities import domain", () => {
           forceImport: true,
           lineNumber: 3,
         },
-      ]) as {
+      ])) as {
         activities: Array<Record<string, unknown>>;
         summary: Record<string, unknown>;
       };
@@ -681,7 +731,7 @@ describe("TS activities import domain", () => {
       expect(readActivityValue(db, forcedUniqueId, "idempotency_key")).toBeString();
       expect(readActivityCount(db)).toBe(3);
 
-      const allDuplicateResult = service.importActivities?.([
+      const allDuplicateResult = (await service.importActivities?.([
         {
           accountId: "account-1",
           activityType: "DEPOSIT",
@@ -691,7 +741,7 @@ describe("TS activities import domain", () => {
           isDraft: false,
           lineNumber: 1,
         },
-      ]) as {
+      ])) as {
         importRunId: string;
         summary: Record<string, unknown>;
       };
@@ -709,13 +759,13 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("rejects invalid import apply rows without writing activities or import runs", () => {
+  test("rejects invalid import apply rows without writing activities or import runs", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
     try {
       insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
-      const result = service.importActivities?.([
+      const result = (await service.importActivities?.([
         {
           accountId: "account-1",
           activityType: "DEPOSIT",
@@ -734,7 +784,7 @@ describe("TS activities import domain", () => {
           isDraft: false,
           lineNumber: 2,
         },
-      ]) as {
+      ])) as {
         activities: Array<Record<string, unknown>>;
         importRunId: string;
         summary: Record<string, unknown>;

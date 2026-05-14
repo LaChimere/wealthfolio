@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 63
+turns_used: 64
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T21:40:21+08:00"
+updated_at: "2026-05-14T21:52:09+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -426,6 +426,12 @@ updated_at: "2026-05-14T21:40:21+08:00"
   and internal-flow metadata during `/api/v1/activities/import`. Symbol-only
   asset creation, FX pair ensure, device-sync outbox, and portfolio
   recalculation remain deferred.
+- Turn 64: Wired activity import apply to the migrated TS exchange-rate runtime:
+  `/api/v1/activities/import` now ensures required activity-currency and
+  quote-currency FX pairs before writing import runs or activities, and aborts
+  without partial activity/import-run writes if FX registration fails.
+  Symbol-only asset creation, device-sync outbox, and portfolio recalculation
+  remain deferred.
 
 ## Deferred items
 
@@ -514,11 +520,11 @@ updated_at: "2026-05-14T21:40:21+08:00"
   previewed as existing matches, bounded drafts, or explicit fixing errors, and
   mapped import rows are validated read-only with duplicate warnings; apply rows
   are persisted with CSV import-run metadata, duplicate skipping/force-import
-  behavior, and cross-account transfer-pair source-group metadata; symbol-only
-  asset creation, quote fallback writes, provider-backed asset resolution, FX
-  pair ensure, device-sync outbox emission for writes, and portfolio
-  recalculation side effects remain active follow-ups for dedicated
-  activities/import/portfolio parity slices.
+  behavior, cross-account transfer-pair source-group metadata, and FX pair
+  ensure through the TS exchange-rate runtime; symbol-only asset creation, quote
+  fallback writes, provider-backed asset resolution, device-sync outbox emission
+  for writes, and portfolio recalculation side effects remain active follow-ups
+  for dedicated activities/import/portfolio parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag
   persistence, and tool-result mutation behavior remain active follow-ups.
   reason=this slice only adds the guarded HTTP seam, while runtime behavior must

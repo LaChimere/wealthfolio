@@ -182,7 +182,9 @@ function createServicesFromDatabase(
 
   const options: BackendRequestHandlerOptions = {
     accountService,
-    activityService: createActivityService(db),
+    activityService: createActivityService(db, {
+      ensureFxPairs: (pairs) => exchangeRateService.ensureFxPairs(pairs),
+    }),
     alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
     assetService: createAssetService(db, {
       eventBus,
