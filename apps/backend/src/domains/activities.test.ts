@@ -149,12 +149,30 @@ describe("TS activities import domain", () => {
         displayCode: "AAPL",
         name: "Apple",
         quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
       });
       insertAsset(db, {
         id: "LSE",
         displayCode: "LSE",
         name: "London",
         quoteCcy: "GBP",
+      });
+      insertAsset(db, {
+        id: "VOD-US",
+        displayCode: "VOD",
+        name: "Vodafone ADR",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, {
+        id: "VOD-LN",
+        displayCode: "VOD",
+        name: "Vodafone London",
+        quoteCcy: "GBP",
+        exchangeMic: "XLON",
+        instrumentType: "EQUITY",
       });
 
       const created = service.createActivity?.({
@@ -219,6 +237,38 @@ describe("TS activities import domain", () => {
         fee: "0.1",
         currency: "GBP",
       });
+
+      const existingSymbol = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "aapl", exchangeMic: "XNAS", instrumentType: "EQUITY" },
+        activityType: "BUY",
+        activityDate: "2025-01-17",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+
+      expect(existingSymbol).toMatchObject({
+        assetId: "AAPL",
+        activityType: "BUY",
+      });
+
+      const hintedSymbol = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "vod", exchangeMic: "XLON", instrumentType: "EQUITY", quoteCcy: "GBP" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "GBP",
+      }) as Activity;
+
+      expect(hintedSymbol).toMatchObject({
+        assetId: "VOD-LN",
+        activityType: "BUY",
+      });
     } finally {
       db.close();
     }
@@ -242,12 +292,26 @@ describe("TS activities import domain", () => {
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",
-          asset: { symbol: "AAPL" },
+          asset: { symbol: "UNKNOWN" },
           activityType: "BUY",
           activityDate: "2025-01-15",
           currency: "USD",
         }),
-      ).toThrow("Symbol-based activity asset resolution is not yet implemented");
+      ).toThrow("Symbol-based asset creation is not yet implemented");
+      insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
+      insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "DUP" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+        }),
+      ).toThrow("Multiple existing assets match symbol DUP");
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",
@@ -265,6 +329,9 @@ describe("TS activities import domain", () => {
           currency: "USD",
         }),
       ).toThrow("Invalid date format");
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count,
+      ).toBe(0);
     } finally {
       db.close();
     }
@@ -277,7 +344,15 @@ describe("TS activities import domain", () => {
     try {
       insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
       insertAsset(db, { id: "AAPL", displayCode: "AAPL", name: "Apple", quoteCcy: "USD" });
-      insertAsset(db, { id: "MSFT", displayCode: "MSFT", name: "Microsoft", quoteCcy: "USD" });
+      insertAsset(db, {
+        id: "MSFT",
+        displayCode: "MSFT",
+        name: "Microsoft",
+        quoteCcy: "USD",
+        instrumentSymbol: "MSFT",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
       insertActivity(db, {
         id: "update-me",
         accountId: "account-1",
@@ -306,7 +381,7 @@ describe("TS activities import domain", () => {
       const updated = service.updateActivity?.({
         id: "update-me",
         accountId: "account-1",
-        asset: { id: "MSFT" },
+        asset: { symbol: "msft", exchangeMic: "XNAS", instrumentType: "EQUITY" },
         activityType: "TRANSFER_IN",
         subtype: "",
         activityDate: "2024-02-01",
@@ -924,6 +999,7 @@ function createActivitiesDb(): Database {
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT,
       display_code TEXT,
+      instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       quote_mode TEXT,
       quote_ccy TEXT NOT NULL DEFAULT 'USD',
@@ -979,6 +1055,7 @@ interface AssetFixture {
   quoteMode?: string | null;
   quoteCcy?: string;
   exchangeMic?: string | null;
+  instrumentSymbol?: string | null;
 }
 
 interface ActivityFixture {
@@ -1021,14 +1098,15 @@ function insertAsset(db: Database, asset: AssetFixture): void {
   db.query(
     `
       INSERT INTO assets (
-        id, name, display_code, instrument_exchange_mic, quote_mode, quote_ccy, instrument_type
+        id, name, display_code, instrument_symbol, instrument_exchange_mic, quote_mode, quote_ccy, instrument_type
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
     asset.name,
     asset.displayCode,
+    asset.instrumentSymbol ?? asset.displayCode,
     asset.exchangeMic ?? null,
     asset.quoteMode ?? "MARKET",
     asset.quoteCcy ?? "USD",

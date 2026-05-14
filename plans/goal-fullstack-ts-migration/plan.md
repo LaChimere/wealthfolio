@@ -10,21 +10,22 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding contained activity create/update/bulk
-runtime slices to the standalone TS backend:
+PR 5 continues vertical slices by extending contained activity
+create/update/bulk runtime slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
-  provide cash activity data or an existing `asset.id`.
+  provide cash activity data, an existing `asset.id`, or an `asset.symbol` that
+  resolves to exactly one existing SQLite asset.
 - Preserve Rust-compatible generated activity IDs, strict date handling,
   subtype/status defaults, decimal patch semantics, absolute economic signs,
   minor-currency normalization, securities-transfer amount clearing,
   source/idempotency preservation, duplicate detection, bulk created mappings,
   per-entry bulk errors, atomic no-write-on-error behavior, and response
   mapping.
-- Keep still-deferred symbol-only asset resolution/creation, quote fallback
-  writes, activity import/CSV parse, asset preview, device-sync outbox emission,
-  and portfolio recalculation side effects for dedicated parity slices.
+- Keep still-deferred symbol-only asset creation, quote fallback writes,
+  activity import/CSV parse, asset preview, device-sync outbox emission, and
+  portfolio recalculation side effects for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -36,10 +37,10 @@ runtime, quote-provider interactions, auto-classification side effects,
 portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
 lookups, read-only search, transfer link/unlink, single activity delete, and
-bounded existing-asset/cash activity create/update/bulk persistence,
-sync-crypto/device-sync integration, real health status/check/fix runtime
-implementation, real Connect runtime implementation, real device-sync runtime
-implementation, or Rust runtime removal is in scope for this slice.
+bounded existing-asset/cash/symbol-resolved activity create/update/bulk
+persistence, sync-crypto/device-sync integration, real health status/check/fix
+runtime implementation, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

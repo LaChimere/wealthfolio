@@ -299,11 +299,18 @@ interface AccountRow {
 interface AssetRow {
   id: string;
   quote_ccy: string;
+  display_code: string | null;
+  instrument_symbol: string | null;
+  instrument_exchange_mic: string | null;
+  instrument_type: string | null;
 }
 
 interface ActivityAssetInput {
   id?: string;
   symbol?: string;
+  exchangeMic?: string;
+  instrumentType?: string;
+  quoteCcy?: string;
 }
 
 interface ActivityCreateRowInput {
@@ -1035,9 +1042,11 @@ function resolveActivityAssetId(
     return assetInput.id;
   }
   if (assetInput?.symbol) {
-    throw new Error(
-      "Symbol-based activity asset resolution is not yet implemented in the TS runtime",
-    );
+    const existingAsset = findExistingAssetBySymbol(db, assetInput);
+    if (existingAsset) {
+      return existingAsset.id;
+    }
+    throw new Error("Symbol-based asset creation is not yet implemented in the TS runtime");
   }
   if (requiresAssetIdentity(activityType, subtype)) {
     throw new Error("Asset-backed activities need either asset_id or symbol");
@@ -1056,7 +1065,12 @@ function activityAssetInputFromRecord(input: Record<string, unknown>): ActivityA
   const symbol =
     (assetRecord ? optionalTrimmedString(assetRecord.symbol) : undefined) ??
     (typeof input.symbol === "string" ? optionalTrimmedString(input.symbol) : undefined);
-  return id || symbol ? { id, symbol } : null;
+  const exchangeMic = assetRecord ? optionalTrimmedString(assetRecord.exchangeMic) : undefined;
+  const instrumentType = assetRecord
+    ? optionalTrimmedString(assetRecord.instrumentType)
+    : undefined;
+  const quoteCcy = assetRecord ? optionalTrimmedString(assetRecord.quoteCcy) : undefined;
+  return id || symbol ? { id, symbol, exchangeMic, instrumentType, quoteCcy } : null;
 }
 
 function readAccountRow(db: Database, accountId: string): AccountRow {
@@ -1079,7 +1093,13 @@ function readAssetRow(db: Database, assetId: string): AssetRow {
   const row = db
     .query<AssetRow, [string]>(
       `
-        SELECT id, quote_ccy
+        SELECT
+          id,
+          quote_ccy,
+          display_code,
+          instrument_symbol,
+          instrument_exchange_mic,
+          instrument_type
         FROM assets
         WHERE id = ?
       `,
@@ -1089,6 +1109,59 @@ function readAssetRow(db: Database, assetId: string): AssetRow {
     throw new Error(`Record not found: asset ${assetId}`);
   }
   return row;
+}
+
+function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): AssetRow | null {
+  if (!asset.symbol) {
+    return null;
+  }
+  const symbol = asset.symbol.trim();
+  const instrumentType = asset.instrumentType?.trim().toUpperCase();
+  const exchangeMic = asset.exchangeMic?.trim().toUpperCase();
+  const quoteCcy = asset.quoteCcy ? normalizedCurrencyCode(asset.quoteCcy.trim()) : undefined;
+  const clauses = [
+    "(UPPER(COALESCE(instrument_symbol, '')) = UPPER(?) OR UPPER(COALESCE(display_code, '')) = UPPER(?) OR id = ?)",
+  ];
+  const params: string[] = [symbol, symbol, symbol];
+
+  if (instrumentType) {
+    clauses.push("UPPER(COALESCE(instrument_type, '')) = ?");
+    params.push(instrumentType);
+  }
+  if (exchangeMic) {
+    clauses.push("UPPER(COALESCE(instrument_exchange_mic, '')) = ?");
+    params.push(exchangeMic);
+  }
+  if (quoteCcy) {
+    clauses.push("UPPER(quote_ccy) = UPPER(?)");
+    params.push(quoteCcy);
+  }
+
+  const rows = db
+    .query<AssetRow, string[]>(
+      `
+        SELECT
+          id,
+          quote_ccy,
+          display_code,
+          instrument_symbol,
+          instrument_exchange_mic,
+          instrument_type
+        FROM assets
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY
+          CASE WHEN UPPER(COALESCE(display_code, '')) = UPPER(?) THEN 0 ELSE 1 END,
+          id ASC
+        LIMIT 2
+      `,
+    )
+    .all(...params, symbol);
+  if (rows.length > 1) {
+    throw new Error(
+      `Multiple existing assets match symbol ${symbol}; provide asset.id or more disambiguation`,
+    );
+  }
+  return rows[0] ?? null;
 }
 
 function insertActivityRow(db: Database, activity: ActivityCreateRowInput): void {
