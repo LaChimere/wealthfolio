@@ -170,6 +170,43 @@ describe("TS backend runtime composition", () => {
       );
       expect(assetDeleteResponse.status).toBe(204);
 
+      const assetCreateResponse = await fetch(`${server.baseUrl}/api/v1/assets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "",
+          instrumentType: "EQUITY",
+          instrumentSymbol: "SHOP.TO",
+          name: "Shopify",
+        }),
+      });
+      expect(assetCreateResponse.status).toBe(200);
+      const createdAsset = (await assetCreateResponse.json()) as { id: string };
+      expect(createdAsset).toMatchObject({
+        displayCode: "SHOP",
+        quoteCcy: "CAD",
+        instrumentExchangeMic: "XTSE",
+        exchangeName: "TSX",
+      });
+
+      const assetProfileUpdateResponse = await fetch(
+        `${server.baseUrl}/api/v1/assets/profile/${createdAsset.id}`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ notes: "runtime note" }),
+        },
+      );
+      expect(assetProfileUpdateResponse.status).toBe(200);
+      await expect(assetProfileUpdateResponse.json()).resolves.toMatchObject({
+        id: createdAsset.id,
+        name: "Shopify",
+        quoteMode: "MARKET",
+        notes: "runtime note",
+      });
+
       const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
         method: "POST",
         headers: { "content-type": "application/json" },

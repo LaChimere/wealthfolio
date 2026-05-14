@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 43
+turns_used: 45
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T10:01:48+08:00"
+updated_at: "2026-05-14T10:44:32+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -305,6 +305,13 @@ updated_at: "2026-05-14T10:01:48+08:00"
   quote/sync-state cleanup, and `assets_updated` events. Asset create/profile
   mutation remains explicitly deferred until market identity canonicalization is
   ported.
+- Turn 45: Added general asset create/profile mutation runtime for the
+  standalone TS backend: asset creation and profile updates now canonicalize
+  equity/option/metal Yahoo suffixes, crypto pairs, FX pairs, and bond CUSIPs;
+  preserve generated `instrument_key` stability and duplicate returns; infer the
+  Rust-compatible German ISIN provider config; refresh quote currency on MARKET
+  MIC changes; reset existing quote sync state on pricing-identity changes; and
+  emit asset-created/updated events through the runtime route wiring.
 
 ## Deferred items
 
@@ -357,12 +364,12 @@ updated_at: "2026-05-14T10:01:48+08:00"
   holdings/net-worth calculations, and portfolio job enqueue behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/portfolio calculation parity slices.
-- Asset create/profile mutation, market identity canonicalization,
-  quote-provider interactions, and portfolio recalculation behavior remain
-  active follow-ups. reason=asset list/profile reads, quote-mode updates, delete
-  guards, quote cleanup, sync-state cleanup, and exchange-name enrichment now
-  have TS runtime parity, while create/update profile must wait for
-  canonicalization to avoid divergent `instrument_key` behavior.
+- Asset create/profile mutation and market identity canonicalization now have TS
+  runtime parity for direct SQLite-backed routes. reason=asset create/update now
+  preserves generated `instrument_key` behavior, duplicate returns, provider
+  inference, and sync-state reset; quote-provider interactions,
+  auto-classification side effects, and portfolio recalculation behavior remain
+  active follow-ups.
 - App utility database restore runtime now has TS runtime parity. reason=the
   standalone backend performs file-level restore after closing the live database
   handle and explicitly reports restart-required readiness afterward; future

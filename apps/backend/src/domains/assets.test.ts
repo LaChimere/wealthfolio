@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createEventBus } from "../events";
-import { createAssetService, parseExchangeNameLookup } from "./assets";
+import { createAssetService, parseExchangeMetadataLookup, parseExchangeNameLookup } from "./assets";
 
 describe("TS assets domain", () => {
   test("lists and reads assets with Rust-compatible response shape and exchange names", () => {
@@ -28,7 +28,6 @@ describe("TS assets domain", () => {
         instrument_type: "EQUITY",
         instrument_symbol: "AAPL",
         instrument_exchange_mic: "XNAS",
-        instrument_key: "EQUITY:AAPL@XNAS",
         provider_config: JSON.stringify({ preferredProvider: "YAHOO" }),
         created_at: "2026-01-02 03:04:05",
         updated_at: "2026-01-02T03:04:05.123Z",
@@ -182,17 +181,211 @@ describe("TS assets domain", () => {
     }
   });
 
-  test("keeps canonicalization-dependent mutations explicitly deferred", () => {
+  test("creates assets with Rust-compatible market identity canonicalization", () => {
     const db = createAssetsDb();
-    const service = createAssetService(db);
+    const eventBus = createEventBus();
+    const events: unknown[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    const service = createAssetService(db, {
+      eventBus,
+      exchangeMetadata: testExchangeMetadata(),
+    });
 
     try {
+      const shop = service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "shop.to",
+        name: "Shopify",
+      });
+      expect(shop).toMatchObject({
+        kind: "INVESTMENT",
+        displayCode: "SHOP",
+        quoteCcy: "CAD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "SHOP",
+        instrumentExchangeMic: "XTSE",
+        instrumentKey: "EQUITY:SHOP@XTSE",
+        exchangeName: "TSX",
+      });
+
+      const duplicate = service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "CAD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "SHOP",
+        instrumentExchangeMic: "XTSE",
+      });
+      expect(duplicate.id).toBe(shop.id);
+
+      expect(
+        service.createAsset({
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          instrumentType: "CRYPTO",
+          instrumentSymbol: "BTC-USD",
+        }),
+      ).toMatchObject({
+        displayCode: "BTC",
+        instrumentSymbol: "BTC",
+        instrumentExchangeMic: null,
+        instrumentKey: "CRYPTO:BTC/USD",
+      });
+
+      expect(
+        service.createAsset({
+          kind: "FX",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          instrumentType: "FX",
+          instrumentSymbol: "eurusd=x",
+        }),
+      ).toMatchObject({
+        displayCode: "EUR/USD",
+        instrumentSymbol: "EUR",
+        quoteCcy: "USD",
+        instrumentKey: "FX:EUR/USD",
+      });
+
+      expect(
+        service.createAsset({
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "USD",
+          instrumentType: "BOND",
+          instrumentSymbol: "912810TH1",
+        }),
+      ).toMatchObject({
+        displayCode: "US912810TH14",
+        instrumentSymbol: "US912810TH14",
+        instrumentKey: "BOND:US912810TH14",
+      });
+
+      expect(
+        service.createAsset({
+          kind: "INVESTMENT",
+          quoteMode: "MARKET",
+          quoteCcy: "EUR",
+          instrumentType: "EQUITY",
+          instrumentSymbol: "DE000BASF111",
+          instrumentExchangeMic: "xetr",
+        }),
+      ).toMatchObject({
+        providerConfig: { preferred_provider: "BOERSE_FRANKFURT" },
+        instrumentExchangeMic: "XETR",
+      });
+
+      expect(events).toHaveLength(5);
+      expect(events[0]).toMatchObject({
+        name: "assets_created",
+        payload: { type: "assets_created", asset_ids: [shop.id] },
+      });
       expect(() =>
         service.createAsset({ kind: "INVESTMENT", quoteMode: "MARKET", quoteCcy: "USD" }),
-      ).toThrow("market identity canonicalization");
-      expect(() => service.updateAssetProfile("asset-1", { notes: "" })).toThrow(
-        "market identity canonicalization",
-      );
+      ).toThrow("instrument_symbol");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("updates asset profiles while preserving omitted fields and resetting sync state", () => {
+    const db = createAssetsDb();
+    const eventBus = createEventBus();
+    const events: unknown[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    const service = createAssetService(db, {
+      eventBus,
+      exchangeMetadata: testExchangeMetadata(),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        kind: "INVESTMENT",
+        name: "Apple Inc.",
+        display_code: "AAPL",
+        notes: "old",
+        metadata: JSON.stringify({ identifiers: { isin: "US0378331005" } }),
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, data_source, error_count, last_error, updated_at
+          )
+          VALUES ('asset-1', 'YAHOO', 3, 'old failure', '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const notesOnly = service.updateAssetProfile("asset-1", { notes: "new notes" });
+      expect(notesOnly).toMatchObject({
+        name: "Apple Inc.",
+        displayCode: "AAPL",
+        notes: "new notes",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        providerConfig: { preferred_provider: "YAHOO" },
+      });
+      expect(readSyncState(db, "asset-1")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 3,
+        last_error: "old failure",
+      });
+
+      const moved = service.updateAssetProfile("asset-1", {
+        instrumentExchangeMic: "xtse",
+      });
+      expect(moved).toMatchObject({
+        instrumentSymbol: "AAPL",
+        instrumentExchangeMic: "XTSE",
+        quoteCcy: "CAD",
+        instrumentKey: "EQUITY:AAPL@XTSE",
+        exchangeName: "TSX",
+      });
+      expect(readSyncState(db, "asset-1")).toMatchObject({
+        data_source: "",
+        error_count: 0,
+        last_error: null,
+      });
+      const clearedMic = service.updateAssetProfile("asset-1", {
+        instrumentExchangeMic: "",
+        quoteCcy: "usd",
+      });
+      expect(clearedMic).toMatchObject({
+        instrumentExchangeMic: null,
+        quoteCcy: "USD",
+        instrumentKey: "EQUITY:AAPL",
+      });
+      expect(() =>
+        service.updateAssetProfile("asset-1", {
+          instrumentType: "BOND",
+          instrumentSymbol: "US912810TH14",
+          quoteCcy: "",
+        }),
+      ).toThrow("quote_ccy");
+      expect(events).toEqual([
+        {
+          name: "assets_updated",
+          payload: { type: "assets_updated", asset_ids: ["asset-1"] },
+        },
+        {
+          name: "assets_updated",
+          payload: { type: "assets_updated", asset_ids: ["asset-1"] },
+        },
+        {
+          name: "assets_updated",
+          payload: { type: "assets_updated", asset_ids: ["asset-1"] },
+        },
+      ]);
     } finally {
       db.close();
     }
@@ -229,7 +422,16 @@ function createAssetsDb(): Database {
       instrument_type TEXT,
       instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
-      instrument_key TEXT,
+      instrument_key TEXT GENERATED ALWAYS AS (
+        CASE
+          WHEN instrument_type IS NULL OR instrument_symbol IS NULL THEN NULL
+          WHEN instrument_type IN ('FX', 'CRYPTO')
+            THEN instrument_type || ':' || instrument_symbol || '/' || quote_ccy
+          WHEN instrument_exchange_mic IS NOT NULL
+            THEN instrument_type || ':' || instrument_symbol || '@' || instrument_exchange_mic
+          ELSE instrument_type || ':' || instrument_symbol
+        END
+      ) STORED,
       provider_config TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -256,6 +458,9 @@ function createAssetsDb(): Database {
 
     CREATE TABLE quote_sync_state (
       asset_id TEXT PRIMARY KEY NOT NULL,
+      data_source TEXT NOT NULL DEFAULT 'YAHOO',
+      error_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -284,7 +489,6 @@ function insertAsset(
     instrument_type?: string | null;
     instrument_symbol?: string | null;
     instrument_exchange_mic?: string | null;
-    instrument_key?: string | null;
     provider_config?: string | null;
     created_at?: string;
     updated_at?: string;
@@ -295,9 +499,9 @@ function insertAsset(
       INSERT INTO assets (
         id, kind, name, display_code, notes, metadata, is_active, quote_mode,
         quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
-        instrument_key, provider_config, created_at, updated_at
+        provider_config, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
@@ -312,7 +516,6 @@ function insertAsset(
     asset.instrument_type ?? null,
     asset.instrument_symbol ?? null,
     asset.instrument_exchange_mic ?? null,
-    asset.instrument_key ?? null,
     asset.provider_config ?? null,
     asset.created_at ?? "2026-01-01T00:00:00Z",
     asset.updated_at ?? "2026-01-01T00:00:00Z",
@@ -331,4 +534,49 @@ function readAssetOrNull(db: Database, assetId: string): Record<string, unknown>
   return db
     .query<Record<string, unknown>, [string]>("SELECT * FROM assets WHERE id = ?")
     .get(assetId);
+}
+
+function readSyncState(db: Database, assetId: string): Record<string, unknown> | null {
+  return db
+    .query<Record<string, unknown>, [string]>("SELECT * FROM quote_sync_state WHERE asset_id = ?")
+    .get(assetId);
+}
+
+function testExchangeMetadata() {
+  return parseExchangeMetadataLookup(
+    JSON.stringify({
+      exchanges: [
+        {
+          mic: "XNAS",
+          name: "NASDAQ",
+          currency: "USD",
+          yahoo: { suffix: "" },
+        },
+        {
+          mic: "XTSE",
+          name: "TSX",
+          currency: "CAD",
+          yahoo: { suffix: "TO" },
+        },
+        {
+          mic: "XETR",
+          name: "XETRA",
+          currency: "EUR",
+          yahoo: { suffix: "DE" },
+        },
+        {
+          mic: "XFRA",
+          name: "Frankfurt",
+          currency: "EUR",
+          yahoo: { suffix: "F" },
+        },
+        {
+          mic: "CXE",
+          name: "Cboe UK",
+          currency: "GBp",
+          yahoo: { suffix: "XC" },
+        },
+      ],
+    }),
+  );
 }

@@ -9,7 +9,7 @@ import {
 import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
-import { createAssetService, parseExchangeNameLookup } from "./domains/assets";
+import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
 import {
   createContributionDepositCalculator,
   createContributionLimitRepository,
@@ -180,7 +180,7 @@ function createServicesFromDatabase(
     alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
     assetService: createAssetService(db, {
       eventBus,
-      exchangeNameByMic: readExchangeNameLookup(runtimeOptions.repositoryRoot),
+      exchangeMetadata: readExchangeMetadataLookup(runtimeOptions.repositoryRoot),
     }),
     aiProviderService: secretService
       ? createAiProviderService({
@@ -301,8 +301,8 @@ function readPackageVersion(repositoryRoot: string): string {
   }
 }
 
-function readExchangeNameLookup(repositoryRoot: string): Map<string, string> {
-  return parseExchangeNameLookup(
+function readExchangeMetadataLookup(repositoryRoot: string) {
+  return parseExchangeMetadataLookup(
     readFileSync(
       path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
       "utf8",

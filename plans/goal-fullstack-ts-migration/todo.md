@@ -71,11 +71,12 @@
     enrollment/engine, device-sync device management, team-key/reset, and
     pairing, standalone runtime composition for already-ported SQLite-backed
     domains, contribution-limit deposit calculation runtime, alternative-assets
-    runtime, contained asset read/quote-mode/delete runtime, safe app utility
-    runtime, custom provider test-source runtime, alternative assets, assets,
-    portfolio metrics, holdings, add-ons, market-data, and activities TS
-    repository/service or route config implementations plus guarded/runtime
-    route tests in `apps/backend/src/domains/settings.ts`,
+    runtime, contained asset read/quote-mode/delete runtime, asset
+    create/profile mutation runtime, safe app utility runtime, custom provider
+    test-source runtime, alternative assets, assets, portfolio metrics,
+    holdings, add-ons, market-data, and activities TS repository/service or
+    route config implementations plus guarded/runtime route tests in
+    `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -113,11 +114,13 @@
     alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, and holdings reads now have TS runtime
     parity, while portfolio job enqueue and recalculation side effects are
-    deferred to portfolio parity slices; asset persistence/profile/quote-mode
-    behavior is deferred to asset/market-data/portfolio parity slices; app
-    utility database restore now has TS runtime parity with restart-required
-    readiness after file restore; contribution-limit deposit calculation now has
-    TS runtime parity with SQLite activity reads, Rust-compatible contribution
+    deferred to portfolio parity slices; asset read/create/profile/quote-mode
+    and delete behavior now have TS runtime parity, while quote-provider
+    interactions, auto-classification, and portfolio recalculation side effects
+    are deferred to asset/market-data/portfolio parity slices; app utility
+    database restore now has TS runtime parity with restart-required readiness
+    after file restore; contribution-limit deposit calculation now has TS
+    runtime parity with SQLite activity reads, Rust-compatible contribution
     rules, user-timezone year ranges, and FX conversion dates; portfolio metric
     calculations are deferred to portfolio calculation parity slices; holdings
     fan-out, valuations, allocations, snapshots, imports, and portfolio
@@ -753,6 +756,18 @@ contract:
   runtime route wiring. Rubber-duck critique narrowed the slice away from unsafe
   create/profile mutation, and focused code review found no remaining actionable
   issues. Full repository check passed with `bun run check`.
+- `pr5-assets-mutation-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test src/domains/assets.test.ts src/runtime.test.ts`.
+  Coverage includes create/profile SQLite writes, Rust-compatible
+  equity/option/metal Yahoo suffix canonicalization, crypto and FX pair
+  canonicalization, bond CUSIP-to-ISIN conversion, duplicate `instrument_key`
+  returns without duplicate create events, German ISIN provider inference,
+  optional profile notes/omitted-field preservation, MARKET MIC quote-currency
+  refresh, quote sync-state reset, empty final `quote_ccy` rejection, and
+  standalone runtime route wiring. Focused code review found and fixed optional
+  profile notes, empty quote-currency update, and transaction-bound duplicate
+  detection gaps; re-review found no remaining actionable issues.
 
 ## Result
 
@@ -774,9 +789,9 @@ contract:
   settings/catalog runtime, sync crypto runtime, legacy classification migration
   runtime, custom provider test-source runtime, FX converter/register runtime,
   app utility database restore runtime, contribution-limit deposit calculation
-  runtime, alternative-assets runtime, and contained asset
-  read/quote-mode/delete runtime slices implemented; broader migration remains
-  active.
+  runtime, alternative-assets runtime, contained asset read/quote-mode/delete
+  runtime, and asset create/profile mutation runtime slices implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -787,27 +802,27 @@ contract:
   moves with a dedicated runtime parity slice; AI chat execution and persistence
   move with AI runtime parity slices; alternative asset portfolio job enqueue
   and recalculation side effects move with portfolio parity slices; asset
-  create/profile canonicalization, provider interactions, and portfolio
-  recalculation side effects move with asset/market-data/portfolio parity
-  slices; portfolio metric calculations move with portfolio calculation parity
-  slices; holdings fan-out, valuations, allocations, snapshots, imports, and
-  portfolio recalculation side effects move with holdings/portfolio parity
-  slices; add-on filesystem extraction, runtime loading, store HTTP, staging
-  I/O, and update behavior move with add-on runtime parity slices; exchange
-  metadata, provider HTTP, Yahoo dividends, quote import/persistence, market
-  sync, and portfolio recalculation behavior move with market-data/portfolio
-  parity slices; activity persistence, import parsing/mapping/template storage,
-  duplicate lookups, transfer mutation behavior, asset preview resolution, and
-  portfolio recalculation side effects move with activities/import runtime
-  parity slices; AI chat persistence, provider streaming, tool execution, thread
-  storage, tag persistence, and tool-result mutation behavior move with AI
-  runtime parity slices; device-sync integration for sync crypto moves with
-  device-sync parity slices; real health checks, market sync fix execution,
-  health cache behavior, and `/health/fix` dispatch move with health/calculation
-  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-  orchestration, local sync repositories, subscription entitlement checks, event
-  production, E2EE enrollment, sync engine, snapshot/upload runtime,
-  feature-flag errors, background workers, device-sync cloud clients, token
-  lifecycle, team-key operations, key material handling, pairing flows,
-  freshness gate persistence, bootstrap transfer, and secret side effects move
-  with Connect/device-sync parity slices.
+  quote-provider interactions, auto-classification, and portfolio recalculation
+  side effects move with asset/market-data/portfolio parity slices; portfolio
+  metric calculations move with portfolio calculation parity slices; holdings
+  fan-out, valuations, allocations, snapshots, imports, and portfolio
+  recalculation side effects move with holdings/portfolio parity slices; add-on
+  filesystem extraction, runtime loading, store HTTP, staging I/O, and update
+  behavior move with add-on runtime parity slices; exchange metadata, provider
+  HTTP, Yahoo dividends, quote import/persistence, market sync, and portfolio
+  recalculation behavior move with market-data/portfolio parity slices; activity
+  persistence, import parsing/mapping/template storage, duplicate lookups,
+  transfer mutation behavior, asset preview resolution, and portfolio
+  recalculation side effects move with activities/import runtime parity slices;
+  AI chat persistence, provider streaming, tool execution, thread storage, tag
+  persistence, and tool-result mutation behavior move with AI runtime parity
+  slices; device-sync integration for sync crypto moves with device-sync parity
+  slices; real health checks, market sync fix execution, health cache behavior,
+  and `/health/fix` dispatch move with health/calculation parity slices; real
+  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
+  sync repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.
