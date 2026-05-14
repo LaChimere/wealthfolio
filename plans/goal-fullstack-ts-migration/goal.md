@@ -318,7 +318,8 @@ updated_at: "2026-05-14T11:02:29+08:00"
   exchange list filtering, path-owned `asset_id`, deterministic manual quote
   IDs, existing same-day/source ID preservation, optional OHLCV zero-to-null
   storage, invalid stored timestamp fallback, idempotent deletes, and optional
-  route methods that keep provider/search/import/sync behavior deferred.
+  route methods that kept provider/search/import/sync behavior deferred at that
+  point in the migration.
 - Turn 47: Added market-data latest quote snapshot runtime for the standalone TS
   backend: `/api/v1/market-data/quotes/latest` now reads SQLite latest quotes
   with Rust-compatible source priority, asset quote-currency reconciliation,
@@ -335,6 +336,12 @@ updated_at: "2026-05-14T11:02:29+08:00"
   two-year daily chart query parameters, dividend event extraction, 401 crumb
   reset, symbol-not-found/no-data errors, and Yahoo chart provider-error
   mapping.
+- Turn 50: Added the market-data symbol search runtime for the standalone TS
+  backend: `/api/v1/market-data/search` now merges existing SQLite assets with
+  injectable Yahoo raw search results, including exchange code/suffix MIC
+  mapping, provider/exchange-inferred currency provenance, canonical
+  instrument-key de-dupe, secondary Yahoo search fallback, provider failure
+  fallback, and existing-first/score ordering.
 
 ## Deferred items
 
@@ -368,11 +375,12 @@ updated_at: "2026-05-14T11:02:29+08:00"
   assets, valuation, and market sync parity beyond local health dismissal/config
   state.
 - Market-data exchange list, local quote history/update/delete, latest quote
-  snapshots, quote CSV check/import, and addon-compatible Yahoo dividends now
-  have TS runtime parity. reason=the standalone backend reads the Rust exchange
-  catalog, writes local quote rows directly, and can call Yahoo dividends
-  through an injectable HTTP path; provider search/symbol resolution, market
-  sync, and portfolio recalculation side effects remain active follow-ups.
+  snapshots, quote CSV check/import, addon-compatible Yahoo dividends, and
+  symbol search now have TS runtime parity. reason=the standalone backend reads
+  the Rust exchange catalog, writes local quote rows directly, can call Yahoo
+  dividends/search through injectable HTTP paths, and can merge search results
+  against existing SQLite assets; symbol quote resolution, market sync, and
+  portfolio recalculation side effects remain active follow-ups.
 - Actual portfolio job execution and event production remain active follow-ups.
   reason=they depend on market sync, holdings, snapshot, valuation, account,
   health, and FX service parity beyond route-level job enqueue and SSE transport
@@ -453,11 +461,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
   behavior must move with dedicated add-on parity slices.
-- Market-data provider search/resolve, market sync execution, and portfolio
+- Market-data symbol quote resolution, market sync execution, and portfolio
   recalculation side effects remain active follow-ups. reason=exchange metadata,
-  local quote persistence/import, and Yahoo dividends have TS runtime coverage,
-  while provider discovery/sync and recalculation behavior must move with
-  dedicated market-data and portfolio parity slices.
+  local quote persistence/import, Yahoo dividends, and symbol search have TS
+  runtime coverage, while quote resolution/sync and recalculation behavior must
+  move with dedicated market-data and portfolio parity slices.
 
 ## Blockers
 

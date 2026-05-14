@@ -40,6 +40,13 @@ describe("TS backend runtime composition", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        expect([
+          "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+          "https://query1.finance.yahoo.com/v1/finance/search?q=SHOP",
+        ]).toContain(String(input));
+        return Promise.resolve(Response.json({ quotes: [] }));
+      }) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
     });
@@ -309,9 +316,16 @@ describe("TS backend runtime composition", () => {
         }),
         expect.objectContaining({ id: manualQuoteId }),
       ]);
-      expect((await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`)).status).toBe(
-        404,
-      );
+      const searchResponse = await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`);
+      expect(searchResponse.status).toBe(200);
+      await expect(searchResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "SHOP",
+          isExisting: true,
+          existingAssetId: createdAsset.id,
+          dataSource: "MANUAL",
+        }),
+      ]);
       const deleteQuoteResponse = await fetch(
         `${server.baseUrl}/api/v1/market-data/quotes/id/${encodeURIComponent(manualQuoteId)}`,
         { method: "DELETE" },

@@ -47,6 +47,7 @@ export interface SqliteBackedBackendServicesOptions {
   repositoryRoot?: string;
   secretKey?: Uint8Array;
   aiProviderCatalogJson?: string;
+  marketDataFetch?: typeof fetch;
 }
 
 export interface SqliteBackedBackendServices {
@@ -76,6 +77,7 @@ export function createSqliteBackedBackendServices(
       repositoryRoot,
       secretKey: options.secretKey,
       aiProviderCatalogJson: options.aiProviderCatalogJson,
+      marketDataFetch: options.marketDataFetch,
     });
   } catch (error) {
     initialized.db.close();
@@ -131,6 +133,7 @@ function createServicesFromDatabase(
     repositoryRoot: string;
     secretKey?: Uint8Array;
     aiProviderCatalogJson?: string;
+    marketDataFetch?: typeof fetch;
   },
 ): SqliteBackedBackendServices {
   const eventBus = runtimeOptions.eventBus ?? createEventBus();
@@ -227,6 +230,7 @@ function createServicesFromDatabase(
     ),
     marketDataService: createMarketDataService(db, {
       exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
+      fetch: runtimeOptions.marketDataFetch,
     }),
     restartRequired: () => restartRequired,
     secretService,

@@ -678,6 +678,183 @@ describe("TS market data domain", () => {
       db.close();
     }
   });
+
+  test("searches existing assets and Yahoo raw results with canonical dedupe", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      expect(url).toBe("https://query2.finance.yahoo.com/v1/finance/search?q=AZN");
+      expect((init?.headers as Record<string, string>)["User-Agent"]).toContain("Mozilla/5.0");
+      return Promise.resolve(
+        Response.json({
+          quotes: [
+            {
+              symbol: "AZN.L",
+              exchange: "LSE",
+              quoteType: "EQUITY",
+              shortname: "AstraZeneca PLC",
+              longname: "AstraZeneca PLC",
+              score: 9000,
+              currency: "GBp",
+            },
+            {
+              symbol: "VFEG.L",
+              exchange: "LSE",
+              quoteType: "ETF",
+              shortname: "Vanguard FTSE Emerging Markets",
+              score: 20001,
+              currency: "GBP",
+            },
+          ],
+        }),
+      );
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "EQUITY:AZN@XLON",
+        name: "AstraZeneca existing",
+        display_code: "AZN",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AZN",
+        instrument_exchange_mic: "XLON",
+        instrument_key: "EQUITY:AZN@XLON",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+        quote_ccy: "GBp",
+      });
+
+      expect(await service.searchSymbol?.("AZN")).toEqual([
+        {
+          symbol: "AZN",
+          shortName: "AstraZeneca existing",
+          longName: "AstraZeneca existing",
+          exchange: "LSE",
+          exchangeMic: "XLON",
+          exchangeName: "LSE",
+          quoteType: "EQUITY",
+          typeDisplay: "EQUITY",
+          currency: "GBp",
+          currencySource: null,
+          dataSource: "YAHOO",
+          isExisting: true,
+          existingAssetId: "EQUITY:AZN@XLON",
+          index: "",
+          score: 100,
+        },
+        {
+          symbol: "VFEG.L",
+          shortName: "Vanguard FTSE Emerging Markets",
+          longName: "Vanguard FTSE Emerging Markets",
+          exchange: "LSE",
+          exchangeMic: "XLON",
+          exchangeName: "LSE",
+          quoteType: "ETF",
+          typeDisplay: "",
+          currency: "GBP",
+          currencySource: "provider",
+          dataSource: "YAHOO",
+          isExisting: false,
+          existingAssetId: null,
+          index: "",
+          score: 20001,
+        },
+      ]);
+      expect(calls).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search falls back to existing assets when Yahoo search fails", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = (() => Promise.reject(new Error("network unavailable"))) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "EQUITY:AAPL@XNAS",
+        name: "Apple Inc.",
+        display_code: "AAPL",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        instrument_key: "EQUITY:AAPL@XNAS",
+        quote_ccy: "USD",
+      });
+
+      expect(await service.searchSymbol?.("apple")).toMatchObject([
+        {
+          symbol: "AAPL",
+          isExisting: true,
+          existingAssetId: "EQUITY:AAPL@XNAS",
+          dataSource: "MANUAL",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search falls back to secondary Yahoo endpoint when raw search is empty", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP") {
+        return Promise.resolve(Response.json({ quotes: [] }));
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/finance/search?q=SHOP") {
+        return Promise.resolve(
+          Response.json({
+            quotes: [
+              {
+                symbol: "SHOP.TO",
+                exchange: "TOR",
+                quoteType: "EQUITY",
+                longname: "Shopify Inc.",
+                score: 42,
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      expect(await service.searchSymbol?.("SHOP")).toEqual([
+        expect.objectContaining({
+          symbol: "SHOP.TO",
+          exchangeMic: "XTSE",
+          exchangeName: "TSX",
+          currency: "CAD",
+          currencySource: "exchange_inferred",
+          dataSource: "YAHOO",
+          score: 42,
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=SHOP",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createMarketDataDb(): Database {
@@ -702,12 +879,17 @@ function createMarketDataDb(): Database {
     CREATE UNIQUE INDEX uq_quotes_asset_day_source ON quotes(asset_id, day, source);
     CREATE TABLE assets (
       id TEXT NOT NULL PRIMARY KEY,
+      kind TEXT NOT NULL,
+      name TEXT,
       display_code TEXT,
       quote_ccy TEXT NOT NULL,
       quote_mode TEXT NOT NULL,
       is_active INTEGER NOT NULL,
+      instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       instrument_type TEXT,
+      instrument_key TEXT,
+      provider_config TEXT,
       metadata TEXT
     );
     CREATE TABLE quote_sync_state (
@@ -724,31 +906,41 @@ function insertAsset(
   db: Database,
   asset: {
     id: string;
+    kind?: string;
+    name?: string | null;
     display_code?: string | null;
     quote_ccy?: string;
     quote_mode?: string;
     is_active?: number;
+    instrument_symbol?: string | null;
     instrument_exchange_mic?: string | null;
     instrument_type?: string | null;
+    instrument_key?: string | null;
+    provider_config?: string | null;
     metadata?: string | null;
   },
 ) {
   db.query(
     `
       INSERT INTO assets (
-        id, display_code, quote_ccy, quote_mode, is_active, instrument_exchange_mic,
-        instrument_type, metadata
+        id, kind, name, display_code, quote_ccy, quote_mode, is_active, instrument_symbol,
+        instrument_exchange_mic, instrument_type, instrument_key, provider_config, metadata
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
+    asset.kind ?? "INVESTMENT",
+    asset.name ?? null,
     asset.display_code ?? null,
     asset.quote_ccy ?? "USD",
     asset.quote_mode ?? "MARKET",
     asset.is_active ?? 1,
+    asset.instrument_symbol ?? null,
     asset.instrument_exchange_mic ?? null,
     asset.instrument_type ?? "EQUITY",
+    asset.instrument_key ?? null,
+    asset.provider_config ?? null,
     asset.metadata ?? null,
   );
 }
@@ -838,7 +1030,7 @@ function testExchangeCatalogJson(): string {
         currency: "USD",
         timezone: "America/New_York",
         close: [16, 0],
-        yahoo: { suffix: "" },
+        yahoo: { suffix: "", codes: ["NMS", "NGM", "NCM"] },
       },
       {
         mic: "XTSE",
@@ -846,7 +1038,7 @@ function testExchangeCatalogJson(): string {
         currency: "CAD",
         timezone: "America/Toronto",
         close: [16, 0],
-        yahoo: { suffix: "TO" },
+        yahoo: { suffix: "TO", codes: ["TOR"] },
       },
       {
         mic: "XLON",
@@ -854,7 +1046,7 @@ function testExchangeCatalogJson(): string {
         currency: "GBP",
         timezone: "Europe/London",
         close: [16, 30],
-        yahoo: { suffix: "L" },
+        yahoo: { suffix: "L", codes: ["LSE"] },
       },
       {
         mic: "NOCCY",

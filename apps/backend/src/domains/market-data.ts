@@ -60,6 +60,24 @@ export interface YahooDividend {
   date: number;
 }
 
+export interface SymbolSearchResult {
+  symbol: string;
+  shortName: string;
+  longName: string;
+  exchange: string;
+  exchangeMic?: string | null;
+  exchangeName?: string | null;
+  quoteType: string;
+  typeDisplay: string;
+  currency?: string | null;
+  currencySource?: string | null;
+  dataSource?: string | null;
+  isExisting: boolean;
+  existingAssetId?: string | null;
+  index: string;
+  score: number;
+}
+
 export interface ResolveSymbolQuoteRequest {
   symbol: string;
   exchangeMic?: string;
@@ -70,7 +88,7 @@ export interface ResolveSymbolQuoteRequest {
 
 export interface MarketDataService {
   getExchanges?(): Promise<ExchangeInfo[]> | ExchangeInfo[];
-  searchSymbol?(query: string): Promise<unknown[]> | unknown[];
+  searchSymbol?(query: string): Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<unknown> | unknown;
   getQuoteHistory?(symbol: string): Promise<Quote[]> | Quote[];
   fetchYahooDividends?(symbol: string): Promise<YahooDividend[]> | YahooDividend[];
@@ -133,9 +151,13 @@ interface QuoteWrite {
 
 interface ExchangeCatalog {
   exchanges: ExchangeInfo[];
+  currencyByMic: ReadonlyMap<string, string>;
+  nameByMic: ReadonlyMap<string, string>;
   timezoneByMic: ReadonlyMap<string, string>;
   closeByMic: ReadonlyMap<string, readonly [number, number]>;
+  yahooCodeToMic: ReadonlyMap<string, string>;
   yahooSuffixByMic: ReadonlyMap<string, string>;
+  yahooSuffixToMic: ReadonlyMap<string, string>;
 }
 
 interface AssetQuoteStateRow {
@@ -161,6 +183,19 @@ interface QuoteImportAssetRow {
   instrument_exchange_mic: string | null;
 }
 
+interface AssetSearchRow {
+  id: string;
+  kind: string;
+  name: string | null;
+  display_code: string | null;
+  quote_ccy: string;
+  instrument_type: string | null;
+  instrument_symbol: string | null;
+  instrument_exchange_mic: string | null;
+  instrument_key: string | null;
+  provider_config: string | null;
+}
+
 interface NormalizedQuoteImport {
   symbol: string;
   displaySymbol: string | null;
@@ -178,6 +213,16 @@ interface NormalizedQuoteImport {
 interface YahooCrumbData {
   cookie: string;
   crumb: string;
+}
+
+interface YahooSearchQuoteRaw {
+  symbol?: unknown;
+  exchange?: unknown;
+  quoteType?: unknown;
+  shortname?: unknown;
+  longname?: unknown;
+  score?: unknown;
+  currency?: unknown;
 }
 
 const MAX_SYNC_ERRORS = 10;
@@ -206,6 +251,10 @@ export function createMarketDataService(
   return {
     getExchanges() {
       return exchangeCatalog.exchanges;
+    },
+
+    searchSymbol(query) {
+      return searchSymbols(db, query, exchangeCatalog, fetchImpl);
     },
 
     getQuoteHistory(symbol) {
@@ -281,14 +330,20 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
     throw new Error("Invalid exchange metadata catalog");
   }
   const exchanges: ExchangeInfo[] = [];
+  const currencyByMic = new Map<string, string>();
+  const nameByMic = new Map<string, string>();
   const timezoneByMic = new Map<string, string>();
   const closeByMic = new Map<string, readonly [number, number]>();
+  const yahooCodeToMic = new Map<string, string>();
   const yahooSuffixByMic = new Map<string, string>();
+  const suffixToMicCandidates = new Map<string, string>();
+  const ambiguousSuffixes = new Set<string>();
   for (const entry of parsed.exchanges) {
     if (!isRecord(entry) || typeof entry.mic !== "string") {
       continue;
     }
     const mic = entry.mic.toUpperCase();
+    yahooCodeToMic.set(mic, mic);
     if (typeof entry.timezone === "string") {
       timezoneByMic.set(mic, entry.timezone);
     }
@@ -300,6 +355,8 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
       closeByMic.set(mic, [entry.close[0], entry.close[1]]);
     }
     if (typeof entry.name === "string" && typeof entry.currency === "string") {
+      nameByMic.set(mic, entry.name);
+      currencyByMic.set(mic, entry.currency);
       exchanges.push({
         mic: entry.mic,
         name: entry.name,
@@ -307,23 +364,509 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
         currency: entry.currency,
       });
     }
+    if (isRecord(entry.yahoo)) {
+      if (Array.isArray(entry.yahoo.codes)) {
+        for (const code of entry.yahoo.codes) {
+          if (typeof code !== "string" || code.trim() === "") {
+            continue;
+          }
+          yahooCodeToMic.set(code.trim().toUpperCase(), mic);
+        }
+      }
+    }
     if (isRecord(entry.yahoo) && typeof entry.yahoo.suffix === "string") {
       const suffix = entry.yahoo.suffix.trim().replace(/^\./, "");
       if (suffix) {
         yahooSuffixByMic.set(mic, suffix);
+        const suffixKey = suffix.toUpperCase();
+        if (!ambiguousSuffixes.has(suffixKey)) {
+          const existing = suffixToMicCandidates.get(suffixKey);
+          if (existing && existing !== mic) {
+            suffixToMicCandidates.delete(suffixKey);
+            ambiguousSuffixes.add(suffixKey);
+          } else {
+            suffixToMicCandidates.set(suffixKey, mic);
+          }
+        }
       }
     }
   }
-  return { exchanges, timezoneByMic, closeByMic, yahooSuffixByMic };
+  return {
+    exchanges,
+    currencyByMic,
+    nameByMic,
+    timezoneByMic,
+    closeByMic,
+    yahooCodeToMic,
+    yahooSuffixByMic,
+    yahooSuffixToMic: suffixToMicCandidates,
+  };
 }
 
 function emptyExchangeCatalog(): ExchangeCatalog {
   return {
     exchanges: [],
+    currencyByMic: new Map(),
+    nameByMic: new Map(),
     timezoneByMic: new Map(),
     closeByMic: new Map(),
+    yahooCodeToMic: new Map(),
     yahooSuffixByMic: new Map(),
+    yahooSuffixToMic: new Map(),
   };
+}
+
+async function searchSymbols(
+  db: Database,
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Promise<SymbolSearchResult[]> {
+  const existingSummaries = readSearchAssets(db, query).map((asset) =>
+    assetToSearchResult(asset, exchangeCatalog),
+  );
+  const existingAssetIds = new Set(existingSummaries.map((summary) => summary.existingAssetId));
+
+  let providerResults: SymbolSearchResult[] = [];
+  try {
+    providerResults = await searchYahooSymbols(query, exchangeCatalog, fetchImpl);
+  } catch {
+    providerResults = [];
+  }
+
+  const providerKeys = dedupe(
+    providerResults
+      .map((result) => instrumentKeyFromSearchResult(result, exchangeCatalog))
+      .filter((key): key is string => key !== null),
+  );
+  const existingByInstrumentKey = readAssetsByInstrumentKey(db, providerKeys);
+  const unmatchedProviderResults: SymbolSearchResult[] = [];
+
+  for (const result of providerResults) {
+    const instrumentKey = instrumentKeyFromSearchResult(result, exchangeCatalog);
+    const existingAsset = instrumentKey ? existingByInstrumentKey.get(instrumentKey) : undefined;
+    if (existingAsset && existingAsset.kind !== "FX") {
+      if (!existingAssetIds.has(existingAsset.id)) {
+        existingSummaries.push(assetToSearchResult(existingAsset, exchangeCatalog));
+        existingAssetIds.add(existingAsset.id);
+      }
+      continue;
+    }
+    unmatchedProviderResults.push(result);
+  }
+
+  const existingKeys = new Set(
+    existingSummaries.map((summary) => searchResultDedupKey(summary.symbol, summary.exchangeMic)),
+  );
+  const newProviderResults = unmatchedProviderResults.filter(
+    (result) => !existingKeys.has(searchResultDedupKey(result.symbol, result.exchangeMic)),
+  );
+
+  const merged = [...existingSummaries, ...newProviderResults];
+  merged.sort((left, right) => {
+    if (left.isExisting !== right.isExisting) {
+      return left.isExisting ? -1 : 1;
+    }
+    return right.score - left.score;
+  });
+  return merged;
+}
+
+function readSearchAssets(db: Database, query: string): AssetSearchRow[] {
+  const like = `%${query.toLowerCase()}%`;
+  return db
+    .query<AssetSearchRow, [string, string, string]>(
+      `
+        SELECT
+          id, kind, name, display_code, quote_ccy, instrument_type, instrument_symbol,
+          instrument_exchange_mic, instrument_key, provider_config
+        FROM assets
+        WHERE kind != 'FX'
+          AND (
+            lower(COALESCE(display_code, '')) LIKE ?
+            OR lower(COALESCE(instrument_symbol, '')) LIKE ?
+            OR lower(COALESCE(name, '')) LIKE ?
+          )
+        ORDER BY display_code ASC
+        LIMIT 50
+      `,
+    )
+    .all(like, like, like);
+}
+
+function readAssetsByInstrumentKey(
+  db: Database,
+  instrumentKeys: string[],
+): Map<string, AssetSearchRow> {
+  if (instrumentKeys.length === 0) {
+    return new Map();
+  }
+  const placeholders = instrumentKeys.map(() => "?").join(", ");
+  const rows = db
+    .query<AssetSearchRow, string[]>(
+      `
+        SELECT
+          id, kind, name, display_code, quote_ccy, instrument_type, instrument_symbol,
+          instrument_exchange_mic, instrument_key, provider_config
+        FROM assets
+        WHERE instrument_key IN (${placeholders})
+      `,
+    )
+    .all(...instrumentKeys);
+  return new Map(
+    rows
+      .filter(
+        (row): row is AssetSearchRow & { instrument_key: string } => row.instrument_key !== null,
+      )
+      .map((row) => [row.instrument_key, row]),
+  );
+}
+
+function assetToSearchResult(
+  asset: AssetSearchRow,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult {
+  const display = asset.display_code ?? asset.instrument_symbol ?? "";
+  const exchangeMic = asset.instrument_exchange_mic;
+  const exchangeName = exchangeMic
+    ? (exchangeCatalog.nameByMic.get(exchangeMic.toUpperCase()) ?? null)
+    : null;
+  const quoteType = quoteTypeForInstrumentType(asset.instrument_type);
+  return {
+    symbol: display,
+    shortName: asset.name ?? display,
+    longName: asset.name ?? display,
+    exchange: exchangeName ?? "",
+    exchangeMic,
+    exchangeName,
+    quoteType,
+    typeDisplay: quoteType,
+    currency: asset.quote_ccy,
+    currencySource: null,
+    dataSource: preferredProvider(asset.provider_config) ?? "MANUAL",
+    isExisting: true,
+    existingAssetId: asset.id,
+    index: "",
+    score: 100,
+  };
+}
+
+async function searchYahooSymbols(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Promise<SymbolSearchResult[]> {
+  const query2Results = await searchYahooRawSymbols(
+    "https://query2.finance.yahoo.com/v1/finance/search",
+    query,
+    exchangeCatalog,
+    fetchImpl,
+  ).catch(() => []);
+  if (query2Results.length > 0) {
+    return query2Results;
+  }
+  return searchYahooRawSymbols(
+    "https://query1.finance.yahoo.com/v1/finance/search",
+    query,
+    exchangeCatalog,
+    fetchImpl,
+  );
+}
+
+async function searchYahooRawSymbols(
+  endpoint: string,
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Promise<SymbolSearchResult[]> {
+  const response = await fetchImpl(`${endpoint}?q=${encodeURIComponent(query)}`, {
+    headers: yahooSearchHeaders(),
+  });
+  const payload = await response.text();
+  const parsed = parseYahooSearchPayload(payload);
+  return parsed
+    .map((quote) => yahooSearchQuoteToResult(quote, exchangeCatalog))
+    .filter((result): result is SymbolSearchResult => result !== null);
+}
+
+function parseYahooSearchPayload(payload: string): YahooSearchQuoteRaw[] {
+  const parsed: unknown = JSON.parse(payload);
+  if (!isRecord(parsed) || !Array.isArray(parsed.quotes)) {
+    return [];
+  }
+  return parsed.quotes.filter(isRecord);
+}
+
+function yahooSearchQuoteToResult(
+  item: YahooSearchQuoteRaw,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult | null {
+  if (typeof item.symbol !== "string" || item.symbol.trim() === "") {
+    return null;
+  }
+  const symbol = item.symbol.trim();
+  const exchange = typeof item.exchange === "string" ? item.exchange : "";
+  const exchangeMic =
+    yahooCodeToMic(exchange, exchangeCatalog) ?? yahooSuffixToMic(symbol, exchangeCatalog);
+  const exchangeName = exchangeMic ? (exchangeCatalog.nameByMic.get(exchangeMic) ?? null) : null;
+  const providerCurrency =
+    typeof item.currency === "string" && item.currency.trim() !== "" ? item.currency : null;
+  const inferredCurrency = exchangeMic
+    ? (exchangeCatalog.currencyByMic.get(exchangeMic) ?? null)
+    : null;
+  const currency = providerCurrency ?? inferredCurrency;
+  const name =
+    (typeof item.longname === "string" && item.longname.trim() !== "" ? item.longname : null) ??
+    (typeof item.shortname === "string" && item.shortname.trim() !== "" ? item.shortname : null) ??
+    symbol;
+  const quoteType =
+    typeof item.quoteType === "string" && item.quoteType.trim() !== "" ? item.quoteType : "UNKNOWN";
+  return {
+    symbol,
+    shortName: name,
+    longName: name,
+    exchange,
+    exchangeMic,
+    exchangeName,
+    quoteType,
+    typeDisplay: "",
+    currency,
+    currencySource: providerCurrency ? "provider" : inferredCurrency ? "exchange_inferred" : null,
+    dataSource: "YAHOO",
+    isExisting: false,
+    existingAssetId: null,
+    index: "",
+    score: typeof item.score === "number" && Number.isFinite(item.score) ? item.score : 0,
+  };
+}
+
+function quoteTypeForInstrumentType(instrumentType: string | null): string {
+  switch (instrumentType) {
+    case "EQUITY":
+      return "EQUITY";
+    case "CRYPTO":
+      return "CRYPTOCURRENCY";
+    case "METAL":
+      return "COMMODITY";
+    case "OPTION":
+      return "OPTION";
+    case "BOND":
+      return "BOND";
+    case "FX":
+      return "FOREX";
+    default:
+      return "OTHER";
+  }
+}
+
+function instrumentTypeFromQuoteType(quoteType: string): string | null {
+  switch (quoteType.toUpperCase()) {
+    case "EQUITY":
+    case "STOCK":
+    case "ETF":
+    case "MUTUALFUND":
+    case "MUTUAL FUND":
+    case "INDEX":
+    case "ECNQUOTE":
+      return "EQUITY";
+    case "CRYPTOCURRENCY":
+    case "CRYPTO":
+      return "CRYPTO";
+    case "CURRENCY":
+    case "FOREX":
+    case "FX":
+      return "FX";
+    case "OPTION":
+      return "OPTION";
+    case "COMMODITY":
+      return "METAL";
+    case "BOND":
+    case "MONEYMARKET":
+      return "BOND";
+    default:
+      return null;
+  }
+}
+
+function instrumentKeyFromSearchResult(
+  result: SymbolSearchResult,
+  exchangeCatalog: ExchangeCatalog,
+): string | null {
+  const instrumentType = instrumentTypeFromQuoteType(result.quoteType);
+  if (!instrumentType || result.symbol.trim() === "") {
+    return null;
+  }
+  const canonical = canonicalizeSearchIdentity(
+    instrumentType,
+    result.symbol,
+    result.exchangeMic ?? null,
+    result.currency ?? null,
+    exchangeCatalog,
+  );
+  return generatedInstrumentKey({
+    instrumentType,
+    instrumentSymbol: canonical.instrumentSymbol,
+    instrumentExchangeMic: canonical.instrumentExchangeMic,
+    quoteCcy: canonical.quoteCcy ?? "",
+  });
+}
+
+function canonicalizeSearchIdentity(
+  instrumentType: string,
+  symbol: string,
+  exchangeMic: string | null,
+  quoteCcy: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): {
+  instrumentSymbol: string | null;
+  instrumentExchangeMic: string | null;
+  quoteCcy: string | null;
+} {
+  let instrumentSymbol: string | null = symbol.trim();
+  let instrumentExchangeMic = exchangeMic?.trim().toUpperCase() || null;
+  let normalizedQuote = quoteCcy?.trim().toUpperCase() || null;
+
+  switch (instrumentType) {
+    case "EQUITY":
+    case "OPTION":
+    case "METAL": {
+      const parsed = parseSymbolWithYahooSuffix(instrumentSymbol, exchangeCatalog);
+      instrumentSymbol = parsed.baseSymbol.toUpperCase();
+      instrumentExchangeMic ??= parsed.mic;
+      normalizedQuote ??= instrumentExchangeMic
+        ? (exchangeCatalog.currencyByMic.get(instrumentExchangeMic) ?? null)
+        : null;
+      return { instrumentSymbol, instrumentExchangeMic, quoteCcy: normalizedQuote };
+    }
+    case "CRYPTO": {
+      const parsed = parseCryptoPairSymbol(instrumentSymbol);
+      if (parsed) {
+        instrumentSymbol = parsed.base.toUpperCase();
+        normalizedQuote ??= parsed.quote;
+      } else {
+        instrumentSymbol = instrumentSymbol.toUpperCase();
+      }
+      return { instrumentSymbol, instrumentExchangeMic: null, quoteCcy: normalizedQuote };
+    }
+    case "FX": {
+      const parsed = parseFxSymbolParts(instrumentSymbol);
+      if (parsed) {
+        instrumentSymbol = parsed.base;
+        normalizedQuote = parsed.quote;
+      } else {
+        instrumentSymbol = instrumentSymbol.toUpperCase();
+      }
+      return { instrumentSymbol, instrumentExchangeMic: null, quoteCcy: normalizedQuote };
+    }
+    case "BOND":
+      return {
+        instrumentSymbol: instrumentSymbol.toUpperCase(),
+        instrumentExchangeMic: null,
+        quoteCcy: normalizedQuote,
+      };
+    default:
+      return { instrumentSymbol, instrumentExchangeMic, quoteCcy: normalizedQuote };
+  }
+}
+
+function generatedInstrumentKey(asset: {
+  instrumentType: string | null;
+  instrumentSymbol: string | null;
+  instrumentExchangeMic: string | null;
+  quoteCcy: string;
+}): string | null {
+  if (!asset.instrumentType || !asset.instrumentSymbol) {
+    return null;
+  }
+  if (asset.instrumentType === "CRYPTO" || asset.instrumentType === "FX") {
+    return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}/${asset.quoteCcy.toUpperCase()}`;
+  }
+  if (asset.instrumentExchangeMic) {
+    return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}@${asset.instrumentExchangeMic.toUpperCase()}`;
+  }
+  return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}`;
+}
+
+function parseSymbolWithYahooSuffix(
+  symbol: string,
+  exchangeCatalog: ExchangeCatalog,
+): { baseSymbol: string; mic: string | null } {
+  const trimmed = symbol.trim();
+  const suffixes = [...exchangeCatalog.yahooSuffixToMic.entries()].sort(
+    ([left], [right]) => right.length - left.length,
+  );
+  for (const [suffix, mic] of suffixes) {
+    const dottedSuffix = `.${suffix}`;
+    if (
+      trimmed.length >= dottedSuffix.length &&
+      trimmed.slice(trimmed.length - dottedSuffix.length).toUpperCase() ===
+        dottedSuffix.toUpperCase()
+    ) {
+      return { baseSymbol: trimmed.slice(0, -dottedSuffix.length), mic };
+    }
+  }
+  return { baseSymbol: trimmed, mic: null };
+}
+
+function parseCryptoPairSymbol(symbol: string): { base: string; quote: string } | null {
+  const separator = symbol.trim().lastIndexOf("-");
+  if (separator <= 0 || separator === symbol.trim().length - 1) {
+    return null;
+  }
+  const base = symbol.trim().slice(0, separator).trim();
+  const quote = symbol
+    .trim()
+    .slice(separator + 1)
+    .trim()
+    .toUpperCase();
+  if (base === "" || quote.length < 3 || quote.length > 5 || !/^[A-Z]+$/.test(quote)) {
+    return null;
+  }
+  return { base, quote };
+}
+
+function parseFxSymbolParts(symbol: string): { base: string; quote: string } | null {
+  const cleaned = symbol.trim().toUpperCase().replace(/=X$/, "");
+  const slashParts = cleaned.split("/");
+  if (
+    slashParts.length === 2 &&
+    /^[A-Z]{3}$/.test(slashParts[0] ?? "") &&
+    /^[A-Z]{3}$/.test(slashParts[1] ?? "")
+  ) {
+    return { base: slashParts[0] ?? "", quote: slashParts[1] ?? "" };
+  }
+  if (/^[A-Z]{6}$/.test(cleaned)) {
+    return { base: cleaned.slice(0, 3), quote: cleaned.slice(3) };
+  }
+  return null;
+}
+
+function yahooCodeToMic(code: string, exchangeCatalog: ExchangeCatalog): string | null {
+  const normalized = code.trim().toUpperCase();
+  return normalized ? (exchangeCatalog.yahooCodeToMic.get(normalized) ?? null) : null;
+}
+
+function yahooSuffixToMic(symbol: string, exchangeCatalog: ExchangeCatalog): string | null {
+  const dotIndex = symbol.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === symbol.length - 1) {
+    return null;
+  }
+  const suffix = symbol.slice(dotIndex + 1).toUpperCase();
+  return exchangeCatalog.yahooSuffixToMic.get(suffix) ?? null;
+}
+
+function preferredProvider(providerConfig: string | null): string | null {
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  return typeof parsed.preferred_provider === "string" && parsed.preferred_provider.trim() !== ""
+    ? parsed.preferred_provider
+    : null;
+}
+
+function searchResultDedupKey(symbol: string, exchangeMic: string | null | undefined): string {
+  return `${symbol}\u0000${exchangeMic ?? ""}`;
 }
 
 function latestQuoteSnapshots(
@@ -598,6 +1141,12 @@ function yahooHeaders(cookie: string): HeadersInit {
   return {
     Accept: "application/json",
     Cookie: cookie,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  };
+}
+
+function yahooSearchHeaders(): HeadersInit {
+  return {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
   };
 }

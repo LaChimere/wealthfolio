@@ -10,18 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data Yahoo dividends
+PR 5 continues vertical slices by adding a contained market-data symbol search
 runtime slice to the standalone TS backend:
 
-- Add `/api/v1/market-data/yahoo/dividends/{symbol}` behavior through the TS
-  market-data service, preserving the Rust Yahoo crumb/cookie handshake,
-  two-year daily chart query, dividend event extraction, 401 crumb reset, and
-  provider/symbol/no-data error mapping.
-- Keep Yahoo dividends injectable/testable so unit coverage does not depend on
-  live Yahoo network calls.
-- Keep remaining high-risk market-data methods optional so provider
-  search/resolve, sync, and recalculation side effects remain `404` until their
-  dedicated parity slices.
+- Add `/api/v1/market-data/search` behavior through the TS market-data service,
+  merging existing SQLite assets with Yahoo raw search results.
+- Preserve Rust-compatible existing-asset mapping, Yahoo exchange-code/suffix
+  MIC lookup, provider/exchange-inferred currency provenance, canonical
+  instrument-key dedupe, secondary Yahoo search fallback, provider failure
+  fallback, and existing-first/score ordering.
+- Keep Yahoo search injectable/testable so runtime tests do not depend on live
+  Yahoo network calls.
+- Keep remaining high-risk market-data methods optional so provider resolve,
+  sync, and recalculation side effects remain `404` until their dedicated parity
+  slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
