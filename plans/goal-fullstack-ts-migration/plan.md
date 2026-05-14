@@ -12,7 +12,7 @@ SQLite data.
 
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
-validation, bounded import-apply, save-up goal-plan persistence, local AI chat
+validation, bounded import-apply, goal-plan persistence, local AI chat
 thread/message persistence, bounded health status/check runtime, and bounded
 health legacy-classification runtime slices in the standalone TS backend:
 
@@ -47,6 +47,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   `DELETE /api/v1/goals/{id}/plan`, including versioned `goal_plans` upserts,
   unknown settings preservation, unconditional 204 deletes, and `goal_plans`
   sync event queuing.
+- Add bounded retirement goal-plan writes for `POST /api/v1/goals/plan`,
+  including Rust-compatible retirement plan JSON validation, `birthYearMonth`
+  current-age normalization, unknown settings preservation,
+  duplicate/participating DC account link guards, versioned `goal_plans`
+  upserts, and `goal_plans` sync event queuing.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -66,9 +71,8 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep retirement goal-plan validation/persistence, goal summary refresh, and
-  retirement/save-up calculations deferred to dedicated goal/calculation parity
-  slices.
+- Keep goal summary refresh and retirement/save-up calculations deferred to
+  dedicated goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -85,10 +89,10 @@ existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, local AI chat thread/message persistence, bounded health account/timezone
 status/checks and legacy-classification issue generation,
-sync-crypto/device-sync integration, retirement goal-plan validation/persistence
-or summary refresh, calculation-heavy health checks or non-classification
-`/health/fix` execution, real Connect runtime implementation, real device-sync
-runtime implementation, or Rust runtime removal is in scope for this slice.
+sync-crypto/device-sync integration, retirement goal summary refresh,
+calculation-heavy health checks or non-classification `/health/fix` execution,
+real Connect runtime implementation, real device-sync runtime implementation, or
+Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

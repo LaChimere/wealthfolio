@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import { validateAndNormalizeRetirementPlanSettings } from "./retirement-plan";
+
 export interface Goal {
   id: string;
   goalType: string;
@@ -100,6 +102,7 @@ export interface GoalRepositoryOptions {
 export interface GoalServiceOptions {
   accountProvider?: GoalAccountProvider;
   baseCurrency?: string | (() => string | undefined);
+  now?: () => Date;
 }
 
 export interface GoalRepository {
@@ -518,9 +521,19 @@ export function createGoalService(
         throw new Error("Invalid input: planner_mode is only valid for retirement plans");
       }
       if (plan.planKind === "retirement") {
-        throw new Error(
-          "Invalid input: Saving retirement goal plans is deferred until retirement plan validation is ported",
-        );
+        const validated = validateAndNormalizeRetirementPlanSettings(plan.settingsJson, {
+          asOf: options.now?.(),
+        });
+        const participatingRules =
+          validated.dcLinkedAccountIds.length > 0 ? repository.loadParticipatingFundingRules() : [];
+        for (const accountId of validated.dcLinkedAccountIds) {
+          if (participatingRules.some((rule) => rule.accountId === accountId)) {
+            throw new Error(
+              `Invalid input: Account '${accountId}' has participating goal shares and cannot be linked as DC`,
+            );
+          }
+        }
+        return repository.saveGoalPlan({ ...plan, settingsJson: validated.settingsJson });
       }
       return repository.saveGoalPlan(plan);
     },

@@ -111,8 +111,9 @@
     search, transfer link/unlink, single delete behavior, bounded
     existing-asset/cash create/update/bulk persistence, symbol-only resolution
     to existing assets, CSV parse, and read-only import asset preview now have
-    TS runtime parity; goals plan writes and calculation endpoints are deferred
-    to calculation-heavy slices; automatic FX market sync/provider HTTP behavior
+    TS runtime parity; save-up and retirement goal-plan writes now have bounded
+    TS runtime parity while calculation endpoints are deferred to
+    calculation-heavy slices; automatic FX market sync/provider HTTP behavior
     plus broader market-data sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event
     production are deferred to portfolio/calculation slices; TS file-backed
@@ -976,9 +977,17 @@ contract:
   Coverage includes save-up `goal_plans` upsert/delete runtime, version
   increments, created-at preservation, unknown settings preservation, summary
   defaulting, `goal_plans` sync Create/Update/Delete events,
-  `POST /api/v1/goals/plan`, unconditional 204 plan deletes, and bounded
-  retirement-plan deferral while retirement validation, summary refresh, and
-  goal calculations remain deferred.
+  `POST /api/v1/goals/plan`, and unconditional 204 plan deletes while summary
+  refresh and goal calculations remain deferred.
+- `pr5-goal-plan-retirement-save-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes retirement `goal_plans` upsert runtime, retirement plan JSON
+  validation, `birthYearMonth` current-age normalization, unknown frontend-owned
+  settings preservation, duplicate DC linked-account guards, participating-share
+  DC link rejection, planner-mode persistence, sync Create events, and continued
+  deferral of retirement simulations, summary refresh, and save-up overview
+  calculations.
 - `pr5-ai-chat-persistence-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/ai-chat.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1046,28 +1055,27 @@ contract:
   existing-asset/cash activity create/update/bulk runtime, and existing-asset
   symbol resolution, CSV parse, read-only import asset preview, and read-only
   import validation plus bounded import apply and import transfer-pair auto-link
-  plus import FX pair ensure, save-up goal-plan persistence, AI chat
-  thread/message persistence, bounded health status/check slices, bounded health
-  classification-fix runtime, and bounded legacy-classification health issue
-  runtime implemented; broader migration remains active.
+  plus import FX pair ensure, save-up and retirement goal-plan persistence, AI
+  chat thread/message persistence, bounded health status/check slices, bounded
+  health classification-fix runtime, and bounded legacy-classification health
+  issue runtime implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; retirement
-  goal-plan validation/persistence, summary refresh, save-up overview, and
-  retirement simulation endpoints move with calculation-heavy goal slices;
-  automatic FX market sync/provider HTTP behavior plus broader market-data
-  provider resolution/sync behavior move with calculation/market-data slices;
-  actual portfolio job execution and event production move with
-  portfolio/calculation slices; OS keyring integration moves with a dedicated
-  runtime parity slice; AI chat provider streaming, title generation, tool
-  execution, tag mutations, attachment handling, and outbox writes move with AI
-  runtime parity slices; alternative asset portfolio job enqueue and
-  recalculation side effects move with portfolio parity slices; asset
-  quote-provider interactions, auto-classification, and portfolio recalculation
-  side effects move with asset/market-data/portfolio parity slices; market-data
-  market sync and quote-triggered recalculation side effects move with
-  market-data/portfolio parity slices; portfolio metric calculations move with
-  portfolio calculation parity slices; holdings fan-out, valuations,
+  summary refresh, save-up overview, and retirement simulation endpoints move
+  with calculation-heavy goal slices; automatic FX market sync/provider HTTP
+  behavior plus broader market-data provider resolution/sync behavior move with
+  calculation/market-data slices; actual portfolio job execution and event
+  production move with portfolio/calculation slices; OS keyring integration
+  moves with a dedicated runtime parity slice; AI chat provider streaming, title
+  generation, tool execution, tag mutations, attachment handling, and outbox
+  writes move with AI runtime parity slices; alternative asset portfolio job
+  enqueue and recalculation side effects move with portfolio parity slices;
+  asset quote-provider interactions, auto-classification, and portfolio
+  recalculation side effects move with asset/market-data/portfolio parity
+  slices; market-data market sync and quote-triggered recalculation side effects
+  move with market-data/portfolio parity slices; portfolio metric calculations
+  move with portfolio calculation parity slices; holdings fan-out, valuations,
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
