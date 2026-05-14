@@ -948,6 +948,14 @@ contract:
   preservation, and standalone runtime route wiring while symbol-only asset
   creation, transfer-pair auto-linking, FX pair ensure, device-sync outbox, and
   portfolio recalculation remain deferred.
+- `pr5-activities-import-transfer-link-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/runtime.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check`. Coverage includes
+  cross-account `TRANSFER_IN`/`TRANSFER_OUT` import pair matching by date,
+  currency, symbol, and amount, shared `source_group_id` writes, internal-flow
+  metadata replacement, response source-group mapping, and preserving duplicate
+  filtering before pairing while symbol-only asset creation, FX pair ensure,
+  device-sync outbox, and portfolio recalculation remain deferred.
 
 ## Result
 
@@ -978,8 +986,8 @@ contract:
   transfer link/unlink runtime, single activity delete runtime, bounded
   existing-asset/cash activity create/update/bulk runtime, and existing-asset
   symbol resolution, CSV parse, read-only import asset preview, and read-only
-  import validation plus bounded import apply slices implemented; broader
-  migration remains active.
+  import validation plus bounded import apply and import transfer-pair auto-link
+  slices implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -999,18 +1007,17 @@ contract:
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
   parity slices; symbol-only activity asset creation, quote fallback writes,
-  provider-backed asset resolution, import transfer-pair auto-linking, FX pair
-  ensure, device-sync outbox emission for activity writes, and portfolio
-  recalculation side effects move with activities/import runtime parity slices;
-  AI chat persistence, provider streaming, tool execution, thread storage, tag
-  persistence, and tool-result mutation behavior move with AI runtime parity
-  slices; device-sync integration for sync crypto moves with device-sync parity
-  slices; real health checks, market sync fix execution, health cache behavior,
-  and `/health/fix` dispatch move with health/calculation parity slices; real
-  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
-  sync repositories, subscription entitlement checks, event production, E2EE
-  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  provider-backed asset resolution, FX pair ensure, device-sync outbox emission
+  for activity writes, and portfolio recalculation side effects move with
+  activities/import runtime parity slices; AI chat persistence, provider
+  streaming, tool execution, thread storage, tag persistence, and tool-result
+  mutation behavior move with AI runtime parity slices; device-sync integration
+  for sync crypto moves with device-sync parity slices; real health checks,
+  market sync fix execution, health cache behavior, and `/health/fix` dispatch
+  move with health/calculation parity slices; real Connect token lifecycle,
+  cloud HTTP clients, broker sync orchestration, local sync repositories,
+  subscription entitlement checks, event production, E2EE enrollment, sync
+  engine, snapshot/upload runtime, feature-flag errors, background workers,
+  device-sync cloud clients, token lifecycle, team-key operations, key material
+  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
+  secret side effects move with Connect/device-sync parity slices.

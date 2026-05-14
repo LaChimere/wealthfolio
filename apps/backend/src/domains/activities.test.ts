@@ -566,6 +566,55 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("auto-links imported transfer pairs across accounts", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAccount(db, { id: "account-2", name: "Beta", currency: "USD" });
+
+      const result = service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "TRANSFER_OUT",
+          date: "2025-01-15",
+          amount: "25",
+          currency: "USD",
+          isDraft: false,
+          isExternal: true,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-2",
+          activityType: "TRANSFER_IN",
+          date: "2025-01-15",
+          amount: "25",
+          currency: "USD",
+          isDraft: false,
+          isExternal: true,
+          lineNumber: 2,
+        },
+      ]) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({ imported: 2, success: true });
+      const outId = result.activities[0]?.id as string;
+      const inId = result.activities[1]?.id as string;
+      const sourceGroupId = readActivityValue(db, outId, "source_group_id");
+      expect(sourceGroupId).toBeString();
+      expect(readActivityValue(db, inId, "source_group_id")).toBe(sourceGroupId);
+      expect(result.activities[0]).toMatchObject({ sourceGroupId });
+      expect(result.activities[1]).toMatchObject({ sourceGroupId });
+      expect(readActivityMetadata(db, outId)).toEqual({ flow: { is_external: false } });
+      expect(readActivityMetadata(db, inId)).toEqual({ flow: { is_external: false } });
+    } finally {
+      db.close();
+    }
+  });
+
   test("skips import duplicates unless force importing", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1793,6 +1842,13 @@ function readActivityCount(db: Database): number {
   return (
     db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count ?? 0
   );
+}
+
+function readActivityMetadata(db: Database, activityId: string): unknown {
+  const row = db
+    .query<{ metadata: string | null }, [string]>("SELECT metadata FROM activities WHERE id = ?")
+    .get(activityId);
+  return row?.metadata ? JSON.parse(row.metadata) : null;
 }
 
 function readImportRunCount(db: Database): number {

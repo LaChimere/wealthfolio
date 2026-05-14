@@ -1805,6 +1805,8 @@ function importActivityRows(db: Database, activities: unknown[]): ImportActiviti
       insertable.push(row);
     }
 
+    linkImportedTransferPairs(insertable);
+
     const summary: ImportActivitiesSummary = {
       total,
       imported: insertable.length,
@@ -1991,6 +1993,79 @@ function copyNormalizedImportFields(
   }
   activity.isValid = true;
   delete activity.errors;
+}
+
+function linkImportedTransferPairs(rows: PreparedImportActivity[]): void {
+  const grouped = new Map<string, { transferIn: number[]; transferOut: number[] }>();
+
+  for (const [index, row] of rows.entries()) {
+    const key = importTransferMatchKey(row);
+    if (!key) {
+      continue;
+    }
+    const group = grouped.get(key) ?? { transferIn: [], transferOut: [] };
+    if (row.create.activityType === "TRANSFER_IN") {
+      group.transferIn.push(index);
+    } else {
+      group.transferOut.push(index);
+    }
+    grouped.set(key, group);
+  }
+
+  for (const group of grouped.values()) {
+    const usedTransferOut = new Set<number>();
+    for (const transferInIndex of group.transferIn) {
+      const transferOutIndex = group.transferOut.find((candidate) => {
+        const inRow = rows[transferInIndex];
+        const outRow = rows[candidate];
+        return (
+          !usedTransferOut.has(candidate) &&
+          inRow !== undefined &&
+          outRow !== undefined &&
+          inRow.create.accountId !== outRow.create.accountId
+        );
+      });
+      if (transferOutIndex === undefined) {
+        continue;
+      }
+      const transferInRow = rows[transferInIndex];
+      const transferOutRow = rows[transferOutIndex];
+      if (!transferInRow || !transferOutRow) {
+        continue;
+      }
+      usedTransferOut.add(transferOutIndex);
+      const sourceGroupId = crypto.randomUUID();
+      applyImportedTransferLink(transferInRow, sourceGroupId);
+      applyImportedTransferLink(transferOutRow, sourceGroupId);
+    }
+  }
+}
+
+function importTransferMatchKey(row: PreparedImportActivity): string | null {
+  if (row.create.activityType !== "TRANSFER_IN" && row.create.activityType !== "TRANSFER_OUT") {
+    return null;
+  }
+  const amount =
+    row.create.amount ??
+    (row.create.quantity !== null && row.create.unitPrice !== null
+      ? row.create.quantity.mul(row.create.unitPrice)
+      : null);
+  if (amount === null || amount.isZero()) {
+    return null;
+  }
+  const symbol = typeof row.activity.symbol === "string" ? row.activity.symbol : "";
+  return [
+    row.create.activityDate.slice(0, 10),
+    row.create.currency,
+    symbol,
+    decimalToCanonicalString(amount),
+  ].join("\u001f");
+}
+
+function applyImportedTransferLink(row: PreparedImportActivity, sourceGroupId: string): void {
+  row.create.sourceGroupId = sourceGroupId;
+  row.create.metadata = setTransferFlowExternal(row.create.metadata, false);
+  row.activity.sourceGroupId = sourceGroupId;
 }
 
 function addImportError(activity: Record<string, unknown>, field: string, message: string): void {
