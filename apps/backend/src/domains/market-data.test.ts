@@ -855,6 +855,159 @@ describe("TS market data domain", () => {
       db.close();
     }
   });
+
+  test("resolves Yahoo quote summary with suffix stripping and auth retry", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    let cookieCount = 0;
+    let quoteCount = 0;
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://fc.yahoo.com") {
+        cookieCount += 1;
+        return Promise.resolve(
+          new Response("", { headers: { "set-cookie": `B=resolve-cookie-${cookieCount}` } }),
+        );
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+        return Promise.resolve(new Response(`resolve-crumb-${cookieCount}`));
+      }
+      if (url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/AZN.L?")) {
+        expect((init?.headers as Record<string, string>).Cookie).toBe(
+          `B=resolve-cookie-${cookieCount}`,
+        );
+        quoteCount += 1;
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("modules")).toBe("price");
+        expect(parsed.searchParams.get("crumb")).toBe(`resolve-crumb-${cookieCount}`);
+        if (quoteCount === 1) {
+          return Promise.resolve(new Response("", { status: 401, statusText: "Unauthorized" }));
+        }
+        return Promise.resolve(
+          Response.json({
+            quoteSummary: {
+              result: [
+                {
+                  price: {
+                    currency: "GBp",
+                    regularMarketPrice: { raw: 123.45 },
+                  },
+                },
+              ],
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "AZN.L",
+          exchangeMic: "xlon",
+          instrumentType: "equity",
+          quoteCcy: "GBP",
+          providerId: "",
+        }),
+      ).resolves.toEqual({
+        currency: "GBp",
+        price: 123.45,
+        resolvedProviderId: "YAHOO",
+      });
+      expect(calls.filter((url) => url === "https://fc.yahoo.com")).toHaveLength(2);
+      expect(
+        calls.filter((url) =>
+          url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/AZN.L?"),
+        ),
+      ).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("resolves Yahoo crypto pairs and respects non-Yahoo provider preferences", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://fc.yahoo.com") {
+        return Promise.resolve(new Response("", { headers: { "set-cookie": "B=crypto" } }));
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+        return Promise.resolve(new Response("crypto-crumb"));
+      }
+      if (url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/BTC-USD?")) {
+        return Promise.resolve(
+          Response.json({
+            quoteSummary: {
+              result: [
+                {
+                  price: {
+                    currency: "USD",
+                    regularMarketPrice: 65000,
+                  },
+                },
+              ],
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "",
+          instrumentType: "EQUITY",
+        }),
+      ).resolves.toEqual({ currency: null, price: null, resolvedProviderId: null });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "AAPL",
+          instrumentType: "EQUITY",
+          providerId: "ALPHA_VANTAGE",
+        }),
+      ).resolves.toEqual({ currency: null, price: null, resolvedProviderId: null });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "AAPL",
+          instrumentType: "EQUITY",
+          providerId: "yahoo",
+        }),
+      ).resolves.toEqual({ currency: null, price: null, resolvedProviderId: null });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "US912810UE10",
+          instrumentType: "BOND",
+        }),
+      ).resolves.toEqual({ currency: null, price: null, resolvedProviderId: null });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "BTC-USD",
+          instrumentType: "CRYPTO",
+        }),
+      ).resolves.toEqual({ currency: "USD", price: 65000, resolvedProviderId: "YAHOO" });
+      expect(
+        calls.filter((url) =>
+          url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/BTC-USD?"),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createMarketDataDb(): Database {

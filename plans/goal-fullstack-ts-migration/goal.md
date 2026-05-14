@@ -342,6 +342,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   mapping, provider/exchange-inferred currency provenance, canonical
   instrument-key de-dupe, secondary Yahoo search fallback, provider failure
   fallback, and existing-first/score ordering.
+- Turn 51: Added the market-data resolve-currency runtime for the standalone TS
+  backend: `/api/v1/market-data/resolve-currency` now resolves Yahoo-backed
+  latest quote currency/price with suffix stripping, candidate fallback,
+  equity/crypto/FX provider-symbol construction, provider preference handling,
+  quoteSummary parsing, BOND default behavior, and 401 crumb retry.
 
 ## Deferred items
 
@@ -375,12 +380,13 @@ updated_at: "2026-05-14T11:02:29+08:00"
   assets, valuation, and market sync parity beyond local health dismissal/config
   state.
 - Market-data exchange list, local quote history/update/delete, latest quote
-  snapshots, quote CSV check/import, addon-compatible Yahoo dividends, and
-  symbol search now have TS runtime parity. reason=the standalone backend reads
-  the Rust exchange catalog, writes local quote rows directly, can call Yahoo
-  dividends/search through injectable HTTP paths, and can merge search results
-  against existing SQLite assets; symbol quote resolution, market sync, and
-  portfolio recalculation side effects remain active follow-ups.
+  snapshots, quote CSV check/import, addon-compatible Yahoo dividends, symbol
+  search, and Yahoo-backed symbol quote resolution now have TS runtime parity.
+  reason=the standalone backend reads the Rust exchange catalog, writes local
+  quote rows directly, can call Yahoo dividends/search/resolve through
+  injectable HTTP paths, and can merge search results against existing SQLite
+  assets; market sync and portfolio recalculation side effects remain active
+  follow-ups.
 - Actual portfolio job execution and event production remain active follow-ups.
   reason=they depend on market sync, holdings, snapshot, valuation, account,
   health, and FX service parity beyond route-level job enqueue and SSE transport
@@ -461,11 +467,11 @@ updated_at: "2026-05-14T11:02:29+08:00"
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
   behavior must move with dedicated add-on parity slices.
-- Market-data symbol quote resolution, market sync execution, and portfolio
-  recalculation side effects remain active follow-ups. reason=exchange metadata,
-  local quote persistence/import, Yahoo dividends, and symbol search have TS
-  runtime coverage, while quote resolution/sync and recalculation behavior must
-  move with dedicated market-data and portfolio parity slices.
+- Market-data market sync execution and portfolio recalculation side effects
+  remain active follow-ups. reason=exchange metadata, local quote
+  persistence/import, Yahoo dividends/search/resolve have TS runtime coverage,
+  while sync and recalculation behavior must move with dedicated market-data and
+  portfolio parity slices.
 
 ## Blockers
 

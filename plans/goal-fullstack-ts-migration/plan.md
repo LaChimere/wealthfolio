@@ -10,20 +10,19 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained market-data symbol search
-runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained market-data
+`resolve-currency` runtime slice to the standalone TS backend:
 
-- Add `/api/v1/market-data/search` behavior through the TS market-data service,
-  merging existing SQLite assets with Yahoo raw search results.
-- Preserve Rust-compatible existing-asset mapping, Yahoo exchange-code/suffix
-  MIC lookup, provider/exchange-inferred currency provenance, canonical
-  instrument-key dedupe, secondary Yahoo search fallback, provider failure
-  fallback, and existing-first/score ordering.
-- Keep Yahoo search injectable/testable so runtime tests do not depend on live
-  Yahoo network calls.
-- Keep remaining high-risk market-data methods optional so provider resolve,
-  sync, and recalculation side effects remain `404` until their dedicated parity
-  slices.
+- Add `/api/v1/market-data/resolve-currency` behavior through the TS market-data
+  service for Yahoo-backed latest quote resolution.
+- Preserve Rust-compatible empty/default responses, provider preference
+  handling, Yahoo suffix stripping, candidate fallback, equity/crypto/FX
+  provider-symbol construction, quoteSummary price/currency extraction, 401
+  crumb retry, and BOND default behavior.
+- Keep Yahoo resolve calls injectable/testable so runtime tests do not depend on
+  live Yahoo network calls.
+- Keep remaining high-risk market-data methods optional so sync and
+  recalculation side effects remain `404` until their dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

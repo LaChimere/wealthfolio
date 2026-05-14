@@ -86,10 +86,16 @@ export interface ResolveSymbolQuoteRequest {
   providerId?: string;
 }
 
+export interface ResolvedQuote {
+  currency: string | null;
+  price: number | null;
+  resolvedProviderId: string | null;
+}
+
 export interface MarketDataService {
   getExchanges?(): Promise<ExchangeInfo[]> | ExchangeInfo[];
   searchSymbol?(query: string): Promise<SymbolSearchResult[]> | SymbolSearchResult[];
-  resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<unknown> | unknown;
+  resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<ResolvedQuote> | ResolvedQuote;
   getQuoteHistory?(symbol: string): Promise<Quote[]> | Quote[];
   fetchYahooDividends?(symbol: string): Promise<YahooDividend[]> | YahooDividend[];
   getLatestQuotes?(
@@ -225,6 +231,8 @@ interface YahooSearchQuoteRaw {
   currency?: unknown;
 }
 
+class YahooUnauthorizedError extends Error {}
+
 const MAX_SYNC_ERRORS = 10;
 const MARKET_CLOSE_GRACE_MINUTES = 60;
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
@@ -255,6 +263,18 @@ export function createMarketDataService(
 
     searchSymbol(query) {
       return searchSymbols(db, query, exchangeCatalog, fetchImpl);
+    },
+
+    resolveSymbolQuote(request) {
+      return resolveSymbolQuote(request, exchangeCatalog, fetchImpl, {
+        get: () => yahooCrumb,
+        set: (crumb) => {
+          yahooCrumb = crumb;
+        },
+        clear: () => {
+          yahooCrumb = null;
+        },
+      });
     },
 
     getQuoteHistory(symbol) {
@@ -867,6 +887,223 @@ function preferredProvider(providerConfig: string | null): string | null {
 
 function searchResultDedupKey(symbol: string, exchangeMic: string | null | undefined): string {
   return `${symbol}\u0000${exchangeMic ?? ""}`;
+}
+
+async function resolveSymbolQuote(
+  request: ResolveSymbolQuoteRequest,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+    clear: () => void;
+  },
+): Promise<ResolvedQuote> {
+  const trimmedSymbol = request.symbol.trim();
+  if (trimmedSymbol === "") {
+    return defaultResolvedQuote();
+  }
+
+  const preferredProvider = normalizePreferredProvider(request.providerId);
+  if (preferredProvider !== null && preferredProvider !== "YAHOO") {
+    return defaultResolvedQuote();
+  }
+
+  const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
+  if (instrumentType === "BOND") {
+    return defaultResolvedQuote();
+  }
+
+  const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
+  const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
+  const cleanSymbol = stripMatchingYahooSuffix(trimmedSymbol, exchangeMic, exchangeCatalog);
+
+  for (const candidate of symbolResolutionCandidates(cleanSymbol)) {
+    const canonical = canonicalizeSearchIdentity(
+      instrumentType,
+      candidate,
+      exchangeMic,
+      requestedQuoteCcy,
+      exchangeCatalog,
+    );
+    if (
+      (instrumentType === "CRYPTO" || instrumentType === "FX") &&
+      (canonical.quoteCcy === null || canonical.quoteCcy === "")
+    ) {
+      continue;
+    }
+    const yahooSymbol = yahooProviderSymbol(instrumentType, canonical, exchangeCatalog);
+    if (yahooSymbol === null) {
+      continue;
+    }
+
+    for (const retry of [0, 1]) {
+      try {
+        return await fetchYahooResolvedQuote(
+          yahooSymbol,
+          canonical.quoteCcy,
+          fetchImpl,
+          crumbCache,
+        );
+      } catch (error) {
+        if (error instanceof YahooUnauthorizedError && retry === 0) {
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  return defaultResolvedQuote();
+}
+
+async function fetchYahooResolvedQuote(
+  symbol: string,
+  fallbackCurrency: string | null,
+  fetchImpl: typeof fetch,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+    clear: () => void;
+  },
+): Promise<ResolvedQuote> {
+  const crumb = await getYahooCrumb(fetchImpl, crumbCache);
+  const url = new URL(
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`,
+  );
+  url.searchParams.set("modules", "price");
+  url.searchParams.set("crumb", crumb.crumb);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { headers: yahooHeaders(crumb.cookie) });
+  } catch (error) {
+    throw yahooProviderError(`Backup quote request failed: ${errorMessage(error)}`);
+  }
+  if (response.status === 401) {
+    crumbCache.clear();
+    throw new YahooUnauthorizedError("Yahoo authentication expired");
+  }
+  if (!response.ok) {
+    throw yahooProviderError(yahooStatusMessage(response));
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw yahooProviderError(`Failed to parse backup quote response: ${errorMessage(error)}`);
+  }
+  const price = parseYahooQuoteSummaryPrice(payload);
+  const rawPrice = yahooPriceNumber(
+    price.regularMarketPrice ?? price.regularMarketPreviousClose ?? price.previousClose,
+  );
+  if (rawPrice === null) {
+    throw yahooProviderError("No valid price in backup response");
+  }
+  const currency =
+    typeof price.currency === "string" && price.currency.trim() !== ""
+      ? price.currency.trim()
+      : fallbackCurrency;
+  return {
+    currency,
+    price: rawPrice === 0 ? null : rawPrice,
+    resolvedProviderId: "YAHOO",
+  };
+}
+
+function parseYahooQuoteSummaryPrice(payload: unknown): Record<string, unknown> {
+  if (!isRecord(payload) || !isRecord(payload.quoteSummary)) {
+    throw yahooProviderError("Failed to parse backup quote response: missing quoteSummary");
+  }
+  const result = payload.quoteSummary.result;
+  if (!Array.isArray(result) || result.length === 0 || !isRecord(result[0])) {
+    throw new Error("Symbol not found");
+  }
+  const price = result[0].price;
+  if (!isRecord(price)) {
+    throw new Error("Symbol not found");
+  }
+  return price;
+}
+
+function yahooPriceNumber(value: unknown): number | null {
+  const raw = isRecord(value) ? value.raw : value;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function yahooProviderSymbol(
+  instrumentType: string,
+  canonical: {
+    instrumentSymbol: string | null;
+    instrumentExchangeMic: string | null;
+    quoteCcy: string | null;
+  },
+  exchangeCatalog: ExchangeCatalog,
+): string | null {
+  const symbol = canonical.instrumentSymbol;
+  if (!symbol) {
+    return null;
+  }
+  switch (instrumentType) {
+    case "CRYPTO":
+      return canonical.quoteCcy ? `${symbol}-${canonical.quoteCcy}` : null;
+    case "FX":
+      return canonical.quoteCcy ? `${symbol}${canonical.quoteCcy}=X` : null;
+    case "EQUITY":
+    case "OPTION":
+    case "METAL": {
+      const mic = canonical.instrumentExchangeMic?.toUpperCase();
+      const suffix = mic ? exchangeCatalog.yahooSuffixByMic.get(mic) : undefined;
+      return suffix ? `${symbol}.${suffix}` : symbol;
+    }
+    default:
+      return symbol;
+  }
+}
+
+function stripMatchingYahooSuffix(
+  symbol: string,
+  exchangeMic: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): string {
+  if (!exchangeMic) {
+    return symbol;
+  }
+  const suffix = exchangeCatalog.yahooSuffixByMic.get(exchangeMic.toUpperCase());
+  if (!suffix) {
+    return symbol;
+  }
+  const dottedSuffix = `.${suffix}`;
+  return symbol.slice(-dottedSuffix.length).toUpperCase() === dottedSuffix.toUpperCase()
+    ? symbol.slice(0, -dottedSuffix.length)
+    : symbol;
+}
+
+function symbolResolutionCandidates(symbol: string): string[] {
+  const candidates = [symbol];
+  const dotIndex = symbol.lastIndexOf(".");
+  if (dotIndex > 0) {
+    candidates.push(symbol.slice(0, dotIndex));
+  }
+  return dedupe(candidates);
+}
+
+function normalizePreferredProvider(providerId: string | undefined): string | null {
+  const trimmed = providerId?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeInstrumentType(instrumentType: string | undefined): string | null {
+  const normalized = instrumentType?.trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+  return instrumentTypeFromQuoteType(normalized) ?? (normalized === "METAL" ? "METAL" : null);
+}
+
+function defaultResolvedQuote(): ResolvedQuote {
+  return { currency: null, price: null, resolvedProviderId: null };
 }
 
 function latestQuoteSnapshots(
