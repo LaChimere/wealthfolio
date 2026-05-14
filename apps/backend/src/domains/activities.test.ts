@@ -237,6 +237,36 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("deletes an activity and returns the deleted row", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertActivity(db, {
+        id: "delete-me",
+        accountId: "account-1",
+        activityType: "DIVIDEND",
+        amount: "12.34",
+        idempotencyKey: "delete-key",
+        metadata: JSON.stringify({ source: "manual" }),
+      });
+
+      expect(service.deleteActivity?.("delete-me")).toMatchObject({
+        id: "delete-me",
+        activityType: "DIVIDEND",
+        amount: "12.34",
+        idempotencyKey: "delete-key",
+        metadata: { source: "manual" },
+      });
+      expect(readActivityValue(db, "delete-me", "id")).toBeNull();
+      expect(() => service.deleteActivity?.("missing")).toThrow(
+        "Record not found: activity missing",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns Rust-compatible default import mapping with legacy context normalization", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -658,7 +688,7 @@ function insertActivity(
 function readActivityValue(
   db: Database,
   activityId: string,
-  column: "source_group_id",
+  column: "id" | "source_group_id",
 ): string | null {
   const row = db
     .query<

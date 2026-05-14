@@ -10,18 +10,16 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a contained activities transfer
-link/unlink runtime slice to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained single activity delete
+runtime slice to the standalone TS backend:
 
-- Add TS SQLite runtime behavior for `/api/v1/activities/link` and
-  `/api/v1/activities/unlink`.
-- Preserve Rust-compatible transfer-in/out ordering, same-ID/type/same-account
-  and existing-link guards, source-group assignment/clearing, metadata
-  `flow.is_external` mutation with sibling-key preservation, and
-  `is_user_modified`/`updated_at` updates.
-- Keep still-deferred activity create/update/delete/import/CSV parse, bulk
-  mutation, asset preview, device-sync outbox emission, and portfolio
-  recalculation side effects optional/404 until dedicated parity slices.
+- Add TS SQLite runtime behavior for `DELETE /api/v1/activities/{id}`.
+- Preserve Rust-compatible read-before-delete behavior, deleted activity
+  response mapping, metadata parsing, source identity return fields, and
+  missing-row errors.
+- Keep still-deferred activity create/update/import/CSV parse, bulk mutation,
+  asset preview, device-sync outbox emission, and portfolio recalculation side
+  effects optional/404 until dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -32,10 +30,10 @@ provider sync, portfolio recalculation side effects, keyring storage, AI chat
 runtime, quote-provider interactions, auto-classification side effects,
 portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
-lookups, read-only search, and transfer link/unlink, sync-crypto/device-sync
-integration, real health status/check/fix runtime implementation, real Connect
-runtime implementation, real device-sync runtime implementation, or Rust runtime
-removal is in scope for this slice.
+lookups, read-only search, transfer link/unlink, and single activity delete,
+sync-crypto/device-sync integration, real health status/check/fix runtime
+implementation, real Connect runtime implementation, real device-sync runtime
+implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

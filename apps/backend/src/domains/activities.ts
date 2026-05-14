@@ -136,7 +136,7 @@ export interface ActivityService {
   createActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
   updateActivity?(activity: Record<string, unknown>): Promise<unknown> | unknown;
   bulkMutateActivities?(request: Record<string, unknown>): Promise<unknown> | unknown;
-  deleteActivity?(id: string): Promise<unknown> | unknown;
+  deleteActivity?(id: string): Promise<Activity> | Activity;
   linkTransferActivities?(
     activityAId: string,
     activityBId: string,
@@ -441,6 +441,14 @@ export function createActivityService(db: Database): ActivityService {
           activityFromRow(readActivityRow(db, transferOut.id)),
         ];
         return updatedPair;
+      })();
+    },
+
+    deleteActivity(activityId) {
+      return db.transaction(() => {
+        const deleted = readActivityRow(db, activityId);
+        db.query("DELETE FROM activities WHERE id = ?").run(activityId);
+        return activityFromRow(deleted);
       })();
     },
 
