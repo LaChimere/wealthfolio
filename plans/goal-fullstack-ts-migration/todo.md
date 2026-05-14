@@ -111,8 +111,9 @@
     search, transfer link/unlink, single delete behavior, bounded
     existing-asset/cash create/update/bulk persistence, symbol-only resolution
     to existing assets, CSV parse, and read-only import asset preview now have
-    TS runtime parity; save-up and retirement goal-plan writes now have bounded
-    TS runtime parity while calculation endpoints are deferred to
+    TS runtime parity; save-up and retirement goal-plan writes plus save-up
+    preview calculations now have bounded TS runtime parity while goal-id
+    overview and retirement calculation endpoints are deferred to
     calculation-heavy slices; automatic FX market sync/provider HTTP behavior
     plus broader market-data sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event
@@ -988,6 +989,16 @@ contract:
   DC link rejection, planner-mode persistence, sync Create events, and continued
   deferral of retirement simulations, summary refresh, and save-up overview
   calculations.
+- `pr5-goal-save-up-preview-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/save-up.test.ts apps/backend/src/http.test.ts apps/backend/src/domains/goals.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible save-up input validation, local-date future
+  value projection, required monthly contribution solving, open-ended and past
+  target-date behavior, zero-target/unreachable completion handling, leap-year
+  month-clamp behavior, and guarded `/api/v1/goals/save-up/preview` route wiring
+  while goal-id save-up overview, summary refresh, and retirement simulations
+  remain deferred. Full repository check passed with `bun run check`, and
+  focused review found no actionable issues.
 - `pr5-ai-chat-persistence-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/ai-chat.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1055,17 +1066,18 @@ contract:
   existing-asset/cash activity create/update/bulk runtime, and existing-asset
   symbol resolution, CSV parse, read-only import asset preview, and read-only
   import validation plus bounded import apply and import transfer-pair auto-link
-  plus import FX pair ensure, save-up and retirement goal-plan persistence, AI
-  chat thread/message persistence, bounded health status/check slices, bounded
-  health classification-fix runtime, and bounded legacy-classification health
-  issue runtime implemented; broader migration remains active.
+  plus import FX pair ensure, save-up and retirement goal-plan persistence,
+  save-up preview calculation runtime, AI chat thread/message persistence,
+  bounded health status/check slices, bounded health classification-fix runtime,
+  and bounded legacy-classification health issue runtime implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; retirement
-  summary refresh, save-up overview, and retirement simulation endpoints move
-  with calculation-heavy goal slices; automatic FX market sync/provider HTTP
-  behavior plus broader market-data provider resolution/sync behavior move with
-  calculation/market-data slices; actual portfolio job execution and event
+  summary refresh, goal-id save-up overview, and retirement simulation endpoints
+  move with calculation-heavy goal slices; automatic FX market sync/provider
+  HTTP behavior plus broader market-data provider resolution/sync behavior move
+  with calculation/market-data slices; actual portfolio job execution and event
   production move with portfolio/calculation slices; OS keyring integration
   moves with a dedicated runtime parity slice; AI chat provider streaming, title
   generation, tool execution, tag mutations, attachment handling, and outbox

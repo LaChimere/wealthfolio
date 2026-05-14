@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 70
+turns_used: 71
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T23:22:19+08:00"
+updated_at: "2026-05-14T23:49:05+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -466,6 +466,12 @@ updated_at: "2026-05-14T23:22:19+08:00"
   and participating DC account links, and persists versioned `goal_plans` rows.
   Retirement simulations, summary refresh, and save-up overview calculations
   remain deferred.
+- Turn 71: Added bounded save-up preview calculation runtime:
+  `POST /api/v1/goals/save-up/preview` now validates save-up inputs and returns
+  Rust-compatible local-date projections, required monthly contribution,
+  completion-date search, and trajectory output. Goal-id save-up overview,
+  summary refresh, and retirement simulations remain deferred. Targeted tests,
+  backend type-check, full `bun run check`, and focused review passed.
 
 ## Deferred items
 
@@ -482,10 +488,11 @@ updated_at: "2026-05-14T23:22:19+08:00"
   behavior, response safety limits, and preview metadata are implemented in the
   standalone TS backend; broader market-data provider quote/import/sync runtime
   remains deferred below.
-- Retirement summary refresh, save-up overview, and retirement simulation
-  endpoints remain active follow-ups. reason=save-up and retirement goal-plan
-  writes now have bounded TS runtime parity, while calculations should move in
-  dedicated calculation-heavy slices.
+- Retirement summary refresh, goal-id save-up overview, and retirement
+  simulation endpoints remain active follow-ups. reason=save-up preview
+  calculations and save-up/retirement goal-plan writes now have bounded TS
+  runtime parity, while valuation-backed goal summaries and retirement
+  simulations should move in dedicated calculation-heavy slices.
 - FX currency converter, historical lookup, and register-pair behavior now have
   TS runtime parity. reason=the standalone TS exchange-rate service initializes
   the historical converter and can register required FX assets; automatic market

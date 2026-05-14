@@ -5364,6 +5364,54 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(invalidPlanResponse.status).toBe(400);
 
+      const previewResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/save-up/preview", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            currentValue: 1000,
+            targetAmount: 5000,
+            targetDate: null,
+            monthlyContribution: 250,
+            expectedAnnualReturn: 0.05,
+          }),
+        }),
+      );
+      expect(previewResponse.status).toBe(200);
+      await expect(previewResponse.json()).resolves.toMatchObject({
+        currentValue: 1000,
+        targetAmount: 5000,
+        progress: 0.2,
+        health: "not_applicable",
+        projectedValueAtTargetDate: 0,
+        requiredMonthlyContribution: 0,
+        trajectory: [],
+      });
+
+      const invalidPreviewResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/save-up/preview", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            currentValue: 1000,
+            targetAmount: 5000,
+            targetDate: null,
+            monthlyContribution: 250,
+            expectedAnnualReturn: 2,
+          }),
+        }),
+      );
+      expect(invalidPreviewResponse.status).toBe(400);
+      await expect(invalidPreviewResponse.json()).resolves.toMatchObject({
+        message: "Expected annual return must be between -20% and 50%",
+      });
+
       const deletePlanResponse = await handler(
         new Request(`http://127.0.0.1/api/v1/goals/${created.id}/plan`, {
           method: "DELETE",

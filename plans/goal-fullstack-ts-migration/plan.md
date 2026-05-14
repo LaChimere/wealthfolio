@@ -52,6 +52,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   current-age normalization, unknown settings preservation,
   duplicate/participating DC account link guards, versioned `goal_plans`
   upserts, and `goal_plans` sync event queuing.
+- Add bounded save-up preview calculations for
+  `POST /api/v1/goals/save-up/preview`, including Rust-compatible input
+  validation, local-date projection math, monthly contribution solving,
+  completion-date search, and trajectory generation.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -71,8 +75,8 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep goal summary refresh and retirement/save-up calculations deferred to
-  dedicated goal/calculation parity slices.
+- Keep goal summary refresh, goal-id save-up overview, and retirement
+  calculations deferred to dedicated goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -87,12 +91,13 @@ beyond mapping/templates/duplicate lookups, read-only search, transfer
 link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
-apply, local AI chat thread/message persistence, bounded health account/timezone
-status/checks and legacy-classification issue generation,
-sync-crypto/device-sync integration, retirement goal summary refresh,
-calculation-heavy health checks or non-classification `/health/fix` execution,
-real Connect runtime implementation, real device-sync runtime implementation, or
-Rust runtime removal is in scope for this slice.
+apply, save-up preview calculations, local AI chat thread/message persistence,
+bounded health account/timezone status/checks and legacy-classification issue
+generation, sync-crypto/device-sync integration, retirement goal summary
+refresh, goal-id save-up overview, retirement simulations, calculation-heavy
+health checks or non-classification `/health/fix` execution, real Connect
+runtime implementation, real device-sync runtime implementation, or Rust runtime
+removal is in scope for this slice.
 
 ## Next slices
 

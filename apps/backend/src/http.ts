@@ -95,6 +95,7 @@ import {
 } from "./domains/portfolio-jobs";
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import type { SecretService } from "./domains/secrets";
+import { previewSaveUpOverview, type SaveUpInput } from "./domains/save-up";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
 import type { SyncCryptoService } from "./domains/sync-crypto";
 import type {
@@ -2202,6 +2203,12 @@ function routeGoalRequest(
   if (request.method === "POST" && url.pathname === "/api/v1/goals/plan") {
     return handleJsonMutation(request, parseSaveGoalPlan, (plan) =>
       goalService.saveGoalPlan(normalizeGoalPlanCurrency(plan, goalService)),
+    );
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/save-up/preview") {
+    return handleJsonMutation(request, parseSaveUpInput, async (input) =>
+      previewSaveUpOverview(input),
     );
   }
 
@@ -5248,6 +5255,42 @@ function parseSaveGoalPlan(payload: Record<string, unknown>): SaveGoalPlan | Res
     plannerMode,
     settingsJson,
     summaryJson,
+  };
+}
+
+function parseSaveUpInput(payload: Record<string, unknown>): SaveUpInput | Response {
+  const currentValue = parseRequiredNumber(payload.currentValue, "currentValue");
+  if (currentValue instanceof Response) {
+    return currentValue;
+  }
+  const targetAmount = parseRequiredNumber(payload.targetAmount, "targetAmount");
+  if (targetAmount instanceof Response) {
+    return targetAmount;
+  }
+  const targetDate = parseOptionalStringOrNull(payload.targetDate, "targetDate");
+  if (targetDate instanceof Response) {
+    return targetDate;
+  }
+  const monthlyContribution = parseRequiredNumber(
+    payload.monthlyContribution,
+    "monthlyContribution",
+  );
+  if (monthlyContribution instanceof Response) {
+    return monthlyContribution;
+  }
+  const expectedAnnualReturn = parseRequiredNumber(
+    payload.expectedAnnualReturn,
+    "expectedAnnualReturn",
+  );
+  if (expectedAnnualReturn instanceof Response) {
+    return expectedAnnualReturn;
+  }
+  return {
+    currentValue,
+    targetAmount,
+    targetDate: targetDate ?? null,
+    monthlyContribution,
+    expectedAnnualReturn,
   };
 }
 
