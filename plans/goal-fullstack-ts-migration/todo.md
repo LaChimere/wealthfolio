@@ -71,11 +71,11 @@
     enrollment/engine, device-sync device management, team-key/reset, and
     pairing, standalone runtime composition for already-ported SQLite-backed
     domains, contribution-limit deposit calculation runtime, alternative-assets
-    runtime, safe app utility runtime, custom provider test-source runtime,
-    alternative assets, assets, portfolio metrics, holdings, add-ons,
-    market-data, and activities TS repository/service or route config
-    implementations plus guarded/runtime route tests in
-    `apps/backend/src/domains/settings.ts`,
+    runtime, contained asset read/quote-mode/delete runtime, safe app utility
+    runtime, custom provider test-source runtime, alternative assets, assets,
+    portfolio metrics, holdings, add-ons, market-data, and activities TS
+    repository/service or route config implementations plus guarded/runtime
+    route tests in `apps/backend/src/domains/settings.ts`,
     `apps/backend/src/domains/accounts.ts`,
     `apps/backend/src/domains/contribution-limits.ts`,
     `apps/backend/src/domains/taxonomies.ts`,
@@ -742,6 +742,17 @@ contract:
   input validation, and standalone runtime route wiring. Rubber-duck critique
   and focused code review found no remaining actionable issues. Full repository
   check passed with `bun run check`.
+- `pr5-assets-contained-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test src/domains/assets.test.ts src/runtime.test.ts`.
+  Coverage includes asset list/profile response mapping, Rust exchange-name
+  enrichment from the existing exchange catalog, invalid JSON metadata fallback,
+  exact quote-mode validation, manual-mode sync-state cleanup, `assets_updated`
+  events, delete activity guards, quote/sync-state cleanup, explicit
+  create/profile deferral until canonicalization is ported, and standalone
+  runtime route wiring. Rubber-duck critique narrowed the slice away from unsafe
+  create/profile mutation, and focused code review found no remaining actionable
+  issues. Full repository check passed with `bun run check`.
 
 ## Result
 
@@ -762,9 +773,10 @@ contract:
   safe app utility runtime, file-backed secrets runtime, AI provider
   settings/catalog runtime, sync crypto runtime, legacy classification migration
   runtime, custom provider test-source runtime, FX converter/register runtime,
-  app utility database restore runtime, and contribution-limit deposit
-  calculation runtime, and alternative-assets runtime slices implemented;
-  broader migration remains active.
+  app utility database restore runtime, contribution-limit deposit calculation
+  runtime, alternative-assets runtime, and contained asset
+  read/quote-mode/delete runtime slices implemented; broader migration remains
+  active.
 - Follow-ups: continue other low-risk domain slices; health status/check/fix
   endpoints move with the health/calculation services; goals plan write/delete,
   summary refresh, save-up overview, and retirement simulation endpoints move
@@ -775,10 +787,11 @@ contract:
   moves with a dedicated runtime parity slice; AI chat execution and persistence
   move with AI runtime parity slices; alternative asset portfolio job enqueue
   and recalculation side effects move with portfolio parity slices; asset
-  persistence/profile/quote-mode behavior moves with asset/market-data/portfolio
-  parity slices; portfolio metric calculations move with portfolio calculation
-  parity slices; holdings fan-out, valuations, allocations, snapshots, imports,
-  and portfolio recalculation side effects move with holdings/portfolio parity
+  create/profile canonicalization, provider interactions, and portfolio
+  recalculation side effects move with asset/market-data/portfolio parity
+  slices; portfolio metric calculations move with portfolio calculation parity
+  slices; holdings fan-out, valuations, allocations, snapshots, imports, and
+  portfolio recalculation side effects move with holdings/portfolio parity
   slices; add-on filesystem extraction, runtime loading, store HTTP, staging
   I/O, and update behavior move with add-on runtime parity slices; exchange
   metadata, provider HTTP, Yahoo dividends, quote import/persistence, market

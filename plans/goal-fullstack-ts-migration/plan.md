@@ -10,19 +10,20 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding alternative-assets runtime parity to
-the standalone TS backend:
+PR 5 continues vertical slices by adding a contained general-asset runtime slice
+to the standalone TS backend:
 
-- Replace the prior injectable-only alternative-assets seam with a SQLite-backed
-  service wired into runtime composition.
-- Mirror Rust asset/quote writes for alternative assets: manual asset rows,
-  purchase/current valuation quotes, same-day manual quote replacement, latest
-  quote selection, and asset-created events.
-- Preserve Rust metadata behavior for subtype display codes, liability linking,
-  unlink no-op semantics, all-metadata removal asymmetry, and liability
-  unlinking during asset deletion.
-- Keep portfolio job enqueue/recalculation side effects deferred until the
-  portfolio job/runtime slices migrate.
+- Replace the prior injectable-only general asset seam with SQLite-backed
+  read/profile, quote-mode update, and delete behavior wired into runtime
+  composition.
+- Mirror Rust asset response enrichment for `exchangeName` by reading the
+  existing Rust exchange metadata catalog, and preserve invalid JSON metadata
+  fallback behavior.
+- Keep asset creation and full profile mutation explicitly deferred until market
+  identity canonicalization is ported, avoiding divergent generated
+  `instrument_key` behavior.
+- Preserve Rust delete constraints, quote cleanup, manual quote-mode sync-state
+  cleanup, and `assets_updated` events without inventing delete events.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -30,11 +31,11 @@ the standalone TS backend:
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
-runtime, asset runtime, portfolio metrics runtime, holdings runtime, add-on
-runtime, market-data runtime, activities/import runtime, sync-crypto/device-sync
-integration, real health status/check/fix runtime implementation, real Connect
-runtime implementation, real device-sync runtime implementation, or Rust runtime
-removal is in scope for this slice.
+runtime, asset create/profile canonicalization, portfolio metrics runtime,
+holdings runtime, add-on runtime, market-data runtime, activities/import
+runtime, sync-crypto/device-sync integration, real health status/check/fix
+runtime implementation, real Connect runtime implementation, real device-sync
+runtime implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

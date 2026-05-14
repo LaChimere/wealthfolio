@@ -130,6 +130,46 @@ describe("TS backend runtime composition", () => {
         }),
       ]);
 
+      const assetsResponse = await fetch(`${server.baseUrl}/api/v1/assets`);
+      expect(assetsResponse.status).toBe(200);
+      await expect(assetsResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: alternativeAsset.assetId,
+          kind: "PROPERTY",
+          quoteMode: "MANUAL",
+          exchangeName: null,
+        }),
+      ]);
+
+      const assetProfileResponse = await fetch(
+        `${server.baseUrl}/api/v1/assets/profile?assetId=${alternativeAsset.assetId}`,
+      );
+      expect(assetProfileResponse.status).toBe(200);
+      await expect(assetProfileResponse.json()).resolves.toMatchObject({
+        id: alternativeAsset.assetId,
+        displayCode: "Vacation Home",
+      });
+
+      const quoteModeResponse = await fetch(
+        `${server.baseUrl}/api/v1/assets/pricing-mode/${alternativeAsset.assetId}`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ quoteMode: "MANUAL" }),
+        },
+      );
+      expect(quoteModeResponse.status).toBe(200);
+      await expect(quoteModeResponse.json()).resolves.toMatchObject({
+        id: alternativeAsset.assetId,
+        quoteMode: "MANUAL",
+      });
+
+      const assetDeleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/assets/${alternativeAsset.assetId}`,
+        { method: "DELETE" },
+      );
+      expect(assetDeleteResponse.status).toBe(204);
+
       const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
         method: "POST",
         headers: { "content-type": "application/json" },

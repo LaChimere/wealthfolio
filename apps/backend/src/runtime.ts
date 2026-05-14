@@ -9,6 +9,7 @@ import {
 import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
+import { createAssetService, parseExchangeNameLookup } from "./domains/assets";
 import {
   createContributionDepositCalculator,
   createContributionLimitRepository,
@@ -177,6 +178,10 @@ function createServicesFromDatabase(
   const options: BackendRequestHandlerOptions = {
     accountService,
     alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
+    assetService: createAssetService(db, {
+      eventBus,
+      exchangeNameByMic: readExchangeNameLookup(runtimeOptions.repositoryRoot),
+    }),
     aiProviderService: secretService
       ? createAiProviderService({
           db,
@@ -294,6 +299,15 @@ function readPackageVersion(repositoryRoot: string): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function readExchangeNameLookup(repositoryRoot: string): Map<string, string> {
+  return parseExchangeNameLookup(
+    readFileSync(
+      path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
+      "utf8",
+    ),
+  );
 }
 
 function errorMessage(error: unknown): string {

@@ -298,6 +298,13 @@ updated_at: "2026-05-14T10:01:48+08:00"
   liabilities with Rust-compatible metadata semantics, delete assets with
   liability unlinking, emit asset-created events, and list holdings from latest
   manual quotes.
+- Turn 44: Added a contained general-assets runtime slice for the standalone TS
+  backend: `/api/v1/assets` now lists assets, reads profiles, updates quote
+  mode, and deletes unused assets from SQLite with Rust-compatible
+  `exchangeName` enrichment, invalid JSON fallback, activity delete guards,
+  quote/sync-state cleanup, and `assets_updated` events. Asset create/profile
+  mutation remains explicitly deferred until market identity canonicalization is
+  ported.
 
 ## Deferred items
 
@@ -350,10 +357,12 @@ updated_at: "2026-05-14T10:01:48+08:00"
   holdings/net-worth calculations, and portfolio job enqueue behavior remain
   active follow-ups. reason=this slice only adds the guarded HTTP seam, while
   runtime behavior must move with asset/portfolio calculation parity slices.
-- Asset repository persistence, profile/quote-mode side effects, quote-provider
-  interactions, activity guards, and portfolio recalculation behavior remain
-  active follow-ups. reason=this slice only adds the guarded HTTP seam, while
-  runtime behavior must move with asset/market-data/portfolio parity slices.
+- Asset create/profile mutation, market identity canonicalization,
+  quote-provider interactions, and portfolio recalculation behavior remain
+  active follow-ups. reason=asset list/profile reads, quote-mode updates, delete
+  guards, quote cleanup, sync-state cleanup, and exchange-name enrichment now
+  have TS runtime parity, while create/update profile must wait for
+  canonicalization to avoid divergent `instrument_key` behavior.
 - App utility database restore runtime now has TS runtime parity. reason=the
   standalone backend performs file-level restore after closing the live database
   handle and explicitly reports restart-required readiness afterward; future
