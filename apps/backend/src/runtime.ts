@@ -22,6 +22,7 @@ import {
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
+import { createMarketDataService } from "./domains/market-data";
 import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
@@ -224,6 +225,9 @@ function createServicesFromDatabase(
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),
+    marketDataService: createMarketDataService(db, {
+      exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
+    }),
     restartRequired: () => restartRequired,
     secretService,
     settingsService,
@@ -302,11 +306,13 @@ function readPackageVersion(repositoryRoot: string): string {
 }
 
 function readExchangeMetadataLookup(repositoryRoot: string) {
-  return parseExchangeMetadataLookup(
-    readFileSync(
-      path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
-      "utf8",
-    ),
+  return parseExchangeMetadataLookup(readExchangeCatalogJson(repositoryRoot));
+}
+
+function readExchangeCatalogJson(repositoryRoot: string): string {
+  return readFileSync(
+    path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
+    "utf8",
   );
 }
 

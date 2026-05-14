@@ -207,6 +207,52 @@ describe("TS backend runtime composition", () => {
         notes: "runtime note",
       });
 
+      const exchangesResponse = await fetch(`${server.baseUrl}/api/v1/exchanges`);
+      expect(exchangesResponse.status).toBe(200);
+      await expect(exchangesResponse.json()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ mic: "XTSE", name: "TSX", currency: "CAD" }),
+        ]),
+      );
+
+      const updateQuoteResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/${createdAsset.id}`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: "provider-quote",
+            timestamp: "2026-05-14T16:00:00Z",
+            dataSource: "MANUAL",
+            close: 42.5,
+            currency: "CAD",
+          }),
+        },
+      );
+      expect(updateQuoteResponse.status).toBe(204);
+      const manualQuoteId = `${createdAsset.id}_2026-05-14_MANUAL`;
+      const quoteHistoryResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/history?symbol=${createdAsset.id}`,
+      );
+      expect(quoteHistoryResponse.status).toBe(200);
+      await expect(quoteHistoryResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: manualQuoteId,
+          assetId: createdAsset.id,
+          dataSource: "MANUAL",
+          close: 42.5,
+          currency: "CAD",
+        }),
+      ]);
+      expect((await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`)).status).toBe(
+        404,
+      );
+      const deleteQuoteResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/id/${encodeURIComponent(manualQuoteId)}`,
+        { method: "DELETE" },
+      );
+      expect(deleteQuoteResponse.status).toBe(204);
+
       const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
         method: "POST",
         headers: { "content-type": "application/json" },

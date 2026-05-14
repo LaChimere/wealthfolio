@@ -10,32 +10,35 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding a general-asset mutation runtime slice
-to the standalone TS backend:
+PR 5 continues vertical slices by adding a contained market-data quote CRUD
+runtime slice to the standalone TS backend:
 
-- Extend the contained general asset runtime with SQLite-backed create and
-  profile update behavior wired into runtime composition.
-- Port Rust-compatible market identity canonicalization for equity/option/metal
-  Yahoo suffixes, crypto pairs, FX pairs, and bond CUSIP-to-ISIN conversion so
-  generated `instrument_key` values stay stable.
-- Preserve duplicate `instrument_key` handling, German ISIN provider inference,
-  quote-currency fallback from MIC metadata, profile sync-state reset, and
-  asset-created/updated events.
-- Keep omitted profile fields preserved in the TS runtime rather than
-  reproducing the Rust repository null-wipe bug at the HTTP/service boundary.
+- Wire `/api/v1/exchanges` from the existing Rust exchange catalog and expose
+  only entries with exchange name and currency, matching the Rust
+  `get_exchange_list` shape.
+- Add SQLite-backed quote history reads, manual quote update/upsert behavior,
+  and quote deletion for the standalone runtime.
+- Preserve Rust quote storage semantics for path-owned `asset_id`, deterministic
+  manual quote IDs, existing same-day/source ID preservation, zero optional
+  OHLCV values as `NULL`, invalid stored timestamp fallback, and idempotent
+  deletes.
+- Keep high-risk market-data methods optional so provider search/resolve, latest
+  snapshots, Yahoo dividends, CSV import/check, sync, and recalculation side
+  effects remain `404` until their dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-provider sync, portfolio recalculation side effects, keyring storage, AI chat
-runtime, quote-provider interactions, auto-classification side effects,
-portfolio metrics runtime, holdings runtime, add-on runtime, market-data
-runtime, activities/import runtime, sync-crypto/device-sync integration, real
-health status/check/fix runtime implementation, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+provider sync, latest quote snapshot/staleness behavior, quote CSV import/check,
+portfolio recalculation side effects, keyring storage, AI chat runtime,
+quote-provider interactions, auto-classification side effects, portfolio metrics
+runtime, holdings runtime, add-on runtime, broader market-data runtime,
+activities/import runtime, sync-crypto/device-sync integration, real health
+status/check/fix runtime implementation, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 
