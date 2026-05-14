@@ -10,17 +10,19 @@ SQLite data.
 
 ## Current execution slice
 
-PR 5 continues vertical slices by adding contribution-limit deposit calculation
-runtime parity to the standalone TS backend:
+PR 5 continues vertical slices by adding alternative-assets runtime parity to
+the standalone TS backend:
 
-- Replace the prior injectable-only contribution deposit seam with a
-  SQLite-backed calculator wired into runtime composition.
-- Mirror Rust contribution rules for `DEPOSIT`, `TRANSFER_IN`, `TRANSFER_OUT`,
-  and `CREDIT`, including internal transfer-pair exclusion and external-flow
-  metadata checks.
-- Preserve Rust-style activity/account filtering, user-timezone year ranges,
-  inclusive explicit end dates, FX conversion dates, and numeric response
-  shapes.
+- Replace the prior injectable-only alternative-assets seam with a SQLite-backed
+  service wired into runtime composition.
+- Mirror Rust asset/quote writes for alternative assets: manual asset rows,
+  purchase/current valuation quotes, same-day manual quote replacement, latest
+  quote selection, and asset-created events.
+- Preserve Rust metadata behavior for subtype display codes, liability linking,
+  unlink no-op semantics, all-metadata removal asymmetry, and liability
+  unlinking during asset deletion.
+- Keep portfolio job enqueue/recalculation side effects deferred until the
+  portfolio job/runtime slices migrate.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -28,11 +30,11 @@ runtime parity to the standalone TS backend:
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
-runtime, alternative asset runtime, asset runtime, portfolio metrics runtime,
-holdings runtime, add-on runtime, market-data runtime, activities/import
-runtime, sync-crypto/device-sync integration, real health status/check/fix
-runtime implementation, real Connect runtime implementation, real device-sync
-runtime implementation, or Rust runtime removal is in scope for this slice.
+runtime, asset runtime, portfolio metrics runtime, holdings runtime, add-on
+runtime, market-data runtime, activities/import runtime, sync-crypto/device-sync
+integration, real health status/check/fix runtime implementation, real Connect
+runtime implementation, real device-sync runtime implementation, or Rust runtime
+removal is in scope for this slice.
 
 ## Next slices
 

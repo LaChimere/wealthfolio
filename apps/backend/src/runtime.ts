@@ -6,6 +6,7 @@ import {
   createAccountService,
   type AccountService,
 } from "./domains/accounts";
+import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import {
@@ -175,6 +176,7 @@ function createServicesFromDatabase(
 
   const options: BackendRequestHandlerOptions = {
     accountService,
+    alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
     aiProviderService: secretService
       ? createAiProviderService({
           db,

@@ -87,6 +87,49 @@ describe("TS backend runtime composition", () => {
         version: "3.4.0",
       });
 
+      const alternativeAssetCreateResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "property",
+            name: "Cabin",
+            currency: "USD",
+            currentValue: "125000.00",
+            valueDate: "2026-05-14",
+            purchasePrice: "100000.00",
+            purchaseDate: "2024-01-01",
+            metadata: { sub_type: "vacation_home" },
+          }),
+        },
+      );
+      expect(alternativeAssetCreateResponse.status).toBe(200);
+      const alternativeAsset = (await alternativeAssetCreateResponse.json()) as {
+        assetId: string;
+        quoteId: string;
+      };
+      expect(typeof alternativeAsset.assetId).toBe("string");
+      expect(typeof alternativeAsset.quoteId).toBe("string");
+
+      const alternativeHoldingsResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-holdings`,
+      );
+      expect(alternativeHoldingsResponse.status).toBe(200);
+      await expect(alternativeHoldingsResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: alternativeAsset.assetId,
+          kind: "property",
+          name: "Cabin",
+          symbol: "Vacation Home",
+          currency: "USD",
+          marketValue: "125000",
+          purchasePrice: "100000.00",
+          unrealizedGain: "25000",
+          unrealizedGainPct: "0.25",
+        }),
+      ]);
+
       const secretSetResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
         method: "POST",
         headers: { "content-type": "application/json" },

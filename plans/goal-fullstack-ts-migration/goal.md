@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 42
+turns_used: 43
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T09:30:38+08:00"
+updated_at: "2026-05-14T10:01:48+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -292,6 +292,12 @@ updated_at: "2026-05-14T09:30:38+08:00"
   credits, and transfers, use user-timezone year ranges and FX conversion dates,
   and return numeric contribution totals through the existing `/api/v1/limits`
   runtime wiring.
+- Turn 43: Added alternative-assets runtime parity for the standalone TS
+  backend: `/api/v1/alternative-assets` and `/api/v1/alternative-holdings` now
+  create manual asset/quote records, update valuations and metadata, link
+  liabilities with Rust-compatible metadata semantics, delete assets with
+  liability unlinking, emit asset-created events, and list holdings from latest
+  manual quotes.
 
 ## Deferred items
 
@@ -313,6 +319,12 @@ updated_at: "2026-05-14T09:30:38+08:00"
   the historical converter and can register required FX assets; automatic market
   sync, provider HTTP, quote import/persistence, and portfolio recalculation
   side effects remain deferred below.
+- Alternative asset persistence, manual valuation quotes, liability metadata
+  linking/unlinking quirks, and alternative holdings reads now have TS runtime
+  parity. reason=the standalone TS backend writes `assets`/`quotes` directly and
+  preserves Rust response/metadata behavior; portfolio job enqueue and broader
+  portfolio recalculation side effects remain deferred to portfolio parity
+  slices.
 - Health status/check/fix endpoints remain active follow-ups. reason=legacy
   classification migration now has TS runtime parity through taxonomy endpoints,
   while broader health checks and fix execution depend on holdings, quotes, FX,
