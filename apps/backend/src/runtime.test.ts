@@ -170,6 +170,28 @@ describe("TS backend runtime composition", () => {
         }),
       ]);
 
+      const activityImportApplyResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            activities: [{ activityType: "DEPOSIT", date: "2025-01-01", amount: "10" }],
+          }),
+        },
+      );
+      expect(activityImportApplyResponse.status).toBe(200);
+      await expect(activityImportApplyResponse.json()).resolves.toMatchObject({
+        importRunId: "",
+        summary: {
+          total: 1,
+          imported: 0,
+          skipped: 1,
+          success: false,
+          errorMessage: "Account is required for all activities.",
+        },
+      });
+
       const aiProvidersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
       expect(aiProvidersResponse.status).toBe(200);
       await expect(aiProvidersResponse.json()).resolves.toMatchObject({

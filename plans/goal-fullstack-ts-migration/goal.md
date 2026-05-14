@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 61
+turns_used: 62
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-14T20:59:24+08:00"
+updated_at: "2026-05-14T21:27:08+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -413,6 +413,13 @@ updated_at: "2026-05-14T20:59:24+08:00"
   create normalization, existing duplicate idempotency keys, and in-batch
   duplicate warnings without persisting imports. Import execution, asset
   creation, device-sync outbox, and portfolio recalculation remain deferred.
+- Turn 62: Added bounded activity import apply runtime for the standalone TS
+  backend: `/api/v1/activities/import` now validates apply rows, writes existing
+  asset/cash activities with CSV source/import-run metadata, skips duplicates
+  unless `forceImport` is set, preserves non-duplicate idempotency keys, returns
+  Rust-compatible import summaries, and avoids partial writes on validation
+  errors. Symbol-only asset creation, transfer-pair auto-linking, FX pair
+  ensure, device-sync outbox, and portfolio recalculation remain deferred.
 
 ## Deferred items
 
@@ -487,22 +494,24 @@ updated_at: "2026-05-14T20:59:24+08:00"
   activity search, transfer link/unlink mutations, single activity deletes,
   bounded existing-asset/cash activity create/update/bulk persistence, and
   bounded symbol-only resolution to existing assets, CSV parse, read-only import
-  asset preview, and read-only import validation now have TS runtime parity.
-  reason=the standalone backend reads/writes `import_templates`,
-  `import_account_templates`, activity idempotency keys, activity search rows,
-  transfer source-group metadata, deleted activity rows, and bounded manual
-  create/update/bulk rows directly with Rust-compatible defaults, filters,
-  ordering, response mapping, transfer guards, decimal semantics, date
-  normalization, duplicate detection, created mappings, and no-write-on-error
-  bulk behavior, while existing symbol-only inputs are resolved locally with
-  ambiguity-safe errors and CSV bytes are parsed with Rust-compatible detected
-  config, structure warnings, UTF-16 BOM handling, and Windows-1252 fallback
-  warnings, import asset candidates are previewed as existing matches, bounded
-  drafts, or explicit fixing errors, and mapped import rows are validated
-  read-only with duplicate warnings; symbol-only asset creation, quote fallback
-  writes, import execution, provider-backed asset resolution, device-sync outbox
-  emission for writes, and portfolio recalculation side effects remain active
-  follow-ups for dedicated activities/import/portfolio parity slices.
+  asset preview, read-only import validation, and bounded import apply now have
+  TS runtime parity. reason=the standalone backend reads/writes
+  `import_templates`, `import_account_templates`, activity idempotency keys,
+  activity search rows, transfer source-group metadata, deleted activity rows,
+  and bounded manual create/update/bulk rows directly with Rust-compatible
+  defaults, filters, ordering, response mapping, transfer guards, decimal
+  semantics, date normalization, duplicate detection, created mappings, and
+  no-write-on-error bulk behavior, while existing symbol-only inputs are
+  resolved locally with ambiguity-safe errors and CSV bytes are parsed with
+  Rust-compatible detected config, structure warnings, UTF-16 BOM handling, and
+  Windows-1252 fallback warnings, import asset candidates are previewed as
+  existing matches, bounded drafts, or explicit fixing errors, and mapped import
+  rows are validated read-only with duplicate warnings; apply rows are persisted
+  with CSV import-run metadata and duplicate skipping/force-import behavior;
+  symbol-only asset creation, quote fallback writes, provider-backed asset
+  resolution, import transfer-pair auto-linking, FX pair ensure, device-sync
+  outbox emission for writes, and portfolio recalculation side effects remain
+  active follow-ups for dedicated activities/import/portfolio parity slices.
 - AI chat persistence, provider streaming, tool execution, thread storage, tag
   persistence, and tool-result mutation behavior remain active follow-ups.
   reason=this slice only adds the guarded HTTP seam, while runtime behavior must

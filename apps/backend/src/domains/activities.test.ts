@@ -476,6 +476,242 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("imports checked activities with import run metadata", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      const result = service.importActivities?.([
+        {
+          accountId: "account-1",
+          assetId: "AAPL",
+          activityType: "BUY",
+          date: "2025-01-15",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "25",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 2,
+        },
+      ]) as {
+        activities: Array<Record<string, unknown>>;
+        importRunId: string;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({
+        total: 2,
+        imported: 2,
+        skipped: 0,
+        duplicates: 0,
+        assetsCreated: 0,
+        success: true,
+        errorMessage: null,
+      });
+      expect(result.importRunId).toBeString();
+      expect(result.importRunId).not.toBe("");
+      expect(result.activities).toHaveLength(2);
+      expect(result.activities[0]).toMatchObject({
+        accountId: "account-1",
+        assetId: "AAPL",
+        isValid: true,
+      });
+      expect(result.activities[1]).toMatchObject({
+        accountId: "account-1",
+        symbol: "",
+        isValid: true,
+      });
+      const buyId = result.activities[0]?.id as string;
+      const depositId = result.activities[1]?.id as string;
+      expect(readActivityValue(db, buyId, "import_run_id")).toBe(result.importRunId);
+      expect(readActivityValue(db, buyId, "source_system")).toBe("CSV");
+      expect(readActivityValue(db, depositId, "status")).toBe("DRAFT");
+      expect(readImportRun(db, result.importRunId)).toMatchObject({
+        account_id: "account-1",
+        source_system: "csv",
+        run_type: "IMPORT",
+        mode: "INCREMENTAL",
+        status: "APPLIED",
+        review_mode: "NEVER",
+      });
+      expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
+        fetched: 2,
+        inserted: 2,
+        skipped: 0,
+        assetsCreated: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips import duplicates unless force importing", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      const existing = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-15",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+
+      const result = service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-15",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-15",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          forceImport: true,
+          lineNumber: 2,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "12",
+          currency: "USD",
+          isDraft: false,
+          forceImport: true,
+          lineNumber: 3,
+        },
+      ]) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({
+        total: 3,
+        imported: 2,
+        skipped: 1,
+        duplicates: 1,
+        success: true,
+      });
+      expect(result.activities[0]).toMatchObject({
+        duplicateOfId: existing.id,
+        warnings: { _duplicate: ["Duplicate activity already exists"] },
+      });
+      const forcedDuplicateId = result.activities[1]?.id as string;
+      const forcedUniqueId = result.activities[2]?.id as string;
+      expect(readActivityValue(db, forcedDuplicateId, "idempotency_key")).toBeNull();
+      expect(readActivityValue(db, forcedUniqueId, "idempotency_key")).toBeString();
+      expect(readActivityCount(db)).toBe(3);
+
+      const allDuplicateResult = service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-15",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+      ]) as {
+        importRunId: string;
+        summary: Record<string, unknown>;
+      };
+      expect(allDuplicateResult.importRunId).toBeString();
+      expect(allDuplicateResult.importRunId).not.toBe("");
+      expect(allDuplicateResult.summary).toMatchObject({
+        imported: 0,
+        skipped: 1,
+        duplicates: 1,
+        success: true,
+      });
+      expect(readActivityCount(db)).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects invalid import apply rows without writing activities or import runs", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      const result = service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "not-a-date",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "25",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 2,
+        },
+      ]) as {
+        activities: Array<Record<string, unknown>>;
+        importRunId: string;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.importRunId).toBe("");
+      expect(result.summary).toMatchObject({
+        total: 2,
+        imported: 0,
+        skipped: 1,
+        duplicates: 0,
+        success: false,
+        errorMessage: "Validation errors found in activities.",
+      });
+      expect(result.activities[0]).toMatchObject({
+        isValid: false,
+        errors: { symbol: ["Invalid date 'not-a-date'."] },
+      });
+      expect(result.activities[1]).toMatchObject({ isValid: true });
+      expect(readActivityCount(db)).toBe(0);
+      expect(readImportRunCount(db)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("creates activities with Rust-compatible defaults, normalization, and idempotency", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1296,6 +1532,26 @@ function createActivitiesDb(): Database {
       UNIQUE (account_id, context_kind, source_system)
     );
 
+    CREATE TABLE import_runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      source_system TEXT NOT NULL,
+      run_type TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      review_mode TEXT NOT NULL,
+      applied_at TEXT,
+      checkpoint_in TEXT,
+      checkpoint_out TEXT,
+      summary TEXT,
+      warnings TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE activities (
       id TEXT PRIMARY KEY NOT NULL,
       account_id TEXT NOT NULL,
@@ -1516,7 +1772,13 @@ function insertActivity(
 function readActivityValue(
   db: Database,
   activityId: string,
-  column: "id" | "source_group_id",
+  column:
+    | "id"
+    | "idempotency_key"
+    | "import_run_id"
+    | "source_group_id"
+    | "source_system"
+    | "status",
 ): string | null {
   const row = db
     .query<
@@ -1531,6 +1793,25 @@ function readActivityCount(db: Database): number {
   return (
     db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count ?? 0
   );
+}
+
+function readImportRunCount(db: Database): number {
+  return (
+    db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM import_runs").get()?.count ?? 0
+  );
+}
+
+function readImportRun(db: Database, importRunId: string): Record<string, unknown> | null {
+  return db
+    .query<Record<string, unknown>, [string]>("SELECT * FROM import_runs WHERE id = ?")
+    .get(importRunId);
+}
+
+function readImportRunSummary(db: Database, importRunId: string): Record<string, unknown> | null {
+  const row = db
+    .query<{ summary: string | null }, [string]>("SELECT summary FROM import_runs WHERE id = ?")
+    .get(importRunId);
+  return row?.summary ? (JSON.parse(row.summary) as Record<string, unknown>) : null;
 }
 
 function readLinkId(db: Database, accountId: string, contextKind: string): string | null {

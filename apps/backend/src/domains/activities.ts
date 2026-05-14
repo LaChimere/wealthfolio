@@ -178,6 +178,22 @@ export interface ActivityBulkMutationResult {
   errors: ActivityBulkMutationError[];
 }
 
+interface ImportActivitiesSummary {
+  total: number;
+  imported: number;
+  skipped: number;
+  duplicates: number;
+  assetsCreated: number;
+  success: boolean;
+  errorMessage: string | null;
+}
+
+interface ImportActivitiesResult {
+  activities: Array<Record<string, unknown>>;
+  importRunId: string;
+  summary: ImportActivitiesSummary;
+}
+
 export interface ActivityService {
   searchActivities?(
     request: ActivitySearchRequest,
@@ -368,6 +384,7 @@ interface ActivityCreateRowInput {
   sourceRecordId: string | null;
   sourceGroupId: string | null;
   idempotencyKey: string | null;
+  importRunId: string | null;
   needsReview: boolean;
   createdAt: string;
   updatedAt: string;
@@ -609,6 +626,10 @@ export function createActivityService(db: Database): ActivityService {
 
     checkActivitiesImport(activities) {
       return checkActivitiesImportRows(db, activities);
+    },
+
+    importActivities(activities) {
+      return importActivityRows(db, activities);
     },
 
     linkTransferActivities(activityAId, activityBId) {
@@ -1619,6 +1640,403 @@ function importValidationField(error: unknown): string {
   return "general";
 }
 
+interface PreparedImportActivity {
+  index: number;
+  activity: Record<string, unknown>;
+  create: ActivityCreateRowInput;
+  forceImport: boolean;
+}
+
+function importActivityRows(db: Database, activities: unknown[]): ImportActivitiesResult {
+  return db.transaction(() => {
+    const total = activities.length;
+    const ordered: Array<Record<string, unknown> | null> = Array.from(
+      { length: total },
+      () => null,
+    );
+    const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
+    let hasValidationErrors = false;
+
+    for (const [index, input] of activities.entries()) {
+      const activity = isRecord(input) ? { ...input } : {};
+      activity.lineNumber = numericField(activity.lineNumber) ?? index + 1;
+      const accountId = optionalTrimmedString(activity.accountId);
+      if (!accountId) {
+        addImportError(activity, "accountId", "Account is required before importing activities.");
+        activity.isValid = false;
+        ordered[index] = activity;
+        hasValidationErrors = true;
+        continue;
+      }
+      activity.accountId = accountId;
+      validInputs.push({ index, activity });
+    }
+
+    if (validInputs.length === 0) {
+      return {
+        activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
+        importRunId: "",
+        summary: {
+          total,
+          imported: 0,
+          skipped: total,
+          duplicates: 0,
+          assetsCreated: 0,
+          success: false,
+          errorMessage: "Account is required for all activities.",
+        },
+      };
+    }
+
+    const prepared: PreparedImportActivity[] = [];
+    for (const { index, activity } of validInputs) {
+      const errors = cloneMessageMap(activity.errors);
+      const createInput = importActivityCreateInput(activity);
+      collectImportApplyPreflightErrors(activity, errors);
+
+      if (hasMessageMapEntries(errors)) {
+        activity.errors = errors;
+        activity.isValid = false;
+        ordered[index] = activity;
+        hasValidationErrors = true;
+        continue;
+      }
+
+      try {
+        const create = normalizeActivityCreateInput(db, createInput);
+        const explicitId = optionalTrimmedString(activity.id);
+        if (explicitId) {
+          create.id = explicitId;
+        }
+        create.sourceSystem = "CSV";
+        create.importRunId = null;
+        copyNormalizedImportFields(activity, create);
+        prepared.push({
+          index,
+          activity,
+          create,
+          forceImport: activity.forceImport === true,
+        });
+        ordered[index] = activity;
+      } catch (error) {
+        addFieldMessage(errors, importValidationField(error), errorMessage(error));
+        activity.errors = errors;
+        activity.isValid = false;
+        ordered[index] = activity;
+        hasValidationErrors = true;
+      }
+    }
+
+    if (hasValidationErrors) {
+      return {
+        activities: ordered.flatMap((activity) =>
+          activity === null ? [] : [finalizeImportActivity(activity)],
+        ),
+        importRunId: "",
+        summary: {
+          total,
+          imported: 0,
+          skipped: ordered.filter(
+            (activity) => activity === null || !finalizeImportActivity(activity).isValid,
+          ).length,
+          duplicates: 0,
+          assetsCreated: 0,
+          success: false,
+          errorMessage: "Validation errors found in activities.",
+        },
+      };
+    }
+
+    const firstPositionByKey = new Map<string, number>();
+    const existingByKey = new Map<string, string>();
+    for (const [position, row] of prepared.entries()) {
+      const key = row.create.idempotencyKey;
+      if (!key || firstPositionByKey.has(key)) {
+        continue;
+      }
+      firstPositionByKey.set(key, position);
+      const existingId = findActivityIdByIdempotencyKey(db, key);
+      if (existingId) {
+        existingByKey.set(key, existingId);
+      }
+    }
+
+    let duplicateCount = 0;
+    const insertable: PreparedImportActivity[] = [];
+    for (const [position, row] of prepared.entries()) {
+      const key = row.create.idempotencyKey;
+      if (!key) {
+        insertable.push(row);
+        continue;
+      }
+
+      const existingId = existingByKey.get(key);
+      if (existingId) {
+        if (row.forceImport) {
+          row.create.idempotencyKey = null;
+          insertable.push(row);
+        } else {
+          addImportWarning(row.activity, "_duplicate", "Duplicate activity already exists");
+          row.activity.duplicateOfId = existingId;
+          duplicateCount += 1;
+        }
+        continue;
+      }
+
+      const firstPosition = firstPositionByKey.get(key);
+      if (firstPosition !== undefined && firstPosition !== position) {
+        if (row.forceImport) {
+          row.create.idempotencyKey = null;
+          insertable.push(row);
+        } else {
+          const duplicateLineNumber =
+            numericField(prepared[firstPosition]?.activity.lineNumber) ?? firstPosition + 1;
+          addImportWarning(
+            row.activity,
+            "_duplicate",
+            `Duplicate of line ${duplicateLineNumber} in this import batch`,
+          );
+          row.activity.duplicateOfLineNumber = duplicateLineNumber;
+          duplicateCount += 1;
+        }
+        continue;
+      }
+
+      insertable.push(row);
+    }
+
+    const summary: ImportActivitiesSummary = {
+      total,
+      imported: insertable.length,
+      skipped: duplicateCount,
+      duplicates: duplicateCount,
+      assetsCreated: 0,
+      success: true,
+      errorMessage: null,
+    };
+    const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
+
+    try {
+      for (const row of insertable) {
+        row.create.importRunId = importRunId;
+        insertActivityRow(db, row.create);
+      }
+    } catch (error) {
+      throw mapActivitySqliteError(error);
+    }
+
+    for (const row of prepared) {
+      ordered[row.index] = finalizeImportActivity(row.activity);
+    }
+
+    return {
+      activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
+      importRunId,
+      summary,
+    };
+  })();
+}
+
+function importActivityCreateInput(activity: Record<string, unknown>): Record<string, unknown> {
+  const activityType = optionalTrimmedString(activity.activityType);
+  const subtype = optionalTrimmedString(activity.subtype);
+  const symbol = optionalTrimmedString(activity.symbol);
+  const assetId = optionalTrimmedString(activity.assetId);
+  const createInput: Record<string, unknown> = {
+    id: optionalTrimmedString(activity.id),
+    accountId: optionalTrimmedString(activity.accountId),
+    activityType,
+    subtype,
+    activityDate: activity.date ?? activity.activityDate,
+    quantity: activity.quantity,
+    unitPrice: activity.unitPrice,
+    amount: activity.amount,
+    fee: activity.fee,
+    currency: activity.currency,
+    comment: activity.comment,
+    fxRate: activity.fxRate,
+    sourceSystem: "CSV",
+    status: activity.isDraft === true ? "DRAFT" : "POSTED",
+    metadata: importActivityMetadata(activity),
+  };
+  if (assetId) {
+    createInput.asset = { id: assetId };
+  } else if (symbol) {
+    createInput.asset = {
+      symbol,
+      exchangeMic: optionalTrimmedString(activity.exchangeMic),
+      instrumentType: optionalTrimmedString(activity.instrumentType),
+      quoteCcy: optionalTrimmedString(activity.quoteCcy),
+    };
+  }
+  return createInput;
+}
+
+function importActivityMetadata(activity: Record<string, unknown>): Record<string, unknown> | null {
+  const activityType = optionalTrimmedString(activity.activityType);
+  if (
+    activity.isExternal === true &&
+    (activityType === "TRANSFER_IN" || activityType === "TRANSFER_OUT")
+  ) {
+    return { flow: { is_external: true } };
+  }
+  return null;
+}
+
+function collectImportApplyPreflightErrors(
+  activity: Record<string, unknown>,
+  errors: Record<string, string[]>,
+): void {
+  const rawDate = activity.date ?? activity.activityDate;
+  try {
+    normalizeActivityDateInput(rawDate);
+  } catch {
+    addFieldMessage(errors, "symbol", `Invalid date '${String(rawDate ?? "")}'.`);
+  }
+
+  const activityType = optionalTrimmedString(activity.activityType);
+  if (!activityType) {
+    addFieldMessage(errors, "activityType", "Activity type is required.");
+    return;
+  }
+
+  const subtype = normalizeCreateSubtype(activity.subtype);
+  const symbol = optionalTrimmedString(activity.symbol);
+  const assetId = optionalTrimmedString(activity.assetId);
+  const quantity = parseOptionalImportDecimal(activity.quantity);
+  const unitPrice = parseOptionalImportDecimal(activity.unitPrice);
+  const amount = parseOptionalImportDecimal(activity.amount);
+
+  if (isAssetBackedIncomeSubtype(activityType, subtype)) {
+    try {
+      validateAssetBackedIncomeValues(
+        activityType,
+        subtype,
+        quantity?.abs() ?? null,
+        unitPrice?.abs() ?? null,
+        amount?.abs() ?? null,
+      );
+    } catch (error) {
+      const message = errorMessage(error);
+      addFieldMessage(errors, importAssetBackedIncomeField(message), message);
+    }
+  }
+
+  if (requiresAssetIdentity(activityType, subtype) && !symbol && !assetId) {
+    addFieldMessage(errors, "symbol", "Symbol or asset_id is required to import this activity.");
+    return;
+  }
+
+  if (requiresAssetIdentity(activityType, subtype) && symbol && !assetId) {
+    if (!optionalTrimmedString(activity.quoteCcy)) {
+      addFieldMessage(
+        errors,
+        "quoteCcy",
+        "Price currency (quoteCcy) is required to import this activity.",
+      );
+    }
+    if (!optionalTrimmedString(activity.instrumentType)) {
+      addFieldMessage(
+        errors,
+        "instrumentType",
+        "Instrument type is required to import this activity.",
+      );
+    }
+  }
+}
+
+function parseOptionalImportDecimal(value: unknown): Decimal | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Decimal)) {
+    return null;
+  }
+  try {
+    return new Decimal(value);
+  } catch {
+    return null;
+  }
+}
+
+function importAssetBackedIncomeField(message: string): string {
+  if (message.includes("positive quantity")) {
+    return "quantity";
+  }
+  if (message.includes("Income amount")) {
+    return "amount";
+  }
+  return "unitPrice";
+}
+
+function copyNormalizedImportFields(
+  activity: Record<string, unknown>,
+  create: ActivityCreateRowInput,
+): void {
+  activity.id = create.id;
+  activity.accountId = create.accountId;
+  activity.assetId = create.assetId ?? undefined;
+  activity.date = create.activityDate;
+  activity.currency = create.currency;
+  activity.amount = create.amount?.toString() ?? null;
+  activity.quantity = create.quantity?.toString() ?? null;
+  activity.unitPrice = create.unitPrice?.toString() ?? null;
+  activity.fee = create.fee?.toString() ?? null;
+  activity.fxRate = create.fxRate?.toString() ?? null;
+  if (create.assetId === null && !requiresAssetIdentity(create.activityType, create.subtype)) {
+    activity.symbol = "";
+    activity.exchangeMic = undefined;
+    activity.quoteCcy = undefined;
+    activity.instrumentType = undefined;
+  }
+  activity.isValid = true;
+  delete activity.errors;
+}
+
+function addImportError(activity: Record<string, unknown>, field: string, message: string): void {
+  const errors = cloneMessageMap(activity.errors);
+  addFieldMessage(errors, field, message);
+  activity.errors = errors;
+}
+
+function insertCompletedImportRun(
+  db: Database,
+  accountId: string,
+  summary: ImportActivitiesSummary,
+): string {
+  const id = crypto.randomUUID();
+  const now = activityTimestampNow();
+  db.query(
+    `
+      INSERT INTO import_runs (
+        id, account_id, source_system, run_type, mode, status, started_at, finished_at,
+        review_mode, applied_at, checkpoint_in, checkpoint_out, summary, warnings, error,
+        created_at, updated_at
+      )
+      VALUES (?, ?, 'csv', 'IMPORT', 'INCREMENTAL', 'APPLIED', ?, ?, 'NEVER', ?, NULL, NULL, ?, NULL, NULL, ?, ?)
+    `,
+  ).run(
+    id,
+    accountId,
+    now,
+    now,
+    now,
+    JSON.stringify({
+      fetched: summary.total,
+      inserted: summary.imported,
+      updated: 0,
+      skipped: summary.skipped,
+      warnings: summary.duplicates,
+      errors: 0,
+      removed: 0,
+      assetsCreated: summary.assetsCreated,
+    }),
+    now,
+    now,
+  );
+  return id;
+}
+
 function normalizeActivityCreateInput(
   db: Database,
   input: Record<string, unknown>,
@@ -1694,6 +2112,7 @@ function normalizeActivityCreateInput(
     sourceRecordId,
     sourceGroupId: stringFieldOrNull(input.sourceGroupId),
     idempotencyKey,
+    importRunId: stringFieldOrNull(input.importRunId),
     needsReview: input.needsReview === true,
     createdAt: now,
     updatedAt: now,
@@ -1945,7 +2364,7 @@ function insertActivityRow(db: Database, activity: ActivityCreateRowInput): void
         fx_rate, notes, metadata, source_system, source_record_id, source_group_id,
         idempotency_key, import_run_id, is_user_modified, needs_review, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?)
+      VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
     `,
   ).run(
     activity.id,
@@ -1967,6 +2386,7 @@ function insertActivityRow(db: Database, activity: ActivityCreateRowInput): void
     activity.sourceRecordId,
     activity.sourceGroupId,
     activity.idempotencyKey,
+    activity.importRunId,
     activity.needsReview ? 1 : 0,
     activity.createdAt,
     activity.updatedAt,

@@ -12,7 +12,8 @@ SQLite data.
 
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, and read-only import
-validation runtime slices in the standalone TS backend:
+validation plus bounded import-apply runtime slices in the standalone TS
+backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -36,10 +37,13 @@ validation runtime slices in the standalone TS backend:
   account checks, existing-asset resolution, bounded symbol resolution,
   create-normalization validation, existing duplicate warnings, and in-batch
   duplicate warnings without import writes.
+- Add bounded import apply for `/api/v1/activities/import` with validation
+  gating, existing-asset/cash activity inserts, CSV import-run metadata,
+  duplicate skipping, `forceImport`, and import summaries.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
-  activity import execution, provider-backed asset resolution, device-sync
-  outbox emission, and portfolio recalculation side effects for dedicated parity
-  slices.
+  provider-backed asset resolution, import transfer-pair auto-linking, FX pair
+  ensure, device-sync outbox emission, and portfolio recalculation side effects
+  for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -52,10 +56,11 @@ portfolio metrics runtime, holdings runtime, add-on runtime, broader market-data
 runtime, broader activities/import runtime beyond mapping/templates/duplicate
 lookups, read-only search, transfer link/unlink, single activity delete, and
 bounded existing-asset/cash/symbol-resolved activity create/update/bulk
-persistence plus CSV parse/read-only asset preview/read-only import validation,
-sync-crypto/device-sync integration, real health status/check/fix runtime
-implementation, real Connect runtime implementation, real device-sync runtime
-implementation, or Rust runtime removal is in scope for this slice.
+persistence plus CSV parse/read-only asset preview/read-only import validation
+and bounded import apply, sync-crypto/device-sync integration, real health
+status/check/fix runtime implementation, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 
