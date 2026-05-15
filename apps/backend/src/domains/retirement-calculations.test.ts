@@ -15,9 +15,13 @@ import {
   planBlendedReturn,
   planIncomeAtAge,
   planRetirementReturn,
+  projectRetirement,
+  projectRetirementWithMode,
+  retirementFeasibleFromCapital,
   resolvePlanDcPayouts,
   scaleTaxBucketBalances,
   stepPlanPensionFunds,
+  tryComputeRequiredCapital,
   type RetirementPlan,
   type TaxProfile,
 } from "./retirement-calculations";
@@ -259,6 +263,92 @@ describe("retirement calculation primitives", () => {
       true,
     );
     expect(balances.get("dc")).toBe(0);
+  });
+
+  test("matches Rust required capital search behavior", () => {
+    const highReturn = basePlan();
+    highReturn.investment.retirementAnnualReturn = 0.07;
+
+    const lowReturn = basePlan();
+    lowReturn.investment.retirementAnnualReturn = 0.03;
+
+    const highReturnTarget = tryComputeRequiredCapital(
+      highReturn,
+      highReturn.personal.targetRetirementAge,
+    );
+    const lowReturnTarget = tryComputeRequiredCapital(
+      lowReturn,
+      lowReturn.personal.targetRetirementAge,
+    );
+    expect(highReturnTarget).not.toBeNull();
+    expect(lowReturnTarget).not.toBeNull();
+    expect(lowReturnTarget!).toBeGreaterThan(highReturnTarget!);
+
+    const unreachable = basePlan();
+    unreachable.expenses.items[0].monthlyAmount = Number.MAX_VALUE / 4;
+    expect(tryComputeRequiredCapital(unreachable, unreachable.personal.targetRetirementAge)).toBe(
+      null,
+    );
+  });
+
+  test("matches Rust deterministic projection retirement timing semantics", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 35;
+    const projection = projectRetirement(plan, 100_000, { currentYear: 2026 });
+
+    expect(projection.fireAge).not.toBeNull();
+    expect(projection.fireAge!).toBeLessThanOrEqual(plan.personal.targetRetirementAge);
+    expect(projection.retirementStartAge).toBe(plan.personal.targetRetirementAge);
+    expect(projection.retirementStartReason).toBe("funded");
+    expect(projection.fundedAtRetirement).toBe(true);
+    expect(projection.fireYear).toBe(2026 + projection.fireAge! - plan.personal.currentAge);
+    expect(
+      projection.yearByYear
+        .filter((snapshot) => snapshot.age < plan.personal.targetRetirementAge)
+        .every((snapshot) => snapshot.phase === "accumulation"),
+    ).toBe(true);
+
+    const targetSnapshot = projection.yearByYear.find(
+      (snapshot) => snapshot.age === plan.personal.targetRetirementAge,
+    );
+    expect(targetSnapshot?.phase).toBe("fire");
+    expect(targetSnapshot?.plannedExpenses).toBeGreaterThan(0);
+    expect(targetSnapshot?.grossWithdrawal).toBeGreaterThan(0);
+  });
+
+  test("matches Rust traditional mode forced retirement semantics", () => {
+    const plan = basePlan();
+    plan.investment.monthlyContribution = 0;
+    const projection = projectRetirementWithMode(plan, 0, "traditional", { currentYear: 2026 });
+
+    expect(projection.fireAge).toBe(null);
+    expect(projection.retirementStartAge).toBe(plan.personal.targetRetirementAge);
+    expect(projection.retirementStartReason).toBe("target_age_forced");
+    expect(projection.fundedAtRetirement).toBe(false);
+    expect(
+      projection.yearByYear.find((snapshot) => snapshot.age === plan.personal.targetRetirementAge)
+        ?.phase,
+    ).toBe("fire");
+  });
+
+  test("matches Rust projection continuity and feasibility checks", () => {
+    const plan = basePlan();
+    const projection = projectRetirement(plan, 100_000, { currentYear: 2026 });
+
+    for (let index = 0; index < projection.yearByYear.length - 1; index += 1) {
+      const current = projection.yearByYear[index];
+      const next = projection.yearByYear[index + 1];
+      expect(closeTo(current.portfolioEndValue, next.portfolioValue, 0.01)).toBe(true);
+    }
+    const requiredCapital = tryComputeRequiredCapital(plan, plan.personal.targetRetirementAge);
+    expect(requiredCapital).not.toBeNull();
+    expect(
+      retirementFeasibleFromCapital(
+        plan,
+        plan.personal.targetRetirementAge,
+        requiredCapital! * 1.001,
+      ),
+    ).toBe(true);
   });
 });
 

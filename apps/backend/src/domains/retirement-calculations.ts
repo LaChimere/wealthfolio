@@ -3,6 +3,9 @@ import type { TaxBucketBalances } from "./retirement-plan";
 export const DEFAULT_DC_PAYOUT_ESTIMATE_RATE = 0.035;
 
 const DEFAULT_BOND_VOLATILITY_RATIO = 0.35;
+const MAX_REQUIRED_CAPITAL_DOUBLING_STEPS = 128;
+const REQUIRED_CAPITAL_SEED_MULTIPLE = 30;
+const FUNDING_TOLERANCE = 0.999;
 
 export interface RetirementPlan {
   personal: PersonalProfile;
@@ -86,7 +89,45 @@ export interface WithdrawalOutcome {
   taxAmount: number;
 }
 
+export type RetirementTimingMode = "fire" | "traditional";
+export type RetirementStartReason = "funded" | "target_age_forced";
+
+export interface YearlySnapshot {
+  age: number;
+  year: number;
+  phase: "accumulation" | "fire";
+  portfolioValue: number;
+  portfolioEndValue: number;
+  annualContribution: number;
+  annualWithdrawal: number;
+  annualIncome: number;
+  netWithdrawalFromPortfolio: number;
+  pensionAssets: number;
+  annualTaxes?: number;
+  grossWithdrawal?: number;
+  plannedExpenses?: number;
+  fundedExpenses?: number;
+  annualShortfall?: number;
+}
+
+export interface RetirementProjection {
+  fireAge: number | null;
+  fireYear: number | null;
+  retirementStartAge: number | null;
+  retirementStartReason?: RetirementStartReason;
+  portfolioAtFire: number;
+  fundedAtRetirement: boolean;
+  coastFireAmount: number;
+  coastFireReached: boolean;
+  yearByYear: YearlySnapshot[];
+}
+
+export interface RetirementProjectionOptions {
+  currentYear?: number;
+}
+
 type TaxBucketKind = "taxable" | "taxDeferred" | "taxFree";
+export type RequiredCapitalCache = Map<number, number | null>;
 
 export function taxBucketTotal(buckets: TaxBucketBalances): number {
   return buckets.taxable + buckets.taxDeferred + buckets.taxFree;
@@ -378,6 +419,298 @@ export function planBlendedReturn(
   return stockPct * retirementReturn + bondPct * bondReturn;
 }
 
+export function computeRequiredCapital(plan: RetirementPlan, retirementAge: number): number | null {
+  return tryComputeRequiredCapital(plan, retirementAge);
+}
+
+export function requiredCapitalFor(
+  plan: RetirementPlan,
+  retirementAge: number,
+  cache: RequiredCapitalCache,
+): number | null {
+  if (cache.has(retirementAge)) {
+    return cache.get(retirementAge) ?? null;
+  }
+  const required = tryComputeRequiredCapital(plan, retirementAge);
+  cache.set(retirementAge, required);
+  return required;
+}
+
+export function tryComputeRequiredCapital(
+  plan: RetirementPlan,
+  retirementAge: number,
+): number | null {
+  if (retirementAge > plan.personal.planningHorizonAge) {
+    return 0;
+  }
+  if (retirementFeasibleFromCapital(plan, retirementAge, 0)) {
+    return 0;
+  }
+
+  let upperBound = Math.max(initialRequiredCapitalUpperBound(plan, retirementAge), 1);
+  for (let step = 0; step < MAX_REQUIRED_CAPITAL_DOUBLING_STEPS; step += 1) {
+    if (retirementFeasibleFromCapital(plan, retirementAge, upperBound)) {
+      break;
+    }
+    if (!Number.isFinite(upperBound) || upperBound >= Number.MAX_VALUE / 2) {
+      return null;
+    }
+    upperBound *= 2;
+  }
+  if (!retirementFeasibleFromCapital(plan, retirementAge, upperBound)) {
+    return null;
+  }
+
+  let lowerBound = 0;
+  for (let step = 0; step < 50; step += 1) {
+    const midpoint = (lowerBound + upperBound) / 2;
+    if (retirementFeasibleFromCapital(plan, retirementAge, midpoint)) {
+      upperBound = midpoint;
+    } else {
+      lowerBound = midpoint;
+    }
+  }
+  return upperBound;
+}
+
+export function retirementFeasibleFromCapital(
+  plan: RetirementPlan,
+  retirementAge: number,
+  startingCapital: number,
+): boolean {
+  const currentAge = plan.personal.currentAge;
+  const horizon = plan.personal.planningHorizonAge;
+  const inflation = plan.investment.inflationRate;
+  const yearsToRetirement = Math.max(retirementAge - currentAge, 0);
+  const resolvedPayouts = resolvePlanDcPayouts(
+    plan.incomeStreams,
+    currentAge,
+    retirementAge,
+    planAccumulationReturn(plan),
+  );
+
+  let buckets = initialWithdrawalBuckets(plan.tax, Math.max(startingCapital, 0));
+  const yearsInRetirement = Math.max(horizon - retirementAge, 0);
+  for (let yearIndex = 0; yearIndex <= yearsInRetirement; yearIndex += 1) {
+    const age = retirementAge + yearIndex;
+    const yearsFromNow = yearsToRetirement + yearIndex;
+    const annualReturn = planBlendedReturn(plan, yearsFromNow, true, retirementAge);
+    const grownBuckets = applyGrowthToTaxBuckets(buckets, annualReturn);
+    const [expenses] = annualExpensesAtYear(plan.expenses, age, yearsFromNow, inflation);
+    const income = planIncomeAtAge(
+      plan.incomeStreams,
+      resolvedPayouts,
+      age,
+      yearsFromNow,
+      inflation,
+    );
+    const outcome = applyPlannedSpendingWithdrawal(grownBuckets, expenses, income, plan.tax, age);
+    const spendingGap = Math.max(expenses - income, 0);
+    if (outcome.spendingFunded < spendingGap * FUNDING_TOLERANCE) {
+      return false;
+    }
+    buckets = outcome.remainingBuckets;
+  }
+  return taxBucketTotal(buckets) > 0;
+}
+
+export function retirementStartDecision(
+  mode: RetirementTimingMode,
+  age: number,
+  targetAge: number,
+  portfolio: number,
+  requiredCapital: number | null,
+): RetirementStartReason | null {
+  if (mode === "fire") {
+    if (age >= targetAge && requiredCapital !== null && portfolio >= requiredCapital) {
+      return "funded";
+    }
+    return null;
+  }
+  if (age >= targetAge && requiredCapital !== null && portfolio >= requiredCapital) {
+    return "funded";
+  }
+  if (age >= targetAge) {
+    return "target_age_forced";
+  }
+  return null;
+}
+
+export function projectRetirement(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  options: RetirementProjectionOptions = {},
+): RetirementProjection {
+  return projectRetirementWithMode(plan, currentPortfolio, "fire", options);
+}
+
+export function projectRetirementWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+  options: RetirementProjectionOptions = {},
+): RetirementProjection {
+  const cache: RequiredCapitalCache = new Map();
+  return projectRetirementWithModeCached(plan, currentPortfolio, mode, cache, options);
+}
+
+export function projectRetirementWithModeCached(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+  requiredCapitalCache: RequiredCapitalCache,
+  options: RetirementProjectionOptions = {},
+): RetirementProjection {
+  const targetAtGoal = requiredCapitalFor(
+    plan,
+    plan.personal.targetRetirementAge,
+    requiredCapitalCache,
+  );
+  const coastAmount = computeCoastAmountAtGoal(plan, targetAtGoal);
+  const startYear = options.currentYear ?? new Date().getFullYear();
+  const currentAge = plan.personal.currentAge;
+  const horizonYears = Math.max(plan.personal.planningHorizonAge - currentAge, 1);
+  const contributionGrowth =
+    plan.personal.salaryGrowthRate ?? plan.investment.contributionGrowthRate;
+  const inflation = plan.investment.inflationRate;
+
+  let buckets = initialWithdrawalBuckets(plan.tax, currentPortfolio);
+  let fireAge: number | null = null;
+  let fireYear: number | null = null;
+  let retirementStartAge: number | null = null;
+  let retirementStartReason: RetirementStartReason | undefined;
+  let portfolioAtFire = 0;
+  let fundedAtRetirement = false;
+  let inRetirement = false;
+  let actualRetirementAge = plan.personal.targetRetirementAge;
+  let resolvedPayouts: Map<string, number> | null = null;
+  const yearByYear: YearlySnapshot[] = [];
+  const pensionBalances = new Map(
+    plan.incomeStreams.map((stream) => [stream.id, stream.currentValue ?? 0]),
+  );
+
+  for (let yearIndex = 0; yearIndex <= horizonYears; yearIndex += 1) {
+    const age = currentAge + yearIndex;
+    const year = startYear + yearIndex;
+    const portfolio = taxBucketTotal(buckets);
+    const pensionAssets = plan.incomeStreams
+      .filter((stream) => {
+        const hasAccumulation =
+          (stream.currentValue ?? 0) > 0 || (stream.monthlyContribution ?? 0) > 0;
+        return hasAccumulation && age < stream.startAge;
+      })
+      .reduce(
+        (total, stream) => total + (pensionBalances.get(stream.id) ?? stream.currentValue ?? 0),
+        0,
+      );
+
+    if (!inRetirement) {
+      const required = requiredCapitalFor(plan, age, requiredCapitalCache);
+      if (fireAge === null && required !== null && portfolio >= required) {
+        fireAge = age;
+        fireYear = year;
+        portfolioAtFire = portfolio;
+      }
+      const startReason = retirementStartDecision(
+        mode,
+        age,
+        plan.personal.targetRetirementAge,
+        portfolio,
+        required,
+      );
+      if (startReason !== null) {
+        inRetirement = true;
+        actualRetirementAge = age;
+        retirementStartAge = age;
+        retirementStartReason = startReason;
+        if (startReason === "funded") {
+          fundedAtRetirement = true;
+        }
+        resolvedPayouts = resolvePlanDcPayouts(
+          plan.incomeStreams,
+          currentAge,
+          age,
+          planAccumulationReturn(plan),
+        );
+      }
+    }
+
+    const annualReturn = planBlendedReturn(plan, yearIndex, inRetirement, actualRetirementAge);
+    if (inRetirement) {
+      const payouts = resolvedPayouts ?? new Map<string, number>();
+      const [totalExpenses] = annualExpensesAtYear(plan.expenses, age, yearIndex, inflation);
+      const income = planIncomeAtAge(plan.incomeStreams, payouts, age, yearIndex, inflation);
+      const grownBuckets = applyGrowthToTaxBuckets(buckets, annualReturn);
+      const outcome = applyPlannedSpendingWithdrawal(
+        grownBuckets,
+        totalExpenses,
+        income,
+        plan.tax,
+        age,
+      );
+      const shortfall = Math.max(totalExpenses - outcome.spendingFunded - income, 0);
+      const remainingBuckets = outcome.remainingBuckets;
+      const portfolioEndValue = Math.max(taxBucketTotal(remainingBuckets), 0);
+      yearByYear.push({
+        age,
+        year,
+        phase: "fire",
+        portfolioValue: Math.max(portfolio, 0),
+        portfolioEndValue,
+        annualContribution: 0,
+        annualWithdrawal: outcome.spendingFunded + income,
+        annualIncome: income,
+        netWithdrawalFromPortfolio: outcome.spendingFunded,
+        pensionAssets,
+        annualTaxes: outcome.taxAmount,
+        grossWithdrawal: outcome.grossWithdrawal,
+        plannedExpenses: totalExpenses,
+        fundedExpenses: outcome.spendingFunded + income,
+        annualShortfall: shortfall,
+      });
+      buckets = remainingBuckets;
+    } else {
+      const monthlyContribution =
+        plan.investment.monthlyContribution * Math.pow(1 + contributionGrowth, yearIndex);
+      const annualContribution = monthlyContribution * 12;
+      const contributionEndValue = endOfYearValueOfMonthlyContributions(
+        monthlyContribution,
+        annualReturn,
+      );
+      const grownBuckets = applyGrowthToTaxBuckets(buckets, annualReturn);
+      const nextBuckets = addContributionToTaxBuckets(grownBuckets, contributionEndValue, plan.tax);
+      const portfolioEndValue = Math.max(taxBucketTotal(nextBuckets), 0);
+      yearByYear.push({
+        age,
+        year,
+        phase: "accumulation",
+        portfolioValue: portfolio,
+        portfolioEndValue,
+        annualContribution,
+        annualWithdrawal: 0,
+        annualIncome: 0,
+        netWithdrawalFromPortfolio: 0,
+        pensionAssets,
+      });
+      buckets = nextBuckets;
+    }
+
+    stepPlanPensionFunds(plan.incomeStreams, pensionBalances, age, inRetirement);
+  }
+
+  return {
+    fireAge,
+    fireYear,
+    retirementStartAge,
+    ...(retirementStartReason === undefined ? {} : { retirementStartReason }),
+    portfolioAtFire,
+    fundedAtRetirement,
+    coastFireAmount: coastAmount,
+    coastFireReached: targetAtGoal !== null && currentPortfolio >= coastAmount,
+    yearByYear,
+  };
+}
+
 export function blendedReturnParams(
   accumulationMean: number,
   retirementMean: number,
@@ -413,6 +746,40 @@ export function blendedReturnParams(
     stockPct * retirementMean + bondPct * bondMean,
     Math.sqrt(Math.pow(stockPct * baseStd, 2) + Math.pow(bondPct * bondStd, 2)),
   ];
+}
+
+function initialRequiredCapitalUpperBound(plan: RetirementPlan, retirementAge: number): number {
+  const yearsFromNow = Math.max(retirementAge - plan.personal.currentAge, 0);
+  const resolvedPayouts = resolvePlanDcPayouts(
+    plan.incomeStreams,
+    plan.personal.currentAge,
+    retirementAge,
+    planAccumulationReturn(plan),
+  );
+  const [annualExpenses] = annualExpensesAtYear(
+    plan.expenses,
+    retirementAge,
+    yearsFromNow,
+    plan.investment.inflationRate,
+  );
+  const annualIncome = planIncomeAtAge(
+    plan.incomeStreams,
+    resolvedPayouts,
+    retirementAge,
+    yearsFromNow,
+    plan.investment.inflationRate,
+  );
+  return Math.max(annualExpenses - annualIncome, 0) * REQUIRED_CAPITAL_SEED_MULTIPLE;
+}
+
+function computeCoastAmountAtGoal(plan: RetirementPlan, targetAtGoal: number | null): number {
+  const years = plan.personal.targetRetirementAge - plan.personal.currentAge;
+  if (years <= 0) {
+    return targetAtGoal ?? 0;
+  }
+  return targetAtGoal === null
+    ? 0
+    : targetAtGoal / Math.pow(1 + planAccumulationReturn(plan), years);
 }
 
 function withdrawForNetTarget(
