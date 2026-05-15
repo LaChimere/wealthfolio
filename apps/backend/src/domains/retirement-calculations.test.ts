@@ -21,6 +21,7 @@ import {
   projectRetirementWithMode,
   retirementFeasibleFromCapital,
   resolvePlanDcPayouts,
+  runScenarioAnalysisWithMode,
   runSorr,
   scaleTaxBucketBalances,
   stepPlanPensionFunds,
@@ -501,6 +502,34 @@ describe("retirement calculation primitives", () => {
     expect(depleted[0].failureAge).toBe(56);
     expect(depleted[0].spendingShortfallAge).toBe(55);
     expect(runSorr(plan, 0, 55)).toEqual([]);
+  });
+
+  test("matches Rust retirement scenario analysis labels and return deltas", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 60;
+    plan.investment.preRetirementAnnualReturn = 0.07;
+    plan.investment.retirementAnnualReturn = 0.05;
+    plan.investment.annualInvestmentFeeRate = 0.005;
+    plan.expenses.items[0].monthlyAmount = 1_000;
+
+    const results = runScenarioAnalysisWithMode(plan, 1_000_000, "traditional");
+
+    expect(results.map((result) => result.label)).toEqual([
+      "Pessimistic",
+      "Base case",
+      "Optimistic",
+    ]);
+    expect(closeTo(results[0].annualReturn, 0.045)).toBe(true);
+    expect(closeTo(results[1].annualReturn, 0.065)).toBe(true);
+    expect(closeTo(results[2].annualReturn, 0.08)).toBe(true);
+    expect(results.every((result) => result.yearByYear.at(0)?.portfolioValue === 1_000_000)).toBe(
+      true,
+    );
+    expect(results[0].portfolioAtHorizon).toBeLessThan(results[1].portfolioAtHorizon);
+    expect(results[2].portfolioAtHorizon).toBeGreaterThan(results[1].portfolioAtHorizon);
+    expect(results.every((result) => typeof result.fundedAtGoalAge === "boolean")).toBe(true);
   });
 });
 

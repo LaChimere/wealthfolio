@@ -97,6 +97,7 @@ import {
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import {
   projectRetirementWithMode,
+  runScenarioAnalysisWithMode,
   runSorr,
   type RetirementPlan,
 } from "./domains/retirement-calculations";
@@ -2246,6 +2247,10 @@ function routeGoalRequest(
     return handleRetirementProjectionRequest(request, goalService, goalValuationProvider);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/retirement/scenario-analysis") {
+    return handleRetirementScenarioAnalysisRequest(request, goalService, goalValuationProvider);
+  }
+
   if (
     request.method === "POST" &&
     url.pathname === "/api/v1/goals/retirement/sequence-of-returns"
@@ -2418,6 +2423,40 @@ async function handleRetirementProjectionRequest(
     const plan = normalizedRetirementPlanFromPayload(parsed.plan);
     return jsonResponse(
       projectRetirementWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
+    );
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementScenarioAnalysisRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementSimulationRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return runScenarioAnalysisWithMode(
+        prepared.plan,
+        prepared.currentPortfolio,
+        prepared.plannerMode,
+      );
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(
+      runScenarioAnalysisWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
     );
   } catch (error) {
     return domainErrorResponse(error);

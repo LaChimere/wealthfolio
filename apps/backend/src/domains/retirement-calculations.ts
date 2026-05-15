@@ -181,6 +181,18 @@ export interface RetirementTrajectoryPoint {
   annualShortfall?: number;
 }
 
+export interface ScenarioResult {
+  label: string;
+  annualReturn: number;
+  fireAge: number | null;
+  portfolioAtHorizon: number;
+  fundedAtGoalAge: boolean;
+  success: boolean;
+  failureAge?: number | null;
+  spendingShortfallAge?: number | null;
+  yearByYear: YearlySnapshot[];
+}
+
 export interface SorrScenario {
   label: string;
   returns: number[];
@@ -954,6 +966,53 @@ export function computeRetirementOverviewWithMode(
     ),
     trajectory: buildTrajectory(projection.yearByYear, plan, requiredCapitalCache),
   };
+}
+
+export function runScenarioAnalysisWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): ScenarioResult[] {
+  const scenarios: Array<[string, number]> = [
+    ["Pessimistic", -0.02],
+    ["Base case", 0],
+    ["Optimistic", 0.015],
+  ];
+
+  return scenarios.map(([label, delta]) => {
+    const adjusted: RetirementPlan = {
+      ...plan,
+      investment: {
+        ...plan.investment,
+        preRetirementAnnualReturn: plan.investment.preRetirementAnnualReturn + delta,
+        retirementAnnualReturn: plan.investment.retirementAnnualReturn + delta,
+      },
+    };
+    const projection = projectRetirementWithMode(adjusted, currentPortfolio, mode);
+    const overview = computeRetirementOverviewWithMode(adjusted, currentPortfolio, mode);
+    const lastSnapshot = projection.yearByYear.at(-1);
+    const success =
+      overview.successStatus === "on_track" || overview.successStatus === "overfunded";
+
+    return {
+      label,
+      annualReturn: planAccumulationReturn(adjusted),
+      fireAge: projection.fireAge,
+      portfolioAtHorizon: lastSnapshot?.portfolioEndValue ?? 0,
+      fundedAtGoalAge: overview.fundedAtGoalAge,
+      success,
+      failureAge: overview.failureAge,
+      spendingShortfallAge: overview.spendingShortfallAge,
+      yearByYear: projection.yearByYear,
+    };
+  });
+}
+
+export function runScenarioAnalysis(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+): ScenarioResult[] {
+  return runScenarioAnalysisWithMode(plan, currentPortfolio, "fire");
 }
 
 export function runSorr(

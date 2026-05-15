@@ -5531,6 +5531,33 @@ describe("TS backend HTTP skeleton", () => {
       expect(directProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
       expect(providerCalls).toBe(2);
 
+      const directScenarioResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 100_000,
+            plannerMode: "traditional",
+          }),
+        }),
+      );
+      expect(directScenarioResponse.status).toBe(200);
+      const directScenarios = await directScenarioResponse.json();
+      expect(directScenarios.map((scenario: { label: string }) => scenario.label)).toEqual([
+        "Pessimistic",
+        "Base case",
+        "Optimistic",
+      ]);
+      expect(directScenarios[1]).toMatchObject({
+        fireAge: null,
+        fundedAtGoalAge: expect.any(Boolean),
+      });
+      expect(providerCalls).toBe(2);
+
       const directSorrResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/sequence-of-returns", {
           method: "POST",
@@ -5673,6 +5700,29 @@ describe("TS backend HTTP skeleton", () => {
       expect(goalProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
       expect(providerCalls).toBe(8);
 
+      const goalScenarioResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({ personal: { currentAge: 30 } }),
+            currentPortfolio: 1,
+            plannerMode: "fire",
+            goalId: "retirement-traditional",
+          }),
+        }),
+      );
+      expect(goalScenarioResponse.status).toBe(200);
+      const goalScenarios = await goalScenarioResponse.json();
+      expect(goalScenarios[0]).toMatchObject({
+        label: "Pessimistic",
+      });
+      expect(goalScenarios[0].yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
+      expect(providerCalls).toBe(9);
+
       const goalSorrResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/sequence-of-returns", {
           method: "POST",
@@ -5694,7 +5744,7 @@ describe("TS backend HTTP skeleton", () => {
         label: "Base case",
       });
       expect(goalSorr[0].portfolioPath).toHaveLength(36);
-      expect(providerCalls).toBe(9);
+      expect(providerCalls).toBe(10);
 
       const nonRetirementOverviewResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/goal%201/retirement/overview", {
@@ -5720,7 +5770,7 @@ describe("TS backend HTTP skeleton", () => {
       await expect(missingPlanResponse.json()).resolves.toMatchObject({
         message: "Invalid input: No plan found for goal retirement-no-plan",
       });
-      expect(providerCalls).toBe(11);
+      expect(providerCalls).toBe(12);
     } finally {
       db.close();
     }
@@ -5849,6 +5899,25 @@ describe("TS backend HTTP skeleton", () => {
         message: "Goal valuation provider is not available in the TS backend runtime yet",
       });
 
+      const scenarioNoProviderResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+          }),
+        }),
+      );
+      expect(scenarioNoProviderResponse.status).toBe(501);
+      await expect(scenarioNoProviderResponse.json()).resolves.toMatchObject({
+        message: "Goal valuation provider is not available in the TS backend runtime yet",
+      });
+
       const sorrNoProviderResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/sequence-of-returns", {
           method: "POST",
@@ -5895,6 +5964,25 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(projectionProviderErrorResponse.status).toBe(503);
       await expect(projectionProviderErrorResponse.json()).resolves.toMatchObject({
+        message: "valuation unavailable",
+      });
+
+      const scenarioProviderErrorResponse = await failingHandler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+          }),
+        }),
+      );
+      expect(scenarioProviderErrorResponse.status).toBe(503);
+      await expect(scenarioProviderErrorResponse.json()).resolves.toMatchObject({
         message: "valuation unavailable",
       });
 
