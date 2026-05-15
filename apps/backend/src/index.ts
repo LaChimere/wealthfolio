@@ -221,13 +221,16 @@ export {
   type IssueDismissal,
   type NavigateAction,
 } from "./domains/health";
-export type {
-  HoldingInput,
-  HoldingsImportRequest,
-  HoldingsPositionInput,
-  HoldingsService,
-  HoldingsSnapshotInput,
-  SaveManualHoldingsRequest,
+export {
+  createHoldingsService,
+  HoldingsNotImplementedError,
+  type DailyAccountValuation,
+  type HoldingInput,
+  type HoldingsImportRequest,
+  type HoldingsPositionInput,
+  type HoldingsService,
+  type HoldingsSnapshotInput,
+  type SaveManualHoldingsRequest,
 } from "./domains/holdings";
 export type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
 export {

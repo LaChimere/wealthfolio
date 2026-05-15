@@ -24,6 +24,7 @@ import {
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
+import { createHoldingsService } from "./domains/holdings";
 import { createMarketDataService } from "./domains/market-data";
 import {
   createMarketDataProviderRepository,
@@ -238,6 +239,7 @@ function createServicesFromDatabase(
       classificationMigrationProvider: taxonomyService,
       settingsProvider: settingsService,
     }),
+    holdingsService: createHoldingsService(db),
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),

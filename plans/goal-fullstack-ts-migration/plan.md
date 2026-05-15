@@ -150,6 +150,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   account valuation history reads, TWR/MWR compounding, holdings-mode return
   behavior, annualized/simple returns, volatility, max drawdown, and explicit
   provider-backed symbol-history deferral.
+- Add bounded holdings valuation read runtime for `/api/v1/valuations/history`
+  and `/api/v1/valuations/latest`, including active-account defaulting,
+  request-order preservation, filtered history ranges, numeric valuation fields,
+  and explicit 501 gates for still-deferred holdings fan-out, allocations,
+  snapshots, and imports.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -173,10 +178,11 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
-current/historical net-worth, income summary, simple account performance, and
-account performance history/summary, holdings runtime, add-on runtime, broader
-market-data runtime beyond mapping/templates/duplicate lookups, read-only
-search, transfer link/unlink, single activity delete, and bounded
+current/historical net-worth, income summary, simple account performance,
+account performance history/summary, and valuation reads, holdings fan-out/
+allocation/snapshot/import runtime, add-on runtime, broader market-data runtime
+beyond mapping/templates/duplicate lookups, read-only search, transfer
+link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
