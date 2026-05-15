@@ -266,6 +266,7 @@ export {
   type PerformanceRequest,
   type PortfolioMetricsService,
   type PortfolioMetricsServiceOptions,
+  type SimplePerformanceMetrics,
   type StaleAssetInfo,
 } from "./domains/portfolio-metrics";
 export {

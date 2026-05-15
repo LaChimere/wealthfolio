@@ -249,6 +249,143 @@ describe("TS portfolio metrics domain", () => {
     }
   });
 
+  test("calculates simple account performance with active-account defaulting and exact previous dates", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      insertAccount(db, { id: "a1", accountType: "SECURITIES", name: "Alpha" });
+      insertAccount(db, {
+        id: "a2",
+        accountType: "SECURITIES",
+        name: "Beta Archived",
+        isArchived: 1,
+      });
+      insertAccount(db, {
+        id: "inactive",
+        accountType: "SECURITIES",
+        name: "Inactive",
+        isActive: 0,
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2024-03-09",
+        totalValue: "100.456789",
+        netContribution: "90",
+        accountCurrency: "CAD",
+        baseCurrency: "USD",
+        fxRateToBase: "1.5",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2024-03-10",
+        totalValue: "123.456789",
+        netContribution: "100",
+        accountCurrency: "CAD",
+        baseCurrency: "USD",
+        fxRateToBase: "1.5",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "a2",
+        date: "2024-03-10",
+        totalValue: "50",
+        netContribution: "0",
+        accountCurrency: "USD",
+        baseCurrency: "USD",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "inactive",
+        date: "2024-03-10",
+        totalValue: "999",
+        netContribution: "1",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "TOTAL",
+        date: "2024-03-10",
+        totalValue: "150",
+        netContribution: "150",
+        accountCurrency: "USD",
+        baseCurrency: "USD",
+      });
+
+      expect(
+        service.calculateAccountsSimplePerformance?.(["a2", "missing", "TOTAL", "a1"]),
+      ).toEqual([
+        {
+          accountId: "a2",
+          accountCurrency: "USD",
+          baseCurrency: "USD",
+          fxRateToBase: 1,
+          totalValue: 50,
+          totalGainLossAmount: 50,
+          cumulativeReturnPercent: null,
+          dayGainLossAmount: null,
+          dayReturnPercentModDietz: null,
+          portfolioWeight: 0.3333,
+        },
+        {
+          accountId: "TOTAL",
+          accountCurrency: "USD",
+          baseCurrency: "USD",
+          fxRateToBase: 1,
+          totalValue: 150,
+          totalGainLossAmount: 0,
+          cumulativeReturnPercent: 0,
+          dayGainLossAmount: null,
+          dayReturnPercentModDietz: null,
+          portfolioWeight: 1,
+        },
+        {
+          accountId: "a1",
+          accountCurrency: "CAD",
+          baseCurrency: "USD",
+          fxRateToBase: 1.5,
+          totalValue: 123.456789,
+          totalGainLossAmount: 23.46,
+          cumulativeReturnPercent: 0.2346,
+          dayGainLossAmount: 13,
+          dayReturnPercentModDietz: 0.1233,
+          portfolioWeight: 1,
+        },
+      ]);
+      expect(service.calculateAccountsSimplePerformance?.()).toEqual([
+        expect.objectContaining({ accountId: "a1" }),
+        expect.objectContaining({ accountId: "a2" }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns null simple performance weights when TOTAL valuation is missing", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2026-01-10",
+        totalValue: "10",
+        netContribution: "10",
+      });
+
+      expect(service.calculateAccountsSimplePerformance?.(["a1"])).toEqual([
+        expect.objectContaining({
+          accountId: "a1",
+          portfolioWeight: null,
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates income summaries with asset-backed income, FX fallback, and account filtering", () => {
     const db = createPortfolioMetricsDb();
     const warnings: string[] = [];
@@ -402,6 +539,7 @@ function createPortfolioMetricsDb(): Database {
       name TEXT NOT NULL DEFAULT '',
       account_type TEXT NOT NULL DEFAULT 'SECURITIES',
       currency TEXT NOT NULL DEFAULT 'USD',
+      is_active INTEGER NOT NULL DEFAULT 1,
       is_archived INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE assets (
@@ -425,9 +563,17 @@ function createPortfolioMetricsDb(): Database {
       timestamp TEXT NOT NULL
     );
     CREATE TABLE daily_account_valuation (
+      id TEXT PRIMARY KEY NOT NULL,
       account_id TEXT NOT NULL,
       valuation_date TEXT NOT NULL,
+      account_currency TEXT NOT NULL DEFAULT 'USD',
+      base_currency TEXT NOT NULL DEFAULT 'USD',
+      fx_rate_to_base TEXT NOT NULL DEFAULT '1',
+      cash_balance TEXT NOT NULL DEFAULT '0',
+      investment_market_value TEXT NOT NULL DEFAULT '0',
       total_value TEXT NOT NULL,
+      cost_basis TEXT NOT NULL DEFAULT '0',
+      calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       net_contribution TEXT NOT NULL
     );
     CREATE TABLE activities (
@@ -476,16 +622,18 @@ function insertAccount(
     accountType: string;
     name?: string;
     currency?: string;
+    isActive?: number;
     isArchived?: number;
   },
 ): void {
   db.prepare(
-    "INSERT INTO accounts (id, name, account_type, currency, is_archived) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO accounts (id, name, account_type, currency, is_active, is_archived) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(
     account.id,
     account.name ?? account.id,
     account.accountType,
     account.currency ?? "USD",
+    account.isActive ?? 1,
     account.isArchived ?? 0,
   );
 }
@@ -544,16 +692,43 @@ function insertQuote(
 
 function insertDailyAccountValuation(
   db: Database,
-  valuation: { accountId: string; date: string; totalValue: string; netContribution: string },
+  valuation: {
+    accountId: string;
+    date: string;
+    totalValue: string;
+    netContribution: string;
+    accountCurrency?: string;
+    baseCurrency?: string;
+    fxRateToBase?: string;
+    cashBalance?: string;
+    investmentMarketValue?: string;
+    costBasis?: string;
+    calculatedAt?: string;
+  },
 ): void {
   db.prepare(
     `
       INSERT INTO daily_account_valuation (
-        account_id, valuation_date, total_value, net_contribution
+        id, account_id, valuation_date, account_currency, base_currency,
+        fx_rate_to_base, cash_balance, investment_market_value, total_value,
+        cost_basis, net_contribution, calculated_at
       )
-      VALUES (?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-  ).run(valuation.accountId, valuation.date, valuation.totalValue, valuation.netContribution);
+  ).run(
+    `${valuation.accountId}-${valuation.date}`,
+    valuation.accountId,
+    valuation.date,
+    valuation.accountCurrency ?? "USD",
+    valuation.baseCurrency ?? "USD",
+    valuation.fxRateToBase ?? "1",
+    valuation.cashBalance ?? "0",
+    valuation.investmentMarketValue ?? valuation.totalValue,
+    valuation.totalValue,
+    valuation.costBasis ?? valuation.netContribution,
+    valuation.netContribution,
+    valuation.calculatedAt ?? `${valuation.date}T00:00:00Z`,
+  );
 }
 
 function insertActivity(

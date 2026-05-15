@@ -17,7 +17,7 @@ export interface PerformanceRequest {
 export interface PortfolioMetricsService {
   getNetWorth(date?: string): Promise<unknown> | unknown;
   getNetWorthHistory(startDate: string, endDate: string): Promise<unknown[]> | unknown[];
-  calculateAccountsSimplePerformance?(accountIds?: string[]): Promise<unknown[]> | unknown[];
+  calculateAccountsSimplePerformance?(accountIds?: string[]): SimplePerformanceMetrics[];
   calculatePerformanceHistory?(request: PerformanceRequest): Promise<unknown> | unknown;
   calculatePerformanceSummary?(request: PerformanceRequest): Promise<unknown> | unknown;
   getIncomeSummary?(accountId?: string): Promise<unknown[]> | unknown[];
@@ -63,6 +63,19 @@ export interface NetWorthResponse {
   staleAssets: StaleAssetInfo[];
 }
 
+export interface SimplePerformanceMetrics {
+  accountId: string;
+  accountCurrency: string | null;
+  baseCurrency: string | null;
+  fxRateToBase: number | null;
+  totalValue: number | null;
+  totalGainLossAmount: number | null;
+  cumulativeReturnPercent: number | null;
+  dayGainLossAmount: number | null;
+  dayReturnPercentModDietz: number | null;
+  portfolioWeight: number | null;
+}
+
 export interface PortfolioMetricsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
   exchangeRateService: Pick<ExchangeRateService, "convertCurrency" | "convertCurrencyForDate">;
@@ -106,6 +119,16 @@ interface DailyAccountValuationRow {
   net_contribution: string;
 }
 
+interface SimpleDailyAccountValuationRow {
+  account_id: string;
+  valuation_date: string;
+  account_currency: string;
+  base_currency: string;
+  fx_rate_to_base: string;
+  total_value: string;
+  net_contribution: string;
+}
+
 interface IncomeDataRow {
   date: string;
   income_type: string;
@@ -128,6 +151,16 @@ interface PositionSnapshot {
   totalCostBasis: Decimal;
   currency: string;
   contractMultiplier: Decimal;
+}
+
+interface SimpleDailyAccountValuation {
+  accountId: string;
+  valuationDate: string;
+  accountCurrency: string;
+  baseCurrency: string;
+  fxRateToBase: Decimal;
+  totalValue: Decimal;
+  netContribution: Decimal;
 }
 
 interface IncomeData {
@@ -196,6 +229,7 @@ interface CategoryMetadata {
 
 const DECIMAL_PRECISION = 8;
 const DISPLAY_DECIMAL_PRECISION = 2;
+const PERFORMANCE_PERCENT_PRECISION = 4;
 const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 const STALENESS_THRESHOLD_DAYS = 90;
 const QUOTE_LOOKBACK_DAYS = 30;
@@ -231,6 +265,9 @@ export function createPortfolioMetricsService(
     },
     getNetWorthHistory(startDate, endDate) {
       return calculateNetWorthHistory(db, startDate, endDate, options);
+    },
+    calculateAccountsSimplePerformance(accountIds) {
+      return calculateAccountsSimplePerformance(db, accountIds);
     },
     getIncomeSummary(accountId) {
       return calculateIncomeSummary(db, accountId, options);
@@ -603,6 +640,61 @@ function calculateIncomeSummary(
   ];
 }
 
+function calculateAccountsSimplePerformance(
+  db: Database,
+  accountIds: string[] | undefined,
+): SimplePerformanceMetrics[] {
+  const requestedAccountIds = accountIds ?? readActiveAccountIds(db);
+  if (requestedAccountIds.length === 0) {
+    return [];
+  }
+
+  const idsToFetch = requestedAccountIds.includes(PORTFOLIO_TOTAL_ACCOUNT_ID)
+    ? requestedAccountIds
+    : [...requestedAccountIds, PORTFOLIO_TOTAL_ACCOUNT_ID];
+  const latestByAccount = readLatestSimpleDailyValuations(db, idsToFetch);
+  const previousDatesNeeded = new Map<string, string[]>();
+  for (const accountId of requestedAccountIds) {
+    const latest = latestByAccount.get(accountId);
+    if (!latest) {
+      continue;
+    }
+    const previousDate = addDays(latest.valuationDate, -1);
+    previousDatesNeeded.set(previousDate, [
+      ...(previousDatesNeeded.get(previousDate) ?? []),
+      accountId,
+    ]);
+  }
+
+  const previousByAccount = new Map<string, SimpleDailyAccountValuation>();
+  for (const [date, ids] of previousDatesNeeded) {
+    for (const valuation of readSimpleDailyValuationsOnDate(db, ids, date).values()) {
+      previousByAccount.set(valuation.accountId, valuation);
+    }
+  }
+
+  const totalPortfolioValueBase = latestByAccount
+    .get(PORTFOLIO_TOTAL_ACCOUNT_ID)
+    ?.totalValue.mul(
+      latestByAccount.get(PORTFOLIO_TOTAL_ACCOUNT_ID)?.fxRateToBase ?? new Decimal(1),
+    );
+  const metrics: SimplePerformanceMetrics[] = [];
+  for (const accountId of requestedAccountIds) {
+    const current = latestByAccount.get(accountId);
+    if (!current) {
+      continue;
+    }
+    metrics.push(
+      calculateSimplePerformance(
+        current,
+        previousByAccount.get(accountId),
+        totalPortfolioValueBase,
+      ),
+    );
+  }
+  return metrics;
+}
+
 function readNonArchivedAccounts(db: Database): AccountRow[] {
   return db
     .query<AccountRow, []>(
@@ -614,6 +706,20 @@ function readNonArchivedAccounts(db: Database): AccountRow[] {
       `,
     )
     .all();
+}
+
+function readActiveAccountIds(db: Database): string[] {
+  return db
+    .query<{ id: string }, []>(
+      `
+        SELECT id
+        FROM accounts
+        WHERE is_active = 1
+        ORDER BY is_active DESC, is_archived ASC, name ASC
+      `,
+    )
+    .all()
+    .map((account) => account.id);
 }
 
 function readLatestSnapshotsBeforeDate(
@@ -702,6 +808,80 @@ function readTotalAccountValuations(
       `,
     )
     .all(PORTFOLIO_TOTAL_ACCOUNT_ID, startDate, endDate);
+}
+
+function readLatestSimpleDailyValuations(
+  db: Database,
+  accountIds: string[],
+): Map<string, SimpleDailyAccountValuation> {
+  if (accountIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = accountIds.map(() => "?").join(", ");
+  const rows = db
+    .query<SimpleDailyAccountValuationRow, string[]>(
+      `
+        WITH ranked_valuations AS (
+          SELECT
+            account_id,
+            valuation_date,
+            account_currency,
+            base_currency,
+            fx_rate_to_base,
+            total_value,
+            net_contribution,
+            ROW_NUMBER() OVER (
+              PARTITION BY account_id
+              ORDER BY valuation_date DESC
+            ) AS rn
+          FROM daily_account_valuation
+          WHERE account_id IN (${placeholders})
+        )
+        SELECT
+          account_id,
+          valuation_date,
+          account_currency,
+          base_currency,
+          fx_rate_to_base,
+          total_value,
+          net_contribution
+        FROM ranked_valuations
+        WHERE rn = 1
+      `,
+    )
+    .all(...accountIds);
+  return new Map(rows.map((row) => [row.account_id, simpleValuationFromRow(row)]));
+}
+
+function readSimpleDailyValuationsOnDate(
+  db: Database,
+  accountIds: string[],
+  date: string,
+): Map<string, SimpleDailyAccountValuation> {
+  if (accountIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = accountIds.map(() => "?").join(", ");
+  const rows = db
+    .query<SimpleDailyAccountValuationRow, string[]>(
+      `
+        SELECT
+          account_id,
+          valuation_date,
+          account_currency,
+          base_currency,
+          fx_rate_to_base,
+          total_value,
+          net_contribution
+        FROM daily_account_valuation
+        WHERE account_id IN (${placeholders})
+          AND valuation_date = ?
+      `,
+    )
+    .all(...accountIds, date);
+  return new Map(rows.map((row) => [row.account_id, simpleValuationFromRow(row)]));
 }
 
 function readIncomeActivitiesData(db: Database, accountId: string | undefined): IncomeDataRow[] {
@@ -1075,6 +1255,15 @@ function parseStoredDecimalOrZero(value: unknown): Decimal {
   }
 }
 
+function parseStoredDecimalOrDefault(value: unknown, fallback: Decimal): Decimal {
+  try {
+    const decimal = new Decimal(value as Decimal.Value);
+    return decimal.isFinite() ? decimal : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function decimalFromJsonNumber(value: number): Decimal {
   return new Decimal(value);
 }
@@ -1091,6 +1280,10 @@ function decimalToDisplayJsonNumber(value: Decimal): number {
   return Number(
     value.toDecimalPlaces(DISPLAY_DECIMAL_PRECISION, Decimal.ROUND_HALF_EVEN).toString(),
   );
+}
+
+function decimalToPrecisionJsonNumber(value: Decimal, precision: number): number {
+  return Number(value.toDecimalPlaces(precision, Decimal.ROUND_HALF_EVEN).toString());
 }
 
 function normalizeAmountAndCurrency(
@@ -1198,6 +1391,81 @@ function emptyNetWorthResponse(date: string, currency: string): NetWorthResponse
     currency,
     oldestValuationDate: null,
     staleAssets: [],
+  };
+}
+
+function simpleValuationFromRow(row: SimpleDailyAccountValuationRow): SimpleDailyAccountValuation {
+  return {
+    accountId: row.account_id,
+    valuationDate: row.valuation_date,
+    accountCurrency: row.account_currency,
+    baseCurrency: row.base_currency,
+    fxRateToBase: parseStoredDecimalOrDefault(row.fx_rate_to_base, new Decimal(1)),
+    totalValue: parseStoredDecimalOrZero(row.total_value),
+    netContribution: parseStoredDecimalOrZero(row.net_contribution),
+  };
+}
+
+function calculateSimplePerformance(
+  current: SimpleDailyAccountValuation,
+  previous: SimpleDailyAccountValuation | undefined,
+  totalPortfolioValueBase: Decimal | undefined,
+): SimplePerformanceMetrics {
+  const totalGainLossAmount = current.totalValue.minus(current.netContribution);
+  const cumulativeReturnPercent = !current.netContribution.isZero()
+    ? decimalToPrecisionJsonNumber(
+        totalGainLossAmount.div(current.netContribution),
+        PERFORMANCE_PERCENT_PRECISION,
+      )
+    : totalGainLossAmount.isZero()
+      ? 0
+      : null;
+
+  let dayGainLossAmount: number | null = null;
+  let dayReturnPercentModDietz: number | null = null;
+  if (previous) {
+    const cashFlowDay = current.netContribution.minus(previous.netContribution);
+    const gainDay = current.totalValue.minus(previous.totalValue).minus(cashFlowDay);
+    const denominator = previous.totalValue.plus(new Decimal("0.5").mul(cashFlowDay));
+    dayGainLossAmount = decimalToPrecisionJsonNumber(gainDay, DISPLAY_DECIMAL_PRECISION);
+    if (!denominator.isZero()) {
+      dayReturnPercentModDietz = decimalToPrecisionJsonNumber(
+        gainDay.div(denominator),
+        PERFORMANCE_PERCENT_PRECISION,
+      );
+    } else if (gainDay.isZero()) {
+      dayReturnPercentModDietz = 0;
+    }
+  }
+
+  const totalValueBase = current.totalValue.mul(current.fxRateToBase);
+  let portfolioWeight: number | null = null;
+  if (totalPortfolioValueBase !== undefined) {
+    if (!totalPortfolioValueBase.isZero()) {
+      const clampedWeight = Decimal.min(
+        Decimal.max(totalValueBase.div(totalPortfolioValueBase), new Decimal(0)),
+        new Decimal(1),
+      );
+      portfolioWeight = decimalToPrecisionJsonNumber(clampedWeight, PERFORMANCE_PERCENT_PRECISION);
+    } else if (totalValueBase.isZero()) {
+      portfolioWeight = 0;
+    }
+  }
+
+  return {
+    accountId: current.accountId,
+    accountCurrency: current.accountCurrency,
+    baseCurrency: current.baseCurrency,
+    fxRateToBase: decimalToRawNumber(current.fxRateToBase),
+    totalValue: decimalToRawNumber(current.totalValue),
+    totalGainLossAmount: decimalToPrecisionJsonNumber(
+      totalGainLossAmount,
+      DISPLAY_DECIMAL_PRECISION,
+    ),
+    cumulativeReturnPercent,
+    dayGainLossAmount,
+    dayReturnPercentModDietz,
+    portfolioWeight,
   };
 }
 

@@ -141,6 +141,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   income activity reads, account filtering, asset-backed income fallback
   amounts, FX conversion/fallback behavior, period totals, monthly averages, YoY
   growth, and breakdowns by month/type/asset/currency/account.
+- Add bounded simple account performance runtime for
+  `/api/v1/performance/accounts/simple`, including active-account defaulting,
+  latest and exact previous-day valuation reads, TOTAL portfolio weighting,
+  cumulative/day return formulas, and null/clamp edge cases.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -164,17 +168,18 @@ accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/p
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
-current/historical net-worth and income summary, holdings runtime, add-on
-runtime, broader market-data runtime beyond mapping/templates/duplicate lookups,
-read-only search, transfer link/unlink, single activity delete, and bounded
-existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
-CSV parse/read-only asset preview/read-only import validation and bounded import
-apply, save-up preview calculations, local AI chat thread/message persistence,
-bounded health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+current/historical net-worth, income summary, and simple account performance,
+holdings runtime, add-on runtime, broader market-data runtime beyond
+mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
+single activity delete, and bounded existing-asset/cash/symbol-resolved activity
+create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
+import validation and bounded import apply, save-up preview calculations, local
+AI chat thread/message persistence, bounded health account/timezone
+status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, calculation-heavy health checks or
+non-classification `/health/fix` execution, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 

@@ -91,6 +91,17 @@ describe("TS backend runtime composition", () => {
       expect(incomeSummaryResponse.status).toBe(200);
       await expect(incomeSummaryResponse.json()).resolves.toEqual([]);
 
+      const simplePerformanceResponse = await fetch(
+        `${server.baseUrl}/api/v1/performance/accounts/simple`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      expect(simplePerformanceResponse.status).toBe(200);
+      await expect(simplePerformanceResponse.json()).resolves.toEqual([]);
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);

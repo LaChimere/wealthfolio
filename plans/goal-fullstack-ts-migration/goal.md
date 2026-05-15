@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 90
+turns_used: 91
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T01:04:00+08:00"
+updated_at: "2026-05-16T01:36:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -595,6 +595,12 @@ updated_at: "2026-05-16T01:04:00+08:00"
   monthly averages, YoY growth, and by-month/type/asset/currency/account
   breakdowns. Targeted portfolio/runtime tests, backend type-check, and focused
   code review passed.
+- Turn 91: Added simple account performance runtime parity:
+  `/api/v1/performance/accounts/simple` now uses SQLite-backed latest and exact
+  previous-day account valuations, Rust-compatible default active-account
+  selection, TOTAL portfolio weighting, cumulative/day return formulas,
+  clamping/null edge cases, and numeric JSON response fields. Targeted
+  portfolio/runtime tests and backend type-check passed.
 
 ## Deferred items
 
@@ -666,12 +672,13 @@ updated_at: "2026-05-16T01:04:00+08:00"
   handle and explicitly reports restart-required readiness afterward; future
   polish can improve long-running file-copy offload but no Rust route behavior
   remains blocked on a `501`.
-- Net-worth current/history and income summary calculations now have bounded TS
-  runtime parity, while performance, holdings, and broader valuation
-  calculations remain active follow-ups. reason=the standalone backend can
-  calculate `/api/v1/net-worth`, `/api/v1/net-worth/history`, and
-  `/api/v1/income/summary`; remaining portfolio metrics still need dedicated
-  calculation parity slices.
+- Net-worth current/history, income summary, and simple account performance now
+  have bounded TS runtime parity, while performance history/summary, holdings,
+  and broader valuation calculations remain active follow-ups. reason=the
+  standalone backend can calculate `/api/v1/net-worth`,
+  `/api/v1/net-worth/history`, `/api/v1/income/summary`, and
+  `/api/v1/performance/accounts/simple`; remaining portfolio metrics still need
+  dedicated calculation parity slices.
 - Activity import mapping/template storage, duplicate lookups, read-only
   activity search, transfer link/unlink mutations, single activity deletes,
   bounded existing-asset/cash activity create/update/bulk persistence, and
