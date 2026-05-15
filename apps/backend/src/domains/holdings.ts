@@ -41,6 +41,21 @@ export interface HoldingsImportRequest {
   snapshots: HoldingsSnapshotInput[];
 }
 
+export interface SymbolCheckResult {
+  symbol: string;
+  found: boolean;
+  assetName: string | null;
+  assetId: string | null;
+  currency: string | null;
+  exchangeMic: string | null;
+}
+
+export interface CheckHoldingsImportResult {
+  existingDates: string[];
+  symbols: SymbolCheckResult[];
+  validationErrors: string[];
+}
+
 export interface HoldingsService {
   getHoldings(accountId: string): Promise<unknown[]> | unknown[];
   getHolding(accountId: string, assetId: string): Promise<unknown | null> | unknown | null;
@@ -208,6 +223,14 @@ interface AssetRow {
   provider_config: string | null;
 }
 
+interface AccountExistsRow {
+  count: number;
+}
+
+interface SnapshotDateRow {
+  snapshot_date: string;
+}
+
 const ALTERNATIVE_ASSET_KINDS = new Set([
   "PROPERTY",
   "VEHICLE",
@@ -260,8 +283,12 @@ export function createHoldingsService(
     saveManualHoldings() {
       return notImplemented("Manual holdings save is not available in the TS runtime yet");
     },
-    checkHoldingsImport() {
-      return notImplemented("Holdings import validation is not available in the TS runtime yet");
+    checkHoldingsImport(request) {
+      try {
+        return checkHoldingsImport(db, request);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     importHoldingsCsv() {
       return notImplemented("Holdings import is not available in the TS runtime yet");
@@ -357,6 +384,50 @@ function readSnapshotHoldings(
   }
 
   return holdings;
+}
+
+function checkHoldingsImport(
+  db: Database,
+  request: HoldingsImportRequest,
+): CheckHoldingsImportResult {
+  assertAccountExists(db, request.accountId);
+
+  const validationErrors: string[] = [];
+  const validDates: string[] = [];
+  const uniqueSymbols = new Set<string>();
+
+  for (const snapshot of request.snapshots) {
+    if (!isValidDateString(snapshot.date)) {
+      validationErrors.push(`Invalid date format: '${snapshot.date}'`);
+      continue;
+    }
+    validDates.push(snapshot.date);
+
+    for (const position of snapshot.positions) {
+      if (position.symbol.trim() === "") {
+        validationErrors.push(`Date ${snapshot.date}: empty symbol found`);
+      }
+      if (!isValidFiniteDecimalString(position.quantity)) {
+        validationErrors.push(
+          `Date ${snapshot.date}: invalid quantity '${position.quantity}' for ${position.symbol}`,
+        );
+      }
+      if (position.avgCost !== undefined && position.avgCost !== "") {
+        if (!isValidFiniteDecimalString(position.avgCost)) {
+          validationErrors.push(
+            `Date ${snapshot.date}: invalid avg cost '${position.avgCost}' for ${position.symbol}`,
+          );
+        }
+      }
+      uniqueSymbols.add(position.symbol.trim().toUpperCase());
+    }
+  }
+
+  return {
+    existingDates: readExistingSnapshotDates(db, request.accountId, validDates),
+    symbols: [...uniqueSymbols].map((symbol) => symbolCheckResult(db, symbol)),
+    validationErrors,
+  };
 }
 
 function readHistoricalValuations(
@@ -589,6 +660,90 @@ function readAssetsById(db: Database, assetIds: string[]): Map<string, AssetRow>
   return new Map(rows.map((row) => [row.id, row]));
 }
 
+function assertAccountExists(db: Database, accountId: string): void {
+  const row = db
+    .query<AccountExistsRow, [string]>("SELECT COUNT(*) AS count FROM accounts WHERE id = ?")
+    .get(accountId);
+  if (!row || row.count === 0) {
+    throw new Error(`Record not found: account ${accountId}`);
+  }
+}
+
+function readExistingSnapshotDates(
+  db: Database,
+  accountId: string,
+  validDates: string[],
+): string[] {
+  if (validDates.length === 0) {
+    return [];
+  }
+  const importDates = new Set(validDates);
+  const minDate = validDates.reduce((min, date) => (date < min ? date : min), validDates[0]);
+  const maxDate = validDates.reduce((max, date) => (date > max ? date : max), validDates[0]);
+  return db
+    .query<SnapshotDateRow, [string, string, string]>(
+      `
+        SELECT snapshot_date
+        FROM holdings_snapshots
+        WHERE account_id = ? AND snapshot_date >= ? AND snapshot_date <= ?
+        ORDER BY snapshot_date ASC
+      `,
+    )
+    .all(accountId, minDate, maxDate)
+    .filter((row) => importDates.has(row.snapshot_date))
+    .map((row) => row.snapshot_date);
+}
+
+function symbolCheckResult(db: Database, symbol: string): SymbolCheckResult {
+  const row = readExactAssetSymbol(db, symbol);
+  if (!row) {
+    return {
+      symbol,
+      found: false,
+      assetName: null,
+      assetId: null,
+      currency: null,
+      exchangeMic: null,
+    };
+  }
+  return {
+    symbol,
+    found: true,
+    assetName: row.name,
+    assetId: row.id,
+    currency: row.quote_ccy,
+    exchangeMic: row.instrument_exchange_mic,
+  };
+}
+
+function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {
+  if (symbol.trim() === "") {
+    return null;
+  }
+  return db
+    .query<AssetRow, [string, string]>(
+      `
+        SELECT
+          id,
+          kind,
+          name,
+          display_code,
+          notes,
+          metadata,
+          quote_mode,
+          quote_ccy,
+          instrument_exchange_mic,
+          provider_config
+        FROM assets
+        WHERE UPPER(display_code) = ?
+           OR UPPER(instrument_symbol) = ?
+        ORDER BY is_active DESC, name ASC, id ASC
+        LIMIT 1
+      `,
+    )
+    .get(symbol, symbol);
+}
+
 function decimalToNumber(value: unknown, fallback: Decimal): number {
   try {
     const decimal = new Decimal(value as Decimal.Value);
@@ -596,6 +751,22 @@ function decimalToNumber(value: unknown, fallback: Decimal): number {
   } catch {
     return Number(fallback.toString());
   }
+}
+
+function isValidFiniteDecimalString(value: string): boolean {
+  try {
+    return new Decimal(value).isFinite();
+  } catch {
+    return false;
+  }
+}
+
+function isValidDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function parseJsonObjectOrEmpty(rawJson: string): Record<string, unknown> {

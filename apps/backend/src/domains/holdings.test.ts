@@ -139,6 +139,65 @@ describe("TS holdings domain", () => {
       await expect(service.getSnapshotByDate("a1", "2026-01-03")).rejects.toThrow(
         "No snapshot found for date 2026-01-03",
       );
+      expect(
+        service.checkHoldingsImport({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-01-01",
+              positions: [
+                { symbol: " acme ", quantity: "3", avgCost: "bad", currency: "USD" },
+                { symbol: "UNKNOWN", quantity: "1", currency: "USD" },
+              ],
+              cashBalances: {},
+            },
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "IGNORED", quantity: "bad", currency: "USD" }],
+              cashBalances: {},
+            },
+            {
+              date: "2026-01-05",
+              positions: [{ symbol: "", quantity: "NaN", currency: "USD" }],
+              cashBalances: {},
+            },
+          ],
+        }),
+      ).toEqual({
+        existingDates: ["2026-01-01"],
+        symbols: [
+          {
+            symbol: "ACME",
+            found: true,
+            assetName: "Acme Corp",
+            assetId: "asset-1",
+            currency: "USD",
+            exchangeMic: null,
+          },
+          {
+            symbol: "UNKNOWN",
+            found: false,
+            assetName: null,
+            assetId: null,
+            currency: null,
+            exchangeMic: null,
+          },
+          {
+            symbol: "",
+            found: false,
+            assetName: null,
+            assetId: null,
+            currency: null,
+            exchangeMic: null,
+          },
+        ],
+        validationErrors: [
+          "Date 2026-01-01: invalid avg cost 'bad' for  acme ",
+          "Invalid date format: 'not-a-date'",
+          "Date 2026-01-05: empty symbol found",
+          "Date 2026-01-05: invalid quantity 'NaN' for ",
+        ],
+      });
       await expect(service.getHoldings("a1")).rejects.toThrow("Holdings fan-out is not available");
     } finally {
       db.close();
@@ -162,8 +221,10 @@ function createHoldingsDb(): Database {
       display_code TEXT,
       notes TEXT,
       metadata TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
       quote_mode TEXT NOT NULL DEFAULT 'MARKET',
       quote_ccy TEXT NOT NULL DEFAULT 'USD',
+      instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       provider_config TEXT
     );

@@ -144,8 +144,9 @@
     ranges, and FX conversion dates; current/history net-worth, income summary,
     simple account performance, account performance history/summary
     calculations, holdings valuation reads, holdings snapshot metadata reads,
-    and historical snapshot holdings reads now have TS runtime parity, while
-    provider-backed symbol performance history is deferred to
+    historical snapshot holdings reads, and holdings import checks now have TS
+    runtime parity, while provider-backed symbol performance history and
+    holdings import provider-backed symbol search are deferred to
     portfolio/market-data parity slices; live holdings fan-out, allocations,
     snapshot writes/imports, and portfolio recalculation side effects are
     deferred to holdings/portfolio parity slices; add-on filesystem extraction,

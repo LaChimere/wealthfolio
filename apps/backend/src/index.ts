@@ -224,6 +224,7 @@ export {
 export {
   createHoldingsService,
   HoldingsNotImplementedError,
+  type CheckHoldingsImportResult,
   type DailyAccountValuation,
   type Holding,
   type HoldingInput,
@@ -236,6 +237,7 @@ export {
   type HoldingsSnapshotInput,
   type SaveManualHoldingsRequest,
   type SnapshotInfo,
+  type SymbolCheckResult,
 } from "./domains/holdings";
 export type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
 export {
