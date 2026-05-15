@@ -3228,9 +3228,23 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function domainErrorResponse(error: unknown): Response {
+  if (isHttpStatusError(error)) {
+    return jsonResponse({ code: error.code ?? error.status, message: error.message }, error.status);
+  }
   return jsonResponse(
     { code: 400, message: error instanceof Error ? error.message : String(error) },
     400,
+  );
+}
+
+function isHttpStatusError(error: unknown): error is Error & { status: number; code?: string } {
+  return (
+    error instanceof Error &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    Number.isInteger(error.status) &&
+    error.status >= 400 &&
+    error.status <= 599
   );
 }
 

@@ -102,6 +102,48 @@ describe("TS backend runtime composition", () => {
       expect(simplePerformanceResponse.status).toBe(200);
       await expect(simplePerformanceResponse.json()).resolves.toEqual([]);
 
+      const performanceHistoryResponse = await fetch(
+        `${server.baseUrl}/api/v1/performance/history`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ itemType: "account", itemId: "missing" }),
+        },
+      );
+      expect(performanceHistoryResponse.status).toBe(200);
+      await expect(performanceHistoryResponse.json()).resolves.toMatchObject({
+        id: "missing",
+        returns: [],
+        periodStartDate: null,
+      });
+
+      const symbolPerformanceHistoryResponse = await fetch(
+        `${server.baseUrl}/api/v1/performance/history`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ itemType: "symbol", itemId: "SPY" }),
+        },
+      );
+      expect(symbolPerformanceHistoryResponse.status).toBe(501);
+      await expect(symbolPerformanceHistoryResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+
+      const performanceSummaryResponse = await fetch(
+        `${server.baseUrl}/api/v1/performance/summary`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ itemType: "symbol", itemId: "SPY" }),
+        },
+      );
+      expect(performanceSummaryResponse.status).toBe(200);
+      await expect(performanceSummaryResponse.json()).resolves.toMatchObject({
+        id: "SPY",
+        returns: [],
+      });
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);

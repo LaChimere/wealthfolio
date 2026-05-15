@@ -386,6 +386,193 @@ describe("TS portfolio metrics domain", () => {
     }
   });
 
+  test("calculates account performance history and summary from daily valuations", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2026-01-01",
+        totalValue: "100",
+        netContribution: "100",
+        investmentMarketValue: "100",
+        costBasis: "100",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2026-01-02",
+        totalValue: "110",
+        netContribution: "100",
+        investmentMarketValue: "110",
+        costBasis: "100",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "a1",
+        date: "2026-01-03",
+        totalValue: "120",
+        netContribution: "110",
+        investmentMarketValue: "120",
+        costBasis: "110",
+      });
+
+      const history = service.calculatePerformanceHistory?.({
+        itemType: "account",
+        itemId: "a1",
+        trackingMode: "TRANSACTIONS",
+      });
+      expect(history).toMatchObject({
+        id: "a1",
+        returns: [
+          { date: "2026-01-01", value: 0 },
+          { date: "2026-01-02", value: 0.1 },
+          { date: "2026-01-03", value: 0.1 },
+        ],
+        periodStartDate: "2026-01-01",
+        periodEndDate: "2026-01-03",
+        currency: "USD",
+        periodGain: 10,
+        periodReturn: 0.1,
+        cumulativeTwr: 0.1,
+        gainLossAmount: 10,
+        annualizedTwr: 0.1,
+        simpleReturn: 0.1,
+        annualizedSimpleReturn: 0.1,
+        cumulativeMwr: 0.1,
+        annualizedMwr: 0.1,
+        maxDrawdown: 0,
+        isHoldingsMode: false,
+      });
+      expect(history?.volatility).toBeCloseTo(1.12249722, 8);
+
+      expect(
+        service.calculatePerformanceSummary?.({
+          itemType: "account",
+          itemId: "a1",
+          trackingMode: "TRANSACTIONS",
+        }),
+      ).toMatchObject({
+        id: "a1",
+        returns: [],
+        periodReturn: 0.1,
+        cumulativeTwr: 0.1,
+        simpleReturn: 0.1,
+        volatility: 0,
+        maxDrawdown: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("calculates holdings-mode account performance and rejects invalid histories", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      insertDailyAccountValuation(db, {
+        accountId: "holdings",
+        date: "2026-01-01",
+        totalValue: "100",
+        netContribution: "100",
+        investmentMarketValue: "100",
+        costBasis: "100",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "holdings",
+        date: "2026-01-02",
+        totalValue: "125",
+        netContribution: "110",
+        investmentMarketValue: "125",
+        costBasis: "110",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "negative",
+        date: "2026-01-01",
+        totalValue: "10",
+        netContribution: "10",
+      });
+      insertDailyAccountValuation(db, {
+        accountId: "negative",
+        date: "2026-01-02",
+        totalValue: "-1",
+        netContribution: "10",
+      });
+
+      expect(
+        service.calculatePerformanceHistory?.({
+          itemType: "account",
+          itemId: "holdings",
+          trackingMode: "HOLDINGS",
+        }),
+      ).toMatchObject({
+        id: "holdings",
+        periodGain: 15,
+        periodReturn: 0.13636364,
+        cumulativeTwr: null,
+        annualizedTwr: null,
+        cumulativeMwr: null,
+        annualizedMwr: null,
+        gainLossAmount: 15,
+        isHoldingsMode: true,
+      });
+      expect(() =>
+        service.calculatePerformanceHistory?.({
+          itemType: "account",
+          itemId: "negative",
+        }),
+      ).toThrow("Account has negative portfolio value in its history");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves performance empty responses and deferred symbol history", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      expect(
+        service.calculatePerformanceHistory?.({ itemType: "account", itemId: "missing" }),
+      ).toEqual({
+        id: "missing",
+        returns: [],
+        periodStartDate: null,
+        periodEndDate: null,
+        currency: "",
+        periodGain: 0,
+        periodReturn: 0,
+        cumulativeTwr: 0,
+        gainLossAmount: null,
+        annualizedTwr: 0,
+        simpleReturn: 0,
+        annualizedSimpleReturn: 0,
+        cumulativeMwr: 0,
+        annualizedMwr: 0,
+        volatility: 0,
+        maxDrawdown: 0,
+        isHoldingsMode: false,
+      });
+      expect(service.calculatePerformanceSummary?.({ itemType: "symbol", itemId: "SPY" })).toEqual(
+        service.calculatePerformanceHistory?.({ itemType: "account", itemId: "SPY" }),
+      );
+      expect(() =>
+        service.calculatePerformanceHistory?.({ itemType: "symbol", itemId: "SPY" }),
+      ).toThrow("Symbol performance history is not available");
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates income summaries with asset-backed income, FX fallback, and account filtering", () => {
     const db = createPortfolioMetricsDb();
     const warnings: string[] = [];

@@ -18,9 +18,19 @@ export interface PortfolioMetricsService {
   getNetWorth(date?: string): Promise<unknown> | unknown;
   getNetWorthHistory(startDate: string, endDate: string): Promise<unknown[]> | unknown[];
   calculateAccountsSimplePerformance?(accountIds?: string[]): SimplePerformanceMetrics[];
-  calculatePerformanceHistory?(request: PerformanceRequest): Promise<unknown> | unknown;
-  calculatePerformanceSummary?(request: PerformanceRequest): Promise<unknown> | unknown;
+  calculatePerformanceHistory?(request: PerformanceRequest): PerformanceMetrics;
+  calculatePerformanceSummary?(request: PerformanceRequest): PerformanceMetrics;
   getIncomeSummary?(accountId?: string): Promise<unknown[]> | unknown[];
+}
+
+export class PortfolioMetricsNotImplementedError extends Error {
+  readonly status = 501;
+  readonly code = "not_implemented";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PortfolioMetricsNotImplementedError";
+  }
 }
 
 export interface NetWorthHistoryPoint {
@@ -76,6 +86,31 @@ export interface SimplePerformanceMetrics {
   portfolioWeight: number | null;
 }
 
+export interface ReturnData {
+  date: string;
+  value: number;
+}
+
+export interface PerformanceMetrics {
+  id: string;
+  returns: ReturnData[];
+  periodStartDate: string | null;
+  periodEndDate: string | null;
+  currency: string;
+  periodGain: number;
+  periodReturn: number | null;
+  cumulativeTwr: number | null;
+  gainLossAmount: number | null;
+  annualizedTwr: number | null;
+  simpleReturn: number;
+  annualizedSimpleReturn: number;
+  cumulativeMwr: number | null;
+  annualizedMwr: number | null;
+  volatility: number;
+  maxDrawdown: number;
+  isHoldingsMode: boolean;
+}
+
 export interface PortfolioMetricsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
   exchangeRateService: Pick<ExchangeRateService, "convertCurrency" | "convertCurrencyForDate">;
@@ -129,6 +164,11 @@ interface SimpleDailyAccountValuationRow {
   net_contribution: string;
 }
 
+interface AccountPerformanceValuationRow extends SimpleDailyAccountValuationRow {
+  investment_market_value: string;
+  cost_basis: string;
+}
+
 interface IncomeDataRow {
   date: string;
   income_type: string;
@@ -161,6 +201,11 @@ interface SimpleDailyAccountValuation {
   fxRateToBase: Decimal;
   totalValue: Decimal;
   netContribution: Decimal;
+}
+
+interface AccountPerformanceValuation extends SimpleDailyAccountValuation {
+  investmentMarketValue: Decimal;
+  costBasis: Decimal;
 }
 
 interface IncomeData {
@@ -234,6 +279,10 @@ const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 const STALENESS_THRESHOLD_DAYS = 90;
 const QUOTE_LOOKBACK_DAYS = 30;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const TRADING_DAYS_PER_YEAR = 252;
+const DAYS_PER_YEAR = new Decimal("365.25");
+const NEGATIVE_ACCOUNT_VALUE_MESSAGE =
+  "Account has negative portfolio value in its history. This may be caused by missing buy activities. Please review your transactions on the Activities page.";
 
 const CATEGORY_METADATA: Record<AssetCategory, CategoryMetadata> = {
   cash: { key: "cash", name: "Cash" },
@@ -268,6 +317,12 @@ export function createPortfolioMetricsService(
     },
     calculateAccountsSimplePerformance(accountIds) {
       return calculateAccountsSimplePerformance(db, accountIds);
+    },
+    calculatePerformanceHistory(request) {
+      return calculatePerformanceHistory(db, request);
+    },
+    calculatePerformanceSummary(request) {
+      return calculatePerformanceSummary(db, request);
     },
     getIncomeSummary(accountId) {
       return calculateIncomeSummary(db, accountId, options);
@@ -695,6 +750,66 @@ function calculateAccountsSimplePerformance(
   return metrics;
 }
 
+function calculatePerformanceHistory(
+  db: Database,
+  request: PerformanceRequest,
+): PerformanceMetrics {
+  switch (request.itemType) {
+    case "account":
+      return calculateAccountPerformance(db, request, true);
+    case "symbol":
+      throw new PortfolioMetricsNotImplementedError(
+        "Symbol performance history is not available in the TS runtime yet",
+      );
+    default:
+      throw new Error("Invalid item type");
+  }
+}
+
+function calculatePerformanceSummary(
+  db: Database,
+  request: PerformanceRequest,
+): PerformanceMetrics {
+  switch (request.itemType) {
+    case "account":
+      return calculateAccountPerformance(db, request, false);
+    case "symbol":
+      return emptyPerformanceResponse(request.itemId);
+    default:
+      throw new Error("Invalid item type");
+  }
+}
+
+function calculateAccountPerformance(
+  db: Database,
+  request: PerformanceRequest,
+  includeReturnsSeries: boolean,
+): PerformanceMetrics {
+  validatePerformanceDateRange(request.startDate, request.endDate);
+  const history = readAccountPerformanceHistory(
+    db,
+    request.itemId,
+    request.startDate,
+    request.endDate,
+  );
+  if (history.length < 2) {
+    if (includeReturnsSeries) {
+      return emptyPerformanceResponse(request.itemId);
+    }
+    throw new Error(
+      `Account '${request.itemId}': Not enough history data (${history.length} points).`,
+    );
+  }
+
+  const metrics = computeAccountPerformance(
+    history,
+    request.trackingMode,
+    request.startDate,
+    includeReturnsSeries,
+  );
+  return { ...metrics, id: request.itemId };
+}
+
 function readNonArchivedAccounts(db: Database): AccountRow[] {
   return db
     .query<AccountRow, []>(
@@ -882,6 +997,45 @@ function readSimpleDailyValuationsOnDate(
     )
     .all(...accountIds, date);
   return new Map(rows.map((row) => [row.account_id, simpleValuationFromRow(row)]));
+}
+
+function readAccountPerformanceHistory(
+  db: Database,
+  accountId: string,
+  startDate: string | undefined,
+  endDate: string | undefined,
+): AccountPerformanceValuation[] {
+  const conditions = ["account_id = ?"];
+  const params = [accountId];
+  if (startDate) {
+    conditions.push("valuation_date >= ?");
+    params.push(startDate);
+  }
+  if (endDate) {
+    conditions.push("valuation_date <= ?");
+    params.push(endDate);
+  }
+
+  return db
+    .query<AccountPerformanceValuationRow, string[]>(
+      `
+        SELECT
+          account_id,
+          valuation_date,
+          account_currency,
+          base_currency,
+          fx_rate_to_base,
+          investment_market_value,
+          total_value,
+          cost_basis,
+          net_contribution
+        FROM daily_account_valuation
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY valuation_date ASC
+      `,
+    )
+    .all(...params)
+    .map(accountPerformanceValuationFromRow);
 }
 
 function readIncomeActivitiesData(db: Database, accountId: string | undefined): IncomeDataRow[] {
@@ -1406,6 +1560,16 @@ function simpleValuationFromRow(row: SimpleDailyAccountValuationRow): SimpleDail
   };
 }
 
+function accountPerformanceValuationFromRow(
+  row: AccountPerformanceValuationRow,
+): AccountPerformanceValuation {
+  return {
+    ...simpleValuationFromRow(row),
+    investmentMarketValue: parseStoredDecimalOrZero(row.investment_market_value),
+    costBasis: parseStoredDecimalOrZero(row.cost_basis),
+  };
+}
+
 function calculateSimplePerformance(
   current: SimpleDailyAccountValuation,
   previous: SimpleDailyAccountValuation | undefined,
@@ -1467,6 +1631,242 @@ function calculateSimplePerformance(
     dayReturnPercentModDietz,
     portfolioWeight,
   };
+}
+
+function computeAccountPerformance(
+  history: AccountPerformanceValuation[],
+  trackingMode: PerformanceRequest["trackingMode"],
+  startDate: string | undefined,
+  includeReturnsSeries: boolean,
+): PerformanceMetrics {
+  const startPoint = history[0]!;
+  const endPoint = history[history.length - 1]!;
+  const isHoldingsMode = trackingMode === "HOLDINGS";
+  const returns: ReturnData[] = [];
+  const dailyReturnsForRisk: Decimal[] = [];
+  if (includeReturnsSeries) {
+    returns.push({ date: startPoint.valuationDate, value: 0 });
+  }
+
+  const { cumulativeTwr, cumulativeMwr } = computeCompoundedDailyReturns(
+    history,
+    isHoldingsMode,
+    includeReturnsSeries,
+    returns,
+    dailyReturnsForRisk,
+  );
+  const annualizedTwr = calculateAnnualizedReturn(
+    startPoint.valuationDate,
+    endPoint.valuationDate,
+    cumulativeTwr,
+  );
+  const annualizedMwr = calculateAnnualizedReturn(
+    startPoint.valuationDate,
+    endPoint.valuationDate,
+    cumulativeMwr,
+  );
+  const netCashFlow = endPoint.netContribution.minus(startPoint.netContribution);
+  const gainLossAmount = endPoint.totalValue.minus(startPoint.totalValue).minus(netCashFlow);
+  const simpleReturn = computeSimpleTotalReturn(startPoint.totalValue, gainLossAmount);
+  const annualizedSimpleReturn = calculateAnnualizedReturn(
+    startPoint.valuationDate,
+    endPoint.valuationDate,
+    simpleReturn,
+  );
+  const [volatility, maxDrawdown] = includeReturnsSeries
+    ? [calculateVolatility(dailyReturnsForRisk), calculateMaxDrawdown(dailyReturnsForRisk)]
+    : [new Decimal(0), new Decimal(0)];
+
+  const [periodGain, periodReturn] = isHoldingsMode
+    ? computeHoldingsPeriodReturn(startPoint, endPoint, startDate === undefined)
+    : [gainLossAmount, cumulativeMwr];
+  const wrapNonHoldings = (value: Decimal): number | null =>
+    isHoldingsMode ? null : decimalToJsonNumber(value);
+
+  return {
+    id: "",
+    returns,
+    periodStartDate: startPoint.valuationDate,
+    periodEndDate: endPoint.valuationDate,
+    currency: startPoint.accountCurrency,
+    periodGain: decimalToJsonNumber(periodGain),
+    periodReturn: decimalToJsonNumber(periodReturn),
+    cumulativeTwr: wrapNonHoldings(cumulativeTwr),
+    gainLossAmount: decimalToJsonNumber(gainLossAmount),
+    annualizedTwr: wrapNonHoldings(annualizedTwr),
+    simpleReturn: decimalToJsonNumber(simpleReturn),
+    annualizedSimpleReturn: decimalToJsonNumber(annualizedSimpleReturn),
+    cumulativeMwr: wrapNonHoldings(cumulativeMwr),
+    annualizedMwr: wrapNonHoldings(annualizedMwr),
+    volatility: decimalToJsonNumber(volatility),
+    maxDrawdown: decimalToJsonNumber(maxDrawdown),
+    isHoldingsMode,
+  };
+}
+
+function computeCompoundedDailyReturns(
+  history: AccountPerformanceValuation[],
+  isHoldingsMode: boolean,
+  includeReturnsSeries: boolean,
+  returns: ReturnData[],
+  dailyReturnsForRisk: Decimal[],
+): { cumulativeTwr: Decimal; cumulativeMwr: Decimal } {
+  let cumulativeTwrFactor = new Decimal(1);
+  let cumulativeMwrFactor = new Decimal(1);
+
+  for (let index = 1; index < history.length; index += 1) {
+    const previous = history[index - 1]!;
+    const current = history[index]!;
+    if (previous.totalValue.isNegative() || current.totalValue.isNegative()) {
+      throw new Error(NEGATIVE_ACCOUNT_VALUE_MESSAGE);
+    }
+
+    const cashFlow = current.netContribution.minus(previous.netContribution);
+    const twrDenominator = previous.totalValue.plus(cashFlow);
+    const twr = twrDenominator.isZero()
+      ? new Decimal(0)
+      : current.totalValue.div(twrDenominator).minus(1);
+    const mwrNumerator = current.totalValue.minus(previous.totalValue).minus(cashFlow);
+    const mwrDenominator = previous.totalValue.plus(cashFlow.div(2));
+    const mwr = mwrDenominator.isZero() ? new Decimal(0) : mwrNumerator.div(mwrDenominator);
+
+    cumulativeTwrFactor = cumulativeTwrFactor.mul(new Decimal(1).plus(twr));
+    cumulativeMwrFactor = cumulativeMwrFactor.mul(new Decimal(1).plus(mwr));
+
+    if (includeReturnsSeries) {
+      const shouldExcludeFromRisk =
+        isHoldingsMode &&
+        (!previous.costBasis.eq(current.costBasis) ||
+          (previous.costBasis.isZero() && !previous.netContribution.eq(current.netContribution)));
+      if (!shouldExcludeFromRisk) {
+        dailyReturnsForRisk.push(twr);
+      }
+      returns.push({
+        date: current.valuationDate,
+        value: decimalToJsonNumber(cumulativeTwrFactor.minus(1)),
+      });
+    }
+  }
+
+  return {
+    cumulativeTwr: cumulativeTwrFactor.minus(1),
+    cumulativeMwr: cumulativeMwrFactor.minus(1),
+  };
+}
+
+function computeSimpleTotalReturn(startValue: Decimal, gainLossAmount: Decimal): Decimal {
+  return startValue.lte(0) ? new Decimal(0) : gainLossAmount.div(startValue);
+}
+
+function computeHoldingsPeriodReturn(
+  startPoint: AccountPerformanceValuation,
+  endPoint: AccountPerformanceValuation,
+  isAllTime: boolean,
+): [Decimal, Decimal] {
+  const startUnrealizedPnl = startPoint.investmentMarketValue.minus(startPoint.costBasis);
+  const endUnrealizedPnl = endPoint.investmentMarketValue.minus(endPoint.costBasis);
+  const periodGain = endUnrealizedPnl.minus(startUnrealizedPnl);
+  if (isAllTime) {
+    return [
+      periodGain,
+      endPoint.costBasis.isZero() ? new Decimal(0) : endUnrealizedPnl.div(endPoint.costBasis),
+    ];
+  }
+  return [
+    periodGain,
+    startPoint.investmentMarketValue.isZero()
+      ? new Decimal(0)
+      : periodGain.div(startPoint.investmentMarketValue),
+  ];
+}
+
+function calculateAnnualizedReturn(
+  startDate: string,
+  endDate: string,
+  totalReturn: Decimal,
+): Decimal {
+  if (compareIsoDates(startDate, endDate) > 0) {
+    return new Decimal(0);
+  }
+  if (totalReturn.lte(-1)) {
+    return new Decimal(-1);
+  }
+  const days = daysBetween(startDate, endDate);
+  if (days <= 0) {
+    return totalReturn;
+  }
+  const years = new Decimal(days).div(DAYS_PER_YEAR);
+  if (years.lt(1)) {
+    return totalReturn;
+  }
+  const base = new Decimal(1).plus(totalReturn);
+  if (base.lte(0)) {
+    return new Decimal(-1);
+  }
+  return base.pow(new Decimal(1).div(years)).minus(1);
+}
+
+function calculateVolatility(dailyReturns: Decimal[]): Decimal {
+  if (dailyReturns.length < 2) {
+    return new Decimal(0);
+  }
+  const count = new Decimal(dailyReturns.length);
+  const sum = dailyReturns.reduce((total, value) => total.plus(value), new Decimal(0));
+  const mean = sum.div(count);
+  const sumSquaredDiff = dailyReturns.reduce((total, value) => {
+    const diff = value.minus(mean);
+    return total.plus(diff.mul(diff));
+  }, new Decimal(0));
+  const variance = sumSquaredDiff.div(count.minus(1));
+  return variance.isNegative()
+    ? new Decimal(0)
+    : variance.sqrt().mul(new Decimal(TRADING_DAYS_PER_YEAR).sqrt());
+}
+
+function calculateMaxDrawdown(dailyReturns: Decimal[]): Decimal {
+  let cumulativeValue = new Decimal(1);
+  let peakValue = new Decimal(1);
+  let maxDrawdown = new Decimal(0);
+  for (const dailyReturn of dailyReturns) {
+    cumulativeValue = cumulativeValue.mul(new Decimal(1).plus(dailyReturn));
+    peakValue = Decimal.max(peakValue, cumulativeValue);
+    const drawdown = peakValue.isZero()
+      ? new Decimal(1)
+      : peakValue.minus(cumulativeValue).div(peakValue);
+    maxDrawdown = Decimal.max(maxDrawdown, drawdown);
+  }
+  return Decimal.max(maxDrawdown, new Decimal(0));
+}
+
+function emptyPerformanceResponse(id: string): PerformanceMetrics {
+  return {
+    id,
+    returns: [],
+    periodStartDate: null,
+    periodEndDate: null,
+    currency: "",
+    periodGain: 0,
+    periodReturn: 0,
+    cumulativeTwr: 0,
+    gainLossAmount: null,
+    annualizedTwr: 0,
+    simpleReturn: 0,
+    annualizedSimpleReturn: 0,
+    cumulativeMwr: 0,
+    annualizedMwr: 0,
+    volatility: 0,
+    maxDrawdown: 0,
+    isHoldingsMode: false,
+  };
+}
+
+function validatePerformanceDateRange(
+  startDate: string | undefined,
+  endDate: string | undefined,
+): void {
+  if (startDate && endDate && compareIsoDates(startDate, endDate) > 0) {
+    throw new Error("Start date must be before end date");
+  }
 }
 
 function createIncomeSummary(period: string, currency: string): IncomeSummary {

@@ -264,8 +264,11 @@ export {
   type NetWorthHistoryPoint,
   type NetWorthResponse,
   type PerformanceRequest,
+  type PerformanceMetrics,
   type PortfolioMetricsService,
   type PortfolioMetricsServiceOptions,
+  PortfolioMetricsNotImplementedError,
+  type ReturnData,
   type SimplePerformanceMetrics,
   type StaleAssetInfo,
 } from "./domains/portfolio-metrics";
