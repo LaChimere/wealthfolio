@@ -94,6 +94,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   `GET /api/v1/goals/{id}/retirement/overview`, including valuation-provider
   501/503 handling, non-retirement/missing-plan errors, and stored/default
   planner-mode behavior.
+- Add plan-backed retirement summary refresh parity by deriving retirement
+  summary targets, projected dates/values, and health from deterministic
+  overview output while preserving no-plan clearing and unreachable-target
+  fallback behavior.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -113,8 +117,8 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep retirement projection/simulation endpoints and plan-backed retirement
-  summary refresh deferred to dedicated goal/calculation parity slices.
+- Keep retirement projection/simulation endpoints deferred to dedicated
+  goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -132,10 +136,10 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, retirement
-projection/simulation execution, plan-backed retirement summary refresh,
-calculation-heavy health checks or non-classification `/health/fix` execution,
-real Connect runtime implementation, real device-sync runtime implementation, or
-Rust runtime removal is in scope for this slice.
+projection/simulation execution, calculation-heavy health checks or
+non-classification `/health/fix` execution, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 

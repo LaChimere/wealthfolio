@@ -226,6 +226,13 @@ export interface GoalFundingRuleRowPayload extends GoalFundingRule {}
 
 export interface GoalPlanRowPayload extends GoalPlan {}
 
+interface RetirementGoalSummary {
+  target: number | null;
+  projectedCompletionDate: string | null;
+  projectedValueAtTargetDate: number;
+  status: RetirementOverview["status"];
+}
+
 const GOAL_LIFECYCLE_ACTIVE = "active";
 const GOAL_LIFECYCLE_ACHIEVED = "achieved";
 const GOAL_LIFECYCLE_ARCHIVED = "archived";
@@ -664,24 +671,39 @@ export function createGoalService(
       const fundingRules = repository.loadFundingRules(goalId);
       const isRetirement = goal.goalType === "retirement";
       const plan = isRetirement ? repository.loadGoalPlan(goalId) : null;
-      if (isRetirement && plan) {
-        throw new Error("Retirement goal summary refresh is not implemented in the TS backend yet");
-      }
+      const retirementSummary =
+        isRetirement && plan
+          ? computeRetirementSummary(prepareRetirementInputForGoal(goalId, valuationMap), options)
+          : null;
 
       const currentValue = computeSummaryCurrentValue(goal, fundingRules, valuationMap);
-      const target = isRetirement ? null : (goal.targetAmount ?? goal.summaryTargetAmount);
+      const target = isRetirement
+        ? plan
+          ? (retirementSummary?.target ?? goal.summaryTargetAmount)
+          : null
+        : (goal.targetAmount ?? goal.summaryTargetAmount);
       const progress = target !== null && target > 0 ? Math.min(currentValue / target, 1) : null;
-      const projectedValueAtTargetDate = isRetirement ? null : goal.projectedValueAtTargetDate;
+      const projectedValueAtTargetDate =
+        isRetirement && !plan
+          ? null
+          : (retirementSummary?.projectedValueAtTargetDate ?? goal.projectedValueAtTargetDate);
       const statusHealth =
         goal.statusLifecycle === GOAL_LIFECYCLE_ACHIEVED
           ? "on_track"
-          : goalSummaryHealth(isRetirement, projectedValueAtTargetDate, target);
+          : isRetirement
+            ? retirementSummary
+              ? retirementGoalHealthFromOverviewStatus(retirementSummary.status)
+              : "not_applicable"
+            : goalSummaryHealth(false, projectedValueAtTargetDate, target);
 
       repository.updateGoalSummaryFields(goalId, {
         summaryTargetAmount: target,
         summaryCurrentValue: currentValue,
         summaryProgress: progress,
-        projectedCompletionDate: isRetirement ? null : goal.projectedCompletionDate,
+        projectedCompletionDate:
+          isRetirement && !plan
+            ? null
+            : (retirementSummary?.projectedCompletionDate ?? goal.projectedCompletionDate),
         projectedValueAtTargetDate,
         statusHealth,
       });
@@ -1093,6 +1115,74 @@ function injectTaxBucketBalances(
       withdrawalBuckets: taxBucketBalances,
     },
   } as RetirementPlan;
+}
+
+function computeRetirementSummary(
+  prepared: PreparedRetirementSimulationInput,
+  options: GoalServiceOptions,
+): RetirementGoalSummary {
+  const overview = computeRetirementOverviewWithMode(
+    prepared.plan,
+    prepared.currentPortfolio,
+    prepared.plannerMode,
+  );
+  const completionAge =
+    prepared.plannerMode === "fire"
+      ? (overview.fiAge ??
+        overview.suggestedGoalAgeIfUnchanged ??
+        prepared.plan.personal.targetRetirementAge)
+      : prepared.plan.personal.targetRetirementAge;
+
+  return {
+    target: overview.requiredCapitalReachable ? overview.requiredCapitalAtGoalAge : null,
+    projectedCompletionDate: dateForPlanAge(prepared.plan, completionAge, options.now?.()),
+    projectedValueAtTargetDate: overview.portfolioAtGoalAge,
+    status: overview.status,
+  };
+}
+
+function dateForPlanAge(plan: RetirementPlan, age: number, now = new Date()): string | null {
+  const years = Math.trunc(age) - plan.personal.currentAge;
+  if (years < 0) {
+    return null;
+  }
+  const current = {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    day: now.getDate(),
+  };
+  const targetYear = current.year + years;
+  return formatDate({
+    year: targetYear,
+    month: current.month,
+    day: Math.min(current.day, daysInMonth(targetYear, current.month)),
+  });
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function formatDate(date: { year: number; month: number; day: number }): string {
+  return `${date.year}-${pad2(date.month)}-${pad2(date.day)}`;
+}
+
+function pad2(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function retirementGoalHealthFromOverviewStatus(status: RetirementOverview["status"]): string {
+  switch (status) {
+    case "achieved":
+    case "on_track":
+      return "on_track";
+    case "at_risk":
+      return "at_risk";
+    case "off_track":
+      return "off_track";
+    default:
+      return "not_applicable";
+  }
 }
 
 function retirementTimingModeFromString(value: string): RetirementTimingMode {

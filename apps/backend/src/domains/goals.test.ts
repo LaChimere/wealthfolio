@@ -621,9 +621,11 @@ describe("TS goals domain", () => {
     }
   });
 
-  test("refreshes retirement summaries without plans and defers plan-backed retirement", async () => {
+  test("refreshes retirement summaries without plans and from plan-backed overviews", async () => {
     const db = createGoalsDb();
-    const service = createGoalService(createGoalRepository(db));
+    const service = createGoalService(createGoalRepository(db), {
+      now: () => new Date("2026-01-15T12:00:00Z"),
+    });
 
     try {
       seedGoal(db, {
@@ -659,11 +661,54 @@ describe("TS goals domain", () => {
       seedGoalPlan(db, {
         goalId: "retirement-plan",
         planKind: "retirement",
-        settingsJson: "{}",
+        plannerMode: "traditional",
+        settingsJson: JSON.stringify(validRetirementPlan({ tax: null })),
       });
-      await expect(service.refreshGoalSummary("retirement-plan", {})).rejects.toThrow(
-        "Retirement goal summary refresh is not implemented in the TS backend yet",
-      );
+      seedFundingRule(db, {
+        id: "retirement-plan-rule",
+        goalId: "retirement-plan",
+        accountId: "brokerage",
+        sharePercent: 50,
+      });
+
+      const overview = await service.computeRetirementOverview("retirement-plan", {
+        brokerage: 200_000,
+      });
+      const refreshed = await service.refreshGoalSummary("retirement-plan", {
+        brokerage: 200_000,
+      });
+      expect(refreshed).toMatchObject({
+        summaryTargetAmount: overview.requiredCapitalAtGoalAge,
+        summaryCurrentValue: 100_000,
+        projectedCompletionDate: "2036-01-15",
+        projectedValueAtTargetDate: overview.portfolioAtGoalAge,
+      });
+      expect(refreshed.summaryProgress).toBeGreaterThan(0);
+      expect(["on_track", "at_risk", "off_track"]).toContain(refreshed.statusHealth);
+
+      seedGoal(db, {
+        id: "retirement-unreachable",
+        title: "Retirement Unreachable",
+        goalType: "retirement",
+        summaryTargetAmount: 123_456,
+      });
+      seedGoalPlan(db, {
+        goalId: "retirement-unreachable",
+        planKind: "retirement",
+        settingsJson: JSON.stringify(
+          validRetirementPlan({
+            expenses: {
+              items: [{ id: "huge", label: "Huge", monthlyAmount: Number.MAX_VALUE / 4 }],
+            },
+          }),
+        ),
+      });
+      const unreachable = await service.refreshGoalSummary("retirement-unreachable", {});
+      expect(unreachable).toMatchObject({
+        summaryTargetAmount: 123_456,
+        summaryCurrentValue: 0,
+        summaryProgress: 0,
+      });
     } finally {
       db.close();
     }

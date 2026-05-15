@@ -5573,6 +5573,19 @@ describe("TS backend HTTP skeleton", () => {
       }
       expect(providerCalls).toBe(6);
 
+      const retirementRefreshResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement-traditional/refresh-summary", {
+          method: "POST",
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(retirementRefreshResponse.status).toBe(200);
+      await expect(retirementRefreshResponse.json()).resolves.toMatchObject({
+        summaryCurrentValue: 100_000,
+        projectedCompletionDate: "2034-01-01",
+      });
+      expect(providerCalls).toBe(7);
+
       const nonRetirementOverviewResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/goal%201/retirement/overview", {
           headers: { authorization: "Bearer sidecar-token" },
@@ -5597,7 +5610,7 @@ describe("TS backend HTTP skeleton", () => {
       await expect(missingPlanResponse.json()).resolves.toMatchObject({
         message: "Invalid input: No plan found for goal retirement-no-plan",
       });
-      expect(providerCalls).toBe(8);
+      expect(providerCalls).toBe(9);
     } finally {
       db.close();
     }
