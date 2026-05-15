@@ -8,7 +8,9 @@ import {
   blendedReturnParams,
   boundedInflationFactor,
   computeGrossWithdrawal,
+  computeRetirementOverview,
   endOfYearValueOfMonthlyContributions,
+  hasMaterialSpendingShortfall,
   initialWithdrawalBuckets,
   netAnnualReturn,
   planAccumulationReturn,
@@ -349,6 +351,103 @@ describe("retirement calculation primitives", () => {
         requiredCapital! * 1.001,
       ),
     ).toBe(true);
+  });
+
+  test("assembles Rust-compatible retirement overview targets and reconciliation", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 35;
+    const overview = computeRetirementOverview(plan, 100_000, "fire", { currentYear: 2026 });
+
+    expect(overview.analysisMode).toBe("fire");
+    expect(overview.desiredFireAge).toBe(plan.personal.targetRetirementAge);
+    expect(overview.portfolioNow).toBe(100_000);
+    expect(overview.requiredCapitalReachable).toBe(true);
+    expect(overview.targetReconciliation.targetAge).toBe(plan.personal.targetRetirementAge);
+    expect(overview.targetReconciliation.inflationFactorToTarget).toBeGreaterThan(1);
+    expect(
+      closeTo(
+        overview.targetReconciliation.requiredCapitalNominal,
+        overview.requiredCapitalAtGoalAge,
+        0.01,
+      ),
+    ).toBe(true);
+    expect(overview.targetReconciliation.requiredCapitalTodayValue).toBeLessThan(
+      overview.targetReconciliation.requiredCapitalNominal,
+    );
+    expect(overview.trajectory.at(-1)?.portfolioEnd).toBeGreaterThanOrEqual(0);
+  });
+
+  test("assembles Rust-compatible budget breakdown units and income percentages", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 35;
+    plan.personal.targetRetirementAge = 65;
+    plan.expenses.items[0].monthlyAmount = 1_000;
+    plan.incomeStreams.push({
+      id: "pension",
+      label: "Pension",
+      streamType: "db",
+      startAge: 65,
+      adjustForInflation: true,
+      monthlyAmount: 500,
+    });
+
+    const overview = computeRetirementOverview(plan, 100_000, "fire", { currentYear: 2026 });
+    const inflationFactor = Math.pow(1.02, 30);
+
+    expect(
+      closeTo(overview.budgetBreakdown.totalMonthlyBudget, 1_000 * inflationFactor, 0.01),
+    ).toBe(true);
+    expect(
+      closeTo(overview.budgetBreakdown.incomeStreams[0].monthlyAmount, 500 * inflationFactor, 0.01),
+    ).toBe(true);
+    expect(closeTo(overview.budgetBreakdown.incomeStreams[0].percentageOfBudget, 0.5)).toBe(true);
+  });
+
+  test("assembles Rust-compatible underfunded and unreachable overview states", () => {
+    const underfunded = basePlan();
+    underfunded.personal.currentAge = 35;
+    underfunded.personal.targetRetirementAge = 45;
+    underfunded.investment.monthlyContribution = 500;
+    const overview = computeRetirementOverview(underfunded, 50_000, "fire", { currentYear: 2026 });
+
+    expect(overview.fundedAtGoalAge).toBe(false);
+    expect(overview.eventuallyReachesFi).toBe(true);
+    expect(overview.suggestedGoalAgeIfUnchanged).toBeGreaterThan(45);
+    expect(overview.requiredAdditionalMonthlyContribution).toBeGreaterThan(0);
+
+    const unreachable = basePlan();
+    unreachable.expenses.items[0].monthlyAmount = Number.MAX_VALUE / 4;
+    const unreachableOverview = computeRetirementOverview(unreachable, 0, "fire", {
+      currentYear: 2026,
+    });
+    expect(unreachableOverview.requiredCapitalReachable).toBe(false);
+    expect(unreachableOverview.successStatus).toBe("shortfall");
+    expect(unreachableOverview.trajectory.every((point) => point.requiredCapital === null)).toBe(
+      true,
+    );
+  });
+
+  test("matches Rust material spending shortfall tolerance", () => {
+    const snapshot = {
+      age: 65,
+      year: 2046,
+      phase: "fire" as const,
+      portfolioValue: 1_000_000,
+      portfolioEndValue: 990_000,
+      annualContribution: 0,
+      annualWithdrawal: 59_950,
+      annualIncome: 12_000,
+      netWithdrawalFromPortfolio: 47_950,
+      pensionAssets: 0,
+      annualTaxes: 0,
+      grossWithdrawal: 47_950,
+      plannedExpenses: 60_000,
+      fundedExpenses: 59_950,
+      annualShortfall: 40,
+    };
+
+    expect(hasMaterialSpendingShortfall(snapshot)).toBe(false);
+    expect(hasMaterialSpendingShortfall({ ...snapshot, annualShortfall: 500 })).toBe(true);
   });
 });
 

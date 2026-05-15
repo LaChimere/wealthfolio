@@ -86,6 +86,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   including schedule-feasibility binary search, FIRE/traditional
   retirement-start decisions, yearly snapshots, coast amount, and pension asset
   tracking.
+- Add deterministic retirement overview assembly in TS, including target
+  reconciliation, budget breakdown, required-capital trajectory, material
+  shortfall tolerance, required additional contribution, later-age FI
+  suggestion, status mapping, and camelCase DTO fields.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread

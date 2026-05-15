@@ -6,6 +6,8 @@ const DEFAULT_BOND_VOLATILITY_RATIO = 0.35;
 const MAX_REQUIRED_CAPITAL_DOUBLING_STEPS = 128;
 const REQUIRED_CAPITAL_SEED_MULTIPLE = 30;
 const FUNDING_TOLERANCE = 0.999;
+const MATERIAL_SHORTFALL_RATE = 0.001;
+const MIN_MATERIAL_SHORTFALL = 1;
 
 export interface RetirementPlan {
   personal: PersonalProfile;
@@ -124,6 +126,97 @@ export interface RetirementProjection {
 
 export interface RetirementProjectionOptions {
   currentYear?: number;
+}
+
+export interface RetirementOverview {
+  analysisMode: RetirementTimingMode;
+  status: "on_track" | "at_risk" | "off_track" | "achieved";
+  successStatus: "on_track" | "shortfall" | "depleted" | "overfunded";
+  desiredFireAge: number;
+  fiAge: number | null;
+  retirementStartAge: number | null;
+  retirementStartReason?: RetirementStartReason;
+  fundedAtGoalAge: boolean;
+  eventuallyReachesFi: boolean;
+  fundedAtRetirementStart: boolean;
+  portfolioNow: number;
+  portfolioAtRetirementStart: number;
+  netFireTarget: number;
+  grossFireTarget: number;
+  portfolioAtGoalAge: number;
+  requiredCapitalReachable: boolean;
+  requiredCapitalAtGoalAge: number;
+  shortfallAtGoalAge: number;
+  surplusAtGoalAge: number;
+  fundedThroughAge: number | null;
+  failureAge: number | null;
+  spendingShortfallAge: number | null;
+  requiredAdditionalMonthlyContribution: number;
+  suggestedGoalAgeIfUnchanged: number | null;
+  coastAmountToday: number;
+  coastReached: boolean;
+  progress: number;
+  taxBucketBalances: TaxBucketBalances;
+  budgetBreakdown: BudgetBreakdown;
+  targetReconciliation: TargetReconciliation;
+  trajectory: RetirementTrajectoryPoint[];
+}
+
+export interface RetirementTrajectoryPoint {
+  age: number;
+  year: number;
+  phase: "accumulation" | "fire";
+  portfolioStart: number;
+  annualContribution: number;
+  annualIncome: number;
+  annualExpenses: number;
+  netWithdrawalFromPortfolio: number;
+  portfolioEnd: number;
+  requiredCapital: number | null;
+  pensionAssets: number;
+  annualTaxes?: number;
+  grossWithdrawal?: number;
+  plannedExpenses?: number;
+  fundedExpenses?: number;
+  annualShortfall?: number;
+}
+
+export interface BudgetBreakdown {
+  totalMonthlyBudget: number;
+  monthlyPortfolioWithdrawal: number;
+  incomeStreams: BudgetStreamItem[];
+  effectiveTaxRate?: number;
+}
+
+export interface BudgetStreamItem {
+  label: string;
+  monthlyAmount: number;
+  percentageOfBudget: number;
+}
+
+export interface TargetReconciliation {
+  targetAge: number;
+  requiredCapitalReachable: boolean;
+  inflationFactorToTarget: number;
+  plannedAnnualExpensesTodayValue: number;
+  plannedAnnualExpensesNominal: number;
+  annualIncomeTodayValue: number;
+  annualIncomeNominal: number;
+  netAnnualSpendingGapTodayValue: number;
+  netAnnualSpendingGapNominal: number;
+  grossAnnualPortfolioWithdrawalTodayValue: number;
+  grossAnnualPortfolioWithdrawalNominal: number;
+  estimatedAnnualTaxesTodayValue: number;
+  estimatedAnnualTaxesNominal: number;
+  requiredCapitalTodayValue: number;
+  requiredCapitalNominal: number;
+  portfolioAtTargetTodayValue: number;
+  portfolioAtTargetNominal: number;
+  shortfallTodayValue: number;
+  shortfallNominal: number;
+  preRetirementNetReturn: number;
+  retirementNetReturn: number;
+  annualInvestmentFeeRate: number;
 }
 
 type TaxBucketKind = "taxable" | "taxDeferred" | "taxFree";
@@ -711,6 +804,148 @@ export function projectRetirementWithModeCached(
   };
 }
 
+export function computeRetirementOverview(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  analysisMode: string,
+  options: RetirementProjectionOptions = {},
+): RetirementOverview {
+  return computeRetirementOverviewWithMode(
+    plan,
+    currentPortfolio,
+    retirementTimingModeFromString(analysisMode),
+    options,
+  );
+}
+
+export function computeRetirementOverviewWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+  options: RetirementProjectionOptions = {},
+): RetirementOverview {
+  const requiredCapitalCache: RequiredCapitalCache = new Map();
+  const netTargetToday = requiredCapitalFor(plan, plan.personal.currentAge, requiredCapitalCache);
+  const requiredCapital = requiredCapitalFor(
+    plan,
+    plan.personal.targetRetirementAge,
+    requiredCapitalCache,
+  );
+  const netTargetTodayValue = netTargetToday ?? 0;
+  const requiredCapitalValue = requiredCapital ?? 0;
+  const coast = computeCoastAmountAtGoal(plan, requiredCapital);
+  const projection = projectRetirementWithModeCached(
+    plan,
+    currentPortfolio,
+    mode,
+    requiredCapitalCache,
+    options,
+  );
+
+  const fiAge = projection.fireAge;
+  const retirementStartAge = projection.retirementStartAge;
+  const portfolioAtRetirementStart =
+    retirementStartAge === null
+      ? 0
+      : (projection.yearByYear.find((snapshot) => snapshot.age === retirementStartAge)
+          ?.portfolioValue ?? 0);
+  const portfolioAtGoal =
+    projection.yearByYear.find((snapshot) => snapshot.age === plan.personal.targetRetirementAge)
+      ?.portfolioValue ?? 0;
+  const requiredCapitalReachable = requiredCapital !== null;
+  const fundedAtGoalAge = requiredCapital !== null && portfolioAtGoal >= requiredCapital;
+  const shortfall = requiredCapital === null ? 0 : Math.max(requiredCapital - portfolioAtGoal, 0);
+  const surplus = requiredCapital === null ? 0 : Math.max(portfolioAtGoal - requiredCapital, 0);
+  const failureAge =
+    projection.yearByYear.find(
+      (snapshot) => snapshot.phase === "fire" && snapshot.portfolioValue <= 0,
+    )?.age ?? null;
+  const spendingShortfallAge =
+    projection.yearByYear.find((snapshot) => hasMaterialSpendingShortfall(snapshot))?.age ?? null;
+  const firstUnfundedAge =
+    failureAge === null
+      ? spendingShortfallAge
+      : spendingShortfallAge === null
+        ? failureAge
+        : Math.min(failureAge, spendingShortfallAge);
+  const fundedThroughAge =
+    firstUnfundedAge === null
+      ? plan.personal.planningHorizonAge
+      : Math.max(firstUnfundedAge - 1, 0);
+  const requiredAdditional =
+    shortfall > 0
+      ? solveRequiredAdditionalMonthly(plan, currentPortfolio, requiredCapitalValue)
+      : 0;
+  const suggestedAge = fundedAtGoalAge
+    ? null
+    : findFiAgeAccumulationOnly(plan, currentPortfolio, requiredCapitalCache);
+  const effectiveFiAge = fiAge ?? suggestedAge;
+  const eventuallyReachesFi = effectiveFiAge !== null;
+  const hasRetirementGap = failureAge !== null || spendingShortfallAge !== null;
+  const status = retirementOverviewStatus(
+    requiredCapitalReachable,
+    netTargetToday !== null,
+    hasRetirementGap,
+    currentPortfolio,
+    netTargetTodayValue,
+    fundedAtGoalAge,
+    effectiveFiAge,
+    plan.personal.targetRetirementAge,
+  );
+  const successStatus = retirementOverviewSuccessStatus(
+    requiredCapitalReachable,
+    failureAge,
+    shortfall,
+    spendingShortfallAge,
+    requiredCapitalValue,
+    surplus,
+  );
+  const progress =
+    netTargetTodayValue > 0 ? Math.min(currentPortfolio / netTargetTodayValue, 1) : 0;
+  const fireAgeForBudget = retirementStartAge ?? plan.personal.targetRetirementAge;
+
+  return {
+    analysisMode: mode,
+    status,
+    successStatus,
+    desiredFireAge: plan.personal.targetRetirementAge,
+    fiAge,
+    retirementStartAge,
+    ...(projection.retirementStartReason === undefined
+      ? {}
+      : { retirementStartReason: projection.retirementStartReason }),
+    fundedAtGoalAge,
+    eventuallyReachesFi,
+    fundedAtRetirementStart: projection.fundedAtRetirement,
+    portfolioNow: currentPortfolio,
+    portfolioAtRetirementStart,
+    netFireTarget: netTargetTodayValue,
+    grossFireTarget: requiredCapitalValue,
+    portfolioAtGoalAge: portfolioAtGoal,
+    requiredCapitalReachable,
+    requiredCapitalAtGoalAge: requiredCapitalValue,
+    shortfallAtGoalAge: shortfall,
+    surplusAtGoalAge: surplus,
+    fundedThroughAge,
+    failureAge,
+    spendingShortfallAge,
+    requiredAdditionalMonthlyContribution: requiredAdditional,
+    suggestedGoalAgeIfUnchanged: suggestedAge,
+    coastAmountToday: coast,
+    coastReached: requiredCapitalReachable && currentPortfolio >= coast,
+    progress,
+    taxBucketBalances: plan.tax?.withdrawalBuckets ?? emptyTaxBucketBalances(),
+    budgetBreakdown: computeBudgetBreakdown(plan, fireAgeForBudget),
+    targetReconciliation: computeTargetReconciliation(
+      plan,
+      plan.personal.targetRetirementAge,
+      requiredCapital,
+      portfolioAtGoal,
+    ),
+    trajectory: buildTrajectory(projection.yearByYear, plan, requiredCapitalCache),
+  };
+}
+
 export function blendedReturnParams(
   accumulationMean: number,
   retirementMean: number,
@@ -748,6 +983,19 @@ export function blendedReturnParams(
   ];
 }
 
+export function hasMaterialSpendingShortfall(snapshot: YearlySnapshot): boolean {
+  if (snapshot.phase !== "fire") {
+    return false;
+  }
+  const shortfall = snapshot.annualShortfall ?? 0;
+  if (shortfall <= 0) {
+    return false;
+  }
+  const spendingGap = Math.max((snapshot.plannedExpenses ?? 0) - snapshot.annualIncome, 0);
+  const tolerance = Math.max(spendingGap * MATERIAL_SHORTFALL_RATE, MIN_MATERIAL_SHORTFALL);
+  return shortfall > tolerance;
+}
+
 function initialRequiredCapitalUpperBound(plan: RetirementPlan, retirementAge: number): number {
   const yearsFromNow = Math.max(retirementAge - plan.personal.currentAge, 0);
   const resolvedPayouts = resolvePlanDcPayouts(
@@ -780,6 +1028,327 @@ function computeCoastAmountAtGoal(plan: RetirementPlan, targetAtGoal: number | n
   return targetAtGoal === null
     ? 0
     : targetAtGoal / Math.pow(1 + planAccumulationReturn(plan), years);
+}
+
+function computeBudgetBreakdown(plan: RetirementPlan, retirementAge: number): BudgetBreakdown {
+  const yearsFromNow = Math.max(retirementAge - plan.personal.currentAge, 0);
+  const [annualBudget] = annualExpensesAtYear(
+    plan.expenses,
+    retirementAge,
+    yearsFromNow,
+    plan.investment.inflationRate,
+  );
+  const totalMonthlyBudget = annualBudget / 12;
+  const resolved = resolvePlanDcPayouts(
+    plan.incomeStreams,
+    plan.personal.currentAge,
+    retirementAge,
+    planAccumulationReturn(plan),
+  );
+  const totalIncomeMonthly =
+    planIncomeAtAge(
+      plan.incomeStreams,
+      resolved,
+      retirementAge,
+      yearsFromNow,
+      plan.investment.inflationRate,
+    ) / 12;
+  const incomeStreams: BudgetStreamItem[] = [];
+  for (const stream of plan.incomeStreams) {
+    if (stream.startAge > retirementAge) {
+      continue;
+    }
+    const baseMonthly = resolved.get(stream.id) ?? stream.monthlyAmount ?? 0;
+    const annual =
+      stream.annualGrowthRate !== undefined && stream.annualGrowthRate !== null
+        ? baseMonthly * 12 * Math.pow(1 + stream.annualGrowthRate, yearsFromNow)
+        : stream.adjustForInflation
+          ? baseMonthly * 12 * Math.pow(1 + plan.investment.inflationRate, yearsFromNow)
+          : baseMonthly * 12;
+    const monthly = annual / 12;
+    incomeStreams.push({
+      label: stream.label,
+      monthlyAmount: monthly,
+      percentageOfBudget: totalMonthlyBudget > 0 ? monthly / totalMonthlyBudget : 0,
+    });
+  }
+
+  const netGapAnnual = Math.max(totalMonthlyBudget - totalIncomeMonthly, 0) * 12;
+  const [grossGapAnnual, taxGapAnnual] = computeGrossWithdrawal(
+    netGapAnnual,
+    plan.tax,
+    retirementAge,
+  );
+  const monthlyPortfolioWithdrawal = grossGapAnnual / 12;
+  const effectiveTaxRate =
+    grossGapAnnual > 0 ? clamp(taxGapAnnual / grossGapAnnual, 0, 0.99) : plan.tax ? 0 : undefined;
+
+  return {
+    totalMonthlyBudget,
+    monthlyPortfolioWithdrawal,
+    incomeStreams,
+    ...(effectiveTaxRate === undefined ? {} : { effectiveTaxRate }),
+  };
+}
+
+function computeTargetReconciliation(
+  plan: RetirementPlan,
+  retirementAge: number,
+  requiredCapital: number | null,
+  portfolioAtTarget: number,
+): TargetReconciliation {
+  const yearsToTarget = Math.max(retirementAge - plan.personal.currentAge, 0);
+  const inflationFactor = boundedInflationFactor(plan.investment.inflationRate, yearsToTarget);
+  const todayValue = (value: number) => value / inflationFactor;
+  const [plannedExpensesNominal] = annualExpensesAtYear(
+    plan.expenses,
+    retirementAge,
+    yearsToTarget,
+    plan.investment.inflationRate,
+  );
+  const resolved = resolvePlanDcPayouts(
+    plan.incomeStreams,
+    plan.personal.currentAge,
+    retirementAge,
+    planAccumulationReturn(plan),
+  );
+  const annualIncomeNominal = planIncomeAtAge(
+    plan.incomeStreams,
+    resolved,
+    retirementAge,
+    yearsToTarget,
+    plan.investment.inflationRate,
+  );
+  const netGapNominal = Math.max(plannedExpensesNominal - annualIncomeNominal, 0);
+  const [grossWithdrawalNominal, taxesNominal] = computeGrossWithdrawal(
+    netGapNominal,
+    plan.tax,
+    retirementAge,
+  );
+  const requiredCapitalNominal = requiredCapital ?? 0;
+  const shortfallNominal =
+    requiredCapital === null ? 0 : Math.max(requiredCapital - portfolioAtTarget, 0);
+
+  return {
+    targetAge: retirementAge,
+    requiredCapitalReachable: requiredCapital !== null,
+    inflationFactorToTarget: inflationFactor,
+    plannedAnnualExpensesTodayValue: todayValue(plannedExpensesNominal),
+    plannedAnnualExpensesNominal: plannedExpensesNominal,
+    annualIncomeTodayValue: todayValue(annualIncomeNominal),
+    annualIncomeNominal,
+    netAnnualSpendingGapTodayValue: todayValue(netGapNominal),
+    netAnnualSpendingGapNominal: netGapNominal,
+    grossAnnualPortfolioWithdrawalTodayValue: todayValue(grossWithdrawalNominal),
+    grossAnnualPortfolioWithdrawalNominal: grossWithdrawalNominal,
+    estimatedAnnualTaxesTodayValue: todayValue(taxesNominal),
+    estimatedAnnualTaxesNominal: taxesNominal,
+    requiredCapitalTodayValue: todayValue(requiredCapitalNominal),
+    requiredCapitalNominal,
+    portfolioAtTargetTodayValue: todayValue(portfolioAtTarget),
+    portfolioAtTargetNominal: portfolioAtTarget,
+    shortfallTodayValue: todayValue(shortfallNominal),
+    shortfallNominal,
+    preRetirementNetReturn: planAccumulationReturn(plan),
+    retirementNetReturn: planRetirementReturn(plan),
+    annualInvestmentFeeRate: plan.investment.annualInvestmentFeeRate,
+  };
+}
+
+function buildTrajectory(
+  yearByYear: YearlySnapshot[],
+  plan: RetirementPlan,
+  requiredCapitalCache: RequiredCapitalCache,
+): RetirementTrajectoryPoint[] {
+  const goalAge = plan.personal.targetRetirementAge;
+  const targetAtGoal = requiredCapitalFor(plan, goalAge, requiredCapitalCache);
+  return yearByYear.map((snapshot) => {
+    const requiredCapital =
+      snapshot.age <= goalAge
+        ? targetAtGoal === null
+          ? null
+          : requiredBalanceAfterRemainingContributions(plan, snapshot.age, goalAge, targetAtGoal)
+        : requiredCapitalFor(plan, snapshot.age, requiredCapitalCache);
+    return {
+      age: snapshot.age,
+      year: snapshot.year,
+      phase: snapshot.phase,
+      portfolioStart: snapshot.portfolioValue,
+      annualContribution: snapshot.annualContribution,
+      annualIncome: snapshot.annualIncome,
+      annualExpenses: snapshot.plannedExpenses ?? snapshot.annualWithdrawal,
+      netWithdrawalFromPortfolio: snapshot.netWithdrawalFromPortfolio,
+      portfolioEnd: snapshot.portfolioEndValue,
+      requiredCapital,
+      pensionAssets: snapshot.pensionAssets,
+      ...(snapshot.annualTaxes === undefined ? {} : { annualTaxes: snapshot.annualTaxes }),
+      ...(snapshot.grossWithdrawal === undefined
+        ? {}
+        : { grossWithdrawal: snapshot.grossWithdrawal }),
+      ...(snapshot.plannedExpenses === undefined
+        ? {}
+        : { plannedExpenses: snapshot.plannedExpenses }),
+      ...(snapshot.fundedExpenses === undefined ? {} : { fundedExpenses: snapshot.fundedExpenses }),
+      ...(snapshot.annualShortfall === undefined
+        ? {}
+        : { annualShortfall: snapshot.annualShortfall }),
+    };
+  });
+}
+
+function requiredBalanceAfterRemainingContributions(
+  plan: RetirementPlan,
+  age: number,
+  goalAge: number,
+  targetAtGoal: number,
+): number {
+  if (age >= goalAge) {
+    return Math.max(targetAtGoal, 0);
+  }
+  const growthFactor = Math.max(1 + planAccumulationReturn(plan), 0.000001);
+  const contributionGrowth =
+    plan.personal.salaryGrowthRate ?? plan.investment.contributionGrowthRate;
+  const firstOffset = Math.max(age - plan.personal.currentAge, 0);
+  const goalOffset = Math.max(goalAge - plan.personal.currentAge, 0);
+  let requiredNext = Math.max(targetAtGoal, 0);
+  for (let offset = goalOffset - 1; offset >= firstOffset; offset -= 1) {
+    const monthlyContribution =
+      plan.investment.monthlyContribution * Math.pow(1 + contributionGrowth, offset);
+    const annualContribution = endOfYearValueOfMonthlyContributions(
+      monthlyContribution,
+      planAccumulationReturn(plan),
+    );
+    requiredNext = Math.max(requiredNext - annualContribution, 0) / growthFactor;
+  }
+  return requiredNext;
+}
+
+function solveRequiredAdditionalMonthly(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  requiredCapital: number,
+): number {
+  const projectedAtGoal = (extraMonthly: number): number => {
+    const adjusted: RetirementPlan = {
+      ...plan,
+      investment: {
+        ...plan.investment,
+        monthlyContribution: plan.investment.monthlyContribution + extraMonthly,
+      },
+    };
+    return (
+      projectRetirement(adjusted, currentPortfolio).yearByYear.find(
+        (snapshot) => snapshot.age === plan.personal.targetRetirementAge,
+      )?.portfolioValue ?? 0
+    );
+  };
+
+  let lowerBound = 0;
+  let upperBound = Math.max(requiredCapital / 12, 1);
+  for (let step = 0; step < 32; step += 1) {
+    if (projectedAtGoal(upperBound) >= requiredCapital) {
+      break;
+    }
+    if (!Number.isFinite(upperBound) || upperBound >= Number.MAX_VALUE / 2) {
+      return upperBound;
+    }
+    upperBound *= 2;
+  }
+  if (projectedAtGoal(upperBound) < requiredCapital) {
+    return upperBound;
+  }
+  for (let step = 0; step < 50; step += 1) {
+    const midpoint = (lowerBound + upperBound) / 2;
+    if (projectedAtGoal(midpoint) >= requiredCapital) {
+      upperBound = midpoint;
+    } else {
+      lowerBound = midpoint;
+    }
+  }
+  return (lowerBound + upperBound) / 2;
+}
+
+function findFiAgeAccumulationOnly(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  requiredCapitalCache: RequiredCapitalCache,
+): number | null {
+  const currentAge = plan.personal.currentAge;
+  const horizon = plan.personal.planningHorizonAge;
+  const contributionGrowth =
+    plan.personal.salaryGrowthRate ?? plan.investment.contributionGrowthRate;
+  const annualReturn = planAccumulationReturn(plan);
+  let portfolio = currentPortfolio;
+  for (let yearIndex = 0; yearIndex <= Math.max(horizon - currentAge, 0); yearIndex += 1) {
+    const age = currentAge + yearIndex;
+    const required = requiredCapitalFor(plan, age, requiredCapitalCache);
+    if (required !== null && portfolio >= required) {
+      return age;
+    }
+    const monthlyContribution =
+      plan.investment.monthlyContribution * Math.pow(1 + contributionGrowth, yearIndex);
+    const annualContribution = endOfYearValueOfMonthlyContributions(
+      monthlyContribution,
+      annualReturn,
+    );
+    portfolio = portfolio * (1 + annualReturn) + annualContribution;
+  }
+  return null;
+}
+
+function retirementOverviewStatus(
+  requiredCapitalReachable: boolean,
+  netTargetTodayReachable: boolean,
+  hasRetirementGap: boolean,
+  currentPortfolio: number,
+  netTargetTodayValue: number,
+  fundedAtGoalAge: boolean,
+  effectiveFiAge: number | null,
+  targetRetirementAge: number,
+): RetirementOverview["status"] {
+  if (!requiredCapitalReachable || !netTargetTodayReachable) {
+    return "off_track";
+  }
+  if (hasRetirementGap) {
+    return "at_risk";
+  }
+  if (currentPortfolio >= netTargetTodayValue) {
+    return "achieved";
+  }
+  if (fundedAtGoalAge) {
+    return "on_track";
+  }
+  if (effectiveFiAge !== null && effectiveFiAge <= targetRetirementAge + 3) {
+    return "at_risk";
+  }
+  return "off_track";
+}
+
+function retirementOverviewSuccessStatus(
+  requiredCapitalReachable: boolean,
+  failureAge: number | null,
+  shortfall: number,
+  spendingShortfallAge: number | null,
+  requiredCapitalValue: number,
+  surplus: number,
+): RetirementOverview["successStatus"] {
+  if (!requiredCapitalReachable) {
+    return "shortfall";
+  }
+  if (failureAge !== null) {
+    return "depleted";
+  }
+  if (shortfall > 0 || spendingShortfallAge !== null) {
+    return "shortfall";
+  }
+  if (requiredCapitalValue > 0 && surplus >= requiredCapitalValue * 0.1) {
+    return "overfunded";
+  }
+  return "on_track";
+}
+
+function retirementTimingModeFromString(value: string): RetirementTimingMode {
+  return value === "traditional" ? "traditional" : "fire";
 }
 
 function withdrawForNetTarget(
