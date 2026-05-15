@@ -78,6 +78,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   normalized/validated plan JSON, funding-share current portfolio, tax-bucket
   balances injected into `tax.withdrawalBuckets`, and `planner_mode` defaulting
   to `fire`.
+- Add the first deterministic retirement calculation primitives in TS:
+  tax-bucket scaling/growth/contribution routing, gross-up and finite-bucket
+  withdrawals, expense/income/DC payout helpers, return/glide-path helpers, and
+  pension fund stepping.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread

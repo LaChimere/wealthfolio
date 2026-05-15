@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 77
+turns_used: 78
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-15T20:55:11+08:00"
+updated_at: "2026-05-15T21:09:34+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -511,6 +511,11 @@ updated_at: "2026-05-15T20:55:11+08:00"
   non-negative tax-bucket balances into `tax.withdrawalBuckets`, and applies
   Rust-compatible `planner_mode` defaulting. Targeted domain tests and backend
   type-check passed.
+- Turn 78: Split the retirement overview work after rubber-duck critique and
+  ported the first deterministic calculation primitives into TS: tax bucket
+  scaling/growth/contribution routing, gross-up and finite-bucket withdrawals,
+  expense/income/DC payout helpers, return/glide-path helpers, and pension fund
+  stepping. Targeted primitive tests and backend type-check passed.
 
 ## Deferred items
 
@@ -532,9 +537,10 @@ updated_at: "2026-05-15T20:55:11+08:00"
   overview service logic, non-retirement summary refresh service logic, no-plan
   retirement summary refresh service logic, runtime valuation-map construction,
   injectable HTTP calculation route seams, save-time summary refresh side
-  effects, refresh-all summary routing, save-up/retirement goal-plan writes, and
-  retirement input preparation now have bounded TS runtime parity, while
-  retirement overview/projection/simulation execution should move in dedicated
+  effects, refresh-all summary routing, save-up/retirement goal-plan writes,
+  retirement input preparation, and the first deterministic retirement
+  calculation primitives now have bounded TS runtime parity, while retirement
+  projection/overview/simulation execution should move in dedicated
   calculation-heavy slices.
 - FX currency converter, historical lookup, and register-pair behavior now have
   TS runtime parity. reason=the standalone TS exchange-rate service initializes

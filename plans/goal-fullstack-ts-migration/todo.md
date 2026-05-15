@@ -116,18 +116,18 @@
     bounded TS runtime parity; non-retirement and no-plan retirement summary
     refresh service logic, guarded valuation-provider HTTP route seams,
     standalone runtime valuation-map construction, refresh-all summary routing,
-    save-time summary refresh side effects, and Rust-compatible retirement input
-    preparation now have bounded TS runtime parity while retirement
-    overview/projection/simulation execution remains deferred to
-    calculation-heavy slices; automatic FX market sync/provider HTTP behavior
-    plus broader market-data sync behavior are deferred to
-    calculation/market-data slices; actual portfolio job execution and event
-    production are deferred to portfolio/calculation slices; TS file-backed
-    secret persistence is wired into standalone runtime while real keyring
-    integration is deferred to a runtime/keyring parity slice; AI provider
-    catalog/settings/model-listing runtime behavior is wired into standalone
-    runtime while AI chat execution is deferred to AI runtime parity slices;
-    alternative asset persistence, manual valuation quotes, liability
+    save-time summary refresh side effects, Rust-compatible retirement input
+    preparation, and deterministic retirement calculation primitives now have
+    bounded TS runtime parity while retirement overview/projection/simulation
+    execution remains deferred to calculation-heavy slices; automatic FX market
+    sync/provider HTTP behavior plus broader market-data sync behavior are
+    deferred to calculation/market-data slices; actual portfolio job execution
+    and event production are deferred to portfolio/calculation slices; TS
+    file-backed secret persistence is wired into standalone runtime while real
+    keyring integration is deferred to a runtime/keyring parity slice; AI
+    provider catalog/settings/model-listing runtime behavior is wired into
+    standalone runtime while AI chat execution is deferred to AI runtime parity
+    slices; alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, and holdings reads now have TS runtime
     parity, while portfolio job enqueue and recalculation side effects are
     deferred to portfolio parity slices; asset read/create/profile/quote-mode
