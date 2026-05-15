@@ -153,22 +153,27 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Add bounded holdings valuation read runtime for `/api/v1/valuations/history`
   and `/api/v1/valuations/latest`, including active-account defaulting,
   request-order preservation, filtered history ranges, numeric valuation fields,
-  and explicit 501 gates for still-deferred holdings fan-out, allocations,
-  snapshots, and imports.
+  and explicit 501 gates for still-deferred holding detail, allocations,
+  snapshot writes, and imports.
 - Add bounded holdings snapshot metadata read runtime for `/api/v1/snapshots`,
   including account/date filters, source defaults, position/cash currency
-  counts, and explicit 501 gates for still-deferred snapshot conversion,
-  deletion, save/import, holdings fan-out, and allocations.
+  counts, and explicit 501 gates for still-deferred deletion, save/import, and
+  allocations.
 - Add bounded historical snapshot holdings read runtime for
   `/api/v1/snapshots/holdings`, including stored snapshot-to-holding conversion,
   asset metadata joins, cash balance holdings, zero-quantity/missing-asset
-  filtering, base-currency injection, and explicit gates for still-deferred live
-  holdings valuation/fan-out, deletion, save/import, and allocations.
+  filtering, base-currency injection, and explicit gates for still-deferred
+  deletion, save/import, and allocations.
 - Add bounded holdings import check runtime for
   `/api/v1/snapshots/import/check`, including account existence checks,
   date/quantity/average-cost validation, existing snapshot date detection, exact
   local asset symbol matching, and explicit gates for provider-backed symbol
   search plus import writes.
+- Add bounded live holdings fan-out runtime for `/api/v1/holdings`, including
+  latest snapshot reads, security/alternative/cash valuation, minor-currency
+  normalization, quote source priority, contract multipliers, FX fallbacks,
+  expired option filtering, base-value weights, and missing quote/asset
+  handling.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -194,10 +199,10 @@ streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
 current/historical net-worth, income summary, simple account performance,
 account performance history/summary, valuation reads, snapshot metadata,
-historical snapshot holdings reads, and holdings import checks, live holdings
-fan-out/allocation/snapshot writes/import runtime, add-on runtime, broader
-market-data runtime beyond mapping/templates/duplicate lookups, read-only
-search, transfer link/unlink, single activity delete, and bounded
+historical snapshot holdings reads, holdings import checks, and live holdings
+fan-out, holding detail/allocation/snapshot writes/import runtime, add-on
+runtime, broader market-data runtime beyond mapping/templates/duplicate lookups,
+read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,

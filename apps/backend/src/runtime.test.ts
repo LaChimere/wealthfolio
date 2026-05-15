@@ -180,10 +180,8 @@ describe("TS backend runtime composition", () => {
       });
 
       const holdingsResponse = await fetch(`${server.baseUrl}/api/v1/holdings?accountId=missing`);
-      expect(holdingsResponse.status).toBe(501);
-      await expect(holdingsResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(holdingsResponse.status).toBe(200);
+      await expect(holdingsResponse.json()).resolves.toEqual([]);
 
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);

@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createHoldingsService } from "./holdings";
+import type { Holding, HoldingsServiceOptions } from "./holdings";
 
 describe("TS holdings domain", () => {
   test("reads historical and latest account valuations from SQLite", async () => {
@@ -125,7 +126,7 @@ describe("TS holdings domain", () => {
         expect.objectContaining({
           id: "CASH-a1-USD",
           holdingType: "cash",
-          instrument: null,
+          instrument: expect.objectContaining({ id: "cash:USD", symbol: "USD" }),
           quantity: 10,
           marketValue: { local: 10, base: 0 },
           price: 1,
@@ -198,7 +199,172 @@ describe("TS holdings domain", () => {
           "Date 2026-01-05: invalid quantity 'NaN' for ",
         ],
       });
-      await expect(service.getHoldings("a1")).rejects.toThrow("Holdings fan-out is not available");
+      expect(await service.getHoldings("a1")).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("calculates live holdings from the latest snapshot with quotes and FX", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({
+        "CAD->USD": "0.75",
+        "GBp->USD": "0.0125",
+        "GBP->GBp": "100",
+        "GBP->USD": "1.25",
+      }),
+      today: () => "2026-01-06",
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha" });
+      insertAsset(db, {
+        id: "lse-share",
+        kind: "INVESTMENT",
+        name: "London Share",
+        displayCode: "LSE",
+        quoteMode: "MARKET",
+        quoteCcy: "GBp",
+        instrumentSymbol: "LSE",
+      });
+      insertAsset(db, {
+        id: "no-quote",
+        kind: "INVESTMENT",
+        name: "No Quote",
+        displayCode: "NOQ",
+        quoteMode: "MARKET",
+      });
+      insertAsset(db, {
+        id: "property",
+        kind: "PROPERTY",
+        name: "Rental Property",
+        displayCode: "HOME",
+        quoteMode: "MANUAL",
+        metadata: { purchase_price: "80000" },
+      });
+      insertAsset(db, {
+        id: "option-live",
+        kind: "INVESTMENT",
+        name: "Live Option",
+        displayCode: "AAPL260117C00100000",
+        quoteMode: "MARKET",
+        instrumentType: "OPTION",
+        instrumentSymbol: "AAPL260117C00100000",
+      });
+      insertAsset(db, {
+        id: "option-expired",
+        kind: "INVESTMENT",
+        name: "Expired Option",
+        displayCode: "AAPL250117C00100000",
+        quoteMode: "MARKET",
+        instrumentType: "OPTION",
+        instrumentSymbol: "AAPL250117C00100000",
+      });
+      insertSnapshot(db, {
+        id: "a1-2026-01-05",
+        accountId: "a1",
+        date: "2026-01-05",
+        positions: {
+          "lse-share": snapshotPosition("lse-share", "2", "600", "GBp", "1"),
+          "no-quote": snapshotPosition("no-quote", "1", "20", "USD", "1"),
+          property: snapshotPosition("property", "0.5", "40000", "USD", "1"),
+          "option-live": snapshotPosition("option-live", "1", "50", "USD", "100"),
+          "option-expired": snapshotPosition("option-expired", "1", "30", "USD", "100"),
+          missing: snapshotPosition("missing", "1", "10", "USD", "1"),
+        },
+        cashBalances: { CAD: "10", USD: "0" },
+      });
+      insertQuote(db, {
+        id: "lse-share-2026-01-05-broker",
+        assetId: "lse-share",
+        day: "2026-01-05",
+        source: "BROKER",
+        close: "1000",
+        currency: "GBp",
+      });
+      insertQuote(db, {
+        id: "lse-share-2026-01-05-manual",
+        assetId: "lse-share",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "500",
+        currency: "GBp",
+      });
+      insertQuote(db, {
+        id: "property-2026-01-05",
+        assetId: "property",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "100000",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "option-live-2026-01-04",
+        assetId: "option-live",
+        day: "2026-01-04",
+        source: "YAHOO",
+        close: "1.5",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "option-live-2026-01-05",
+        assetId: "option-live",
+        day: "2026-01-05",
+        source: "YAHOO",
+        close: "2",
+        currency: "USD",
+      });
+
+      const holdings = (await service.getHoldings("a1")) as Holding[];
+
+      expect(holdings.map((holding) => holding.id)).not.toContain("SEC-a1-option-expired");
+      expect(holdings.map((holding) => holding.id)).not.toContain("SEC-a1-missing");
+
+      const lse = holdingById(holdings, "SEC-a1-lse-share");
+      expect(lse.localCurrency).toBe("GBP");
+      expect(lse.instrument?.currency).toBe("GBP");
+      expect(lse.fxRate).toBe(1.25);
+      expect(lse.price).toBe(5);
+      expect(lse.marketValue).toEqual({ local: 10, base: 12.5 });
+      expect(lse.costBasis).toEqual({ local: 6, base: 7.5 });
+      expect(lse.prevCloseValue).toEqual({ local: 20, base: 25 });
+      expect(lse.dayChange).toEqual({ local: -10, base: -12.5 });
+      expect(lse.dayChangePct).toBe(-0.5);
+      expect(lse.unrealizedGain).toEqual({ local: 4, base: 5 });
+      expect(lse.unrealizedGainPct).toBe(0.6667);
+
+      const noQuote = holdingById(holdings, "SEC-a1-no-quote");
+      expect(noQuote.fxRate).toBe(1);
+      expect(noQuote.costBasis).toEqual({ local: 20, base: 20 });
+      expect(noQuote.marketValue).toEqual({ local: 0, base: 0 });
+      expect(noQuote.price).toBeNull();
+
+      const property = holdingById(holdings, "ALT-a1-property");
+      expect(property.holdingType).toBe("alternativeAsset");
+      expect(property.marketValue).toEqual({ local: 50000, base: 50000 });
+      expect(property.price).toBe(100000);
+      expect(property.unrealizedGain).toEqual({ local: 10000, base: 10000 });
+      expect(property.unrealizedGainPct).toBe(0.25);
+      expect(property.dayChange).toBeNull();
+
+      const option = holdingById(holdings, "SEC-a1-option-live");
+      expect(option.contractMultiplier).toBe(100);
+      expect(option.marketValue).toEqual({ local: 200, base: 200 });
+      expect(option.prevCloseValue).toEqual({ local: 150, base: 150 });
+      expect(option.dayChange).toEqual({ local: 50, base: 50 });
+      expect(option.dayChangePct).toBe(0.3333);
+
+      const cash = holdingById(holdings, "CASH-a1-CAD");
+      expect(cash.fxRate).toBe(0.75);
+      expect(cash.marketValue).toEqual({ local: 10, base: 7.5 });
+      expect(cash.costBasis).toEqual({ local: 10, base: 7.5 });
+      expect(cash.prevCloseValue).toEqual({ local: 10, base: 7.5 });
+      expect(cash.totalGain).toEqual({ local: 0, base: 0 });
+
+      const totalWeight = holdings.reduce((sum, holding) => sum + holding.weight, 0);
+      expect(totalWeight).toBeCloseTo(1, 8);
     } finally {
       db.close();
     }
@@ -224,9 +390,19 @@ function createHoldingsDb(): Database {
       is_active INTEGER NOT NULL DEFAULT 1,
       quote_mode TEXT NOT NULL DEFAULT 'MARKET',
       quote_ccy TEXT NOT NULL DEFAULT 'USD',
+      instrument_type TEXT,
       instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       provider_config TEXT
+    );
+    CREATE TABLE quotes (
+      id TEXT PRIMARY KEY NOT NULL,
+      asset_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      source TEXT NOT NULL,
+      close TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      timestamp TEXT NOT NULL
     );
     CREATE TABLE daily_account_valuation (
       id TEXT PRIMARY KEY NOT NULL,
@@ -278,16 +454,31 @@ function insertAsset(
     name: string;
     displayCode: string;
     quoteMode: string;
+    quoteCcy?: string;
+    metadata?: unknown;
+    instrumentType?: string;
+    instrumentSymbol?: string;
   },
 ): void {
   db.prepare(
     `
       INSERT INTO assets (
-        id, kind, name, display_code, quote_mode, quote_ccy
+        id, kind, name, display_code, metadata, quote_mode, quote_ccy, instrument_type,
+        instrument_symbol
       )
-      VALUES (?, ?, ?, ?, ?, 'USD')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-  ).run(asset.id, asset.kind, asset.name, asset.displayCode, asset.quoteMode);
+  ).run(
+    asset.id,
+    asset.kind,
+    asset.name,
+    asset.displayCode,
+    asset.metadata === undefined ? null : JSON.stringify(asset.metadata),
+    asset.quoteMode,
+    asset.quoteCcy ?? "USD",
+    asset.instrumentType ?? null,
+    asset.instrumentSymbol ?? asset.displayCode,
+  );
 }
 
 function insertSnapshot(
@@ -316,6 +507,73 @@ function insertSnapshot(
     JSON.stringify(snapshot.positions),
     JSON.stringify(snapshot.cashBalances),
   );
+}
+
+function snapshotPosition(
+  assetId: string,
+  quantity: string,
+  totalCostBasis: string,
+  currency: string,
+  contractMultiplier: string,
+): Record<string, string> {
+  return {
+    assetId,
+    quantity,
+    totalCostBasis,
+    currency,
+    inceptionDate: "2025-12-31T00:00:00Z",
+    contractMultiplier,
+  };
+}
+
+function insertQuote(
+  db: Database,
+  quote: {
+    id: string;
+    assetId: string;
+    day: string;
+    source: string;
+    close: string;
+    currency: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO quotes (id, asset_id, day, source, close, currency, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    quote.id,
+    quote.assetId,
+    quote.day,
+    quote.source,
+    quote.close,
+    quote.currency,
+    `${quote.day}T00:00:00Z`,
+  );
+}
+
+function fakeExchangeRateService(
+  rates: Record<string, string>,
+): NonNullable<HoldingsServiceOptions["exchangeRateService"]> {
+  return {
+    getLatestExchangeRate(fromCurrency, toCurrency) {
+      if (fromCurrency === toCurrency) {
+        return "1";
+      }
+      const rate = rates[`${fromCurrency}->${toCurrency}`];
+      if (rate === undefined) {
+        throw new Error(`Missing FX rate ${fromCurrency}->${toCurrency}`);
+      }
+      return rate;
+    },
+  };
+}
+
+function holdingById(holdings: Holding[], id: string): Holding {
+  const holding = holdings.find((candidate) => candidate.id === id);
+  expect(holding).toBeDefined();
+  return holding as Holding;
 }
 
 function insertValuation(

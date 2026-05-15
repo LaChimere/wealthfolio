@@ -239,7 +239,7 @@ function createServicesFromDatabase(
       classificationMigrationProvider: taxonomyService,
       settingsProvider: settingsService,
     }),
-    holdingsService: createHoldingsService(db, { baseCurrency }),
+    holdingsService: createHoldingsService(db, { baseCurrency, exchangeRateService }),
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),

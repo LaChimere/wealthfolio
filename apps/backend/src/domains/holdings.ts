@@ -2,6 +2,10 @@ import type { Database } from "bun:sqlite";
 
 import Decimal from "decimal.js";
 
+import type { ExchangeRateService } from "./exchange-rates";
+
+Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
+
 export interface HoldingInput {
   assetId?: string;
   symbol: string;
@@ -86,6 +90,8 @@ export interface HoldingsService {
 
 export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
+  exchangeRateService?: Pick<ExchangeRateService, "getLatestExchangeRate">;
+  today?: () => string;
 }
 
 export interface DailyAccountValuation {
@@ -140,7 +146,7 @@ export interface Holding {
   contractMultiplier: number;
   localCurrency: string;
   baseCurrency: string;
-  fxRate: null;
+  fxRate: number | null;
   marketValue: MonetaryValue;
   costBasis: MonetaryValue | null;
   price: number | null;
@@ -219,6 +225,8 @@ interface AssetRow {
   metadata: string | null;
   quote_mode: string;
   quote_ccy: string;
+  instrument_type: string | null;
+  instrument_symbol: string | null;
   instrument_exchange_mic: string | null;
   provider_config: string | null;
 }
@@ -231,6 +239,25 @@ interface SnapshotDateRow {
   snapshot_date: string;
 }
 
+interface QuoteRow {
+  asset_id: string;
+  day: string;
+  source: string;
+  close: string;
+  currency: string;
+  timestamp: string;
+}
+
+interface LatestQuotePair {
+  latest: QuoteRow;
+  previous: QuoteRow | null;
+}
+
+interface CurrencyNormalizationRule {
+  majorCode: string;
+  factor: Decimal;
+}
+
 const ALTERNATIVE_ASSET_KINDS = new Set([
   "PROPERTY",
   "VEHICLE",
@@ -240,13 +267,28 @@ const ALTERNATIVE_ASSET_KINDS = new Set([
   "OTHER",
 ]);
 
+const CURRENCY_NORMALIZATION_RULES = new Map<string, CurrencyNormalizationRule>([
+  ["GBp", { majorCode: "GBP", factor: new Decimal("0.01") }],
+  ["GBX", { majorCode: "GBP", factor: new Decimal("0.01") }],
+  ["KWF", { majorCode: "KWD", factor: new Decimal("0.01") }],
+  ["ZAc", { majorCode: "ZAR", factor: new Decimal("0.01") }],
+  ["ZAC", { majorCode: "ZAR", factor: new Decimal("0.01") }],
+  ["ILA", { majorCode: "ILS", factor: new Decimal("0.01") }],
+]);
+
+const DECIMAL_PRECISION = 8;
+
 export function createHoldingsService(
   db: Database,
   options: HoldingsServiceOptions = {},
 ): HoldingsService {
   return {
-    getHoldings() {
-      return notImplemented("Holdings fan-out is not available in the TS runtime yet");
+    getHoldings(accountId) {
+      try {
+        return readLiveHoldings(db, accountId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     getHolding() {
       return notImplemented("Holding detail is not available in the TS runtime yet");
@@ -342,7 +384,43 @@ function readSnapshotHoldings(
   date: string,
   baseCurrency: string | undefined,
 ): Holding[] {
-  const snapshot = db
+  const snapshot = readSnapshotByDate(db, accountId, date);
+  if (!snapshot) {
+    throw new Error(`No snapshot found for date ${date}`);
+  }
+
+  return buildHoldingsFromSnapshot(
+    db,
+    snapshot,
+    baseCurrency ?? snapshot.currency,
+    snapshot.snapshot_date,
+    false,
+  );
+}
+
+function readLiveHoldings(
+  db: Database,
+  accountId: string,
+  options: HoldingsServiceOptions,
+): Holding[] {
+  const snapshot = readLatestSnapshot(db, accountId);
+  if (!snapshot) {
+    return [];
+  }
+
+  const resolvedBaseCurrency = resolveBaseCurrency(options) ?? snapshot.currency;
+  const today = resolveToday(options);
+  const holdings = buildHoldingsFromSnapshot(db, snapshot, resolvedBaseCurrency, today, true);
+  valueHoldings(holdings, readLatestQuotePairs(db, holdings), options, today);
+  applyPortfolioWeights(holdings);
+  for (const holding of holdings) {
+    normalizeHoldingCurrency(holding);
+  }
+  return holdings;
+}
+
+function readSnapshotByDate(db: Database, accountId: string, date: string): SnapshotRow | null {
+  return db
     .query<SnapshotRow, [string, string]>(
       `
         SELECT id, account_id, snapshot_date, currency, positions, cash_balances
@@ -351,11 +429,29 @@ function readSnapshotHoldings(
       `,
     )
     .get(accountId, date);
-  if (!snapshot) {
-    throw new Error(`No snapshot found for date ${date}`);
-  }
+}
 
-  const resolvedBaseCurrency = baseCurrency ?? snapshot.currency;
+function readLatestSnapshot(db: Database, accountId: string): SnapshotRow | null {
+  return db
+    .query<SnapshotRow, [string]>(
+      `
+        SELECT id, account_id, snapshot_date, currency, positions, cash_balances
+        FROM holdings_snapshots
+        WHERE account_id = ?
+        ORDER BY snapshot_date DESC, calculated_at DESC
+        LIMIT 1
+      `,
+    )
+    .get(accountId);
+}
+
+function buildHoldingsFromSnapshot(
+  db: Database,
+  snapshot: SnapshotRow,
+  baseCurrency: string,
+  asOfDate: string,
+  skipExpiredOptions: boolean,
+): Holding[] {
   const positions = snapshotPositionsFromJson(snapshot.positions);
   const assetIds = positions.map((position) => position.assetId);
   const assetsById = readAssetsById(db, assetIds);
@@ -370,7 +466,10 @@ function readSnapshotHoldings(
     if (!asset) {
       continue;
     }
-    holdings.push(holdingFromPosition(snapshot, position, asset, quantity, resolvedBaseCurrency));
+    if (skipExpiredOptions && isExpiredOptionAsset(asset, asOfDate)) {
+      continue;
+    }
+    holdings.push(holdingFromPosition(snapshot, position, asset, quantity, baseCurrency, asOfDate));
   }
 
   for (const [currency, amountValue] of Object.entries(
@@ -380,10 +479,358 @@ function readSnapshotHoldings(
     if (amount === 0) {
       continue;
     }
-    holdings.push(cashHoldingFromSnapshot(snapshot, currency, amount, resolvedBaseCurrency));
+    holdings.push(cashHoldingFromSnapshot(snapshot, currency, amount, baseCurrency, asOfDate));
   }
 
   return holdings;
+}
+
+function valueHoldings(
+  holdings: Holding[],
+  quotePairs: Map<string, LatestQuotePair>,
+  options: HoldingsServiceOptions,
+  today: string,
+): void {
+  for (const holding of holdings) {
+    if (holding.holdingType === "cash") {
+      holding.asOfDate = today;
+      calculateCashValuation(holding, options);
+      continue;
+    }
+
+    const assetId = holding.instrument?.id;
+    const quotePair = assetId ? quotePairs.get(assetId) : undefined;
+    holding.asOfDate = quotePair ? dateStringFromTimestamp(quotePair.latest.timestamp) : today;
+    if (holding.holdingType === "alternativeAsset") {
+      calculateAlternativeAssetValuation(holding, quotePair, options);
+    } else {
+      calculateSecurityValuation(holding, quotePair, options);
+    }
+  }
+}
+
+function calculateSecurityValuation(
+  holding: Holding,
+  quotePair: LatestQuotePair | undefined,
+  options: HoldingsServiceOptions,
+): void {
+  const quantity = decimalOrFallback(holding.quantity, new Decimal(0));
+  const contractMultiplier = decimalOrFallback(holding.contractMultiplier, new Decimal(1));
+  const positionCurrency = holding.localCurrency;
+  const fxRateLocalToBase = getFxRateOrFallback(options, positionCurrency, holding.baseCurrency);
+  holding.fxRate = decimalToNumber(fxRateLocalToBase, new Decimal(1));
+
+  const costBasis = holding.costBasis;
+  if (costBasis) {
+    costBasis.base = decimalToNumber(
+      decimalOrFallback(costBasis.local, new Decimal(0)).mul(fxRateLocalToBase),
+      new Decimal(0),
+    );
+  }
+
+  if (!quotePair) {
+    holding.marketValue = zeroMonetaryValue();
+    holding.price = null;
+    holding.unrealizedGain = null;
+    holding.unrealizedGainPct = null;
+    holding.dayChange = null;
+    holding.dayChangePct = null;
+    holding.prevCloseValue = null;
+    holding.realizedGain = null;
+    holding.realizedGainPct = null;
+    holding.totalGain = null;
+    holding.totalGainPct = null;
+    return;
+  }
+
+  const [normalizedPrice, normalizedQuoteCurrency] = normalizeAmount(
+    quotePair.latest.close,
+    quotePair.latest.currency,
+  );
+  const fxRateQuoteToBase = getFxRateOrFallback(
+    options,
+    normalizedQuoteCurrency,
+    holding.baseCurrency,
+  );
+  const fxRateQuoteToLocal = getFxRateOrFallback(
+    options,
+    normalizedQuoteCurrency,
+    positionCurrency,
+  );
+  const marketValueQuoteMajor = normalizedPrice.mul(quantity).mul(contractMultiplier);
+  const marketValueLocal = marketValueQuoteMajor.mul(fxRateQuoteToLocal);
+  const marketValueBase = marketValueQuoteMajor.mul(fxRateQuoteToBase);
+
+  holding.price = decimalToNumber(normalizedPrice.mul(fxRateQuoteToLocal), new Decimal(0));
+  holding.marketValue = monetaryValue(marketValueLocal, marketValueBase);
+
+  if (costBasis) {
+    const costBasisLocal = decimalOrFallback(costBasis.local, new Decimal(0));
+    const costBasisBase = decimalOrFallback(costBasis.base, new Decimal(0));
+    const unrealizedGainLocal = marketValueLocal.sub(costBasisLocal);
+    const unrealizedGainBase = marketValueBase.sub(costBasisBase);
+    holding.unrealizedGain = monetaryValue(unrealizedGainLocal, unrealizedGainBase);
+    holding.unrealizedGainPct = gainPct(unrealizedGainBase, costBasisBase);
+  } else {
+    holding.unrealizedGain = null;
+    holding.unrealizedGainPct = null;
+  }
+
+  if (quotePair.previous) {
+    const [previousPrice, previousQuoteCurrency] = normalizeAmount(
+      quotePair.previous.close,
+      quotePair.previous.currency,
+    );
+    if (previousQuoteCurrency === normalizedQuoteCurrency) {
+      const previousValueQuoteMajor = previousPrice.mul(quantity).mul(contractMultiplier);
+      const previousValueLocal = previousValueQuoteMajor.mul(fxRateQuoteToLocal);
+      const previousValueBase = previousValueQuoteMajor.mul(fxRateQuoteToBase);
+      const dayChangeQuoteMajor = marketValueQuoteMajor.sub(previousValueQuoteMajor);
+      const dayChangeBase = dayChangeQuoteMajor.mul(fxRateQuoteToBase);
+
+      holding.prevCloseValue = monetaryValue(previousValueLocal, previousValueBase);
+      holding.dayChange = monetaryValue(dayChangeQuoteMajor.mul(fxRateQuoteToLocal), dayChangeBase);
+      holding.dayChangePct = previousValueBase.isZero()
+        ? dayChangeBase.isZero()
+          ? 0
+          : null
+        : decimalToNumber(dayChangeBase.div(previousValueBase).toDecimalPlaces(4), new Decimal(0));
+    } else {
+      holding.prevCloseValue = null;
+      holding.dayChange = null;
+      holding.dayChangePct = null;
+    }
+  } else {
+    holding.prevCloseValue = null;
+    holding.dayChange = null;
+    holding.dayChangePct = null;
+  }
+
+  holding.realizedGain = null;
+  holding.realizedGainPct = null;
+  holding.totalGain = cloneMonetaryValue(holding.unrealizedGain);
+  holding.totalGainPct = holding.unrealizedGainPct;
+}
+
+function calculateAlternativeAssetValuation(
+  holding: Holding,
+  quotePair: LatestQuotePair | undefined,
+  options: HoldingsServiceOptions,
+): void {
+  const quantity = decimalOrFallback(holding.quantity, new Decimal(0));
+  const positionCurrency = holding.localCurrency;
+  const fxRateLocalToBase = getFxRateOrFallback(options, positionCurrency, holding.baseCurrency);
+  holding.fxRate = decimalToNumber(fxRateLocalToBase, new Decimal(1));
+
+  const costBasis = holding.costBasis;
+  if (costBasis) {
+    costBasis.base = decimalToNumber(
+      decimalOrFallback(costBasis.local, new Decimal(0)).mul(fxRateLocalToBase),
+      new Decimal(0),
+    );
+  }
+
+  if (!quotePair) {
+    holding.marketValue = zeroMonetaryValue();
+    holding.price = null;
+    holding.unrealizedGain = null;
+    holding.unrealizedGainPct = null;
+    holding.dayChange = null;
+    holding.dayChangePct = null;
+    holding.prevCloseValue = null;
+    holding.realizedGain = null;
+    holding.realizedGainPct = null;
+    holding.totalGain = null;
+    holding.totalGainPct = null;
+    return;
+  }
+
+  const [normalizedPrice, normalizedQuoteCurrency] = normalizeAmount(
+    quotePair.latest.close,
+    quotePair.latest.currency,
+  );
+  const fxRateQuoteToBase = getFxRateOrFallback(
+    options,
+    normalizedQuoteCurrency,
+    holding.baseCurrency,
+  );
+  const fxRateQuoteToLocal = getFxRateOrFallback(
+    options,
+    normalizedQuoteCurrency,
+    positionCurrency,
+  );
+  const marketValueQuoteMajor = normalizedPrice.mul(quantity);
+  const marketValueLocal = marketValueQuoteMajor.mul(fxRateQuoteToLocal);
+  const marketValueBase = marketValueQuoteMajor.mul(fxRateQuoteToBase);
+
+  holding.price = decimalToNumber(normalizedPrice.mul(fxRateQuoteToLocal), new Decimal(0));
+  holding.marketValue = monetaryValue(marketValueLocal, marketValueBase);
+
+  const purchasePrice =
+    holding.purchasePrice === null
+      ? null
+      : decimalOrFallback(holding.purchasePrice, new Decimal(0));
+  if (purchasePrice) {
+    const totalCostLocal = quantity.mul(purchasePrice);
+    const totalCostBase = totalCostLocal.mul(fxRateLocalToBase);
+    const unrealizedGainLocal = marketValueLocal.sub(totalCostLocal);
+    const unrealizedGainBase = marketValueBase.sub(totalCostBase);
+    holding.unrealizedGain = monetaryValue(unrealizedGainLocal, unrealizedGainBase);
+    holding.unrealizedGainPct = gainPct(unrealizedGainBase, totalCostBase);
+  } else if (costBasis) {
+    const costBasisLocal = decimalOrFallback(costBasis.local, new Decimal(0));
+    const costBasisBase = decimalOrFallback(costBasis.base, new Decimal(0));
+    const unrealizedGainLocal = marketValueLocal.sub(costBasisLocal);
+    const unrealizedGainBase = marketValueBase.sub(costBasisBase);
+    holding.unrealizedGain = monetaryValue(unrealizedGainLocal, unrealizedGainBase);
+    holding.unrealizedGainPct = gainPct(unrealizedGainBase, costBasisBase);
+  } else {
+    holding.unrealizedGain = null;
+    holding.unrealizedGainPct = null;
+  }
+
+  holding.dayChange = null;
+  holding.dayChangePct = null;
+  holding.prevCloseValue = null;
+  holding.realizedGain = null;
+  holding.realizedGainPct = null;
+  holding.totalGain = cloneMonetaryValue(holding.unrealizedGain);
+  holding.totalGainPct = holding.unrealizedGainPct;
+}
+
+function calculateCashValuation(holding: Holding, options: HoldingsServiceOptions): void {
+  const amount = decimalOrFallback(holding.quantity, new Decimal(0));
+  const fxRateCashToBase = getFxRateOrFallback(
+    options,
+    holding.localCurrency,
+    holding.baseCurrency,
+  );
+  const valueBase = amount.mul(fxRateCashToBase);
+
+  holding.price = 1;
+  holding.fxRate = decimalToNumber(fxRateCashToBase, new Decimal(1));
+  holding.marketValue = monetaryValue(amount, valueBase);
+  holding.costBasis = monetaryValue(amount, valueBase);
+  holding.prevCloseValue = monetaryValue(amount, valueBase);
+  holding.unrealizedGain = zeroMonetaryValue();
+  holding.unrealizedGainPct = 0;
+  holding.realizedGain = zeroMonetaryValue();
+  holding.realizedGainPct = 0;
+  holding.totalGain = zeroMonetaryValue();
+  holding.totalGainPct = 0;
+  holding.dayChange = zeroMonetaryValue();
+  holding.dayChangePct = 0;
+}
+
+function readLatestQuotePairs(db: Database, holdings: Holding[]): Map<string, LatestQuotePair> {
+  const assetIds = [
+    ...new Set(
+      holdings
+        .filter(
+          (holding) =>
+            holding.holdingType === "security" || holding.holdingType === "alternativeAsset",
+        )
+        .flatMap((holding) => (holding.instrument ? [holding.instrument.id] : [])),
+    ),
+  ];
+  if (assetIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<QuoteRow & { rn: number }, string[]>(
+      `
+        WITH ranked_quotes AS (
+          SELECT
+            asset_id,
+            day,
+            source,
+            close,
+            currency,
+            timestamp,
+            ROW_NUMBER() OVER (
+              PARTITION BY asset_id
+              ORDER BY
+                day DESC,
+                CASE source
+                  WHEN 'MANUAL' THEN 1
+                  WHEN 'BROKER' THEN 2
+                  ELSE 3
+                END ASC
+            ) AS rn
+          FROM quotes
+          WHERE asset_id IN (${placeholders})
+        )
+        SELECT asset_id, day, source, close, currency, timestamp, rn
+        FROM ranked_quotes
+        WHERE rn <= 2
+        ORDER BY asset_id ASC, rn ASC
+      `,
+    )
+    .all(...assetIds);
+
+  const quotesByAssetId = new Map<string, QuoteRow[]>();
+  for (const row of rows) {
+    const quoteRows = quotesByAssetId.get(row.asset_id) ?? [];
+    quoteRows.push(row);
+    quotesByAssetId.set(row.asset_id, quoteRows);
+  }
+
+  const quotePairs = new Map<string, LatestQuotePair>();
+  for (const [assetId, quoteRows] of quotesByAssetId) {
+    const latest = quoteRows[0];
+    if (latest) {
+      quotePairs.set(assetId, {
+        latest,
+        previous: quoteRows[1] ?? null,
+      });
+    }
+  }
+  return quotePairs;
+}
+
+function getFxRateOrFallback(
+  options: HoldingsServiceOptions,
+  fromCurrency: string,
+  toCurrency: string,
+): Decimal {
+  try {
+    return decimalOrFallback(
+      options.exchangeRateService?.getLatestExchangeRate(fromCurrency, toCurrency) ?? 1,
+      new Decimal(1),
+    );
+  } catch {
+    return new Decimal(1);
+  }
+}
+
+function gainPct(gainBase: Decimal, costBase: Decimal): number {
+  if (!costBase.isZero()) {
+    return decimalToNumber(gainBase.div(costBase).toDecimalPlaces(4), new Decimal(0));
+  }
+  return gainBase.isZero() ? 0 : 1;
+}
+
+function applyPortfolioWeights(holdings: Holding[]): void {
+  const totalBaseValue = holdings.reduce(
+    (total, holding) => total.add(decimalOrFallback(holding.marketValue.base, new Decimal(0))),
+    new Decimal(0),
+  );
+  if (totalBaseValue.lte(0)) {
+    for (const holding of holdings) {
+      holding.weight = 0;
+    }
+    return;
+  }
+  for (const holding of holdings) {
+    holding.weight = decimalToNumber(
+      decimalOrFallback(holding.marketValue.base, new Decimal(0))
+        .div(totalBaseValue)
+        .toDecimalPlaces(DECIMAL_PRECISION),
+      new Decimal(0),
+    );
+  }
 }
 
 function checkHoldingsImport(
@@ -537,6 +984,7 @@ function holdingFromPosition(
   asset: AssetRow,
   quantity: number,
   baseCurrency: string,
+  asOfDate: string,
 ): Holding {
   const isAlternative = ALTERNATIVE_ASSET_KINDS.has(asset.kind);
   return {
@@ -579,7 +1027,7 @@ function holdingFromPosition(
     dayChangePct: null,
     prevCloseValue: null,
     weight: 0,
-    asOfDate: snapshot.snapshot_date,
+    asOfDate,
     metadata: parseNullableJson(asset.metadata),
   };
 }
@@ -589,12 +1037,23 @@ function cashHoldingFromSnapshot(
   currency: string,
   amount: number,
   baseCurrency: string,
+  asOfDate: string,
 ): Holding {
   return {
     id: `CASH-${snapshot.account_id}-${currency}`,
     accountId: snapshot.account_id,
     holdingType: "cash",
-    instrument: null,
+    instrument: {
+      id: `cash:${currency}`,
+      symbol: currency,
+      name: `Cash (${currency})`,
+      currency,
+      notes: null,
+      pricingMode: "MANUAL",
+      preferredProvider: null,
+      exchangeMic: null,
+      classifications: null,
+    },
     assetKind: null,
     quantity: amount,
     openDate: null,
@@ -613,23 +1072,98 @@ function cashHoldingFromSnapshot(
     },
     price: 1,
     purchasePrice: null,
-    unrealizedGain: null,
-    unrealizedGainPct: null,
-    realizedGain: null,
-    realizedGainPct: null,
-    totalGain: null,
-    totalGainPct: null,
-    dayChange: null,
-    dayChangePct: null,
+    unrealizedGain: zeroMonetaryValue(),
+    unrealizedGainPct: 0,
+    realizedGain: zeroMonetaryValue(),
+    realizedGainPct: 0,
+    totalGain: zeroMonetaryValue(),
+    totalGainPct: 0,
+    dayChange: zeroMonetaryValue(),
+    dayChangePct: 0,
     prevCloseValue: null,
     weight: 0,
-    asOfDate: snapshot.snapshot_date,
+    asOfDate,
     metadata: null,
   };
 }
 
 function zeroMonetaryValue(): MonetaryValue {
   return { local: 0, base: 0 };
+}
+
+function monetaryValue(local: Decimal, base: Decimal): MonetaryValue {
+  return {
+    local: decimalToNumber(local, new Decimal(0)),
+    base: decimalToNumber(base, new Decimal(0)),
+  };
+}
+
+function cloneMonetaryValue(value: MonetaryValue | null): MonetaryValue | null {
+  return value ? { ...value } : null;
+}
+
+function normalizeHoldingCurrency(holding: Holding): void {
+  if (holding.instrument) {
+    holding.instrument.currency = normalizeCurrencyCode(holding.instrument.currency);
+  }
+
+  const rule = CURRENCY_NORMALIZATION_RULES.get(holding.localCurrency);
+  if (!rule) {
+    return;
+  }
+
+  holding.localCurrency = rule.majorCode;
+  if (holding.fxRate !== null) {
+    holding.fxRate = decimalToNumber(
+      decimalOrFallback(holding.fxRate, new Decimal(1)).div(rule.factor),
+      new Decimal(1),
+    );
+  }
+
+  if (holding.holdingType === "cash") {
+    holding.price = 1;
+  } else {
+    if (holding.price !== null) {
+      holding.price = decimalToNumber(
+        decimalOrFallback(holding.price, new Decimal(0)).mul(rule.factor),
+        new Decimal(0),
+      );
+    }
+    if (holding.purchasePrice !== null) {
+      holding.purchasePrice = decimalToNumber(
+        decimalOrFallback(holding.purchasePrice, new Decimal(0)).mul(rule.factor),
+        new Decimal(0),
+      );
+    }
+  }
+
+  applyLocalCurrencyFactor(holding.marketValue, rule.factor);
+  applyLocalCurrencyFactor(holding.costBasis, rule.factor);
+  applyLocalCurrencyFactor(holding.unrealizedGain, rule.factor);
+  applyLocalCurrencyFactor(holding.realizedGain, rule.factor);
+  applyLocalCurrencyFactor(holding.totalGain, rule.factor);
+  applyLocalCurrencyFactor(holding.dayChange, rule.factor);
+  applyLocalCurrencyFactor(holding.prevCloseValue, rule.factor);
+}
+
+function applyLocalCurrencyFactor(value: MonetaryValue | null, factor: Decimal): void {
+  if (!value) {
+    return;
+  }
+  value.local = decimalToNumber(
+    decimalOrFallback(value.local, new Decimal(0)).mul(factor),
+    new Decimal(0),
+  );
+}
+
+function normalizeAmount(value: unknown, currency: string): [Decimal, string] {
+  const amount = decimalOrFallback(value, new Decimal(0));
+  const rule = CURRENCY_NORMALIZATION_RULES.get(currency);
+  return rule ? [amount.mul(rule.factor), rule.majorCode] : [amount, currency];
+}
+
+function normalizeCurrencyCode(currency: string): string {
+  return CURRENCY_NORMALIZATION_RULES.get(currency)?.majorCode ?? currency;
 }
 
 function readAssetsById(db: Database, assetIds: string[]): Map<string, AssetRow> {
@@ -650,6 +1184,8 @@ function readAssetsById(db: Database, assetIds: string[]): Map<string, AssetRow>
           metadata,
           quote_mode,
           quote_ccy,
+          instrument_type,
+          instrument_symbol,
           instrument_exchange_mic,
           provider_config
         FROM assets
@@ -732,6 +1268,8 @@ function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {
           metadata,
           quote_mode,
           quote_ccy,
+          instrument_type,
+          instrument_symbol,
           instrument_exchange_mic,
           provider_config
         FROM assets
@@ -742,6 +1280,15 @@ function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {
       `,
     )
     .get(symbol, symbol);
+}
+
+function decimalOrFallback(value: unknown, fallback: Decimal): Decimal {
+  try {
+    const decimal = new Decimal(value as Decimal.Value);
+    return decimal.isFinite() ? decimal : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function decimalToNumber(value: unknown, fallback: Decimal): number {
@@ -836,4 +1383,61 @@ function resolveBaseCurrency(options: HoldingsServiceOptions): string | undefine
   const baseCurrency =
     typeof options.baseCurrency === "function" ? options.baseCurrency() : options.baseCurrency;
   return baseCurrency && baseCurrency.trim() ? baseCurrency : undefined;
+}
+
+function resolveToday(options: HoldingsServiceOptions): string {
+  const today = options.today?.();
+  return today && isValidDateString(today) ? today : resolveUtcDateString();
+}
+
+function resolveUtcDateString(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function dateStringFromTimestamp(timestamp: string): string {
+  const dateString = timestamp.slice(0, 10);
+  return isValidDateString(dateString) ? dateString : resolveUtcDateString();
+}
+
+function isExpiredOptionAsset(asset: AssetRow, today: string): boolean {
+  if (asset.instrument_type !== "OPTION") {
+    return false;
+  }
+  const expiration =
+    optionExpirationFromMetadata(asset.metadata) ??
+    parseOccExpiration(asset.instrument_symbol ?? "") ??
+    parseOccExpiration(asset.display_code ?? "");
+  return expiration !== null && expiration < today;
+}
+
+function optionExpirationFromMetadata(rawJson: string | null): string | null {
+  const metadata = parseNullableJson(rawJson);
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const option = (metadata as { option?: unknown }).option;
+  if (!option || typeof option !== "object" || Array.isArray(option)) {
+    return null;
+  }
+  const expiration = (option as { expiration?: unknown }).expiration;
+  return typeof expiration === "string" && isValidDateString(expiration) ? expiration : null;
+}
+
+function parseOccExpiration(symbol: string): string | null {
+  const trimmed = symbol.trim();
+  if (trimmed.length < 15 || trimmed.length > 21) {
+    return null;
+  }
+  const dateStart = trimmed.length - 15;
+  const dateEnd = trimmed.length - 9;
+  const datePart = trimmed.slice(dateStart, dateEnd);
+  const optionType = trimmed[dateEnd];
+  if (!/^\d{6}$/.test(datePart) || (optionType !== "C" && optionType !== "P")) {
+    return null;
+  }
+  const year = 2000 + Number(datePart.slice(0, 2));
+  const month = datePart.slice(2, 4);
+  const day = datePart.slice(4, 6);
+  const expiration = `${year}-${month}-${day}`;
+  return isValidDateString(expiration) ? expiration : null;
 }

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 96
+turns_used: 97
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T03:20:00+08:00"
+updated_at: "2026-05-16T03:30:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -613,9 +613,9 @@ updated_at: "2026-05-16T03:20:00+08:00"
   `/api/v1/valuations/history` and `/api/v1/valuations/latest` to SQLite
   `daily_account_valuation` rows, including active-account default lookup,
   request-order preservation, filtered history ranges, numeric valuation fields,
-  and explicit 501 gates for still-deferred holdings fan-out, allocations,
-  snapshots, and imports. Targeted holdings/runtime tests and backend type-check
-  passed.
+  and explicit 501 gates for still-deferred holding detail, allocations,
+  snapshot writes, and imports. Targeted holdings/runtime tests and backend
+  type-check passed.
 - Turn 94: Added holdings snapshot metadata read runtime parity:
   `/api/v1/snapshots` now reads SQLite `holdings_snapshots` rows with optional
   date filters and returns Rust-shaped snapshot IDs, dates, sources, position
@@ -627,16 +627,23 @@ updated_at: "2026-05-16T03:20:00+08:00"
   Rust-shaped security/alternative/cash holdings, including asset metadata,
   zero-quantity filtering, missing-asset skipping, base-currency injection, cash
   balance conversion, and Rust-compatible empty JSON fallback for stored
-  snapshot blobs. Live holdings fan-out/valuation, single holding detail, asset
-  fan-out, deletion, save/import, and allocations remain explicitly gated.
-  Targeted holdings/runtime tests and backend type-check passed.
+  snapshot blobs. Single holding detail, asset fan-out, deletion, save/import,
+  and allocations remain explicitly gated. Targeted holdings/runtime tests and
+  backend type-check passed.
 - Turn 96: Added bounded holdings import check runtime parity:
   `/api/v1/snapshots/import/check` now verifies account existence, validates
   snapshot dates/quantities/average costs, reports existing snapshot dates, and
   resolves exact local asset symbol matches from SQLite. Provider-backed symbol
-  search, actual import writes, snapshot save/delete side effects, and live
-  holdings fan-out remain explicitly gated. Targeted holdings/runtime tests and
-  backend type-check passed.
+  search, actual import writes, and snapshot save/delete side effects remain
+  explicitly gated. Targeted holdings/runtime tests and backend type-check
+  passed.
+- Turn 97: Added bounded live holdings fan-out runtime parity:
+  `/api/v1/holdings` now reads the latest holdings snapshot and returns valued
+  security, alternative-asset, and cash holdings with minor-currency
+  normalization, quote source priority, contract multipliers, FX fallback
+  behavior, expired option filtering, missing quote/asset handling, and
+  base-value weights. Targeted holdings/runtime tests, backend type-check, full
+  `bun run check`, and focused code review passed.
 
 ## Deferred items
 
@@ -695,8 +702,8 @@ updated_at: "2026-05-16T03:20:00+08:00"
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can
   calculate net-worth from latest holdings snapshots plus standalone alternative
-  assets; holdings fan-out, broader valuation calculations, and portfolio job
-  enqueue behavior remain active follow-ups.
+  assets; broader valuation calculations and portfolio job enqueue behavior
+  remain active follow-ups.
 - Asset create/profile mutation and market identity canonicalization now have TS
   runtime parity for direct SQLite-backed routes. reason=asset create/update now
   preserves generated `instrument_key` behavior, duplicate returns, provider
@@ -711,14 +718,15 @@ updated_at: "2026-05-16T03:20:00+08:00"
 - Net-worth current/history, income summary, simple account performance, and
   account performance history/summary now have bounded TS runtime parity, while
   provider-backed symbol performance history, holdings import provider-backed
-  symbol search, live holdings fan-out/allocations/snapshot writes/imports, and
-  broader valuation calculations remain active follow-ups. reason=the standalone
-  backend can calculate `/api/v1/net-worth`, `/api/v1/net-worth/history`,
+  symbol search, holding detail/allocations/snapshot writes/imports, and broader
+  valuation calculations remain active follow-ups. reason=the standalone backend
+  can calculate `/api/v1/net-worth`, `/api/v1/net-worth/history`,
   `/api/v1/income/summary`, `/api/v1/performance/accounts/simple`, and
   account-scoped `/api/v1/performance/{history,summary}`,
   `/api/v1/valuations/{history,latest}`, `/api/v1/snapshots`,
-  `/api/v1/snapshots/holdings`, and `/api/v1/snapshots/import/check`; remaining
-  portfolio metrics still need dedicated calculation parity slices.
+  `/api/v1/snapshots/holdings`, `/api/v1/snapshots/import/check`, and
+  `/api/v1/holdings`; remaining portfolio metrics still need dedicated
+  calculation parity slices.
 - Activity import mapping/template storage, duplicate lookups, read-only
   activity search, transfer link/unlink mutations, single activity deletes,
   bounded existing-asset/cash activity create/update/bulk persistence, and
