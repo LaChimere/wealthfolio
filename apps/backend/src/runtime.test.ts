@@ -158,6 +158,14 @@ describe("TS backend runtime composition", () => {
       expect(snapshotsResponse.status).toBe(200);
       await expect(snapshotsResponse.json()).resolves.toEqual([]);
 
+      const snapshotHoldingsResponse = await fetch(
+        `${server.baseUrl}/api/v1/snapshots/holdings?accountId=missing&date=2026-01-01`,
+      );
+      expect(snapshotHoldingsResponse.status).toBe(400);
+      await expect(snapshotHoldingsResponse.json()).resolves.toMatchObject({
+        message: "No snapshot found for date 2026-01-01",
+      });
+
       const holdingsResponse = await fetch(`${server.baseUrl}/api/v1/holdings?accountId=missing`);
       expect(holdingsResponse.status).toBe(501);
       await expect(holdingsResponse.json()).resolves.toMatchObject({

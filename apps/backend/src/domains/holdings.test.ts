@@ -12,6 +12,13 @@ describe("TS holdings domain", () => {
       insertAccount(db, { id: "a1", name: "Alpha" });
       insertAccount(db, { id: "a2", name: "Beta Archived", isArchived: 1 });
       insertAccount(db, { id: "inactive", name: "Inactive", isActive: 0 });
+      insertAsset(db, {
+        id: "asset-1",
+        kind: "INVESTMENT",
+        name: "Acme Corp",
+        displayCode: "ACME",
+        quoteMode: "MARKET",
+      });
       insertValuation(db, {
         accountId: "a1",
         date: "2026-01-01",
@@ -42,7 +49,16 @@ describe("TS holdings domain", () => {
         accountId: "a1",
         date: "2026-01-01",
         source: "MANUAL_ENTRY",
-        positions: { stock: { quantity: "2" } },
+        positions: {
+          "asset-1": {
+            assetId: "asset-1",
+            quantity: "2",
+            totalCostBasis: "150",
+            currency: "USD",
+            inceptionDate: "2025-12-31T00:00:00Z",
+            contractMultiplier: "1",
+          },
+        },
         cashBalances: { USD: "10", CAD: "5" },
       });
       insertSnapshot(db, {
@@ -89,6 +105,40 @@ describe("TS holdings domain", () => {
           cashCurrencyCount: 2,
         },
       ]);
+      expect(service.getSnapshotByDate("a1", "2026-01-01")).toEqual([
+        expect.objectContaining({
+          id: "SEC-a1-asset-1",
+          accountId: "a1",
+          holdingType: "security",
+          quantity: 2,
+          openDate: "2025-12-31T00:00:00Z",
+          localCurrency: "USD",
+          baseCurrency: "USD",
+          marketValue: { local: 0, base: 0 },
+          costBasis: { local: 150, base: 0 },
+          instrument: expect.objectContaining({
+            id: "asset-1",
+            symbol: "ACME",
+            pricingMode: "MARKET",
+          }),
+        }),
+        expect.objectContaining({
+          id: "CASH-a1-USD",
+          holdingType: "cash",
+          instrument: null,
+          quantity: 10,
+          marketValue: { local: 10, base: 0 },
+          price: 1,
+        }),
+        expect.objectContaining({
+          id: "CASH-a1-CAD",
+          holdingType: "cash",
+          quantity: 5,
+        }),
+      ]);
+      await expect(service.getSnapshotByDate("a1", "2026-01-03")).rejects.toThrow(
+        "No snapshot found for date 2026-01-03",
+      );
       await expect(service.getHoldings("a1")).rejects.toThrow("Holdings fan-out is not available");
     } finally {
       db.close();
@@ -104,6 +154,18 @@ function createHoldingsDb(): Database {
       name TEXT NOT NULL DEFAULT '',
       is_active INTEGER NOT NULL DEFAULT 1,
       is_archived INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE assets (
+      id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT,
+      display_code TEXT,
+      notes TEXT,
+      metadata TEXT,
+      quote_mode TEXT NOT NULL DEFAULT 'MARKET',
+      quote_ccy TEXT NOT NULL DEFAULT 'USD',
+      instrument_exchange_mic TEXT,
+      provider_config TEXT
     );
     CREATE TABLE daily_account_valuation (
       id TEXT PRIMARY KEY NOT NULL,
@@ -145,6 +207,26 @@ function insertAccount(
     account.isActive ?? 1,
     account.isArchived ?? 0,
   );
+}
+
+function insertAsset(
+  db: Database,
+  asset: {
+    id: string;
+    kind: string;
+    name: string;
+    displayCode: string;
+    quoteMode: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, quote_mode, quote_ccy
+      )
+      VALUES (?, ?, ?, ?, ?, 'USD')
+    `,
+  ).run(asset.id, asset.kind, asset.name, asset.displayCode, asset.quoteMode);
 }
 
 function insertSnapshot(

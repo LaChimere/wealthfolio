@@ -143,33 +143,34 @@
     activity reads, Rust-compatible contribution rules, user-timezone year
     ranges, and FX conversion dates; current/history net-worth, income summary,
     simple account performance, account performance history/summary
-    calculations, holdings valuation reads, and holdings snapshot metadata reads
-    now have TS runtime parity, while provider-backed symbol performance history
-    is deferred to portfolio/market-data parity slices; holdings fan-out,
-    allocations, snapshot conversion, imports, and portfolio recalculation side
-    effects are deferred to holdings/portfolio parity slices; add-on filesystem
-    extraction, runtime loading, store HTTP, staging I/O, and update behavior
-    are deferred to add-on runtime parity slices; market-data market sync and
-    portfolio recalculation behavior are deferred to market-data/portfolio
-    parity slices; symbol-only activity asset creation, import execution,
-    provider-backed asset resolution, device-sync outbox emission for activity
-    writes, and portfolio recalculation side effects are deferred to
-    activities/import runtime parity slices; AI chat persistence and tool-result
-    mutation now have TS runtime parity, while provider streaming, tool
-    execution, tag persistence, and attachments are deferred to AI runtime
-    parity slices; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; bounded account/timezone health
-    status/checks, cache behavior, legacy-classification health issues, and
-    classification migration health-fix dispatch now have TS runtime parity,
-    while calculation-heavy health checks, market sync fix execution, and
-    non-classification `/health/fix` dispatch are deferred to health/calculation
-    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    feature-flag errors, background workers, device-sync cloud clients, token
-    lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    calculations, holdings valuation reads, holdings snapshot metadata reads,
+    and historical snapshot holdings reads now have TS runtime parity, while
+    provider-backed symbol performance history is deferred to
+    portfolio/market-data parity slices; live holdings fan-out, allocations,
+    snapshot writes/imports, and portfolio recalculation side effects are
+    deferred to holdings/portfolio parity slices; add-on filesystem extraction,
+    runtime loading, store HTTP, staging I/O, and update behavior are deferred
+    to add-on runtime parity slices; market-data market sync and portfolio
+    recalculation behavior are deferred to market-data/portfolio parity slices;
+    symbol-only activity asset creation, import execution, provider-backed asset
+    resolution, device-sync outbox emission for activity writes, and portfolio
+    recalculation side effects are deferred to activities/import runtime parity
+    slices; AI chat persistence and tool-result mutation now have TS runtime
+    parity, while provider streaming, tool execution, tag persistence, and
+    attachments are deferred to AI runtime parity slices; device-sync
+    integration for sync crypto is deferred to device-sync runtime parity
+    slices; bounded account/timezone health status/checks, cache behavior,
+    legacy-classification health issues, and classification migration health-fix
+    dispatch now have TS runtime parity, while calculation-heavy health checks,
+    market sync fix execution, and non-classification `/health/fix` dispatch are
+    deferred to health/calculation parity slices; real Connect token lifecycle,
+    cloud HTTP clients, broker sync orchestration, local sync repositories,
+    subscription entitlement checks, event production, E2EE enrollment, sync
+    engine, snapshot/upload runtime, feature-flag errors, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.

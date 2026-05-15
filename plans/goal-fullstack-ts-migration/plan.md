@@ -159,6 +159,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   including account/date filters, source defaults, position/cash currency
   counts, and explicit 501 gates for still-deferred snapshot conversion,
   deletion, save/import, holdings fan-out, and allocations.
+- Add bounded historical snapshot holdings read runtime for
+  `/api/v1/snapshots/holdings`, including stored snapshot-to-holding conversion,
+  asset metadata joins, cash balance holdings, zero-quantity/missing-asset
+  filtering, base-currency injection, and explicit gates for still-deferred live
+  holdings valuation/fan-out, deletion, save/import, and allocations.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -183,18 +188,19 @@ provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
 current/historical net-worth, income summary, simple account performance,
-account performance history/summary, valuation reads, and snapshot metadata,
-holdings fan-out/allocation/snapshot conversion/import runtime, add-on runtime,
-broader market-data runtime beyond mapping/templates/duplicate lookups,
-read-only search, transfer link/unlink, single activity delete, and bounded
-existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
-CSV parse/read-only asset preview/read-only import validation and bounded import
-apply, save-up preview calculations, local AI chat thread/message persistence,
-bounded health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+account performance history/summary, valuation reads, snapshot metadata, and
+historical snapshot holdings reads, live holdings fan-out/allocation/snapshot
+writes/import runtime, add-on runtime, broader market-data runtime beyond
+mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
+single activity delete, and bounded existing-asset/cash/symbol-resolved activity
+create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
+import validation and bounded import apply, save-up preview calculations, local
+AI chat thread/message persistence, bounded health account/timezone
+status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, calculation-heavy health checks or
+non-classification `/health/fix` execution, real Connect runtime implementation,
+real device-sync runtime implementation, or Rust runtime removal is in scope for
+this slice.
 
 ## Next slices
 
