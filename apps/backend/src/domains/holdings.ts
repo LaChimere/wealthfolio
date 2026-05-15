@@ -290,11 +290,19 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
-    getHolding() {
-      return notImplemented("Holding detail is not available in the TS runtime yet");
+    getHolding(accountId, assetId) {
+      try {
+        return readLiveHolding(db, accountId, assetId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
-    getAssetHoldings() {
-      return notImplemented("Asset holdings are not available in the TS runtime yet");
+    getAssetHoldings(assetId) {
+      try {
+        return readAssetHoldings(db, assetId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     getHistoricalValuations(accountId, startDate, endDate) {
       return readHistoricalValuations(db, accountId, startDate, endDate);
@@ -407,7 +415,65 @@ function readLiveHoldings(
   if (!snapshot) {
     return [];
   }
+  return readLiveHoldingsFromSnapshot(db, snapshot, options);
+}
 
+function readLiveHolding(
+  db: Database,
+  accountId: string,
+  assetId: string,
+  options: HoldingsServiceOptions,
+): Holding | null {
+  const snapshot = readLatestSnapshot(db, accountId);
+  if (!snapshot) {
+    return null;
+  }
+
+  const position = snapshotPositionsFromJson(snapshot.positions).find(
+    (candidate) => candidate.assetId === assetId,
+  );
+  if (!position || decimalToNumber(position.quantity, new Decimal(0)) === 0) {
+    return null;
+  }
+
+  const holdings = readLiveHoldingsFromSnapshot(db, snapshot, options);
+  const holding = holdings.find((candidate) => candidate.instrument?.id === assetId);
+  if (holding) {
+    return holding;
+  }
+
+  const today = resolveToday(options);
+  const asset = readAssetsById(db, [assetId]).get(assetId);
+  if (asset && isExpiredOptionAsset(asset, today)) {
+    return null;
+  }
+  throw new Error(`Failed to build holding view for ${assetId}`);
+}
+
+function readAssetHoldings(
+  db: Database,
+  assetId: string,
+  options: HoldingsServiceOptions,
+): Holding[] {
+  const holdings: Holding[] = [];
+  for (const accountId of readActiveAccountIds(db)) {
+    try {
+      const holding = readLiveHolding(db, accountId, assetId, options);
+      if (holding) {
+        holdings.push(holding);
+      }
+    } catch {
+      // Rust ignores per-account failures for this aggregate route.
+    }
+  }
+  return holdings;
+}
+
+function readLiveHoldingsFromSnapshot(
+  db: Database,
+  snapshot: SnapshotRow,
+  options: HoldingsServiceOptions,
+): Holding[] {
   const resolvedBaseCurrency = resolveBaseCurrency(options) ?? snapshot.currency;
   const today = resolveToday(options);
   const holdings = buildHoldingsFromSnapshot(db, snapshot, resolvedBaseCurrency, today, true);

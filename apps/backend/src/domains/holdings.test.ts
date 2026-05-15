@@ -220,6 +220,7 @@ describe("TS holdings domain", () => {
 
     try {
       insertAccount(db, { id: "a1", name: "Alpha" });
+      insertAccount(db, { id: "a2", name: "Beta" });
       insertAsset(db, {
         id: "lse-share",
         kind: "INVESTMENT",
@@ -275,6 +276,15 @@ describe("TS holdings domain", () => {
           missing: snapshotPosition("missing", "1", "10", "USD", "1"),
         },
         cashBalances: { CAD: "10", USD: "0" },
+      });
+      insertSnapshot(db, {
+        id: "a2-2026-01-05",
+        accountId: "a2",
+        date: "2026-01-05",
+        positions: {
+          "lse-share": snapshotPosition("lse-share", "1", "300", "GBp", "1"),
+        },
+        cashBalances: {},
       });
       insertQuote(db, {
         id: "lse-share-2026-01-05-broker",
@@ -365,6 +375,19 @@ describe("TS holdings domain", () => {
 
       const totalWeight = holdings.reduce((sum, holding) => sum + holding.weight, 0);
       expect(totalWeight).toBeCloseTo(1, 8);
+
+      const detail = (await service.getHolding("a1", "lse-share")) as Holding;
+      expect(detail.id).toBe("SEC-a1-lse-share");
+      expect(detail.weight).toBe(lse.weight);
+      await expect(service.getHolding("a1", "missing")).rejects.toThrow(
+        "Failed to build holding view for missing",
+      );
+      expect(await service.getHolding("a1", "option-expired")).toBeNull();
+      expect(await service.getHolding("a1", "not-in-snapshot")).toBeNull();
+
+      const assetHoldings = (await service.getAssetHoldings("lse-share")) as Holding[];
+      expect(assetHoldings.map((holding) => holding.accountId)).toEqual(["a1", "a2"]);
+      expect(assetHoldings[1]?.weight).toBe(1);
     } finally {
       db.close();
     }

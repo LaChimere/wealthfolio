@@ -183,6 +183,18 @@ describe("TS backend runtime composition", () => {
       expect(holdingsResponse.status).toBe(200);
       await expect(holdingsResponse.json()).resolves.toEqual([]);
 
+      const holdingItemResponse = await fetch(
+        `${server.baseUrl}/api/v1/holdings/item?accountId=missing&assetId=missing`,
+      );
+      expect(holdingItemResponse.status).toBe(200);
+      await expect(holdingItemResponse.json()).resolves.toBeNull();
+
+      const assetHoldingsResponse = await fetch(
+        `${server.baseUrl}/api/v1/holdings/by-asset?assetId=missing`,
+      );
+      expect(assetHoldingsResponse.status).toBe(200);
+      await expect(assetHoldingsResponse.json()).resolves.toEqual([]);
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);
