@@ -2197,8 +2197,25 @@ function routeGoalRequest(
     return jsonResponse(goalService.getGoalFunding(fundingGoalId));
   }
   if (fundingGoalId && request.method === "PUT") {
-    return handleJsonArrayMutation(request, parseGoalFundingRuleInput, (rules) =>
-      goalService.saveGoalFunding(fundingGoalId, rules),
+    return handleJsonArrayMutation(request, parseGoalFundingRuleInput, async (rules) => {
+      const saved = await goalService.saveGoalFunding(fundingGoalId, rules);
+      await refreshGoalSummaryAfterSave(goalService, goalValuationProvider, fundingGoalId);
+      return saved;
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/plan") {
+    return handleJsonMutation(request, parseSaveGoalPlan, async (plan) => {
+      const normalizedPlan = normalizeGoalPlanCurrency(plan, goalService);
+      const saved = await goalService.saveGoalPlan(normalizedPlan);
+      await refreshGoalSummaryAfterSave(goalService, goalValuationProvider, normalizedPlan.goalId);
+      return saved;
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/save-up/preview") {
+    return handleJsonMutation(request, parseSaveUpInput, async (input) =>
+      previewSaveUpOverview(input),
     );
   }
 
@@ -2211,18 +2228,6 @@ function routeGoalRequest(
       .deleteGoalPlan(planGoalId)
       .then(() => new Response(null, { status: 204 }))
       .catch(domainErrorResponse);
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/v1/goals/plan") {
-    return handleJsonMutation(request, parseSaveGoalPlan, (plan) =>
-      goalService.saveGoalPlan(normalizeGoalPlanCurrency(plan, goalService)),
-    );
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/v1/goals/save-up/preview") {
-    return handleJsonMutation(request, parseSaveUpInput, async (input) =>
-      previewSaveUpOverview(input),
-    );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/goals/refresh-summaries") {
@@ -2274,6 +2279,30 @@ function routeGoalRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+async function refreshGoalSummaryAfterSave(
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+  goalId: string,
+): Promise<void> {
+  if (!provider) {
+    return;
+  }
+  let valuationMap: GoalValuationMap;
+  try {
+    valuationMap = await provider.getGoalValuationMap();
+  } catch (error) {
+    console.warn(
+      `Failed to build valuation map after saving goal ${goalId}: ${errorMessage(error)}`,
+    );
+    return;
+  }
+  try {
+    await goalService.refreshGoalSummary(goalId, valuationMap);
+  } catch (error) {
+    console.warn(`Failed to refresh goal summary after save for ${goalId}: ${errorMessage(error)}`);
+  }
 }
 
 async function refreshActiveGoalSummaries(

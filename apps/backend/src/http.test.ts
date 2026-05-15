@@ -5539,6 +5539,78 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("refreshes goal summaries after funding and plan saves when valuations are available", async () => {
+    const db = createGoalsDb();
+    const goalService = createGoalService(createGoalRepository(db), {
+      now: () => new Date(2024, 0, 1, 12),
+    });
+    let providerCalls = 0;
+    const handler = createBackendRequestHandler(config, {
+      goalService,
+      goalValuationProvider: {
+        async getGoalValuationMap() {
+          providerCalls += 1;
+          return { cash: 1000 };
+        },
+      },
+    });
+
+    try {
+      seedHttpGoal(db, {
+        id: "goal 1",
+        title: "Goal",
+        targetAmount: 1000,
+      });
+
+      const fundingResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/goal%201/funding", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify([{ accountId: "cash", sharePercent: 25 }]),
+        }),
+      );
+      expect(fundingResponse.status).toBe(200);
+      await expect(fundingResponse.json()).resolves.toEqual([
+        expect.objectContaining({ goalId: "goal 1", accountId: "cash", sharePercent: 25 }),
+      ]);
+      expect(providerCalls).toBe(1);
+      expect(goalService.getGoal("goal 1")).toMatchObject({
+        summaryCurrentValue: 250,
+        summaryProgress: 0.25,
+      });
+
+      const planResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/plan", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            goalId: "goal 1",
+            planKind: "save_up",
+            settingsJson: JSON.stringify({ monthlyContribution: 25 }),
+          }),
+        }),
+      );
+      expect(planResponse.status).toBe(200);
+      await expect(planResponse.json()).resolves.toMatchObject({
+        goalId: "goal 1",
+        planKind: "save_up",
+      });
+      expect(providerCalls).toBe(2);
+      expect(goalService.getGoal("goal 1")).toMatchObject({
+        summaryCurrentValue: 250,
+        summaryProgress: 0.25,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps goal valuation-backed routes explicitly deferred without a provider", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db));

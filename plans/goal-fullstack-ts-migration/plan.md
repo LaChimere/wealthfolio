@@ -70,6 +70,9 @@ health legacy-classification runtime slices in the standalone TS backend:
   `daily_account_valuation` rows for active, non-archived accounts, and add
   guarded `/api/v1/goals/refresh-summaries` routing with per-goal error
   isolation.
+- Refresh goal summaries after successful funding and goal-plan saves when a
+  runtime valuation provider is available, preserving save success when the
+  post-save refresh cannot run.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
