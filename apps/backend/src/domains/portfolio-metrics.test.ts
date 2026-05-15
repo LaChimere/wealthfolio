@@ -248,6 +248,150 @@ describe("TS portfolio metrics domain", () => {
       db.close();
     }
   });
+
+  test("calculates income summaries with asset-backed income, FX fallback, and account filtering", () => {
+    const db = createPortfolioMetricsDb();
+    const warnings: string[] = [];
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({
+        "CAD/USD": "0.8",
+        "EUR/USD": "2",
+      }),
+      now: () => new Date("2026-05-16T00:00:00Z"),
+      timezone: "UTC",
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      insertAccount(db, { id: "taxable", accountType: "SECURITIES", name: "Taxable" });
+      insertAccount(db, {
+        id: "archived",
+        accountType: "SECURITIES",
+        name: "Archived",
+        isArchived: 1,
+      });
+      insertAsset(db, {
+        id: "stock",
+        kind: "INVESTMENT",
+        name: "Alpha Inc",
+        displayCode: "AAA",
+      });
+      insertQuote(db, { assetId: "stock", day: "2024-03-10", close: "5", currency: "USD" });
+      insertActivity(db, {
+        id: "dividend-ytd",
+        accountId: "taxable",
+        assetId: "stock",
+        activityType: "DIVIDEND",
+        activityDate: "2026-05-01T00:00:00+00:00",
+        amount: "10",
+        currency: "CAD",
+      });
+      insertActivity(db, {
+        id: "dividend-ytd-fallback",
+        accountId: "taxable",
+        assetId: "stock",
+        activityType: "DIVIDEND",
+        activityDate: "2026-04-01T00:00:00+00:00",
+        amount: "7",
+        currency: "GBP",
+      });
+      insertActivity(db, {
+        id: "staking-last-year",
+        accountId: "taxable",
+        assetId: "stock",
+        activityType: "INTEREST",
+        subtype: "STAKING_REWARD",
+        activityDate: "2025-02-10T00:00:00+00:00",
+        quantity: "2",
+        unitPrice: "3",
+        amount: "0",
+        currency: "EUR",
+      });
+      insertActivity(db, {
+        id: "drip-two-years-ago",
+        accountId: "taxable",
+        assetId: "stock",
+        activityType: "DIVIDEND",
+        subtype: "DRIP",
+        activityDate: "2024-03-10T00:00:00+00:00",
+        quantity: "4",
+        amount: "0",
+        currency: "USD",
+      });
+      insertActivity(db, {
+        id: "archived-dividend",
+        accountId: "archived",
+        assetId: "stock",
+        activityType: "DIVIDEND",
+        activityDate: "2026-05-01T00:00:00+00:00",
+        amount: "1000",
+        currency: "USD",
+      });
+
+      const summaries = service.getIncomeSummary("taxable");
+      expect(summaries).toHaveLength(4);
+      expect(summaries[0]).toMatchObject({
+        period: "TOTAL",
+        totalIncome: 47,
+        monthlyAverage: 1.81,
+        yoyGrowth: null,
+        currency: "USD",
+        byMonth: {
+          "2026-05": 8,
+          "2026-04": 7,
+          "2025-02": 12,
+          "2024-03": 20,
+        },
+        byType: { DIVIDEND: 35, INTEREST: 12 },
+        byCurrency: { CAD: 10, GBP: 7, EUR: 6, USD: 20 },
+        byAsset: {
+          stock: {
+            assetId: "stock",
+            kind: "INVESTMENT",
+            symbol: "AAA",
+            name: "Alpha Inc",
+            income: 47,
+          },
+        },
+        byAccount: {
+          taxable: {
+            accountId: "taxable",
+            accountName: "Taxable",
+            total: 47,
+            byMonth: {
+              "2026-05": 8,
+              "2026-04": 7,
+              "2025-02": 12,
+              "2024-03": 20,
+            },
+          },
+        },
+      });
+      expect(summaries[1]).toMatchObject({
+        period: "YTD",
+        totalIncome: 15,
+        monthlyAverage: 3,
+        yoyGrowth: 0.25,
+      });
+      expect(summaries[2]).toMatchObject({
+        period: "LAST_YEAR",
+        totalIncome: 12,
+        monthlyAverage: 1,
+        yoyGrowth: -0.4,
+      });
+      expect(summaries[3]).toMatchObject({
+        period: "TWO_YEARS_AGO",
+        totalIncome: 20,
+        monthlyAverage: 2,
+        yoyGrowth: null,
+      });
+      expect(service.getIncomeSummary("missing")).toEqual([]);
+      expect(warnings).toEqual([expect.stringContaining("No exchange rate found for GBP/USD")]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createPortfolioMetricsDb(): Database {
@@ -255,6 +399,7 @@ function createPortfolioMetricsDb(): Database {
   db.exec(`
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
       account_type TEXT NOT NULL DEFAULT 'SECURITIES',
       currency TEXT NOT NULL DEFAULT 'USD',
       is_archived INTEGER NOT NULL DEFAULT 0
@@ -285,34 +430,64 @@ function createPortfolioMetricsDb(): Database {
       total_value TEXT NOT NULL,
       net_contribution TEXT NOT NULL
     );
+    CREATE TABLE activities (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      asset_id TEXT,
+      activity_type TEXT NOT NULL,
+      subtype TEXT,
+      activity_date TEXT NOT NULL,
+      quantity TEXT,
+      unit_price TEXT,
+      amount TEXT,
+      currency TEXT NOT NULL
+    );
   `);
   return db;
 }
 
 function fakeExchangeRateService(rates: Record<string, string>) {
+  const convert = (amount: string, fromCurrency: string, toCurrency: string): string => {
+    const rate = rates[`${fromCurrency}/${toCurrency}`];
+    if (!rate) {
+      throw new Error(`No exchange rate found for ${fromCurrency}/${toCurrency}`);
+    }
+    return (Number(amount) * Number(rate)).toString();
+  };
   return {
+    convertCurrency(amount: string, fromCurrency: string, toCurrency: string): string {
+      return convert(amount, fromCurrency, toCurrency);
+    },
     convertCurrencyForDate(
       amount: string,
       fromCurrency: string,
       toCurrency: string,
       _date: string | Date,
     ): string {
-      const rate = rates[`${fromCurrency}/${toCurrency}`];
-      if (!rate) {
-        throw new Error(`No exchange rate found for ${fromCurrency}/${toCurrency}`);
-      }
-      return (Number(amount) * Number(rate)).toString();
+      return convert(amount, fromCurrency, toCurrency);
     },
   };
 }
 
 function insertAccount(
   db: Database,
-  account: { id: string; accountType: string; currency?: string; isArchived?: number },
+  account: {
+    id: string;
+    accountType: string;
+    name?: string;
+    currency?: string;
+    isArchived?: number;
+  },
 ): void {
   db.prepare(
-    "INSERT INTO accounts (id, account_type, currency, is_archived) VALUES (?, ?, ?, ?)",
-  ).run(account.id, account.accountType, account.currency ?? "USD", account.isArchived ?? 0);
+    "INSERT INTO accounts (id, name, account_type, currency, is_archived) VALUES (?, ?, ?, ?, ?)",
+  ).run(
+    account.id,
+    account.name ?? account.id,
+    account.accountType,
+    account.currency ?? "USD",
+    account.isArchived ?? 0,
+  );
 }
 
 function insertAsset(
@@ -379,4 +554,41 @@ function insertDailyAccountValuation(
       VALUES (?, ?, ?, ?)
     `,
   ).run(valuation.accountId, valuation.date, valuation.totalValue, valuation.netContribution);
+}
+
+function insertActivity(
+  db: Database,
+  activity: {
+    id: string;
+    accountId: string;
+    assetId?: string | null;
+    activityType: string;
+    subtype?: string | null;
+    activityDate: string;
+    quantity?: string | null;
+    unitPrice?: string | null;
+    amount?: string | null;
+    currency: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO activities (
+        id, account_id, asset_id, activity_type, subtype, activity_date,
+        quantity, unit_price, amount, currency
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    activity.id,
+    activity.accountId,
+    activity.assetId ?? null,
+    activity.activityType,
+    activity.subtype ?? null,
+    activity.activityDate,
+    activity.quantity ?? null,
+    activity.unitPrice ?? null,
+    activity.amount ?? null,
+    activity.currency,
+  );
 }

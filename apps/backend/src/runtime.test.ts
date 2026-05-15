@@ -87,6 +87,10 @@ describe("TS backend runtime composition", () => {
         staleAssets: [],
       });
 
+      const incomeSummaryResponse = await fetch(`${server.baseUrl}/api/v1/income/summary`);
+      expect(incomeSummaryResponse.status).toBe(200);
+      await expect(incomeSummaryResponse.json()).resolves.toEqual([]);
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);

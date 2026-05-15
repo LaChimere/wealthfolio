@@ -137,6 +137,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   balances, standalone alternative assets/liabilities, minor-currency quote
   normalization, FX conversion/fallback behavior, staleness metadata, TOTAL
   account valuation history, and filled alternative-asset quote history.
+- Add bounded income summary runtime for `/api/v1/income/summary`, including
+  income activity reads, account filtering, asset-backed income fallback
+  amounts, FX conversion/fallback behavior, period totals, monthly averages, YoY
+  growth, and breakdowns by month/type/asset/currency/account.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -159,10 +163,10 @@ No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
-auto-classification side effects, portfolio metrics runtime beyond current and
-historical net-worth, holdings runtime, add-on runtime, broader market-data
-runtime beyond mapping/templates/duplicate lookups, read-only search, transfer
-link/unlink, single activity delete, and bounded
+auto-classification side effects, portfolio metrics runtime beyond
+current/historical net-worth and income summary, holdings runtime, add-on
+runtime, broader market-data runtime beyond mapping/templates/duplicate lookups,
+read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,

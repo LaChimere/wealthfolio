@@ -65,8 +65,9 @@ export interface NetWorthResponse {
 
 export interface PortfolioMetricsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
-  exchangeRateService: Pick<ExchangeRateService, "convertCurrencyForDate">;
+  exchangeRateService: Pick<ExchangeRateService, "convertCurrency" | "convertCurrencyForDate">;
   now?: () => Date;
+  timezone?: string | (() => string | undefined);
   warn?: (message: string) => void;
 }
 
@@ -105,11 +106,69 @@ interface DailyAccountValuationRow {
   net_contribution: string;
 }
 
+interface IncomeDataRow {
+  date: string;
+  income_type: string;
+  asset_id: string;
+  asset_kind: string;
+  symbol: string;
+  symbol_name: string;
+  currency: string;
+  account_id: string;
+  account_name: string;
+  amount: string;
+}
+
+interface FirstActivityDateRow {
+  activity_date: string | null;
+}
+
 interface PositionSnapshot {
   quantity: Decimal;
   totalCostBasis: Decimal;
   currency: string;
   contractMultiplier: Decimal;
+}
+
+interface IncomeData {
+  date: string;
+  incomeType: string;
+  assetId: string;
+  assetKind: string;
+  symbol: string;
+  symbolName: string;
+  currency: string;
+  amount: Decimal;
+  accountId: string;
+  accountName: string;
+}
+
+export interface IncomeByAsset {
+  assetId: string;
+  kind: string;
+  symbol: string;
+  name: string;
+  income: number;
+}
+
+export interface IncomeByAccount {
+  accountId: string;
+  accountName: string;
+  byMonth: Record<string, number>;
+  total: number;
+}
+
+export interface IncomeSummary {
+  period: string;
+  byMonth: Record<string, number>;
+  byType: Record<string, number>;
+  byAsset: Record<string, IncomeByAsset>;
+  byCurrency: Record<string, number>;
+  byAccount: Record<string, IncomeByAccount>;
+  totalIncome: number;
+  currency: string;
+  monthlyAverage: number;
+  yoyGrowth: number | null;
 }
 
 interface ValuationInfo {
@@ -136,6 +195,7 @@ interface CategoryMetadata {
 }
 
 const DECIMAL_PRECISION = 8;
+const DISPLAY_DECIMAL_PRECISION = 2;
 const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 const STALENESS_THRESHOLD_DAYS = 90;
 const QUOTE_LOOKBACK_DAYS = 30;
@@ -171,6 +231,9 @@ export function createPortfolioMetricsService(
     },
     getNetWorthHistory(startDate, endDate) {
       return calculateNetWorthHistory(db, startDate, endDate, options);
+    },
+    getIncomeSummary(accountId) {
+      return calculateIncomeSummary(db, accountId, options);
     },
   };
 }
@@ -462,6 +525,84 @@ function calculateNetWorthHistory(
   return history;
 }
 
+function calculateIncomeSummary(
+  db: Database,
+  accountId: string | undefined,
+  options: PortfolioMetricsServiceOptions,
+): IncomeSummary[] {
+  const activities = readIncomeActivitiesData(db, accountId).map((row) => ({
+    date: row.date,
+    incomeType: row.income_type,
+    assetId: row.asset_id,
+    assetKind: row.asset_kind,
+    symbol: row.symbol,
+    symbolName: row.symbol_name,
+    currency: row.currency,
+    amount: parseStoredDecimalOrZero(row.amount),
+    accountId: row.account_id,
+    accountName: row.account_name,
+  }));
+  if (activities.length === 0) {
+    return [];
+  }
+
+  const oldestDate = accountId
+    ? readFirstActivityDate(db, [accountId])
+    : readFirstActivityDateOverall(db);
+  if (!oldestDate) {
+    return [];
+  }
+
+  const baseCurrency = resolveBaseCurrency(options);
+  const currentDate = todayInConfiguredTimezone(options);
+  const currentYear = yearFromIsoDate(currentDate);
+  const lastYear = currentYear - 1;
+  const twoYearsAgo = currentYear - 2;
+  const currentMonth = monthFromIsoDate(currentDate);
+  const oldestYear = yearFromIsoDate(oldestDate);
+  const oldestMonth = monthFromIsoDate(oldestDate);
+  const monthsSinceFirstTransaction = (currentYear - oldestYear) * 12 + currentMonth - oldestMonth;
+  const monthsInLastYear = oldestYear >= currentYear - 1 ? 13 - oldestMonth : 12;
+  const monthsTwoYearsAgo = oldestYear >= currentYear - 2 ? 13 - oldestMonth : 12;
+
+  const totalSummary = createIncomeSummary("TOTAL", baseCurrency);
+  const ytdSummary = createIncomeSummary("YTD", baseCurrency);
+  const lastYearSummary = createIncomeSummary("LAST_YEAR", baseCurrency);
+  const twoYearsAgoSummary = createIncomeSummary("TWO_YEARS_AGO", baseCurrency);
+
+  for (const activity of activities) {
+    const activityYear = Number(activity.date.slice(0, 4));
+    const convertedAmount = convertIncomeAmount(activity, baseCurrency, options);
+    addIncome(totalSummary, activity, convertedAmount);
+    if (activityYear === currentYear) {
+      addIncome(ytdSummary, activity, convertedAmount);
+    } else if (activityYear === lastYear) {
+      addIncome(lastYearSummary, activity, convertedAmount);
+    } else if (activityYear === twoYearsAgo) {
+      addIncome(twoYearsAgoSummary, activity, convertedAmount);
+    }
+  }
+
+  calculateIncomeMonthlyAverage(totalSummary, monthsSinceFirstTransaction);
+  calculateIncomeMonthlyAverage(ytdSummary, currentMonth);
+  calculateIncomeMonthlyAverage(lastYearSummary, monthsInLastYear);
+  calculateIncomeMonthlyAverage(twoYearsAgoSummary, monthsTwoYearsAgo);
+
+  ytdSummary.yoyGrowth = calculateYoyGrowth(ytdSummary.totalIncome, lastYearSummary.totalIncome);
+  lastYearSummary.yoyGrowth = calculateYoyGrowth(
+    lastYearSummary.totalIncome,
+    twoYearsAgoSummary.totalIncome,
+  );
+  twoYearsAgoSummary.yoyGrowth = null;
+
+  return [
+    roundIncomeSummary(totalSummary),
+    roundIncomeSummary(ytdSummary),
+    roundIncomeSummary(lastYearSummary),
+    roundIncomeSummary(twoYearsAgoSummary),
+  ];
+}
+
 function readNonArchivedAccounts(db: Database): AccountRow[] {
   return db
     .query<AccountRow, []>(
@@ -561,6 +702,81 @@ function readTotalAccountValuations(
       `,
     )
     .all(PORTFOLIO_TOTAL_ACCOUNT_ID, startDate, endDate);
+}
+
+function readIncomeActivitiesData(db: Database, accountId: string | undefined): IncomeDataRow[] {
+  const accountFilter = accountId ? "AND a.account_id = ?" : "";
+  const query = `
+    SELECT strftime('%Y-%m', a.activity_date) AS date,
+      a.activity_type AS income_type,
+      COALESCE(a.asset_id, 'CASH') AS asset_id,
+      COALESCE(ast.kind, 'CASH') AS asset_kind,
+      COALESCE(ast.display_code, 'CASH') AS symbol,
+      COALESCE(ast.name, 'Cash') AS symbol_name,
+      a.currency,
+      a.account_id,
+      acc.name AS account_name,
+      CASE
+        WHEN (
+          (a.activity_type = 'INTEREST' AND UPPER(a.subtype) = 'STAKING_REWARD')
+          OR (a.activity_type = 'DIVIDEND' AND UPPER(a.subtype) IN ('DRIP', 'DIVIDEND_IN_KIND'))
+        )
+        AND (a.amount IS NULL OR CAST(a.amount AS REAL) = 0)
+        THEN CASE
+          WHEN a.unit_price IS NOT NULL AND CAST(a.unit_price AS REAL) > 0
+          THEN CAST(CAST(a.quantity AS REAL) * CAST(a.unit_price AS REAL) AS TEXT)
+          WHEN q.close IS NOT NULL
+          THEN CAST(CAST(a.quantity AS REAL) * CAST(q.close AS REAL) AS TEXT)
+          ELSE '0'
+        END
+        ELSE COALESCE(a.amount, '0')
+      END AS amount
+    FROM activities a
+    LEFT JOIN assets ast ON a.asset_id = ast.id
+    INNER JOIN accounts acc ON a.account_id = acc.id
+    LEFT JOIN quotes q ON a.asset_id = q.asset_id
+      AND date(a.activity_date) = q.day
+    WHERE a.activity_type IN ('DIVIDEND', 'INTEREST', 'OTHER_INCOME')
+      AND acc.is_archived = 0
+      ${accountFilter}
+    ORDER BY a.activity_date
+  `;
+  return accountId
+    ? db.query<IncomeDataRow, [string]>(query).all(accountId)
+    : db.query<IncomeDataRow, []>(query).all();
+}
+
+function readFirstActivityDateOverall(db: Database): string | null {
+  const row = db
+    .query<FirstActivityDateRow, []>(
+      `
+        SELECT MIN(a.activity_date) AS activity_date
+        FROM activities a
+        INNER JOIN accounts acc ON a.account_id = acc.id
+        WHERE acc.is_archived = 0
+      `,
+    )
+    .get();
+  return row?.activity_date ? row.activity_date.slice(0, 10) : null;
+}
+
+function readFirstActivityDate(db: Database, accountIds: string[]): string | null {
+  if (accountIds.length === 0) {
+    return null;
+  }
+  const placeholders = accountIds.map(() => "?").join(", ");
+  const row = db
+    .query<FirstActivityDateRow, string[]>(
+      `
+        SELECT MIN(a.activity_date) AS activity_date
+        FROM activities a
+        INNER JOIN accounts acc ON a.account_id = acc.id
+        WHERE acc.is_archived = 0
+          AND a.account_id IN (${placeholders})
+      `,
+    )
+    .get(...accountIds);
+  return row?.activity_date ? row.activity_date.slice(0, 10) : null;
 }
 
 function readFilledAlternativeQuoteValues(
@@ -850,6 +1066,15 @@ function parseStoredDecimal(value: unknown, field: string): Decimal {
   }
 }
 
+function parseStoredDecimalOrZero(value: unknown): Decimal {
+  try {
+    const decimal = new Decimal(value as Decimal.Value);
+    return decimal.isFinite() ? decimal : new Decimal(0);
+  } catch {
+    return new Decimal(0);
+  }
+}
+
 function decimalFromJsonNumber(value: number): Decimal {
   return new Decimal(value);
 }
@@ -860,6 +1085,12 @@ function roundDecimal(value: Decimal): Decimal {
 
 function decimalToJsonNumber(value: Decimal): number {
   return Number(roundDecimal(value).toString());
+}
+
+function decimalToDisplayJsonNumber(value: Decimal): number {
+  return Number(
+    value.toDecimalPlaces(DISPLAY_DECIMAL_PRECISION, Decimal.ROUND_HALF_EVEN).toString(),
+  );
 }
 
 function normalizeAmountAndCurrency(
@@ -970,6 +1201,155 @@ function emptyNetWorthResponse(date: string, currency: string): NetWorthResponse
   };
 }
 
+function createIncomeSummary(period: string, currency: string): IncomeSummary {
+  return {
+    period,
+    byMonth: {},
+    byType: {},
+    byAsset: {},
+    byCurrency: {},
+    byAccount: {},
+    totalIncome: 0,
+    currency,
+    monthlyAverage: 0,
+    yoyGrowth: null,
+  };
+}
+
+function addIncome(summary: IncomeSummary, activity: IncomeData, convertedAmount: Decimal): void {
+  summary.byMonth[activity.date] = decimalToRawNumber(
+    rawNumberToDecimal(summary.byMonth[activity.date]).plus(convertedAmount),
+  );
+  summary.byType[activity.incomeType] = decimalToRawNumber(
+    rawNumberToDecimal(summary.byType[activity.incomeType]).plus(convertedAmount),
+  );
+  const existingAsset = summary.byAsset[activity.assetId];
+  if (existingAsset) {
+    existingAsset.income = decimalToRawNumber(
+      rawNumberToDecimal(existingAsset.income).plus(convertedAmount),
+    );
+  } else {
+    summary.byAsset[activity.assetId] = {
+      assetId: activity.assetId,
+      kind: activity.assetKind,
+      symbol: activity.symbol,
+      name: activity.symbolName,
+      income: decimalToRawNumber(convertedAmount),
+    };
+  }
+  summary.byCurrency[activity.currency] = decimalToRawNumber(
+    rawNumberToDecimal(summary.byCurrency[activity.currency]).plus(activity.amount),
+  );
+  const existingAccount = summary.byAccount[activity.accountId];
+  if (existingAccount) {
+    existingAccount.byMonth[activity.date] = decimalToRawNumber(
+      rawNumberToDecimal(existingAccount.byMonth[activity.date]).plus(convertedAmount),
+    );
+    existingAccount.total = decimalToRawNumber(
+      rawNumberToDecimal(existingAccount.total).plus(convertedAmount),
+    );
+  } else {
+    summary.byAccount[activity.accountId] = {
+      accountId: activity.accountId,
+      accountName: activity.accountName,
+      byMonth: { [activity.date]: decimalToRawNumber(convertedAmount) },
+      total: decimalToRawNumber(convertedAmount),
+    };
+  }
+  summary.totalIncome = decimalToRawNumber(
+    rawNumberToDecimal(summary.totalIncome).plus(convertedAmount),
+  );
+}
+
+function convertIncomeAmount(
+  activity: IncomeData,
+  baseCurrency: string,
+  options: PortfolioMetricsServiceOptions,
+): Decimal {
+  if (activity.currency === baseCurrency) {
+    return activity.amount;
+  }
+  try {
+    return parseStoredDecimal(
+      options.exchangeRateService.convertCurrency(
+        activity.amount.toString(),
+        activity.currency,
+        baseCurrency,
+      ),
+      "converted income amount",
+    );
+  } catch (error) {
+    options.warn?.(`Error converting currency: ${errorMessage(error)}`);
+    return activity.amount;
+  }
+}
+
+function calculateIncomeMonthlyAverage(summary: IncomeSummary, months: number): void {
+  if (months > 0) {
+    summary.monthlyAverage = decimalToRawNumber(
+      rawNumberToDecimal(summary.totalIncome).div(months),
+    );
+  }
+}
+
+function calculateYoyGrowth(current: number, previous: number): number {
+  const previousDecimal = rawNumberToDecimal(previous);
+  if (previousDecimal.gt(0)) {
+    return decimalToRawNumber(
+      rawNumberToDecimal(current).minus(previousDecimal).div(previousDecimal),
+    );
+  }
+  return 0;
+}
+
+function roundIncomeSummary(summary: IncomeSummary): IncomeSummary {
+  return {
+    ...summary,
+    byMonth: roundNumberRecord(summary.byMonth),
+    byType: roundNumberRecord(summary.byType),
+    byAsset: Object.fromEntries(
+      Object.entries(summary.byAsset).map(([assetId, entry]) => [
+        assetId,
+        { ...entry, income: decimalToDisplayJsonNumber(rawNumberToDecimal(entry.income)) },
+      ]),
+    ),
+    byCurrency: roundNumberRecord(summary.byCurrency),
+    byAccount: Object.fromEntries(
+      Object.entries(summary.byAccount).map(([accountId, entry]) => [
+        accountId,
+        {
+          ...entry,
+          byMonth: roundNumberRecord(entry.byMonth),
+          total: decimalToDisplayJsonNumber(rawNumberToDecimal(entry.total)),
+        },
+      ]),
+    ),
+    totalIncome: decimalToDisplayJsonNumber(rawNumberToDecimal(summary.totalIncome)),
+    monthlyAverage: decimalToDisplayJsonNumber(rawNumberToDecimal(summary.monthlyAverage)),
+    yoyGrowth:
+      summary.yoyGrowth === null
+        ? null
+        : decimalToDisplayJsonNumber(rawNumberToDecimal(summary.yoyGrowth)),
+  };
+}
+
+function roundNumberRecord(record: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key,
+      decimalToDisplayJsonNumber(rawNumberToDecimal(value)),
+    ]),
+  );
+}
+
+function rawNumberToDecimal(value: number | undefined): Decimal {
+  return new Decimal(value ?? 0);
+}
+
+function decimalToRawNumber(value: Decimal): number {
+  return Number(value.toString());
+}
+
 function resolveBaseCurrency(options: PortfolioMetricsServiceOptions): string {
   if (typeof options.baseCurrency === "function") {
     return options.baseCurrency() ?? "";
@@ -977,8 +1357,38 @@ function resolveBaseCurrency(options: PortfolioMetricsServiceOptions): string {
   return options.baseCurrency ?? "";
 }
 
+function resolveTimezone(options: PortfolioMetricsServiceOptions): string {
+  if (typeof options.timezone === "function") {
+    return options.timezone() ?? "";
+  }
+  return options.timezone ?? "";
+}
+
 function resolveDate(date: string | undefined, now: (() => Date) | undefined): string {
   return date ?? isoDate(now?.() ?? new Date());
+}
+
+function todayInConfiguredTimezone(options: PortfolioMetricsServiceOptions): string {
+  return dateInTimezone(options.now?.() ?? new Date(), resolveTimezone(options));
+}
+
+function dateInTimezone(date: Date, timezone: string): string {
+  const timeZone = timezone.trim() || "UTC";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    if (byType.year && byType.month && byType.day) {
+      return `${byType.year}-${byType.month}-${byType.day}`;
+    }
+  } catch {
+    return dateInTimezone(date, "UTC");
+  }
+  return isoDate(date);
 }
 
 function firstMapKey<T>(map: Map<string, T>): string | null {
@@ -1005,6 +1415,14 @@ function addDays(date: string, days: number): string {
 
 function daysBetween(startDate: string, endDate: string): number {
   return Math.floor((isoDateToUtcMs(endDate) - isoDateToUtcMs(startDate)) / ONE_DAY_MS);
+}
+
+function yearFromIsoDate(date: string): number {
+  return Number(date.slice(0, 4));
+}
+
+function monthFromIsoDate(date: string): number {
+  return Number(date.slice(5, 7));
 }
 
 function compareIsoDates(left: string, right: string): number {

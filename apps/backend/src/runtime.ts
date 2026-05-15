@@ -248,6 +248,7 @@ function createServicesFromDatabase(
     portfolioMetricsService: createPortfolioMetricsService(db, {
       baseCurrency,
       exchangeRateService,
+      timezone: () => settingsService.getSettings().timezone,
     }),
     restartRequired: () => restartRequired,
     secretService,
