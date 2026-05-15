@@ -23,6 +23,7 @@ import {
   resolvePlanDcPayouts,
   runScenarioAnalysisWithMode,
   runSorr,
+  runStressTestsWithMode,
   scaleTaxBucketBalances,
   stepPlanPensionFunds,
   tryComputeRequiredCapital,
@@ -531,6 +532,44 @@ describe("retirement calculation primitives", () => {
     expect(results[2].portfolioAtHorizon).toBeGreaterThan(results[1].portfolioAtHorizon);
     expect(results.every((result) => typeof result.fundedAtGoalAge === "boolean")).toBe(true);
   });
+
+  test("matches Rust retirement stress test scenarios and ordering", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 70;
+    plan.investment.monthlyContribution = 1_500;
+    plan.expenses.items[0].monthlyAmount = 2_000;
+
+    const results = runStressTestsWithMode(plan, 500_000, "fire");
+
+    expect(new Set(results.map((result) => result.id))).toEqual(
+      new Set([
+        "return-drag",
+        "inflation-shock",
+        "spending-shock",
+        "retire-earlier",
+        "save-less",
+        "early-crash",
+      ]),
+    );
+    expect(results).toHaveLength(6);
+    expect(results.map((result) => result.severity)).toEqual(
+      [...results.map((result) => result.severity)].sort(
+        (left, right) => severityOrder(right) - severityOrder(left),
+      ),
+    );
+
+    const returnDrag = results.find((result) => result.id === "return-drag");
+    expect(returnDrag?.label).toBe("Lower returns");
+    expect(returnDrag?.category).toBe("market");
+    expect(returnDrag?.baseline.retirementStartAge).not.toBeUndefined();
+    expect(returnDrag?.delta.portfolioAtHorizon).toBeLessThanOrEqual(0);
+
+    const earlyCrash = results.find((result) => result.id === "early-crash");
+    expect(earlyCrash?.description).toBe("A 30% market drop happens in the first retirement year.");
+    expect(earlyCrash?.stressed.retirementStartAge).toBe(earlyCrash?.baseline.retirementStartAge);
+  });
 });
 
 function basePlan(): RetirementPlan {
@@ -577,4 +616,14 @@ function taxWithBuckets(): TaxProfile {
 
 function closeTo(actual: number, expected: number, epsilon = 0.000001): boolean {
   return Math.abs(actual - expected) <= epsilon;
+}
+
+function severityOrder(severity: "low" | "medium" | "high"): number {
+  if (severity === "high") {
+    return 2;
+  }
+  if (severity === "medium") {
+    return 1;
+  }
+  return 0;
 }

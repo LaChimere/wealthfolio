@@ -112,6 +112,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   validation, goal-backed plan resolution, Rust-compatible scenario/path
   semantics, glide-path return handling, and valuation-provider 501/503
   behavior.
+- Add guarded retirement stress-test routing for
+  `POST /api/v1/goals/retirement/stress-tests`, including direct plan
+  validation, goal-backed input resolution, planner-mode handling,
+  Rust-compatible stress scenarios/outcomes/deltas/severity ordering,
+  early-crash SORR integration, and valuation-provider 501/503 behavior.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -131,7 +136,7 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep remaining stress/Monte Carlo/decision-sensitivity retirement simulation
+- Keep remaining Monte Carlo and decision-sensitivity retirement simulation
   endpoints deferred to dedicated goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates

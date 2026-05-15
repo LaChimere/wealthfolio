@@ -99,6 +99,7 @@ import {
   projectRetirementWithMode,
   runScenarioAnalysisWithMode,
   runSorr,
+  runStressTestsWithMode,
   type RetirementPlan,
 } from "./domains/retirement-calculations";
 import {
@@ -2251,6 +2252,10 @@ function routeGoalRequest(
     return handleRetirementScenarioAnalysisRequest(request, goalService, goalValuationProvider);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/retirement/stress-tests") {
+    return handleRetirementStressTestsRequest(request, goalService, goalValuationProvider);
+  }
+
   if (
     request.method === "POST" &&
     url.pathname === "/api/v1/goals/retirement/sequence-of-returns"
@@ -2457,6 +2462,36 @@ async function handleRetirementScenarioAnalysisRequest(
     const plan = normalizedRetirementPlanFromPayload(parsed.plan);
     return jsonResponse(
       runScenarioAnalysisWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
+    );
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementStressTestsRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementSimulationRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return runStressTestsWithMode(prepared.plan, prepared.currentPortfolio, prepared.plannerMode);
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(
+      runStressTestsWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
     );
   } catch (error) {
     return domainErrorResponse(error);

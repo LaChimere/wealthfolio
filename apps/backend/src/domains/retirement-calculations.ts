@@ -193,6 +193,44 @@ export interface ScenarioResult {
   yearByYear: YearlySnapshot[];
 }
 
+export type StressTestId =
+  | "return-drag"
+  | "inflation-shock"
+  | "spending-shock"
+  | "retire-earlier"
+  | "save-less"
+  | "early-crash";
+
+export type StressCategory = "market" | "inflation" | "spending" | "timing" | "saving";
+export type StressSeverity = "low" | "medium" | "high";
+
+export interface StressOutcome {
+  fiAge: number | null;
+  retirementStartAge: number | null;
+  fundedAtGoalAge: boolean;
+  shortfallAtGoalAge: number;
+  portfolioAtHorizon: number;
+  failureAge?: number | null;
+  spendingShortfallAge?: number | null;
+}
+
+export interface StressDelta {
+  fiAgeYears: number | null;
+  shortfallAtGoalAge: number;
+  portfolioAtHorizon: number;
+}
+
+export interface StressTestResult {
+  id: StressTestId;
+  label: string;
+  description: string;
+  category: StressCategory;
+  baseline: StressOutcome;
+  stressed: StressOutcome;
+  delta: StressDelta;
+  severity: StressSeverity;
+}
+
 export interface SorrScenario {
   label: string;
   returns: number[];
@@ -1015,6 +1053,89 @@ export function runScenarioAnalysis(
   return runScenarioAnalysisWithMode(plan, currentPortfolio, "fire");
 }
 
+export function runStressTestsWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): StressTestResult[] {
+  const baselineOutcome = riskLabPlanOutcome(plan, currentPortfolio, mode);
+  const baseline = stressOutcomeFromPlanOutcome(baselineOutcome);
+  const severityBase = Math.max(baselineOutcome.requiredCapitalAtGoalAge, 1);
+  const specs = [
+    buildPlanStress(
+      "return-drag",
+      "Lower returns",
+      "Pre-retirement and retirement returns are 2 percentage points lower.",
+      "market",
+      plan,
+      currentPortfolio,
+      mode,
+      baseline,
+      severityBase,
+      applyReturnDragStress,
+    ),
+    buildPlanStress(
+      "inflation-shock",
+      "Inflation shock",
+      "General inflation is 1.5 percentage points higher.",
+      "inflation",
+      plan,
+      currentPortfolio,
+      mode,
+      baseline,
+      severityBase,
+      applyInflationShockStress,
+    ),
+    buildPlanStress(
+      "spending-shock",
+      "Higher spending",
+      "All retirement spending lines are 10% higher.",
+      "spending",
+      plan,
+      currentPortfolio,
+      mode,
+      baseline,
+      severityBase,
+      applySpendingShockStress,
+    ),
+    buildPlanStress(
+      "retire-earlier",
+      "Retire 2 years earlier",
+      "Desired retirement age is moved two years earlier.",
+      "timing",
+      plan,
+      currentPortfolio,
+      mode,
+      baseline,
+      severityBase,
+      applyRetireEarlierStress,
+    ),
+    buildPlanStress(
+      "save-less",
+      "Save less",
+      "Monthly contributions are 25% lower.",
+      "saving",
+      plan,
+      currentPortfolio,
+      mode,
+      baseline,
+      severityBase,
+      applySaveLessStress,
+    ),
+    buildEarlyCrashStress(plan, baselineOutcome, baseline, severityBase),
+  ];
+
+  return specs.sort(
+    (left, right) =>
+      severityRank(right.severity) - severityRank(left.severity) ||
+      right.delta.shortfallAtGoalAge - left.delta.shortfallAtGoalAge,
+  );
+}
+
+export function runStressTests(plan: RetirementPlan, currentPortfolio: number): StressTestResult[] {
+  return runStressTestsWithMode(plan, currentPortfolio, "fire");
+}
+
 export function runSorr(
   plan: RetirementPlan,
   portfolioAtFire: number,
@@ -1127,6 +1248,268 @@ export function hasMaterialSpendingShortfall(snapshot: YearlySnapshot): boolean 
   const spendingGap = Math.max((snapshot.plannedExpenses ?? 0) - snapshot.annualIncome, 0);
   const tolerance = Math.max(spendingGap * MATERIAL_SHORTFALL_RATE, MIN_MATERIAL_SHORTFALL);
   return shortfall > tolerance;
+}
+
+interface RiskLabPlanOutcome {
+  fiAge: number | null;
+  retirementStartAge: number | null;
+  fundedAtGoalAge: boolean;
+  shortfallAtGoalAge: number;
+  portfolioAtHorizon: number;
+  portfolioAtRetirementStart: number;
+  requiredCapitalAtGoalAge: number;
+  failureAge: number | null;
+  spendingShortfallAge: number | null;
+}
+
+function riskLabPlanOutcome(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): RiskLabPlanOutcome {
+  const requiredCapitalCache: RequiredCapitalCache = new Map();
+  const requiredCapital = requiredCapitalFor(
+    plan,
+    plan.personal.targetRetirementAge,
+    requiredCapitalCache,
+  );
+  const requiredCapitalValue = requiredCapital ?? 0;
+  const projection = projectRetirementWithModeCached(
+    plan,
+    currentPortfolio,
+    mode,
+    requiredCapitalCache,
+  );
+  const portfolioAtGoal =
+    projection.yearByYear.find((snapshot) => snapshot.age === plan.personal.targetRetirementAge)
+      ?.portfolioValue ?? 0;
+  const portfolioAtRetirementStart =
+    projection.retirementStartAge === null
+      ? 0
+      : (projection.yearByYear.find((snapshot) => snapshot.age === projection.retirementStartAge)
+          ?.portfolioValue ?? 0);
+  const failureAge =
+    projection.yearByYear.find(
+      (snapshot) => snapshot.phase === "fire" && snapshot.portfolioValue <= 0,
+    )?.age ?? null;
+  const spendingShortfallAge =
+    projection.yearByYear.find((snapshot) => hasMaterialSpendingShortfall(snapshot))?.age ?? null;
+
+  return {
+    fiAge: projection.fireAge,
+    retirementStartAge: projection.retirementStartAge,
+    fundedAtGoalAge: requiredCapital !== null && portfolioAtGoal >= requiredCapital,
+    shortfallAtGoalAge:
+      requiredCapital === null ? 0 : Math.max(requiredCapital - portfolioAtGoal, 0),
+    portfolioAtHorizon: projection.yearByYear.at(-1)?.portfolioEndValue ?? 0,
+    portfolioAtRetirementStart,
+    requiredCapitalAtGoalAge: requiredCapitalValue,
+    failureAge,
+    spendingShortfallAge,
+  };
+}
+
+function buildPlanStress(
+  id: StressTestId,
+  label: string,
+  description: string,
+  category: StressCategory,
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+  baseline: StressOutcome,
+  severityBase: number,
+  mutate: (plan: RetirementPlan) => void,
+): StressTestResult {
+  const stressedPlan = cloneRetirementPlan(plan);
+  mutate(stressedPlan);
+  const outcome = riskLabPlanOutcome(stressedPlan, currentPortfolio, mode);
+  return buildStressResult(
+    id,
+    label,
+    description,
+    category,
+    baseline,
+    stressOutcomeFromPlanOutcome(outcome),
+    severityBase,
+  );
+}
+
+function buildEarlyCrashStress(
+  plan: RetirementPlan,
+  baselineOutcome: RiskLabPlanOutcome,
+  baseline: StressOutcome,
+  severityBase: number,
+): StressTestResult {
+  const retirementAge = baselineOutcome.retirementStartAge;
+  if (retirementAge === null) {
+    return buildStressResult(
+      "early-crash",
+      "Retire into a crash",
+      "A 30% market drop happens in the first retirement year.",
+      "market",
+      baseline,
+      baseline,
+      severityBase,
+    );
+  }
+
+  const portfolioAtStart = Math.max(baselineOutcome.portfolioAtRetirementStart, 0);
+  const crash = runSorr(plan, portfolioAtStart, retirementAge).find(
+    (scenario) => scenario.label === "Crash Year 1 (-30%)",
+  );
+  const stressed: StressOutcome =
+    crash === undefined
+      ? {
+          fiAge: baseline.fiAge,
+          retirementStartAge: retirementAge,
+          fundedAtGoalAge: false,
+          shortfallAtGoalAge: baseline.shortfallAtGoalAge,
+          portfolioAtHorizon: 0,
+          failureAge: retirementAge,
+          spendingShortfallAge: retirementAge,
+        }
+      : {
+          fiAge: baseline.fiAge,
+          retirementStartAge: retirementAge,
+          fundedAtGoalAge: baseline.fundedAtGoalAge,
+          shortfallAtGoalAge: baseline.shortfallAtGoalAge,
+          portfolioAtHorizon: crash.finalValue,
+          failureAge: crash.failureAge ?? (crash.survived ? null : retirementAge),
+          spendingShortfallAge: crash.spendingShortfallAge,
+        };
+
+  return buildStressResult(
+    "early-crash",
+    "Retire into a crash",
+    "A 30% market drop happens in the first retirement year.",
+    "market",
+    baseline,
+    stressed,
+    severityBase,
+  );
+}
+
+function buildStressResult(
+  id: StressTestId,
+  label: string,
+  description: string,
+  category: StressCategory,
+  baseline: StressOutcome,
+  stressed: StressOutcome,
+  severityBase: number,
+): StressTestResult {
+  const delta: StressDelta = {
+    fiAgeYears:
+      baseline.fiAge === null || stressed.fiAge === null ? null : stressed.fiAge - baseline.fiAge,
+    shortfallAtGoalAge: stressed.shortfallAtGoalAge - baseline.shortfallAtGoalAge,
+    portfolioAtHorizon: stressed.portfolioAtHorizon - baseline.portfolioAtHorizon,
+  };
+  return {
+    id,
+    label,
+    description,
+    category,
+    baseline,
+    stressed,
+    delta,
+    severity: classifyStress(baseline, stressed, delta, severityBase),
+  };
+}
+
+function stressOutcomeFromPlanOutcome(outcome: RiskLabPlanOutcome): StressOutcome {
+  return {
+    fiAge: outcome.fiAge,
+    retirementStartAge: outcome.retirementStartAge,
+    fundedAtGoalAge: outcome.fundedAtGoalAge,
+    shortfallAtGoalAge: outcome.shortfallAtGoalAge,
+    portfolioAtHorizon: outcome.portfolioAtHorizon,
+    failureAge: outcome.failureAge,
+    spendingShortfallAge: outcome.spendingShortfallAge,
+  };
+}
+
+function classifyStress(
+  baseline: StressOutcome,
+  stressed: StressOutcome,
+  delta: StressDelta,
+  severityBase: number,
+): StressSeverity {
+  const shortfallIncrease = Math.max(delta.shortfallAtGoalAge, 0);
+  if (
+    (stressed.failureAge !== null && stressed.failureAge !== undefined) ||
+    (stressed.spendingShortfallAge !== null && stressed.spendingShortfallAge !== undefined) ||
+    (baseline.fiAge !== null && stressed.fiAge === null) ||
+    (delta.fiAgeYears !== null && delta.fiAgeYears >= 3) ||
+    shortfallIncrease >= severityBase * 0.15
+  ) {
+    return "high";
+  }
+  if (
+    (delta.fiAgeYears !== null && delta.fiAgeYears >= 1) ||
+    shortfallIncrease >= severityBase * 0.05
+  ) {
+    return "medium";
+  }
+  return "low";
+}
+
+function severityRank(severity: StressSeverity): number {
+  if (severity === "high") {
+    return 2;
+  }
+  if (severity === "medium") {
+    return 1;
+  }
+  return 0;
+}
+
+function applyReturnDragStress(plan: RetirementPlan): void {
+  plan.investment.preRetirementAnnualReturn -= 0.02;
+  plan.investment.retirementAnnualReturn -= 0.02;
+}
+
+function applyInflationShockStress(plan: RetirementPlan): void {
+  plan.investment.inflationRate += 0.015;
+}
+
+function applySpendingShockStress(plan: RetirementPlan): void {
+  for (const item of plan.expenses.items) {
+    item.monthlyAmount *= 1.1;
+  }
+}
+
+function applyRetireEarlierStress(plan: RetirementPlan): void {
+  plan.personal.targetRetirementAge = Math.max(
+    Math.max(plan.personal.targetRetirementAge - 2, 0),
+    plan.personal.currentAge + 1,
+  );
+}
+
+function applySaveLessStress(plan: RetirementPlan): void {
+  plan.investment.monthlyContribution *= 0.75;
+}
+
+function cloneRetirementPlan(plan: RetirementPlan): RetirementPlan {
+  return {
+    ...plan,
+    personal: { ...plan.personal },
+    expenses: { ...plan.expenses, items: plan.expenses.items.map((item) => ({ ...item })) },
+    incomeStreams: plan.incomeStreams.map((stream) => ({ ...stream })),
+    investment: {
+      ...plan.investment,
+      glidePath: plan.investment.glidePath
+        ? { ...plan.investment.glidePath }
+        : plan.investment.glidePath,
+    },
+    tax:
+      plan.tax == null
+        ? null
+        : {
+            ...plan.tax,
+            withdrawalBuckets: { ...plan.tax.withdrawalBuckets },
+          },
+  };
 }
 
 function runSorrScenario(

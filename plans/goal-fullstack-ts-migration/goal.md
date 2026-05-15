@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 85
+turns_used: 86
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-15T23:41:56+08:00"
+updated_at: "2026-05-15T23:52:56+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -559,6 +559,13 @@ updated_at: "2026-05-15T23:41:56+08:00"
   projection/overview outputs, and preserves valuation-provider 501/503
   behavior. Targeted calculation/http tests, backend type-check, full
   `bun run check`, and focused review passed.
+- Turn 86: Added deterministic retirement stress-test runtime parity:
+  `POST /api/v1/goals/retirement/stress-tests` now returns the six
+  Rust-compatible stress scenarios with risk-lab baseline/stressed outcomes,
+  deltas, severity classification, early-crash SORR integration, direct and
+  goal-backed input paths, planner-mode handling, and valuation-provider 501/503
+  behavior. Targeted calculation/http tests, backend type-check, full
+  `bun run check`, and focused review passed.
 
 ## Deferred items
 
@@ -584,9 +591,9 @@ updated_at: "2026-05-15T23:41:56+08:00"
   retirement input preparation, deterministic retirement calculation primitives,
   deterministic required-capital/projection engine behavior, deterministic
   retirement overview assembly, HTTP overview routing, retirement projection
-  routing, sequence-of-returns routing, and scenario-analysis routing now have
-  bounded TS runtime parity, while Monte Carlo, stress tests, and decision
-  sensitivity endpoints remain active follow-ups.
+  routing, sequence-of-returns routing, scenario-analysis routing, and
+  stress-tests routing now have bounded TS runtime parity, while Monte Carlo and
+  decision sensitivity endpoints remain active follow-ups.
 - FX currency converter, historical lookup, and register-pair behavior now have
   TS runtime parity. reason=the standalone TS exchange-rate service initializes
   the historical converter and can register required FX assets; automatic market
