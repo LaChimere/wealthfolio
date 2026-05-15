@@ -95,7 +95,11 @@ import {
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
-import { projectRetirementWithMode, type RetirementPlan } from "./domains/retirement-calculations";
+import {
+  projectRetirementWithMode,
+  runSorr,
+  type RetirementPlan,
+} from "./domains/retirement-calculations";
 import {
   parseValidateAndNormalizeRetirementPlanSettings,
   type RetirementTimingMode,
@@ -157,6 +161,13 @@ interface RetirementSimulationRequest {
   currentPortfolio: number;
   goalId?: string;
   plannerMode?: RetirementTimingMode;
+}
+
+interface RetirementSorrRequest {
+  plan: Record<string, unknown>;
+  portfolioAtFire: number;
+  retirementStartAge: number;
+  goalId?: string;
 }
 
 export function createBackendRequestHandler(
@@ -2235,6 +2246,13 @@ function routeGoalRequest(
     return handleRetirementProjectionRequest(request, goalService, goalValuationProvider);
   }
 
+  if (
+    request.method === "POST" &&
+    url.pathname === "/api/v1/goals/retirement/sequence-of-returns"
+  ) {
+    return handleRetirementSorrRequest(request, goalService, goalValuationProvider);
+  }
+
   const planGoalId = goalPlanIdFromPath(url.pathname);
   if (planGoalId && request.method === "GET") {
     return jsonResponse(goalService.getGoalPlan(planGoalId));
@@ -2401,6 +2419,34 @@ async function handleRetirementProjectionRequest(
     return jsonResponse(
       projectRetirementWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
     );
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementSorrRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementSorrRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return runSorr(prepared.plan, parsed.portfolioAtFire, parsed.retirementStartAge);
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(runSorr(plan, parsed.portfolioAtFire, parsed.retirementStartAge));
   } catch (error) {
     return domainErrorResponse(error);
   }
@@ -5496,6 +5542,33 @@ function parseRetirementSimulationRequest(
     currentPortfolio,
     ...(goalId ? { goalId } : {}),
     ...(plannerMode ? { plannerMode } : {}),
+  };
+}
+
+function parseRetirementSorrRequest(
+  payload: Record<string, unknown>,
+): RetirementSorrRequest | Response {
+  const plan = parseRequiredRecord(payload.plan, "plan");
+  if (plan instanceof Response) {
+    return plan;
+  }
+  const portfolioAtFire = parseRequiredNumber(payload.portfolioAtFire, "portfolioAtFire");
+  if (portfolioAtFire instanceof Response) {
+    return portfolioAtFire;
+  }
+  const retirementStartAge = parseRequiredU32(payload.retirementStartAge, "retirementStartAge");
+  if (retirementStartAge instanceof Response) {
+    return retirementStartAge;
+  }
+  const goalId = parseOptionalStringOrNull(payload.goalId, "goalId");
+  if (goalId instanceof Response) {
+    return goalId;
+  }
+  return {
+    plan,
+    portfolioAtFire,
+    retirementStartAge,
+    ...(goalId ? { goalId } : {}),
   };
 }
 

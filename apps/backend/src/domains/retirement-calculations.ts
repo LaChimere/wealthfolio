@@ -181,6 +181,16 @@ export interface RetirementTrajectoryPoint {
   annualShortfall?: number;
 }
 
+export interface SorrScenario {
+  label: string;
+  returns: number[];
+  portfolioPath: number[];
+  finalValue: number;
+  survived: boolean;
+  failureAge?: number | null;
+  spendingShortfallAge?: number | null;
+}
+
 export interface BudgetBreakdown {
   totalMonthlyBudget: number;
   monthlyPortfolioWithdrawal: number;
@@ -946,6 +956,70 @@ export function computeRetirementOverviewWithMode(
   };
 }
 
+export function runSorr(
+  plan: RetirementPlan,
+  portfolioAtFire: number,
+  retirementStartAge: number,
+): SorrScenario[] {
+  if (portfolioAtFire <= 0) {
+    return [];
+  }
+
+  const resolvedPayouts = resolvePlanDcPayouts(
+    plan.incomeStreams,
+    plan.personal.currentAge,
+    retirementStartAge,
+    planAccumulationReturn(plan),
+  );
+  const retirementReturn = planRetirementReturn(plan);
+  const years = Math.max(plan.personal.planningHorizonAge - retirementStartAge, 0);
+  if (years === 0) {
+    return [];
+  }
+  const yearsToFire = Math.max(retirementStartAge - plan.personal.currentAge, 0);
+  const inflation = plan.investment.inflationRate;
+
+  const crashYear1 = Array.from({ length: years }, () => retirementReturn);
+  crashYear1[0] = -0.3;
+
+  const crashYear5 = Array.from({ length: years }, () => retirementReturn);
+  if (years >= 5) {
+    crashYear5[4] = -0.3;
+  }
+
+  const doubleCrash = Array.from({ length: years }, () => retirementReturn);
+  doubleCrash[0] = -0.25;
+  if (years >= 5) {
+    doubleCrash[4] = -0.2;
+  }
+
+  const lostDecade = Array.from({ length: years }, () => retirementReturn);
+  for (let index = 0; index < Math.min(10, lostDecade.length); index += 1) {
+    lostDecade[index] = 0;
+  }
+
+  const scenarios: Array<[string, number[]]> = [
+    ["Base case", Array.from({ length: years }, () => retirementReturn)],
+    ["Crash Year 1 (-30%)", crashYear1],
+    ["Crash Year 5 (-30%)", crashYear5],
+    ["Double Crash", doubleCrash],
+    ["Lost Decade", lostDecade],
+  ];
+
+  return scenarios.map(([label, returns]) =>
+    runSorrScenario(
+      plan,
+      portfolioAtFire,
+      retirementStartAge,
+      yearsToFire,
+      inflation,
+      resolvedPayouts,
+      label,
+      returns,
+    ),
+  );
+}
+
 export function blendedReturnParams(
   accumulationMean: number,
   retirementMean: number,
@@ -994,6 +1068,80 @@ export function hasMaterialSpendingShortfall(snapshot: YearlySnapshot): boolean 
   const spendingGap = Math.max((snapshot.plannedExpenses ?? 0) - snapshot.annualIncome, 0);
   const tolerance = Math.max(spendingGap * MATERIAL_SHORTFALL_RATE, MIN_MATERIAL_SHORTFALL);
   return shortfall > tolerance;
+}
+
+function runSorrScenario(
+  plan: RetirementPlan,
+  portfolioAtFire: number,
+  retirementStartAge: number,
+  yearsToFire: number,
+  inflation: number,
+  resolvedPayouts: ReadonlyMap<string, number>,
+  label: string,
+  returns: number[],
+): SorrScenario {
+  let buckets = initialWithdrawalBuckets(plan.tax, portfolioAtFire);
+  const path: number[] = [];
+  let spendingShortfallAge: number | null = null;
+  let essentialFundedEveryYear = true;
+
+  for (let year = 0; year < returns.length; year += 1) {
+    path.push(Math.max(taxBucketTotal(buckets), 0));
+    const age = retirementStartAge + year;
+    const yearsFromNow = yearsToFire + year;
+    const [expenses, essentialExpenses] = annualExpensesAtYear(
+      plan.expenses,
+      age,
+      yearsFromNow,
+      inflation,
+    );
+    const annualIncome = planIncomeAtAge(
+      plan.incomeStreams,
+      resolvedPayouts,
+      age,
+      yearsFromNow,
+      inflation,
+    );
+    const essentialGap = Math.max(essentialExpenses - annualIncome, 0);
+    const glideMean = planBlendedReturn(plan, yearsFromNow, true, retirementStartAge);
+    const effectiveReturn =
+      Math.abs(returns[year] - planRetirementReturn(plan)) < 1e-9 ? glideMean : returns[year];
+    const grownBuckets = applyGrowthToTaxBuckets(buckets, effectiveReturn);
+
+    const withdrawal = applyPlannedSpendingWithdrawal(
+      grownBuckets,
+      expenses,
+      annualIncome,
+      plan.tax,
+      age,
+    );
+    const funded = withdrawal.spendingFunded;
+
+    if (spendingShortfallAge === null && funded < essentialGap * FUNDING_TOLERANCE) {
+      essentialFundedEveryYear = false;
+      spendingShortfallAge = age;
+    }
+
+    buckets = withdrawal.remainingBuckets;
+    if (!Number.isFinite(taxBucketTotal(buckets))) {
+      buckets = emptyTaxBucketBalances();
+    }
+  }
+
+  const portfolio = taxBucketTotal(buckets);
+  path.push(Math.max(portfolio, 0));
+  const portfolioSurvived = portfolio > 0;
+  const failureIndex = portfolioSurvived ? -1 : path.findIndex((value) => value <= 0);
+
+  return {
+    label,
+    returns,
+    portfolioPath: path,
+    finalValue: portfolio,
+    survived: essentialFundedEveryYear && portfolioSurvived,
+    failureAge: failureIndex === -1 ? null : retirementStartAge + failureIndex,
+    spendingShortfallAge,
+  };
 }
 
 function initialRequiredCapitalUpperBound(plan: RetirementPlan, retirementAge: number): number {

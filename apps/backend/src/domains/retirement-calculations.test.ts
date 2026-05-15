@@ -21,6 +21,7 @@ import {
   projectRetirementWithMode,
   retirementFeasibleFromCapital,
   resolvePlanDcPayouts,
+  runSorr,
   scaleTaxBucketBalances,
   stepPlanPensionFunds,
   tryComputeRequiredCapital,
@@ -448,6 +449,58 @@ describe("retirement calculation primitives", () => {
 
     expect(hasMaterialSpendingShortfall(snapshot)).toBe(false);
     expect(hasMaterialSpendingShortfall({ ...snapshot, annualShortfall: 500 })).toBe(true);
+  });
+
+  test("matches Rust sequence-of-returns scenario structure and survival semantics", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 60;
+    plan.investment.retirementAnnualReturn = 0.05;
+    plan.expenses.items[0].monthlyAmount = 1_000;
+
+    const scenarios = runSorr(plan, 1_000_000, 55);
+
+    expect(scenarios.map((scenario) => scenario.label)).toEqual([
+      "Base case",
+      "Crash Year 1 (-30%)",
+      "Crash Year 5 (-30%)",
+      "Double Crash",
+      "Lost Decade",
+    ]);
+    expect(scenarios.every((scenario) => scenario.returns.length === 5)).toBe(true);
+    expect(scenarios.every((scenario) => scenario.portfolioPath.length === 6)).toBe(true);
+    const firstYearExpenses = 1_000 * 12 * Math.pow(1.02, 10);
+    expect(closeTo(scenarios[0].portfolioPath[1], 1_000_000 * 1.05 - firstYearExpenses)).toBe(true);
+    expect(scenarios[0].survived).toBe(true);
+    expect(scenarios[0].failureAge).toBe(null);
+    expect(scenarios[0].spendingShortfallAge).toBe(null);
+    expect(scenarios[1].returns[0]).toBe(-0.3);
+    expect(scenarios[1].finalValue).toBeLessThan(scenarios[0].finalValue);
+
+    const glidePlan = {
+      ...plan,
+      investment: {
+        ...plan.investment,
+        glidePath: {
+          enabled: true,
+          bondAllocationAtFire: 1,
+          bondAllocationAtHorizon: 1,
+          bondReturnRate: 0.01,
+        },
+      },
+    };
+    expect(runSorr(glidePlan, 1_000_000, 55)[0].finalValue).toBeLessThan(scenarios[0].finalValue);
+
+    const depleted = runSorr(
+      { ...plan, expenses: { items: [{ monthlyAmount: 100_000 }] } },
+      10_000,
+      55,
+    );
+    expect(depleted[0].survived).toBe(false);
+    expect(depleted[0].failureAge).toBe(56);
+    expect(depleted[0].spendingShortfallAge).toBe(55);
+    expect(runSorr(plan, 0, 55)).toEqual([]);
   });
 });
 
