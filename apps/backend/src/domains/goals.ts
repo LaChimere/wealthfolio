@@ -6,6 +6,11 @@ import {
   type RetirementTimingMode,
   type TaxBucketBalances,
 } from "./retirement-plan";
+import {
+  computeRetirementOverviewWithMode,
+  type RetirementOverview,
+  type RetirementPlan,
+} from "./retirement-calculations";
 import { previewSaveUpOverview, type SaveUpOverview } from "./save-up";
 
 export interface Goal {
@@ -92,7 +97,7 @@ export interface GoalSummaryUpdate {
 }
 
 export interface PreparedRetirementSimulationInput {
-  plan: Record<string, unknown>;
+  plan: RetirementPlan;
   currentPortfolio: number;
   plannerMode: RetirementTimingMode;
 }
@@ -158,6 +163,10 @@ export interface GoalService {
   saveGoalPlan(plan: SaveGoalPlan): Promise<GoalPlan>;
   deleteGoalPlan(goalId: string): Promise<number>;
   computeSaveUpOverview(goalId: string, valuationMap: GoalValuationMap): Promise<SaveUpOverview>;
+  computeRetirementOverview(
+    goalId: string,
+    valuationMap: GoalValuationMap,
+  ): Promise<RetirementOverview>;
   prepareRetirementInput(
     goalId: string,
     valuationMap: GoalValuationMap,
@@ -488,6 +497,33 @@ export function createGoalService(
   repository: GoalRepository,
   options: GoalServiceOptions = {},
 ): GoalService {
+  const prepareRetirementInputForGoal = (
+    goalId: string,
+    valuationMap: GoalValuationMap,
+  ): PreparedRetirementSimulationInput => {
+    const goal = repository.loadGoal(goalId);
+    if (goal.goalType !== "retirement") {
+      throw new Error(`Invalid input: Goal ${goalId} is not a retirement goal`);
+    }
+    const storedPlan = repository.loadGoalPlan(goalId);
+    if (!storedPlan) {
+      throw new Error(`Invalid input: No plan found for goal ${goalId}`);
+    }
+
+    const normalized = parseValidateAndNormalizeRetirementPlanSettings(storedPlan.settingsJson, {
+      asOf: options.now?.(),
+    });
+    const fundingRules = repository.loadFundingRules(goalId);
+    const taxBucketBalances = computeTaxBucketBalances(fundingRules, valuationMap);
+    const planWithBuckets = injectTaxBucketBalances(normalized.settings, taxBucketBalances);
+
+    return {
+      plan: planWithBuckets,
+      currentPortfolio: computeGoalValueFromShares(fundingRules, valuationMap),
+      plannerMode: retirementTimingModeFromString(storedPlan.plannerMode ?? "fire"),
+    };
+  };
+
   return {
     getGoals() {
       return repository.loadGoals();
@@ -613,27 +649,15 @@ export function createGoalService(
       );
     },
     async prepareRetirementInput(goalId, valuationMap) {
-      const goal = repository.loadGoal(goalId);
-      if (goal.goalType !== "retirement") {
-        throw new Error(`Invalid input: Goal ${goalId} is not a retirement goal`);
-      }
-      const storedPlan = repository.loadGoalPlan(goalId);
-      if (!storedPlan) {
-        throw new Error(`Invalid input: No plan found for goal ${goalId}`);
-      }
-
-      const normalized = parseValidateAndNormalizeRetirementPlanSettings(storedPlan.settingsJson, {
-        asOf: options.now?.(),
-      });
-      const fundingRules = repository.loadFundingRules(goalId);
-      const taxBucketBalances = computeTaxBucketBalances(fundingRules, valuationMap);
-      const planWithBuckets = injectTaxBucketBalances(normalized.settings, taxBucketBalances);
-
-      return {
-        plan: planWithBuckets,
-        currentPortfolio: computeGoalValueFromShares(fundingRules, valuationMap),
-        plannerMode: retirementTimingModeFromString(storedPlan.plannerMode ?? "fire"),
-      };
+      return prepareRetirementInputForGoal(goalId, valuationMap);
+    },
+    async computeRetirementOverview(goalId, valuationMap) {
+      const prepared = prepareRetirementInputForGoal(goalId, valuationMap);
+      return computeRetirementOverviewWithMode(
+        prepared.plan,
+        prepared.currentPortfolio,
+        prepared.plannerMode,
+      );
     },
     async refreshGoalSummary(goalId, valuationMap) {
       const goal = repository.loadGoal(goalId);
@@ -1054,7 +1078,7 @@ function computeTaxBucketBalances(
 function injectTaxBucketBalances(
   settings: Record<string, unknown>,
   taxBucketBalances: TaxBucketBalances,
-): Record<string, unknown> {
+): RetirementPlan {
   const tax = isRecord(settings.tax)
     ? { ...settings.tax }
     : {
@@ -1068,7 +1092,7 @@ function injectTaxBucketBalances(
       ...tax,
       withdrawalBuckets: taxBucketBalances,
     },
-  };
+  } as RetirementPlan;
 }
 
 function retirementTimingModeFromString(value: string): RetirementTimingMode {

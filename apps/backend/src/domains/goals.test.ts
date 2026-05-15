@@ -938,6 +938,47 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("computes retirement overview from stored plans and planner mode", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, { id: "retirement", title: "Retirement", goalType: "retirement" });
+      seedGoalPlan(db, {
+        goalId: "retirement",
+        planKind: "retirement",
+        plannerMode: "traditional",
+        settingsJson: JSON.stringify(validRetirementPlan({ tax: null })),
+      });
+      seedFundingRule(db, {
+        id: "brokerage-rule",
+        goalId: "retirement",
+        accountId: "brokerage",
+        sharePercent: 50,
+        taxBucket: "taxable",
+      });
+
+      const overview = await service.computeRetirementOverview("retirement", {
+        brokerage: 200_000,
+      });
+
+      expect(overview).toMatchObject({
+        analysisMode: "traditional",
+        portfolioNow: 100_000,
+        taxBucketBalances: {
+          taxable: 100_000,
+          taxDeferred: 0,
+          taxFree: 0,
+        },
+        targetReconciliation: {
+          targetAge: 55,
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects retirement input preparation for non-retirement goals and missing plans", async () => {
     const db = createGoalsDb();
     const service = createGoalService(createGoalRepository(db));

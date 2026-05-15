@@ -5453,7 +5453,7 @@ describe("TS backend HTTP skeleton", () => {
       goalValuationProvider: {
         async getGoalValuationMap() {
           providerCalls += 1;
-          return { cash: 1000 };
+          return { brokerage: 200_000, cash: 1000 };
         },
       },
     });
@@ -5534,6 +5534,70 @@ describe("TS backend HTTP skeleton", () => {
         }),
       ]);
       expect(providerCalls).toBe(4);
+
+      for (const [goalId, plannerMode, expectedMode] of [
+        ["retirement-fire", null, "fire"],
+        ["retirement-traditional", "traditional", "traditional"],
+      ] as const) {
+        seedHttpGoal(db, {
+          id: goalId,
+          title: goalId,
+          goalType: "retirement",
+        });
+        seedHttpGoalPlan(db, {
+          goalId,
+          planKind: "retirement",
+          plannerMode,
+          settingsJson: JSON.stringify(validHttpRetirementPlan()),
+        });
+        seedHttpFundingRule(db, {
+          id: `${goalId}-funding`,
+          goalId,
+          accountId: "brokerage",
+          sharePercent: 50,
+          taxBucket: "tax_deferred",
+        });
+
+        const retirementOverviewResponse = await handler(
+          new Request(`http://127.0.0.1/api/v1/goals/${goalId}/retirement/overview`, {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        );
+        expect(retirementOverviewResponse.status).toBe(200);
+        await expect(retirementOverviewResponse.json()).resolves.toMatchObject({
+          analysisMode: expectedMode,
+          portfolioNow: 100_000,
+          taxBucketBalances: { taxable: 0, taxDeferred: 100_000, taxFree: 0 },
+          targetReconciliation: { targetAge: 55 },
+        });
+      }
+      expect(providerCalls).toBe(6);
+
+      const nonRetirementOverviewResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/goal%201/retirement/overview", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(nonRetirementOverviewResponse.status).toBe(400);
+      await expect(nonRetirementOverviewResponse.json()).resolves.toMatchObject({
+        message: "Invalid input: Goal goal 1 is not a retirement goal",
+      });
+
+      seedHttpGoal(db, {
+        id: "retirement-no-plan",
+        title: "Retirement No Plan",
+        goalType: "retirement",
+      });
+      const missingPlanResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement-no-plan/retirement/overview", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(missingPlanResponse.status).toBe(400);
+      await expect(missingPlanResponse.json()).resolves.toMatchObject({
+        message: "Invalid input: No plan found for goal retirement-no-plan",
+      });
+      expect(providerCalls).toBe(8);
     } finally {
       db.close();
     }
@@ -5629,6 +5693,7 @@ describe("TS backend HTTP skeleton", () => {
         ["POST", "/api/v1/goals/refresh-summaries"],
         ["POST", "/api/v1/goals/goal-1/refresh-summary"],
         ["GET", "/api/v1/goals/goal-1/save-up/overview"],
+        ["GET", "/api/v1/goals/goal-1/retirement/overview"],
       ] as const) {
         const response = await handler(
           new Request(`http://127.0.0.1${path}`, {
@@ -5643,8 +5708,7 @@ describe("TS backend HTTP skeleton", () => {
       }
 
       const providerErrorResponse = await failingHandler(
-        new Request("http://127.0.0.1/api/v1/goals/goal-1/refresh-summary", {
-          method: "POST",
+        new Request("http://127.0.0.1/api/v1/goals/goal-1/retirement/overview", {
           headers: { authorization: "Bearer sidecar-token" },
         }),
       );
@@ -5876,6 +5940,7 @@ function seedHttpGoal(
   goal: {
     id: string;
     title: string;
+    goalType?: string;
     targetAmount?: number;
     projectedCompletionDate?: string | null;
     projectedValueAtTargetDate?: number | null;
@@ -5888,12 +5953,13 @@ function seedHttpGoal(
         status_health, priority, projected_completion_date, projected_value_at_target_date,
         created_at, updated_at
       )
-      VALUES (?, ?, NULL, ?, 'custom_save_up', 'active', 'not_applicable', 0, ?, ?, ?, ?)
+      VALUES (?, ?, NULL, ?, ?, 'active', 'not_applicable', 0, ?, ?, ?, ?)
     `,
   ).run(
     goal.id,
     goal.title,
     goal.targetAmount ?? 100,
+    goal.goalType ?? "custom_save_up",
     goal.projectedCompletionDate ?? null,
     goal.projectedValueAtTargetDate ?? null,
     "2026-01-01T00:00:00Z",
@@ -5908,6 +5974,7 @@ function seedHttpFundingRule(
     goalId: string;
     accountId: string;
     sharePercent: number;
+    taxBucket?: string | null;
   },
 ): void {
   db.prepare(
@@ -5915,16 +5982,69 @@ function seedHttpFundingRule(
       INSERT INTO goals_allocation (
         id, goal_id, account_id, share_percent, tax_bucket, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, NULL, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     rule.id,
     rule.goalId,
     rule.accountId,
     rule.sharePercent,
+    rule.taxBucket ?? null,
     "2026-01-01T00:00:00Z",
     "2026-01-01T00:00:00Z",
   );
+}
+
+function seedHttpGoalPlan(
+  db: Database,
+  plan: {
+    goalId: string;
+    planKind: string;
+    settingsJson: string;
+    plannerMode?: string | null;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO goal_plans (
+        goal_id, plan_kind, planner_mode, settings_json, summary_json, version, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, '{}', 1, ?, ?)
+    `,
+  ).run(
+    plan.goalId,
+    plan.planKind,
+    plan.plannerMode ?? null,
+    plan.settingsJson,
+    "2026-01-01T00:00:00Z",
+    "2026-01-01T00:00:00Z",
+  );
+}
+
+function validHttpRetirementPlan(): Record<string, unknown> {
+  return {
+    personal: {
+      currentAge: 45,
+      targetRetirementAge: 55,
+      planningHorizonAge: 90,
+    },
+    expenses: {
+      items: [{ id: "living", label: "Living", monthlyAmount: 6000 }],
+    },
+    incomeStreams: [],
+    investment: {
+      preRetirementAnnualReturn: 0.057,
+      retirementAnnualReturn: 0.034,
+      annualInvestmentFeeRate: 0.006,
+      annualVolatility: 0.12,
+      inflationRate: 0.02,
+      monthlyContribution: 3000,
+      contributionGrowthRate: 0.02,
+      glidePath: null,
+    },
+    tax: null,
+    currency: "USD",
+  };
 }
 
 function createTaxonomiesDb(): Database {

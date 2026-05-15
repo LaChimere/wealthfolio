@@ -118,10 +118,10 @@
     standalone runtime valuation-map construction, refresh-all summary routing,
     save-time summary refresh side effects, Rust-compatible retirement input
     preparation, deterministic retirement calculation primitives, deterministic
-    required-capital/projection engine behavior, and deterministic retirement
-    overview assembly now have bounded TS runtime parity while HTTP overview
-    routing, plan-backed summary refresh, and retirement simulation endpoints
-    remain deferred to calculation-heavy slices; automatic FX market
+    required-capital/projection engine behavior, deterministic retirement
+    overview assembly, and HTTP retirement overview routing now have bounded TS
+    runtime parity while plan-backed summary refresh and retirement simulation
+    endpoints remain deferred to calculation-heavy slices; automatic FX market
     sync/provider HTTP behavior plus broader market-data sync behavior are
     deferred to calculation/market-data slices; actual portfolio job execution
     and event production are deferred to portfolio/calculation slices; TS
@@ -1059,6 +1059,13 @@ contract:
   `classification:legacy_migration:*` warning issues, migrated classification
   fix action payloads, severity rollup, standalone runtime wiring, and continued
   deferral of full affected-item parity and Rust-generated dismissal hashes.
+- `pr5-retirement-overview-route-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/http.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes `GoalService.computeRetirementOverview`,
+  `GET /api/v1/goals/{id}/retirement/overview`, valuation-provider 501/503
+  behavior, non-retirement and missing-plan errors, funding-share current
+  portfolio, tax-bucket injection, and stored/default planner mode handling.
 
 ## Result
 
@@ -1093,14 +1100,15 @@ contract:
   plus import FX pair ensure, save-up and retirement goal-plan persistence,
   save-up preview calculation runtime, save-up goal overview service logic, AI
   chat thread/message persistence, non-retirement/no-plan retirement summary
-  refresh service logic, bounded health status/check slices, bounded health
-  classification-fix runtime, and bounded legacy-classification health issue
-  runtime implemented; broader migration remains active.
+  refresh service logic, deterministic retirement calculation primitives,
+  projection engine, overview assembly, and guarded retirement overview HTTP
+  routing, bounded health status/check slices, bounded health classification-fix
+  runtime, and bounded legacy-classification health issue runtime implemented;
+  broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
-  `/health/fix` execution move with the health/calculation services; HTTP
-  summary refresh routing, HTTP goal-id save-up overview routing, plan-backed
-  retirement summary refresh, and retirement simulation endpoints move with
+  `/health/fix` execution move with the health/calculation services; plan-backed
+  retirement summary refresh and retirement simulation endpoints move with
   calculation-heavy goal slices; automatic FX market sync/provider HTTP behavior
   plus broader market-data provider resolution/sync behavior move with
   calculation/market-data slices; actual portfolio job execution and event

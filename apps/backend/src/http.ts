@@ -2250,6 +2250,13 @@ function routeGoalRequest(
     );
   }
 
+  const retirementOverviewGoalId = goalRetirementOverviewIdFromPath(url.pathname);
+  if (retirementOverviewGoalId && request.method === "GET") {
+    return handleGoalValuationRequest(goalValuationProvider, (valuationMap) =>
+      goalService.computeRetirementOverview(retirementOverviewGoalId, valuationMap),
+    );
+  }
+
   if (request.method === "GET" && url.pathname === "/api/v1/goals") {
     return jsonResponse(goalService.getGoals());
   }
@@ -2843,6 +2850,11 @@ function goalRefreshSummaryIdFromPath(pathname: string): string | undefined {
 
 function goalSaveUpOverviewIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/goals\/([^/]+)\/save-up\/overview$/.exec(pathname);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function goalRetirementOverviewIdFromPath(pathname: string): string | undefined {
+  const match = /^\/api\/v1\/goals\/([^/]+)\/retirement\/overview$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
