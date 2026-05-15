@@ -154,6 +154,10 @@ describe("TS backend runtime composition", () => {
       expect(valuationHistoryResponse.status).toBe(200);
       await expect(valuationHistoryResponse.json()).resolves.toEqual([]);
 
+      const snapshotsResponse = await fetch(`${server.baseUrl}/api/v1/snapshots?accountId=missing`);
+      expect(snapshotsResponse.status).toBe(200);
+      await expect(snapshotsResponse.json()).resolves.toEqual([]);
+
       const holdingsResponse = await fetch(`${server.baseUrl}/api/v1/holdings?accountId=missing`);
       expect(holdingsResponse.status).toBe(501);
       await expect(holdingsResponse.json()).resolves.toMatchObject({

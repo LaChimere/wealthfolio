@@ -231,6 +231,7 @@ export {
   type HoldingsService,
   type HoldingsSnapshotInput,
   type SaveManualHoldingsRequest,
+  type SnapshotInfo,
 } from "./domains/holdings";
 export type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
 export {

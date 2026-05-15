@@ -37,6 +37,21 @@ describe("TS holdings domain", () => {
         totalValue: "999",
         netContribution: "1",
       });
+      insertSnapshot(db, {
+        id: "a1-2026-01-01",
+        accountId: "a1",
+        date: "2026-01-01",
+        source: "MANUAL_ENTRY",
+        positions: { stock: { quantity: "2" } },
+        cashBalances: { USD: "10", CAD: "5" },
+      });
+      insertSnapshot(db, {
+        id: "a1-2026-01-02",
+        accountId: "a1",
+        date: "2026-01-02",
+        positions: {},
+        cashBalances: {},
+      });
 
       expect(service.getHistoricalValuations("a1", "2026-01-02")).toEqual([
         expect.objectContaining({
@@ -55,6 +70,24 @@ describe("TS holdings domain", () => {
       expect(service.getLatestValuations()).toEqual([
         expect.objectContaining({ accountId: "a1" }),
         expect.objectContaining({ accountId: "a2" }),
+      ]);
+      expect(service.getSnapshots("a1", "2026-01-02")).toEqual([
+        {
+          id: "a1-2026-01-02",
+          snapshotDate: "2026-01-02",
+          source: "CALCULATED",
+          positionCount: 0,
+          cashCurrencyCount: 0,
+        },
+      ]);
+      expect(service.getSnapshots("a1", "2026-01-01", "2026-01-01")).toEqual([
+        {
+          id: "a1-2026-01-01",
+          snapshotDate: "2026-01-01",
+          source: "MANUAL_ENTRY",
+          positionCount: 1,
+          cashCurrencyCount: 2,
+        },
       ]);
       await expect(service.getHoldings("a1")).rejects.toThrow("Holdings fan-out is not available");
     } finally {
@@ -86,6 +119,18 @@ function createHoldingsDb(): Database {
       net_contribution TEXT NOT NULL,
       calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     );
+    CREATE TABLE holdings_snapshots (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      snapshot_date TEXT NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      positions TEXT NOT NULL DEFAULT '{}',
+      cash_balances TEXT NOT NULL DEFAULT '{}',
+      cost_basis TEXT NOT NULL DEFAULT '0',
+      net_contribution TEXT NOT NULL DEFAULT '0',
+      calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      source TEXT NOT NULL DEFAULT 'CALCULATED'
+    );
   `);
   return db;
 }
@@ -99,6 +144,34 @@ function insertAccount(
     account.name,
     account.isActive ?? 1,
     account.isArchived ?? 0,
+  );
+}
+
+function insertSnapshot(
+  db: Database,
+  snapshot: {
+    id: string;
+    accountId: string;
+    date: string;
+    source?: string;
+    positions: Record<string, unknown>;
+    cashBalances: Record<string, unknown>;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO holdings_snapshots (
+        id, account_id, snapshot_date, source, positions, cash_balances
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    snapshot.id,
+    snapshot.accountId,
+    snapshot.date,
+    snapshot.source ?? "CALCULATED",
+    JSON.stringify(snapshot.positions),
+    JSON.stringify(snapshot.cashBalances),
   );
 }
 

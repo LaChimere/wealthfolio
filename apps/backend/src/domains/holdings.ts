@@ -84,6 +84,14 @@ export interface DailyAccountValuation {
   calculatedAt: string;
 }
 
+export interface SnapshotInfo {
+  id: string;
+  snapshotDate: string;
+  source: string;
+  positionCount: number;
+  cashCurrencyCount: number;
+}
+
 export class HoldingsNotImplementedError extends Error {
   readonly status = 501;
   readonly code = "not_implemented";
@@ -107,6 +115,14 @@ interface DailyAccountValuationRow {
   cost_basis: string;
   net_contribution: string;
   calculated_at: string;
+}
+
+interface SnapshotInfoRow {
+  id: string;
+  snapshot_date: string;
+  source: string | null;
+  positions: string;
+  cash_balances: string;
 }
 
 export function createHoldingsService(db: Database): HoldingsService {
@@ -133,8 +149,8 @@ export function createHoldingsService(db: Database): HoldingsService {
     getHoldingsByAllocation() {
       return notImplemented("Allocation holdings are not available in the TS runtime yet");
     },
-    getSnapshots() {
-      return notImplemented("Holdings snapshots are not available in the TS runtime yet");
+    getSnapshots(accountId, dateFrom, dateTo) {
+      return readSnapshotInfo(db, accountId, dateFrom, dateTo);
     },
     getSnapshotByDate() {
       return notImplemented("Snapshot holdings are not available in the TS runtime yet");
@@ -156,6 +172,42 @@ export function createHoldingsService(db: Database): HoldingsService {
 
 function notImplemented(message: string): Promise<never> {
   return Promise.reject(new HoldingsNotImplementedError(message));
+}
+
+function readSnapshotInfo(
+  db: Database,
+  accountId: string,
+  dateFrom: string | undefined,
+  dateTo: string | undefined,
+): SnapshotInfo[] {
+  const conditions = ["account_id = ?"];
+  const params = [accountId];
+  if (dateFrom) {
+    conditions.push("snapshot_date >= ?");
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    conditions.push("snapshot_date <= ?");
+    params.push(dateTo);
+  }
+
+  return db
+    .query<SnapshotInfoRow, string[]>(
+      `
+        SELECT id, snapshot_date, source, positions, cash_balances
+        FROM holdings_snapshots
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY snapshot_date ASC
+      `,
+    )
+    .all(...params)
+    .map((row) => ({
+      id: row.id,
+      snapshotDate: row.snapshot_date,
+      source: row.source ?? "CALCULATED",
+      positionCount: Object.keys(parseJsonObject(row.positions, "positions")).length,
+      cashCurrencyCount: Object.keys(parseJsonObject(row.cash_balances, "cash_balances")).length,
+    }));
 }
 
 function readHistoricalValuations(
@@ -266,4 +318,16 @@ function decimalToNumber(value: unknown, fallback: Decimal): number {
   } catch {
     return Number(fallback.toString());
   }
+}
+
+function parseJsonObject(rawJson: string, field: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(rawJson);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    throw new Error(`Invalid stored JSON: ${field}`);
+  }
+  throw new Error(`Invalid stored JSON: ${field}`);
 }

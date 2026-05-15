@@ -155,6 +155,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   request-order preservation, filtered history ranges, numeric valuation fields,
   and explicit 501 gates for still-deferred holdings fan-out, allocations,
   snapshots, and imports.
+- Add bounded holdings snapshot metadata read runtime for `/api/v1/snapshots`,
+  including account/date filters, source defaults, position/cash currency
+  counts, and explicit 501 gates for still-deferred snapshot conversion,
+  deletion, save/import, holdings fan-out, and allocations.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -179,10 +183,10 @@ provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
 current/historical net-worth, income summary, simple account performance,
-account performance history/summary, and valuation reads, holdings fan-out/
-allocation/snapshot/import runtime, add-on runtime, broader market-data runtime
-beyond mapping/templates/duplicate lookups, read-only search, transfer
-link/unlink, single activity delete, and bounded
+account performance history/summary, valuation reads, and snapshot metadata,
+holdings fan-out/allocation/snapshot conversion/import runtime, add-on runtime,
+broader market-data runtime beyond mapping/templates/duplicate lookups,
+read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
