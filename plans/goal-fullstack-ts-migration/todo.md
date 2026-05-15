@@ -116,8 +116,9 @@
     bounded TS runtime parity; non-retirement and no-plan retirement summary
     refresh service logic, guarded valuation-provider HTTP route seams,
     standalone runtime valuation-map construction, refresh-all summary routing,
-    and save-time summary refresh side effects now have bounded TS runtime
-    parity while plan-backed retirement calculation endpoints are deferred to
+    save-time summary refresh side effects, and Rust-compatible retirement input
+    preparation now have bounded TS runtime parity while retirement
+    overview/projection/simulation execution remains deferred to
     calculation-heavy slices; automatic FX market sync/provider HTTP behavior
     plus broader market-data sync behavior are deferred to
     calculation/market-data slices; actual portfolio job execution and event

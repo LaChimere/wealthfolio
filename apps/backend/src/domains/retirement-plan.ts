@@ -3,6 +3,18 @@ export interface RetirementPlanValidationResult {
   dcLinkedAccountIds: string[];
 }
 
+export interface RetirementPlanSettingsResult extends RetirementPlanValidationResult {
+  settings: Record<string, unknown>;
+}
+
+export interface TaxBucketBalances {
+  taxable: number;
+  taxDeferred: number;
+  taxFree: number;
+}
+
+export type RetirementTimingMode = "fire" | "traditional";
+
 interface RetirementPlanValidationOptions {
   asOf?: Date;
 }
@@ -33,6 +45,17 @@ export function validateAndNormalizeRetirementPlanSettings(
   settingsJson: string,
   options: RetirementPlanValidationOptions = {},
 ): RetirementPlanValidationResult {
+  const result = parseValidateAndNormalizeRetirementPlanSettings(settingsJson, options);
+  return {
+    settingsJson: result.settingsJson,
+    dcLinkedAccountIds: result.dcLinkedAccountIds,
+  };
+}
+
+export function parseValidateAndNormalizeRetirementPlanSettings(
+  settingsJson: string,
+  options: RetirementPlanValidationOptions = {},
+): RetirementPlanSettingsResult {
   const settings = parseRetirementPlanJson(settingsJson);
   const personal = readPersonalProfile(settings);
   const normalizedAge = personal.birthYearMonth
@@ -47,6 +70,7 @@ export function validateAndNormalizeRetirementPlanSettings(
   const dcLinkedAccountIds = validateRetirementPlan(settings, personal, investment);
 
   return {
+    settings,
     settingsJson: JSON.stringify(settings),
     dcLinkedAccountIds,
   };

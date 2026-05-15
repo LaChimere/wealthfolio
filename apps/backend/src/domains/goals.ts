@@ -1,6 +1,11 @@
 import type { Database } from "bun:sqlite";
 
-import { validateAndNormalizeRetirementPlanSettings } from "./retirement-plan";
+import {
+  parseValidateAndNormalizeRetirementPlanSettings,
+  validateAndNormalizeRetirementPlanSettings,
+  type RetirementTimingMode,
+  type TaxBucketBalances,
+} from "./retirement-plan";
 import { previewSaveUpOverview, type SaveUpOverview } from "./save-up";
 
 export interface Goal {
@@ -86,6 +91,12 @@ export interface GoalSummaryUpdate {
   statusHealth: string;
 }
 
+export interface PreparedRetirementSimulationInput {
+  plan: Record<string, unknown>;
+  currentPortfolio: number;
+  plannerMode: RetirementTimingMode;
+}
+
 export type GoalValuationMap =
   | ReadonlyMap<string, number>
   | Readonly<Record<string, number | undefined>>;
@@ -147,6 +158,10 @@ export interface GoalService {
   saveGoalPlan(plan: SaveGoalPlan): Promise<GoalPlan>;
   deleteGoalPlan(goalId: string): Promise<number>;
   computeSaveUpOverview(goalId: string, valuationMap: GoalValuationMap): Promise<SaveUpOverview>;
+  prepareRetirementInput(
+    goalId: string,
+    valuationMap: GoalValuationMap,
+  ): Promise<PreparedRetirementSimulationInput>;
   refreshGoalSummary(goalId: string, valuationMap: GoalValuationMap): Promise<Goal>;
   getBaseCurrency(): string | undefined;
 }
@@ -597,6 +612,29 @@ export function createGoalService(
         { now: options.now?.() },
       );
     },
+    async prepareRetirementInput(goalId, valuationMap) {
+      const goal = repository.loadGoal(goalId);
+      if (goal.goalType !== "retirement") {
+        throw new Error(`Invalid input: Goal ${goalId} is not a retirement goal`);
+      }
+      const storedPlan = repository.loadGoalPlan(goalId);
+      if (!storedPlan) {
+        throw new Error(`Invalid input: No plan found for goal ${goalId}`);
+      }
+
+      const normalized = parseValidateAndNormalizeRetirementPlanSettings(storedPlan.settingsJson, {
+        asOf: options.now?.(),
+      });
+      const fundingRules = repository.loadFundingRules(goalId);
+      const taxBucketBalances = computeTaxBucketBalances(fundingRules, valuationMap);
+      const planWithBuckets = injectTaxBucketBalances(normalized.settings, taxBucketBalances);
+
+      return {
+        plan: planWithBuckets,
+        currentPortfolio: computeGoalValueFromShares(fundingRules, valuationMap),
+        plannerMode: retirementTimingModeFromString(storedPlan.plannerMode ?? "fire"),
+      };
+    },
     async refreshGoalSummary(goalId, valuationMap) {
       const goal = repository.loadGoal(goalId);
       const fundingRules = repository.loadFundingRules(goalId);
@@ -974,6 +1012,69 @@ function computeGoalValueFromShares(
   return value === 0 ? 0 : value;
 }
 
+function computeTaxBucketBalances(
+  fundingRules: GoalFundingRule[],
+  valuationMap: GoalValuationMap,
+): TaxBucketBalances {
+  const balances: TaxBucketBalances = {
+    taxable: 0,
+    taxDeferred: 0,
+    taxFree: 0,
+  };
+  for (const rule of fundingRules) {
+    const accountValue = accountValuation(valuationMap, rule.accountId);
+    if (accountValue === undefined) {
+      continue;
+    }
+    const shareValue = Math.max((accountValue * rule.sharePercent) / 100, 0);
+    switch (rule.taxBucket) {
+      case "tax_deferred":
+      case "tax-deferred":
+        balances.taxDeferred += shareValue;
+        break;
+      case "tax_free":
+      case "tax-free":
+        balances.taxFree += shareValue;
+        break;
+      case "taxable":
+      case null:
+        balances.taxable += shareValue;
+        break;
+      default:
+        console.warn(
+          `Unknown goal funding tax bucket '${rule.taxBucket}' for rule ${rule.id}; treating as taxable`,
+        );
+        balances.taxable += shareValue;
+        break;
+    }
+  }
+  return balances;
+}
+
+function injectTaxBucketBalances(
+  settings: Record<string, unknown>,
+  taxBucketBalances: TaxBucketBalances,
+): Record<string, unknown> {
+  const tax = isRecord(settings.tax)
+    ? { ...settings.tax }
+    : {
+        taxableWithdrawalRate: 0,
+        taxDeferredWithdrawalRate: 0,
+        taxFreeWithdrawalRate: 0,
+      };
+  return {
+    ...settings,
+    tax: {
+      ...tax,
+      withdrawalBuckets: taxBucketBalances,
+    },
+  };
+}
+
+function retirementTimingModeFromString(value: string): RetirementTimingMode {
+  return value === "traditional" ? "traditional" : "fire";
+}
+
 function goalSummaryHealth(
   isRetirement: boolean,
   projectedValueAtTargetDate: number | null,
@@ -1006,6 +1107,10 @@ function isReadonlyMap(
   valuationMap: GoalValuationMap,
 ): valuationMap is ReadonlyMap<string, number> {
   return typeof (valuationMap as ReadonlyMap<string, number>).get === "function";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateGoalFundingCapacity(

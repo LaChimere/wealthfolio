@@ -874,6 +874,89 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("prepares retirement inputs with Rust-compatible portfolio, tax buckets, and mode defaults", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, { id: "retirement", title: "Retirement", goalType: "retirement" });
+      seedGoalPlan(db, {
+        goalId: "retirement",
+        planKind: "retirement",
+        settingsJson: JSON.stringify(validRetirementPlan({ tax: null })),
+      });
+      seedFundingRule(db, {
+        id: "brokerage-rule",
+        goalId: "retirement",
+        accountId: "brokerage",
+        sharePercent: 50,
+        taxBucket: "taxable",
+      });
+      seedFundingRule(db, {
+        id: "rrsp-rule",
+        goalId: "retirement",
+        accountId: "rrsp",
+        sharePercent: 100,
+        taxBucket: "tax_deferred",
+      });
+      seedFundingRule(db, {
+        id: "tfsa-rule",
+        goalId: "retirement",
+        accountId: "tfsa",
+        sharePercent: 25,
+        taxBucket: "tax-free",
+      });
+      seedFundingRule(db, {
+        id: "debt-rule",
+        goalId: "retirement",
+        accountId: "debt",
+        sharePercent: 100,
+        taxBucket: "taxable",
+      });
+
+      const prepared = await service.prepareRetirementInput("retirement", {
+        brokerage: 100_000,
+        rrsp: 20_000,
+        tfsa: 40_000,
+        debt: -5_000,
+      });
+
+      expect(prepared.currentPortfolio).toBe(75_000);
+      expect(prepared.plannerMode).toBe("fire");
+      expect(prepared.plan.tax).toEqual({
+        taxableWithdrawalRate: 0,
+        taxDeferredWithdrawalRate: 0,
+        taxFreeWithdrawalRate: 0,
+        withdrawalBuckets: {
+          taxable: 50_000,
+          taxDeferred: 20_000,
+          taxFree: 10_000,
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects retirement input preparation for non-retirement goals and missing plans", async () => {
+    const db = createGoalsDb();
+    const service = createGoalService(createGoalRepository(db));
+
+    try {
+      seedGoal(db, { id: "save-up", title: "Save Up" });
+      await expect(service.prepareRetirementInput("save-up", {})).rejects.toThrow(
+        "Goal save-up is not a retirement goal",
+      );
+
+      seedGoal(db, { id: "retirement", title: "Retirement", goalType: "retirement" });
+      await expect(service.prepareRetirementInput("retirement", {})).rejects.toThrow(
+        "No plan found for goal retirement",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("replaces funding rules and deletes goals with Rust-compatible sync behavior", async () => {
     const db = createGoalsDb();
     const syncEvents: GoalSyncEvent[] = [];

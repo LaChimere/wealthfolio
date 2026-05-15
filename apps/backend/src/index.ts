@@ -202,6 +202,7 @@ export {
   type GoalSyncEvent,
   type GoalSyncOperation,
   type NewGoal,
+  type PreparedRetirementSimulationInput,
   type SaveGoalPlan,
 } from "./domains/goals";
 export {
