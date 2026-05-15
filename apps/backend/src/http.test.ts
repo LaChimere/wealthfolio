@@ -5511,6 +5511,47 @@ describe("TS backend HTTP skeleton", () => {
       });
       expect(providerCalls).toBe(2);
 
+      const directProjectionResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 100_000,
+            plannerMode: "traditional",
+          }),
+        }),
+      );
+      expect(directProjectionResponse.status).toBe(200);
+      const directProjection = await directProjectionResponse.json();
+      expect(directProjection).toMatchObject({ retirementStartAge: 55 });
+      expect(directProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
+      expect(providerCalls).toBe(2);
+
+      const invalidProjectionResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({
+              personal: { currentAge: 45, targetRetirementAge: 40 },
+            }),
+            currentPortfolio: 100_000,
+          }),
+        }),
+      );
+      expect(invalidProjectionResponse.status).toBe(400);
+      await expect(invalidProjectionResponse.json()).resolves.toMatchObject({
+        message: "Invalid input: Target retirement age must be after current age",
+      });
+      expect(providerCalls).toBe(2);
+
       const domainErrorResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/missing/save-up/overview", {
           headers: { authorization: "Bearer sidecar-token" },
@@ -5586,6 +5627,27 @@ describe("TS backend HTTP skeleton", () => {
       });
       expect(providerCalls).toBe(7);
 
+      const goalProjectionResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            plannerMode: "fire",
+            goalId: "retirement-traditional",
+          }),
+        }),
+      );
+      expect(goalProjectionResponse.status).toBe(200);
+      const goalProjection = await goalProjectionResponse.json();
+      expect(goalProjection).toMatchObject({ retirementStartAge: 55 });
+      expect(goalProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
+      expect(providerCalls).toBe(8);
+
       const nonRetirementOverviewResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/goal%201/retirement/overview", {
           headers: { authorization: "Bearer sidecar-token" },
@@ -5610,7 +5672,7 @@ describe("TS backend HTTP skeleton", () => {
       await expect(missingPlanResponse.json()).resolves.toMatchObject({
         message: "Invalid input: No plan found for goal retirement-no-plan",
       });
-      expect(providerCalls).toBe(9);
+      expect(providerCalls).toBe(10);
     } finally {
       db.close();
     }
@@ -5720,6 +5782,25 @@ describe("TS backend HTTP skeleton", () => {
         });
       }
 
+      const projectionNoProviderResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+          }),
+        }),
+      );
+      expect(projectionNoProviderResponse.status).toBe(501);
+      await expect(projectionNoProviderResponse.json()).resolves.toMatchObject({
+        message: "Goal valuation provider is not available in the TS backend runtime yet",
+      });
+
       const providerErrorResponse = await failingHandler(
         new Request("http://127.0.0.1/api/v1/goals/goal-1/retirement/overview", {
           headers: { authorization: "Bearer sidecar-token" },
@@ -5727,6 +5808,25 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(providerErrorResponse.status).toBe(503);
       await expect(providerErrorResponse.json()).resolves.toMatchObject({
+        message: "valuation unavailable",
+      });
+
+      const projectionProviderErrorResponse = await failingHandler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+          }),
+        }),
+      );
+      expect(projectionProviderErrorResponse.status).toBe(503);
+      await expect(projectionProviderErrorResponse.json()).resolves.toMatchObject({
         message: "valuation unavailable",
       });
     } finally {
@@ -6034,17 +6134,27 @@ function seedHttpGoalPlan(
   );
 }
 
-function validHttpRetirementPlan(): Record<string, unknown> {
+function validHttpRetirementPlan(
+  overrides: {
+    personal?: Record<string, unknown>;
+    expenses?: Record<string, unknown>;
+    incomeStreams?: unknown[];
+    investment?: Record<string, unknown>;
+    tax?: unknown;
+  } = {},
+): Record<string, unknown> {
   return {
     personal: {
       currentAge: 45,
       targetRetirementAge: 55,
       planningHorizonAge: 90,
+      ...overrides.personal,
     },
     expenses: {
       items: [{ id: "living", label: "Living", monthlyAmount: 6000 }],
+      ...overrides.expenses,
     },
-    incomeStreams: [],
+    incomeStreams: overrides.incomeStreams ?? [],
     investment: {
       preRetirementAnnualReturn: 0.057,
       retirementAnnualReturn: 0.034,
@@ -6054,8 +6164,9 @@ function validHttpRetirementPlan(): Record<string, unknown> {
       monthlyContribution: 3000,
       contributionGrowthRate: 0.02,
       glidePath: null,
+      ...overrides.investment,
     },
-    tax: null,
+    tax: overrides.tax === undefined ? null : overrides.tax,
     currency: "USD",
   };
 }

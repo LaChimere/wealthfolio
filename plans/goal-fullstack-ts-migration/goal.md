@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 82
+turns_used: 83
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-15T22:05:00+08:00"
+updated_at: "2026-05-15T23:11:14+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -538,6 +538,12 @@ updated_at: "2026-05-15T22:05:00+08:00"
   projected value, and health from deterministic retirement overviews while
   preserving no-plan clearing, achieved health override, and unreachable-target
   fallback behavior. Targeted goals/http tests and backend type-check passed.
+- Turn 83: Wired the first retirement simulation endpoint in TS:
+  `POST /api/v1/goals/retirement/projection` now accepts direct plan payloads or
+  goal-backed inputs, normalizes/validates standalone plans, reuses stored
+  plan/funding/tax-bucket preparation for `goalId`, honors planner mode, and
+  returns deterministic projection DTOs through the guarded HTTP route. Targeted
+  HTTP tests and backend type-check passed.
 
 ## Deferred items
 
@@ -554,16 +560,18 @@ updated_at: "2026-05-15T22:05:00+08:00"
   behavior, response safety limits, and preview metadata are implemented in the
   standalone TS backend; broader market-data provider quote/import/sync runtime
   remains deferred below.
-- Retirement simulation endpoints remain active follow-ups. reason=save-up
-  preview calculations, save-up goal overview service logic, non-retirement
-  summary refresh service logic, no-plan and plan-backed retirement summary
-  refresh service logic, runtime valuation-map construction, injectable HTTP
-  calculation route seams, save-time summary refresh side effects, refresh-all
-  summary routing, save-up/retirement goal-plan writes, retirement input
-  preparation, deterministic retirement calculation primitives, deterministic
-  required-capital/projection engine behavior, deterministic retirement overview
-  assembly, and HTTP overview routing now have bounded TS runtime parity, while
-  retirement simulation endpoints remain active follow-ups.
+- Remaining retirement simulation endpoints remain active follow-ups.
+  reason=save-up preview calculations, save-up goal overview service logic,
+  non-retirement summary refresh service logic, no-plan and plan-backed
+  retirement summary refresh service logic, runtime valuation-map construction,
+  injectable HTTP calculation route seams, save-time summary refresh side
+  effects, refresh-all summary routing, save-up/retirement goal-plan writes,
+  retirement input preparation, deterministic retirement calculation primitives,
+  deterministic required-capital/projection engine behavior, deterministic
+  retirement overview assembly, HTTP overview routing, and retirement projection
+  routing now have bounded TS runtime parity, while Monte Carlo, stress tests,
+  scenario analysis, decision sensitivity, and sequence-of-returns endpoints
+  remain active follow-ups.
 - FX currency converter, historical lookup, and register-pair behavior now have
   TS runtime parity. reason=the standalone TS exchange-rate service initializes
   the historical converter and can register required FX assets; automatic market

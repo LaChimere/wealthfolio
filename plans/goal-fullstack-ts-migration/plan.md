@@ -98,6 +98,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   summary targets, projected dates/values, and health from deterministic
   overview output while preserving no-plan clearing and unreachable-target
   fallback behavior.
+- Add guarded retirement projection routing for
+  `POST /api/v1/goals/retirement/projection`, including direct plan validation,
+  goal-backed input resolution, planner-mode handling, and valuation-provider
+  501/503 behavior.
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
@@ -117,7 +121,7 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep retirement projection/simulation endpoints deferred to dedicated
+- Keep remaining retirement simulation endpoints deferred to dedicated
   goal/calculation parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
@@ -135,11 +139,10 @@ existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, retirement
-projection/simulation execution, calculation-heavy health checks or
-non-classification `/health/fix` execution, real Connect runtime implementation,
-real device-sync runtime implementation, or Rust runtime removal is in scope for
-this slice.
+generation, sync-crypto/device-sync integration, remaining retirement simulation
+execution, calculation-heavy health checks or non-classification `/health/fix`
+execution, real Connect runtime implementation, real device-sync runtime
+implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

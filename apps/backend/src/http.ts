@@ -95,6 +95,11 @@ import {
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
+import { projectRetirementWithMode, type RetirementPlan } from "./domains/retirement-calculations";
+import {
+  parseValidateAndNormalizeRetirementPlanSettings,
+  type RetirementTimingMode,
+} from "./domains/retirement-plan";
 import type { SecretService } from "./domains/secrets";
 import { previewSaveUpOverview, type SaveUpInput } from "./domains/save-up";
 import type { SettingsService, SettingsUpdate } from "./domains/settings";
@@ -145,6 +150,13 @@ export interface BackendRequestHandlerOptions {
 
 export interface GoalValuationProvider {
   getGoalValuationMap(): Promise<GoalValuationMap>;
+}
+
+interface RetirementSimulationRequest {
+  plan: Record<string, unknown>;
+  currentPortfolio: number;
+  goalId?: string;
+  plannerMode?: RetirementTimingMode;
 }
 
 export function createBackendRequestHandler(
@@ -2219,6 +2231,10 @@ function routeGoalRequest(
     );
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/retirement/projection") {
+    return handleRetirementProjectionRequest(request, goalService, goalValuationProvider);
+  }
+
   const planGoalId = goalPlanIdFromPath(url.pathname);
   if (planGoalId && request.method === "GET") {
     return jsonResponse(goalService.getGoalPlan(planGoalId));
@@ -2351,6 +2367,40 @@ async function handleGoalValuationRequest<T>(
   }
   try {
     return jsonResponse(await handle(valuationMap));
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementProjectionRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementSimulationRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return projectRetirementWithMode(
+        prepared.plan,
+        prepared.currentPortfolio,
+        prepared.plannerMode,
+      );
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(
+      projectRetirementWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
+    );
   } catch (error) {
     return domainErrorResponse(error);
   }
@@ -5422,6 +5472,72 @@ function parseSaveUpInput(payload: Record<string, unknown>): SaveUpInput | Respo
   };
 }
 
+function parseRetirementSimulationRequest(
+  payload: Record<string, unknown>,
+): RetirementSimulationRequest | Response {
+  const plan = parseRequiredRecord(payload.plan, "plan");
+  if (plan instanceof Response) {
+    return plan;
+  }
+  const currentPortfolio = parseRequiredNumber(payload.currentPortfolio, "currentPortfolio");
+  if (currentPortfolio instanceof Response) {
+    return currentPortfolio;
+  }
+  const goalId = parseOptionalStringOrNull(payload.goalId, "goalId");
+  if (goalId instanceof Response) {
+    return goalId;
+  }
+  const plannerMode = parseOptionalRetirementTimingMode(payload.plannerMode, "plannerMode");
+  if (plannerMode instanceof Response) {
+    return plannerMode;
+  }
+  return {
+    plan,
+    currentPortfolio,
+    ...(goalId ? { goalId } : {}),
+    ...(plannerMode ? { plannerMode } : {}),
+  };
+}
+
+function parseOptionalRetirementTimingMode(
+  value: unknown,
+  field: string,
+): RetirementTimingMode | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === "fire" || value === "traditional") {
+    return value;
+  }
+  return jsonResponse({ code: 400, message: `${field} must be 'fire' or 'traditional'` }, 400);
+}
+
+function normalizedRetirementPlanFromPayload(payload: Record<string, unknown>): RetirementPlan {
+  const normalized = parseValidateAndNormalizeRetirementPlanSettings(JSON.stringify(payload));
+  if (!isRetirementPlanRecord(normalized.settings)) {
+    throw new Error(
+      "Invalid input: Invalid retirement plan JSON: retirement plan must be an object",
+    );
+  }
+  return normalized.settings;
+}
+
+function isRetirementPlanRecord(value: unknown): value is RetirementPlan {
+  return (
+    isPlainRecord(value) &&
+    isPlainRecord(value.personal) &&
+    isPlainRecord(value.expenses) &&
+    Array.isArray(value.incomeStreams) &&
+    isPlainRecord(value.investment) &&
+    (value.tax === undefined || value.tax === null || isPlainRecord(value.tax)) &&
+    typeof value.currency === "string"
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function forceGoalCurrency<TGoal extends NewGoal | Goal>(
   goal: TGoal,
   goalService: GoalService,
@@ -6450,6 +6566,13 @@ function parseOptionalRecordOrNull(
   }
   if (typeof value !== "object" || Array.isArray(value)) {
     return jsonResponse({ code: 400, message: `${field} must be an object or null` }, 400);
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseRequiredRecord(value: unknown, field: string): Record<string, unknown> | Response {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return jsonResponse({ code: 400, message: `${field} must be an object` }, 400);
   }
   return value as Record<string, unknown>;
 }
