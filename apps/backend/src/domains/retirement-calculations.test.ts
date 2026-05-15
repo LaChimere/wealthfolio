@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   addContributionToTaxBuckets,
   annualExpensesAtYear,
+  annualExpensesAtYearStochastic,
   applyGrowthToTaxBuckets,
   applyPlannedSpendingWithdrawal,
   blendedReturnParams,
@@ -16,16 +17,19 @@ import {
   planAccumulationReturn,
   planBlendedReturn,
   planIncomeAtAge,
+  planIncomeAtAgeStochastic,
   planRetirementReturn,
   projectRetirement,
   projectRetirementWithMode,
   retirementFeasibleFromCapital,
   resolvePlanDcPayouts,
   runDecisionSensitivityMatrixWithMode,
+  runMonteCarloWithModeAndSeed,
   runScenarioAnalysisWithMode,
   runSorr,
   runStressTestsWithMode,
   scaleTaxBucketBalances,
+  splitmix64,
   stepPlanPensionFunds,
   tryComputeRequiredCapital,
   type RetirementPlan,
@@ -504,6 +508,109 @@ describe("retirement calculation primitives", () => {
     expect(depleted[0].failureAge).toBe(56);
     expect(depleted[0].spendingShortfallAge).toBe(55);
     expect(runSorr(plan, 0, 55)).toEqual([]);
+  });
+
+  test("matches Rust stochastic expense, income, and splitmix helper semantics", () => {
+    const expenses = {
+      items: [
+        { monthlyAmount: 1_000, essential: true },
+        { monthlyAmount: 500, inflationRate: 0.05, essential: false },
+      ],
+    };
+
+    const [firstYearExpenses, firstYearEssential] = annualExpensesAtYearStochastic(
+      expenses,
+      55,
+      10,
+      1,
+    );
+    expect(closeTo(firstYearExpenses, 12_000 + 500 * 12 * Math.pow(1.05, 10))).toBe(true);
+    expect(firstYearEssential).toBe(12_000);
+
+    const [inflatedExpenses, inflatedEssential] = annualExpensesAtYearStochastic(
+      expenses,
+      56,
+      11,
+      1.2,
+    );
+    expect(closeTo(inflatedEssential, 14_400)).toBe(true);
+    expect(inflatedExpenses).toBeGreaterThan(firstYearExpenses);
+
+    const stochasticIncome = planIncomeAtAgeStochastic(
+      [
+        {
+          id: "db",
+          label: "DB",
+          streamType: "db",
+          startAge: 55,
+          adjustForInflation: true,
+          monthlyAmount: 1_000,
+        },
+        {
+          id: "flat",
+          label: "Flat",
+          streamType: "db",
+          startAge: 55,
+          adjustForInflation: false,
+          monthlyAmount: 250,
+        },
+      ],
+      new Map(),
+      56,
+      11,
+      0.02,
+      1.2,
+    );
+    expect(stochasticIncome).toBe(1_000 * 12 * 1.2 + 250 * 12);
+
+    expect(splitmix64(0n).toString(16).padStart(16, "0")).toBe("e220a8397b1dcdaf");
+    expect(splitmix64(1n).toString(16).padStart(16, "0")).toBe("910a2dec89025cc1");
+    expect(splitmix64(42n).toString(16).padStart(16, "0")).toBe("bdd732262feb6e95");
+  });
+
+  test("runs deterministic seeded Monte Carlo simulations with Rust-compatible output shape", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 60;
+    plan.investment.annualVolatility = 0.12;
+    plan.expenses.items[0].monthlyAmount = 1_000;
+
+    const result = runMonteCarloWithModeAndSeed(plan, 750_000, 256, "fire", 42n);
+    const repeat = runMonteCarloWithModeAndSeed(plan, 750_000, 256, "fire", 42n);
+
+    expect(repeat).toEqual(result);
+    expect(result.nSimulations).toBe(256);
+    expect(result.ageAxis).toEqual([
+      45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+    ]);
+    expect(result.percentiles.p10).toHaveLength(result.ageAxis.length);
+    expect(result.percentiles.p50).toHaveLength(result.ageAxis.length);
+    expect(result.percentiles.p90).toHaveLength(result.ageAxis.length);
+    expect(result.finalPortfolioAtHorizon.p50).toBe(result.percentiles.p50.at(-1));
+    expect(result.successRate).toBeGreaterThanOrEqual(0);
+    expect(result.successRate).toBeLessThanOrEqual(1);
+    expect(result.medianFireAge).not.toBe(null);
+
+    const midYear = 8;
+    expect(result.percentiles.p10[midYear]).toBeLessThan(result.percentiles.p50[midYear]);
+    expect(result.percentiles.p50[midYear]).toBeLessThan(result.percentiles.p90[midYear]);
+  });
+
+  test("keeps no-seed Monte Carlo runs stable and gates FIRE median age", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 60;
+    plan.investment.monthlyContribution = 0;
+    plan.expenses.items[0].monthlyAmount = 25_000;
+
+    const first = runMonteCarloWithModeAndSeed(plan, 10_000, 32, "fire");
+    const second = runMonteCarloWithModeAndSeed(plan, 10_000, 32, "fire");
+
+    expect(second).toEqual(first);
+    expect(first.nSimulations).toBe(32);
+    expect(first.medianFireAge).toBe(null);
   });
 
   test("matches Rust retirement scenario analysis labels and return deltas", () => {

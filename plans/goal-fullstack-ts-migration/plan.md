@@ -102,6 +102,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   `POST /api/v1/goals/retirement/projection`, including direct plan validation,
   goal-backed input resolution, planner-mode handling, and valuation-provider
   501/503 behavior.
+- Add guarded retirement Monte Carlo routing for
+  `POST /api/v1/goals/retirement/monte-carlo`, including direct plan validation,
+  goal-backed input resolution, planner-mode handling, HTTP simulation-count
+  default/clamp behavior, deterministic seeded stochastic paths, Rust-compatible
+  percentile/result DTOs, and valuation-provider 501/503 behavior.
 - Add guarded retirement scenario-analysis routing for
   `POST /api/v1/goals/retirement/scenario-analysis`, including direct plan
   validation, goal-backed input resolution, planner-mode handling,
@@ -141,8 +146,6 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
   provider-backed asset resolution, device-sync outbox emission, and portfolio
   recalculation side effects for dedicated parity slices.
-- Keep remaining Monte Carlo retirement simulation endpoint deferred to a
-  dedicated goal/calculation parity slice.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -159,10 +162,10 @@ existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, remaining retirement simulation
-execution, calculation-heavy health checks or non-classification `/health/fix`
-execution, real Connect runtime implementation, real device-sync runtime
-implementation, or Rust runtime removal is in scope for this slice.
+generation, sync-crypto/device-sync integration, calculation-heavy health checks
+or non-classification `/health/fix` execution, real Connect runtime
+implementation, real device-sync runtime implementation, or Rust runtime removal
+is in scope for this slice.
 
 ## Next slices
 

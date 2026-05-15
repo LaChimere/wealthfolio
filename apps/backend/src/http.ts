@@ -97,6 +97,7 @@ import {
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import {
   projectRetirementWithMode,
+  runMonteCarloWithModeAndSeed,
   runDecisionSensitivityMatrixWithMode,
   runScenarioAnalysisWithMode,
   runSorr,
@@ -160,11 +161,19 @@ export interface GoalValuationProvider {
   getGoalValuationMap(): Promise<GoalValuationMap>;
 }
 
+const DEFAULT_RETIREMENT_MONTE_CARLO_SIMULATIONS = 10_000;
+const MAX_RETIREMENT_MONTE_CARLO_SIMULATIONS = 500_000;
+
 interface RetirementSimulationRequest {
   plan: Record<string, unknown>;
   currentPortfolio: number;
   goalId?: string;
   plannerMode?: RetirementTimingMode;
+}
+
+interface RetirementMonteCarloRequest extends RetirementSimulationRequest {
+  nSims: number;
+  seed?: bigint;
 }
 
 interface RetirementSorrRequest {
@@ -2254,6 +2263,10 @@ function routeGoalRequest(
     return handleRetirementProjectionRequest(request, goalService, goalValuationProvider);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/goals/retirement/monte-carlo") {
+    return handleRetirementMonteCarloRequest(request, goalService, goalValuationProvider);
+  }
+
   if (request.method === "POST" && url.pathname === "/api/v1/goals/retirement/scenario-analysis") {
     return handleRetirementScenarioAnalysisRequest(request, goalService, goalValuationProvider);
   }
@@ -2445,6 +2458,48 @@ async function handleRetirementProjectionRequest(
     const plan = normalizedRetirementPlanFromPayload(parsed.plan);
     return jsonResponse(
       projectRetirementWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
+    );
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementMonteCarloRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementMonteCarloRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return runMonteCarloWithModeAndSeed(
+        prepared.plan,
+        prepared.currentPortfolio,
+        parsed.nSims,
+        prepared.plannerMode,
+        parsed.seed,
+      );
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(
+      runMonteCarloWithModeAndSeed(
+        plan,
+        parsed.currentPortfolio,
+        parsed.nSims,
+        parsed.plannerMode ?? "fire",
+        parsed.seed,
+      ),
     );
   } catch (error) {
     return domainErrorResponse(error);
@@ -5676,6 +5731,28 @@ function parseRetirementSimulationRequest(
   };
 }
 
+function parseRetirementMonteCarloRequest(
+  payload: Record<string, unknown>,
+): RetirementMonteCarloRequest | Response {
+  const parsed = parseRetirementSimulationRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  const nSims = parseOptionalU32(payload.nSims, "nSims");
+  if (nSims instanceof Response) {
+    return nSims;
+  }
+  const seed = parseOptionalU64Seed(payload.seed, "seed");
+  if (seed instanceof Response) {
+    return seed;
+  }
+  return {
+    ...parsed,
+    nSims: normalizeRetirementSimulationCount(nSims),
+    ...(seed === undefined ? {} : { seed }),
+  };
+}
+
 function parseRetirementSorrRequest(
   payload: Record<string, unknown>,
 ): RetirementSorrRequest | Response {
@@ -6923,6 +7000,42 @@ function parseRequiredInteger(value: unknown, field: string): number | Response 
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
   }
   return value;
+}
+
+function parseOptionalU32(value: unknown, field: string): number | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const parsed = parseRequiredU32(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  return parsed;
+}
+
+function parseOptionalU64Seed(value: unknown, field: string): bigint | undefined | Response {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > Number.MAX_SAFE_INTEGER
+  ) {
+    return jsonResponse(
+      { code: 400, message: `${field} must be a non-negative safe integer` },
+      400,
+    );
+  }
+  return BigInt(value);
+}
+
+function normalizeRetirementSimulationCount(value: number | undefined): number {
+  return Math.min(
+    Math.max(value ?? DEFAULT_RETIREMENT_MONTE_CARLO_SIMULATIONS, 1),
+    MAX_RETIREMENT_MONTE_CARLO_SIMULATIONS,
+  );
 }
 
 function parseRequiredU32(value: unknown, field: string): number | Response {

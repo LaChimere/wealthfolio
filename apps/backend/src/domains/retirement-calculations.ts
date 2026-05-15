@@ -3,11 +3,19 @@ import type { TaxBucketBalances } from "./retirement-plan";
 export const DEFAULT_DC_PAYOUT_ESTIMATE_RATE = 0.035;
 
 const DEFAULT_BOND_VOLATILITY_RATIO = 0.35;
+const MIN_RETURN_STANDARD_DEVIATION = 1e-9;
+const DEFAULT_INFLATION_STANDARD_DEVIATION = 0.015;
+const RETURN_INFLATION_CORRELATION = -0.25;
 const MAX_REQUIRED_CAPITAL_DOUBLING_STEPS = 128;
 const REQUIRED_CAPITAL_SEED_MULTIPLE = 30;
 const FUNDING_TOLERANCE = 0.999;
 const MATERIAL_SHORTFALL_RATE = 0.001;
 const MIN_MATERIAL_SHORTFALL = 1;
+const SPLITMIX64_INCREMENT = 0x9e37_79b9_7f4a_7c15n;
+const SPLITMIX64_MULTIPLIER_1 = 0xbf58_476d_1ce4_e5b9n;
+const SPLITMIX64_MULTIPLIER_2 = 0x94d0_49bb_1331_11ebn;
+const FNV_OFFSET_BASIS_64 = 0xcbf2_9ce4_8422_2325n;
+const FNV_PRIME_64 = 0x0000_0100_0000_01b3n;
 
 export interface RetirementPlan {
   personal: PersonalProfile;
@@ -263,6 +271,31 @@ export interface SorrScenario {
   spendingShortfallAge?: number | null;
 }
 
+export interface PercentilePaths {
+  p10: number[];
+  p25: number[];
+  p50: number[];
+  p75: number[];
+  p90: number[];
+}
+
+export interface FinalPortfolioPercentiles {
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+}
+
+export interface MonteCarloResult {
+  successRate: number;
+  medianFireAge?: number | null;
+  percentiles: PercentilePaths;
+  ageAxis: number[];
+  finalPortfolioAtHorizon: FinalPortfolioPercentiles;
+  nSimulations: number;
+}
+
 export interface BudgetBreakdown {
   totalMonthlyBudget: number;
   monthlyPortfolioWithdrawal: number;
@@ -471,6 +504,33 @@ export function annualExpensesAtYear(
   return [total, essential];
 }
 
+export function annualExpensesAtYearStochastic(
+  budget: ExpenseBudget,
+  age: number,
+  yearsFromNow: number,
+  cumulativeInflation: number,
+): [totalExpenses: number, essentialExpenses: number] {
+  let total = 0;
+  let essential = 0;
+  for (const bucket of budget.items) {
+    if (bucket.startAge !== undefined && bucket.startAge !== null && age < bucket.startAge) {
+      continue;
+    }
+    if (bucket.endAge !== undefined && bucket.endAge !== null && age >= bucket.endAge) {
+      continue;
+    }
+    const annual =
+      bucket.inflationRate === undefined || bucket.inflationRate === null
+        ? bucket.monthlyAmount * 12 * cumulativeInflation
+        : bucket.monthlyAmount * 12 * Math.pow(1 + bucket.inflationRate, yearsFromNow);
+    total += annual;
+    if (bucket.essential ?? true) {
+      essential += annual;
+    }
+  }
+  return [total, essential];
+}
+
 export function resolvePlanDcPayouts(
   streams: RetirementIncomeStream[],
   currentAge: number,
@@ -531,6 +591,35 @@ export function planIncomeAtAge(
       total += annual * Math.pow(1 + stream.annualGrowthRate, yearsFromNow);
     } else if (stream.adjustForInflation) {
       total += annual * Math.pow(1 + inflationRate, yearsFromNow);
+    } else {
+      total += annual;
+    }
+  }
+  return total;
+}
+
+export function planIncomeAtAgeStochastic(
+  streams: RetirementIncomeStream[],
+  resolvedPayouts: ReadonlyMap<string, number>,
+  age: number,
+  yearsFromNow: number,
+  inflationRate: number,
+  cumulativeInflation?: number,
+): number {
+  let total = 0;
+  for (const stream of streams) {
+    if (age < stream.startAge) {
+      continue;
+    }
+    const baseMonthly = resolvedPayouts.get(stream.id) ?? stream.monthlyAmount ?? 0;
+    const annual = baseMonthly * 12;
+    if (stream.annualGrowthRate !== undefined && stream.annualGrowthRate !== null) {
+      total += annual * Math.pow(1 + stream.annualGrowthRate, yearsFromNow);
+    } else if (stream.adjustForInflation) {
+      total +=
+        cumulativeInflation === undefined
+          ? annual * Math.pow(1 + inflationRate, yearsFromNow)
+          : annual * cumulativeInflation;
     } else {
       total += annual;
     }
@@ -1234,6 +1323,218 @@ export function runSorr(
   );
 }
 
+export function runMonteCarlo(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  nSimulations: number,
+): MonteCarloResult {
+  return runMonteCarloWithModeAndSeed(plan, currentPortfolio, nSimulations, "fire");
+}
+
+export function runMonteCarloWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  nSimulations: number,
+  mode: RetirementTimingMode,
+): MonteCarloResult {
+  return runMonteCarloWithModeAndSeed(plan, currentPortfolio, nSimulations, mode);
+}
+
+export function runMonteCarloWithModeAndSeed(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  nSimulations: number,
+  mode: RetirementTimingMode,
+  seed?: number | bigint,
+): MonteCarloResult {
+  const simulationCount = Math.max(Math.trunc(nSimulations), 1);
+  const currentAge = plan.personal.currentAge;
+  const targetFireAge = plan.personal.targetRetirementAge;
+  const planningHorizonAge = plan.personal.planningHorizonAge;
+  const horizonYears = Math.max(planningHorizonAge - currentAge, 1);
+  const inflationRate = plan.investment.inflationRate;
+  const monthlyContribution = plan.investment.monthlyContribution;
+  const contributionGrowth =
+    plan.personal.salaryGrowthRate ?? plan.investment.contributionGrowthRate;
+  const accumulationMean = planAccumulationReturn(plan);
+  const retirementMean = planRetirementReturn(plan);
+  const annualVolatility = plan.investment.annualVolatility;
+  const annualFeeRate = plan.investment.annualInvestmentFeeRate;
+  const baseSeed =
+    seed === undefined
+      ? retirementPlanSeed(plan, currentPortfolio, simulationCount, mode)
+      : normalizeSeed(seed);
+
+  const perAgeRequiredCapital = Array.from({ length: horizonYears + 1 }, (_, index) =>
+    tryComputeRequiredCapital(plan, currentAge + index),
+  );
+  const perAgePayouts = Array.from({ length: horizonYears + 1 }, (_, index) =>
+    resolvePlanDcPayouts(plan.incomeStreams, currentAge, currentAge + index, accumulationMean),
+  );
+
+  const simResults: Array<{
+    path: number[];
+    survived: boolean;
+    fireAge: number | null;
+  }> = [];
+
+  for (let simIndex = 0; simIndex < simulationCount; simIndex += 1) {
+    const simSeed = splitmix64(baseSeed ^ BigInt(simIndex));
+    const rng = new SplitmixNormalSource(simSeed);
+    let buckets = initialWithdrawalBuckets(plan.tax, currentPortfolio);
+    let inFire = false;
+    let simFireAge: number | null = null;
+    let essentialFundedEveryYear = true;
+    let cumulativeInflation = 1;
+    let simRetirementAge = targetFireAge;
+    let simResolvedPayouts: ReadonlyMap<string, number> | null = null;
+    const path: number[] = [];
+
+    for (let yearIndex = 0; yearIndex <= horizonYears; yearIndex += 1) {
+      const age = currentAge + yearIndex;
+      const portfolio = taxBucketTotal(buckets);
+      path.push(Math.max(portfolio, 0));
+
+      if (!inFire) {
+        const required = perAgeRequiredCapital[yearIndex] ?? null;
+        if (simFireAge === null && required !== null && portfolio >= required) {
+          simFireAge = age;
+        }
+        if (retirementStartDecision(mode, age, targetFireAge, portfolio, required) !== null) {
+          inFire = true;
+          simRetirementAge = age;
+          simResolvedPayouts = perAgePayouts[yearIndex] ?? new Map<string, number>();
+        }
+      }
+
+      const [effectiveMean, effectiveStdDev] = blendedReturnParams(
+        accumulationMean,
+        retirementMean,
+        annualVolatility,
+        annualFeeRate,
+        currentAge,
+        simRetirementAge,
+        planningHorizonAge,
+        plan.investment.glidePath,
+        yearIndex,
+        inFire,
+      );
+      const [annualReturn, annualInflation] = sampleReturnAndInflation(
+        rng,
+        effectiveMean,
+        effectiveStdDev,
+        inflationRate,
+      );
+
+      if (inFire) {
+        const payouts = simResolvedPayouts ?? new Map<string, number>();
+        const grownBuckets = applyGrowthToTaxBuckets(buckets, annualReturn);
+        const [totalExpenses, essentialExpenses] = annualExpensesAtYearStochastic(
+          plan.expenses,
+          age,
+          yearIndex,
+          cumulativeInflation,
+        );
+        const income = planIncomeAtAgeStochastic(
+          plan.incomeStreams,
+          payouts,
+          age,
+          yearIndex,
+          inflationRate,
+          cumulativeInflation,
+        );
+        const outcome = applyPlannedSpendingWithdrawal(
+          grownBuckets,
+          totalExpenses,
+          income,
+          plan.tax,
+          age,
+        );
+        const essentialGap = Math.max(essentialExpenses - income, 0);
+        if (outcome.spendingFunded < essentialGap * FUNDING_TOLERANCE) {
+          essentialFundedEveryYear = false;
+        }
+        buckets = outcome.remainingBuckets;
+      } else {
+        const yearMonthlyContribution =
+          monthlyContribution * Math.pow(1 + contributionGrowth, yearIndex);
+        const annualContribution = endOfYearValueOfMonthlyContributions(
+          yearMonthlyContribution,
+          annualReturn,
+        );
+        const grownBuckets = applyGrowthToTaxBuckets(buckets, annualReturn);
+        buckets = addContributionToTaxBuckets(grownBuckets, annualContribution, plan.tax);
+      }
+
+      cumulativeInflation *= 1 + annualInflation;
+    }
+
+    const endingPortfolio = taxBucketTotal(buckets);
+    const portfolioSurvived = endingPortfolio > 0;
+    simResults.push({
+      path,
+      survived:
+        essentialFundedEveryYear &&
+        portfolioSurvived &&
+        (mode === "traditional" || simFireAge !== null),
+      fireAge: simFireAge,
+    });
+  }
+
+  const yearCount = horizonYears + 1;
+  const survivedCount = simResults.filter((result) => result.survived).length;
+  const fireAges = simResults
+    .flatMap((result) => (result.fireAge === null ? [] : [result.fireAge]))
+    .sort((left, right) => left - right);
+  const p10: number[] = [];
+  const p25: number[] = [];
+  const p50: number[] = [];
+  const p75: number[] = [];
+  const p90: number[] = [];
+  const ageAxis: number[] = [];
+
+  for (let yearIndex = 0; yearIndex < yearCount; yearIndex += 1) {
+    const values = simResults
+      .map((result) => result.path[yearIndex] ?? 0)
+      .sort((left, right) => left - right);
+    p10.push(percentile(values, 0.1));
+    p25.push(percentile(values, 0.25));
+    p50.push(percentile(values, 0.5));
+    p75.push(percentile(values, 0.75));
+    p90.push(percentile(values, 0.9));
+    ageAxis.push(currentAge + yearIndex);
+  }
+
+  const finalValues = simResults
+    .map((result) => result.path.at(-1) ?? 0)
+    .sort((left, right) => left - right);
+  const medianFireAge =
+    fireAges.length > 0 && fireAges.length * 2 >= simulationCount
+      ? fireAges[Math.floor(fireAges.length / 2)]
+      : null;
+
+  return {
+    successRate: survivedCount / simulationCount,
+    medianFireAge,
+    percentiles: {
+      p10,
+      p25,
+      p50,
+      p75,
+      p90,
+    },
+    ageAxis,
+    finalPortfolioAtHorizon: {
+      p10: percentile(finalValues, 0.1),
+      p25: percentile(finalValues, 0.25),
+      p50: percentile(finalValues, 0.5),
+      p75: percentile(finalValues, 0.75),
+      p90: percentile(finalValues, 0.9),
+    },
+    nSimulations: simulationCount,
+  };
+}
+
 export function blendedReturnParams(
   accumulationMean: number,
   retirementMean: number,
@@ -1759,6 +2060,133 @@ function fillMoneyAxis(values: number[], base: number): void {
 
 function approxEq(left: number, right: number, epsilon: number): boolean {
   return Math.abs(left - right) <= epsilon;
+}
+
+function percentile(sortedValues: number[], percentileRank: number): number {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+  const index = Math.floor(sortedValues.length * percentileRank);
+  return sortedValues[Math.min(index, sortedValues.length - 1)] ?? 0;
+}
+
+interface NormalSource {
+  nextStandardNormalPair(): [number, number];
+}
+
+class SplitmixNormalSource implements NormalSource {
+  private state: bigint;
+
+  constructor(seed: bigint) {
+    this.state = BigInt.asUintN(64, seed);
+  }
+
+  nextStandardNormalPair(): [number, number] {
+    const firstUniform = Math.max(this.nextUniform(), Number.MIN_VALUE);
+    const secondUniform = this.nextUniform();
+    const radius = Math.sqrt(-2 * Math.log(firstUniform));
+    const theta = 2 * Math.PI * secondUniform;
+    return [radius * Math.cos(theta), radius * Math.sin(theta)];
+  }
+
+  private nextUniform(): number {
+    this.state = BigInt.asUintN(64, this.state + SPLITMIX64_INCREMENT);
+    const value = splitmix64Mix(this.state);
+    return Number(value >> 11n) / 9_007_199_254_740_992;
+  }
+}
+
+function sampleReturnAndInflation(
+  rng: NormalSource,
+  returnMean: number,
+  returnStdDev: number,
+  inflationMean: number,
+): [annualReturn: number, annualInflation: number] {
+  const [zReturn, zOther] = rng.nextStandardNormalPair();
+  const correlation = clamp(RETURN_INFLATION_CORRELATION, -0.99, 0.99);
+  const zInflation = correlation * zReturn + Math.sqrt(1 - correlation * correlation) * zOther;
+  return [
+    sampleReturnFromStandard(returnMean, returnStdDev, zReturn),
+    sampleInflationFromStandard(inflationMean, DEFAULT_INFLATION_STANDARD_DEVIATION, zInflation),
+  ];
+}
+
+function sampleReturnFromStandard(mean: number, standardDeviation: number, zScore: number): number {
+  if (!Number.isFinite(mean)) {
+    return 0;
+  }
+  if (!Number.isFinite(standardDeviation) || standardDeviation <= MIN_RETURN_STANDARD_DEVIATION) {
+    return mean;
+  }
+  const safeGrowth = Math.max(1 + mean, 0.01);
+  return Math.exp(Math.log(safeGrowth) + standardDeviation * zScore) - 1;
+}
+
+function sampleInflationFromStandard(
+  mean: number,
+  standardDeviation: number,
+  zScore: number,
+): number {
+  if (!Number.isFinite(mean)) {
+    return 0;
+  }
+  if (!Number.isFinite(standardDeviation) || standardDeviation <= MIN_RETURN_STANDARD_DEVIATION) {
+    return mean;
+  }
+  return Math.max(mean + standardDeviation * zScore, -0.99);
+}
+
+export function splitmix64(value: bigint): bigint {
+  return splitmix64Mix(BigInt.asUintN(64, value + SPLITMIX64_INCREMENT));
+}
+
+function splitmix64Mix(value: bigint): bigint {
+  let mixed = BigInt.asUintN(64, value);
+  mixed = BigInt.asUintN(64, (mixed ^ (mixed >> 30n)) * SPLITMIX64_MULTIPLIER_1);
+  mixed = BigInt.asUintN(64, (mixed ^ (mixed >> 27n)) * SPLITMIX64_MULTIPLIER_2);
+  return BigInt.asUintN(64, mixed ^ (mixed >> 31n));
+}
+
+function normalizeSeed(seed: number | bigint): bigint {
+  if (typeof seed === "bigint") {
+    return BigInt.asUintN(64, seed);
+  }
+  return BigInt.asUintN(64, BigInt(Math.trunc(seed)));
+}
+
+function retirementPlanSeed(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  nSimulations: number,
+  mode: RetirementTimingMode,
+): bigint {
+  return fnv1a64(
+    `${stableJsonStringify(plan)}|${currentPortfolio}|${Math.trunc(nSimulations)}|${mode}`,
+  );
+}
+
+function fnv1a64(value: string): bigint {
+  let hash = FNV_OFFSET_BASIS_64;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * FNV_PRIME_64);
+  }
+  return hash;
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonStringify(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const entries = Object.keys(record)
+    .sort()
+    .filter((key) => record[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key])}`);
+  return `{${entries.join(",")}}`;
 }
 
 function runSorrScenario(

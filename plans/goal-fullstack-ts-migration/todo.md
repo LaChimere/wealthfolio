@@ -120,11 +120,10 @@
     preparation, deterministic retirement calculation primitives, deterministic
     required-capital/projection engine behavior, deterministic retirement
     overview assembly, HTTP retirement overview routing, plan-backed retirement
-    summary refresh, retirement projection routing, scenario-analysis routing,
-    sequence-of-returns routing, stress-tests routing, and decision-sensitivity
-    routing now have bounded TS runtime parity while the remaining Monte Carlo
-    retirement simulation endpoint remains deferred to a calculation-heavy
-    slice; automatic FX market sync/provider HTTP behavior plus broader
+    summary refresh, retirement projection routing, Monte Carlo routing,
+    scenario-analysis routing, sequence-of-returns routing, stress-tests
+    routing, and decision-sensitivity routing now have bounded TS runtime
+    parity; automatic FX market sync/provider HTTP behavior plus broader
     market-data sync behavior are deferred to calculation/market-data slices;
     actual portfolio job execution and event production are deferred to
     portfolio/calculation slices; TS file-backed secret persistence is wired
@@ -1123,6 +1122,16 @@ contract:
   goal-backed requests, planner-mode handling, and valuation-provider 501/503
   behavior. Full repository check passed with `bun run check`; focused code
   review found no significant issues.
+- `pr5-retirement-monte-carlo-route-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/retirement-calculations.test.ts apps/backend/src/http.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible stochastic expense/income inflation
+  semantics, splitmix64 seeding, deterministic seeded/no-seed Monte Carlo runs,
+  start-of-year path percentile output, FIRE median-age gating, HTTP `nSims`
+  default/clamp behavior, `POST /api/v1/goals/retirement/monte-carlo` direct
+  plan and goal-backed requests, planner-mode handling, and valuation-provider
+  501/503 behavior. Full repository check passed with `bun run check`;
+  rubber-duck critique and focused code review found no significant issues.
 
 ## Result
 
@@ -1160,27 +1169,27 @@ contract:
   refresh service logic, deterministic retirement calculation primitives,
   projection engine, overview assembly, guarded retirement overview HTTP
   routing, plan-backed retirement summary refresh, retirement projection
-  routing, scenario-analysis routing, sequence-of-returns routing, stress-tests
-  routing, decision-sensitivity routing, bounded health status/check slices,
-  bounded health classification-fix runtime, and bounded legacy-classification
-  health issue runtime implemented; broader migration remains active.
+  routing, Monte Carlo routing, scenario-analysis routing, sequence-of-returns
+  routing, stress-tests routing, decision-sensitivity routing, bounded health
+  status/check slices, bounded health classification-fix runtime, and bounded
+  legacy-classification health issue runtime implemented; broader migration
+  remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
-  remaining Monte Carlo retirement simulation endpoint moves with a
-  calculation-heavy goal slice; automatic FX market sync/provider HTTP behavior
-  plus broader market-data provider resolution/sync behavior move with
-  calculation/market-data slices; actual portfolio job execution and event
-  production move with portfolio/calculation slices; OS keyring integration
-  moves with a dedicated runtime parity slice; AI chat provider streaming, title
-  generation, tool execution, tag mutations, attachment handling, and outbox
-  writes move with AI runtime parity slices; alternative asset portfolio job
-  enqueue and recalculation side effects move with portfolio parity slices;
-  asset quote-provider interactions, auto-classification, and portfolio
-  recalculation side effects move with asset/market-data/portfolio parity
-  slices; market-data market sync and quote-triggered recalculation side effects
-  move with market-data/portfolio parity slices; portfolio metric calculations
-  move with portfolio calculation parity slices; holdings fan-out, valuations,
+  automatic FX market sync/provider HTTP behavior plus broader market-data
+  provider resolution/sync behavior move with calculation/market-data slices;
+  actual portfolio job execution and event production move with
+  portfolio/calculation slices; OS keyring integration moves with a dedicated
+  runtime parity slice; AI chat provider streaming, title generation, tool
+  execution, tag mutations, attachment handling, and outbox writes move with AI
+  runtime parity slices; alternative asset portfolio job enqueue and
+  recalculation side effects move with portfolio parity slices; asset
+  quote-provider interactions, auto-classification, and portfolio recalculation
+  side effects move with asset/market-data/portfolio parity slices; market-data
+  market sync and quote-triggered recalculation side effects move with
+  market-data/portfolio parity slices; portfolio metric calculations move with
+  portfolio calculation parity slices; holdings fan-out, valuations,
   allocations, snapshots, imports, and portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime

@@ -5531,6 +5531,83 @@ describe("TS backend HTTP skeleton", () => {
       expect(directProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
       expect(providerCalls).toBe(2);
 
+      const directMonteCarloResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 100_000,
+            plannerMode: "traditional",
+            nSims: 16,
+            seed: 42,
+          }),
+        }),
+      );
+      expect(directMonteCarloResponse.status).toBe(200);
+      const directMonteCarlo = await directMonteCarloResponse.json();
+      expect(directMonteCarlo).toMatchObject({
+        nSimulations: 16,
+        successRate: expect.any(Number),
+        finalPortfolioAtHorizon: {
+          p50: expect.any(Number),
+        },
+      });
+      expect("medianFireAge" in directMonteCarlo).toBe(true);
+      expect(directMonteCarlo.ageAxis[0]).toBe(45);
+      expect(directMonteCarlo.percentiles.p50).toHaveLength(directMonteCarlo.ageAxis.length);
+      expect(providerCalls).toBe(2);
+
+      const clampedMonteCarloResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({
+              personal: { currentAge: 54, targetRetirementAge: 55, planningHorizonAge: 55 },
+            }),
+            currentPortfolio: 100_000,
+            nSims: 0,
+            seed: 7,
+          }),
+        }),
+      );
+      expect(clampedMonteCarloResponse.status).toBe(200);
+      await expect(clampedMonteCarloResponse.json()).resolves.toMatchObject({
+        nSimulations: 1,
+        ageAxis: [54, 55],
+      });
+      expect(providerCalls).toBe(2);
+
+      const defaultMonteCarloResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({
+              personal: { currentAge: 54, targetRetirementAge: 55, planningHorizonAge: 55 },
+            }),
+            currentPortfolio: 100_000,
+            seed: 7,
+          }),
+        }),
+      );
+      expect(defaultMonteCarloResponse.status).toBe(200);
+      await expect(defaultMonteCarloResponse.json()).resolves.toMatchObject({
+        nSimulations: 10_000,
+        ageAxis: [54, 55],
+      });
+      expect(providerCalls).toBe(2);
+
       const directScenarioResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
           method: "POST",
@@ -5759,6 +5836,32 @@ describe("TS backend HTTP skeleton", () => {
       expect(goalProjection.yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
       expect(providerCalls).toBe(8);
 
+      const goalMonteCarloResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({ personal: { currentAge: 30 } }),
+            currentPortfolio: 1,
+            plannerMode: "fire",
+            goalId: "retirement-traditional",
+            nSims: 16,
+            seed: 42,
+          }),
+        }),
+      );
+      expect(goalMonteCarloResponse.status).toBe(200);
+      const goalMonteCarlo = await goalMonteCarloResponse.json();
+      expect(goalMonteCarlo).toMatchObject({
+        nSimulations: 16,
+        successRate: expect.any(Number),
+      });
+      expect(goalMonteCarlo.ageAxis[0]).toBe(45);
+      expect(providerCalls).toBe(9);
+
       const goalScenarioResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
           method: "POST",
@@ -5780,7 +5883,7 @@ describe("TS backend HTTP skeleton", () => {
         label: "Pessimistic",
       });
       expect(goalScenarios[0].yearByYear[0]).toMatchObject({ portfolioValue: 100_000 });
-      expect(providerCalls).toBe(9);
+      expect(providerCalls).toBe(10);
 
       const goalStressResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/stress-tests", {
@@ -5801,7 +5904,7 @@ describe("TS backend HTTP skeleton", () => {
       const goalStress = await goalStressResponse.json();
       expect(goalStress).toHaveLength(6);
       expect(typeof goalStress[0].baseline.fundedAtGoalAge).toBe("boolean");
-      expect(providerCalls).toBe(10);
+      expect(providerCalls).toBe(11);
 
       const goalDecisionResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/decision-sensitivity-map", {
@@ -5828,7 +5931,7 @@ describe("TS backend HTTP skeleton", () => {
       expect(goalDecision.cells[0][0]).toMatchObject({
         fundedAtGoalAge: expect.any(Boolean),
       });
-      expect(providerCalls).toBe(11);
+      expect(providerCalls).toBe(12);
 
       const goalSorrResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/sequence-of-returns", {
@@ -5851,7 +5954,7 @@ describe("TS backend HTTP skeleton", () => {
         label: "Base case",
       });
       expect(goalSorr[0].portfolioPath).toHaveLength(36);
-      expect(providerCalls).toBe(12);
+      expect(providerCalls).toBe(13);
 
       const nonRetirementOverviewResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/goal%201/retirement/overview", {
@@ -5877,7 +5980,7 @@ describe("TS backend HTTP skeleton", () => {
       await expect(missingPlanResponse.json()).resolves.toMatchObject({
         message: "Invalid input: No plan found for goal retirement-no-plan",
       });
-      expect(providerCalls).toBe(14);
+      expect(providerCalls).toBe(15);
     } finally {
       db.close();
     }
@@ -6006,6 +6109,27 @@ describe("TS backend HTTP skeleton", () => {
         message: "Goal valuation provider is not available in the TS backend runtime yet",
       });
 
+      const monteCarloNoProviderResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+            nSims: 1,
+            seed: 42,
+          }),
+        }),
+      );
+      expect(monteCarloNoProviderResponse.status).toBe(501);
+      await expect(monteCarloNoProviderResponse.json()).resolves.toMatchObject({
+        message: "Goal valuation provider is not available in the TS backend runtime yet",
+      });
+
       const scenarioNoProviderResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/retirement/scenario-analysis", {
           method: "POST",
@@ -6110,6 +6234,27 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(projectionProviderErrorResponse.status).toBe(503);
       await expect(projectionProviderErrorResponse.json()).resolves.toMatchObject({
+        message: "valuation unavailable",
+      });
+
+      const monteCarloProviderErrorResponse = await failingHandler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/monte-carlo", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan(),
+            currentPortfolio: 1,
+            goalId: "goal-1",
+            nSims: 1,
+            seed: 42,
+          }),
+        }),
+      );
+      expect(monteCarloProviderErrorResponse.status).toBe(503);
+      await expect(monteCarloProviderErrorResponse.json()).resolves.toMatchObject({
         message: "valuation unavailable",
       });
 
