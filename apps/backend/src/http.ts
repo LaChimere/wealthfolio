@@ -97,9 +97,11 @@ import {
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
 import {
   projectRetirementWithMode,
+  runDecisionSensitivityMatrixWithMode,
   runScenarioAnalysisWithMode,
   runSorr,
   runStressTestsWithMode,
+  type DecisionSensitivityMap,
   type RetirementPlan,
 } from "./domains/retirement-calculations";
 import {
@@ -170,6 +172,10 @@ interface RetirementSorrRequest {
   portfolioAtFire: number;
   retirementStartAge: number;
   goalId?: string;
+}
+
+interface RetirementDecisionSensitivityMapRequest extends RetirementSimulationRequest {
+  map: DecisionSensitivityMap;
 }
 
 export function createBackendRequestHandler(
@@ -2258,6 +2264,17 @@ function routeGoalRequest(
 
   if (
     request.method === "POST" &&
+    url.pathname === "/api/v1/goals/retirement/decision-sensitivity-map"
+  ) {
+    return handleRetirementDecisionSensitivityMapRequest(
+      request,
+      goalService,
+      goalValuationProvider,
+    );
+  }
+
+  if (
+    request.method === "POST" &&
     url.pathname === "/api/v1/goals/retirement/sequence-of-returns"
   ) {
     return handleRetirementSorrRequest(request, goalService, goalValuationProvider);
@@ -2492,6 +2509,46 @@ async function handleRetirementStressTestsRequest(
     const plan = normalizedRetirementPlanFromPayload(parsed.plan);
     return jsonResponse(
       runStressTestsWithMode(plan, parsed.currentPortfolio, parsed.plannerMode ?? "fire"),
+    );
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
+}
+
+async function handleRetirementDecisionSensitivityMapRequest(
+  request: Request,
+  goalService: GoalService,
+  provider: GoalValuationProvider | undefined,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const parsed = parseRetirementDecisionSensitivityMapRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  if (parsed.goalId) {
+    const goalId = parsed.goalId;
+    return handleGoalValuationRequest(provider, async (valuationMap) => {
+      const prepared = await goalService.prepareRetirementInput(goalId, valuationMap);
+      return runDecisionSensitivityMatrixWithMode(
+        prepared.plan,
+        prepared.currentPortfolio,
+        prepared.plannerMode,
+        parsed.map,
+      );
+    });
+  }
+  try {
+    const plan = normalizedRetirementPlanFromPayload(parsed.plan);
+    return jsonResponse(
+      runDecisionSensitivityMatrixWithMode(
+        plan,
+        parsed.currentPortfolio,
+        parsed.plannerMode ?? "fire",
+        parsed.map,
+      ),
     );
   } catch (error) {
     return domainErrorResponse(error);
@@ -5644,6 +5701,33 @@ function parseRetirementSorrRequest(
     retirementStartAge,
     ...(goalId ? { goalId } : {}),
   };
+}
+
+function parseRetirementDecisionSensitivityMapRequest(
+  payload: Record<string, unknown>,
+): RetirementDecisionSensitivityMapRequest | Response {
+  const parsed = parseRetirementSimulationRequest(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  const map = parseDecisionSensitivityMap(payload.map, "map");
+  if (map instanceof Response) {
+    return map;
+  }
+  return { ...parsed, map };
+}
+
+function parseDecisionSensitivityMap(
+  value: unknown,
+  field: string,
+): DecisionSensitivityMap | Response {
+  if (value === "contribution-return" || value === "retirement-age-spending") {
+    return value;
+  }
+  return jsonResponse(
+    { code: 400, message: `${field} must be 'contribution-return' or 'retirement-age-spending'` },
+    400,
+  );
 }
 
 function parseOptionalRetirementTimingMode(

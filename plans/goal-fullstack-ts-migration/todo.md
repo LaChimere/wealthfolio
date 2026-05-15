@@ -121,12 +121,12 @@
     required-capital/projection engine behavior, deterministic retirement
     overview assembly, HTTP retirement overview routing, plan-backed retirement
     summary refresh, retirement projection routing, scenario-analysis routing,
-    sequence-of-returns routing, and stress-tests routing now have bounded TS
-    runtime parity while remaining Monte Carlo and decision-sensitivity
-    retirement simulation endpoints remain deferred to calculation-heavy slices;
-    automatic FX market sync/provider HTTP behavior plus broader market-data
-    sync behavior are deferred to calculation/market-data slices; actual
-    portfolio job execution and event production are deferred to
+    sequence-of-returns routing, stress-tests routing, and decision-sensitivity
+    routing now have bounded TS runtime parity while the remaining Monte Carlo
+    retirement simulation endpoint remains deferred to a calculation-heavy
+    slice; automatic FX market sync/provider HTTP behavior plus broader
+    market-data sync behavior are deferred to calculation/market-data slices;
+    actual portfolio job execution and event production are deferred to
     portfolio/calculation slices; TS file-backed secret persistence is wired
     into standalone runtime while real keyring integration is deferred to a
     runtime/keyring parity slice; AI provider catalog/settings/model-listing
@@ -1113,6 +1113,16 @@ contract:
   requests, planner-mode handling, and valuation-provider 501/503 behavior. Full
   repository check passed with `bun run check`; focused code review found no
   significant issues.
+- `pr5-retirement-decision-sensitivity-route-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/retirement-calculations.test.ts apps/backend/src/http.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible contribution/return and
+  retirement-age/spending axes, axis rounding/fill behavior, baseline indices,
+  current-value cell scaling,
+  `POST /api/v1/goals/retirement/decision-sensitivity-map` direct plan and
+  goal-backed requests, planner-mode handling, and valuation-provider 501/503
+  behavior. Full repository check passed with `bun run check`; focused code
+  review found no significant issues.
 
 ## Result
 
@@ -1151,14 +1161,14 @@ contract:
   projection engine, overview assembly, guarded retirement overview HTTP
   routing, plan-backed retirement summary refresh, retirement projection
   routing, scenario-analysis routing, sequence-of-returns routing, stress-tests
-  routing, bounded health status/check slices, bounded health classification-fix
-  runtime, and bounded legacy-classification health issue runtime implemented;
-  broader migration remains active.
+  routing, decision-sensitivity routing, bounded health status/check slices,
+  bounded health classification-fix runtime, and bounded legacy-classification
+  health issue runtime implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
-  `/health/fix` execution move with the health/calculation services; remaining
-  Monte Carlo and decision-sensitivity retirement simulation endpoints move with
-  calculation-heavy goal slices; automatic FX market sync/provider HTTP behavior
+  `/health/fix` execution move with the health/calculation services; the
+  remaining Monte Carlo retirement simulation endpoint moves with a
+  calculation-heavy goal slice; automatic FX market sync/provider HTTP behavior
   plus broader market-data provider resolution/sync behavior move with
   calculation/market-data slices; actual portfolio job execution and event
   production move with portfolio/calculation slices; OS keyring integration

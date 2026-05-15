@@ -231,6 +231,28 @@ export interface StressTestResult {
   severity: StressSeverity;
 }
 
+export type DecisionSensitivityMap = "contribution-return" | "retirement-age-spending";
+
+export interface DecisionSensitivityMatrix {
+  rowLabel: string;
+  columnLabel: string;
+  rowValues: number[];
+  columnValues: number[];
+  rowLabels: string[];
+  columnLabels: string[];
+  cells: DecisionSensitivityCell[][];
+  baselineRow?: number | null;
+  baselineColumn?: number | null;
+}
+
+export interface DecisionSensitivityCell {
+  fiAge: number | null;
+  retirementStartAge: number | null;
+  fundedAtGoalAge: boolean;
+  shortfallAtGoalAge: number;
+  portfolioAtHorizon: number;
+}
+
 export interface SorrScenario {
   label: string;
   returns: number[];
@@ -1136,6 +1158,18 @@ export function runStressTests(plan: RetirementPlan, currentPortfolio: number): 
   return runStressTestsWithMode(plan, currentPortfolio, "fire");
 }
 
+export function runDecisionSensitivityMatrixWithMode(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+  map: DecisionSensitivityMap,
+): DecisionSensitivityMatrix {
+  if (map === "contribution-return") {
+    return buildContributionReturnSensitivity(plan, currentPortfolio, mode);
+  }
+  return buildRetirementAgeSpendingSensitivity(plan, currentPortfolio, mode);
+}
+
 export function runSorr(
   plan: RetirementPlan,
   portfolioAtFire: number,
@@ -1510,6 +1544,221 @@ function cloneRetirementPlan(plan: RetirementPlan): RetirementPlan {
             withdrawalBuckets: { ...plan.tax.withdrawalBuckets },
           },
   };
+}
+
+function buildContributionReturnSensitivity(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): DecisionSensitivityMatrix {
+  const baseContribution = plan.investment.monthlyContribution;
+  const baseNetReturn = planAccumulationReturn(plan);
+  const contributionValues = contributionAxis(baseContribution);
+  const returnValues = returnAxis(baseNetReturn);
+  const baselineRow = returnValues.findIndex((value) => approxEq(value, baseNetReturn, 0.000001));
+  const baselineColumn = contributionValues.findIndex((value) =>
+    approxEq(value, baseContribution, 0.01),
+  );
+  const cells = returnValues.map((netReturn) =>
+    contributionValues.map((contribution) => {
+      const adjusted = cloneRetirementPlan(plan);
+      adjusted.investment.monthlyContribution = contribution;
+      applyReturnDelta(adjusted, netReturn - baseNetReturn);
+      return decisionCellFromPlan(adjusted, currentPortfolio, mode);
+    }),
+  );
+
+  return {
+    rowLabel: "After-fee return",
+    columnLabel: "Monthly contribution",
+    rowValues: returnValues,
+    columnValues: contributionValues,
+    rowLabels: returnValues.map((value) => `${(value * 100).toFixed(1)}%`),
+    columnLabels: contributionValues.map((value) => value.toFixed(0)),
+    cells,
+    baselineRow: baselineRow === -1 ? null : baselineRow,
+    baselineColumn: baselineColumn === -1 ? null : baselineColumn,
+  };
+}
+
+function buildRetirementAgeSpendingSensitivity(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): DecisionSensitivityMatrix {
+  const baseRetirementAge = plan.personal.targetRetirementAge;
+  const baseMonthlySpending = activeMonthlyExpenseToday(plan, baseRetirementAge);
+  const spendingValues = spendingAxis(baseMonthlySpending);
+  const retirementAgeValues = retirementAgeAxis(plan);
+  const baselineRow = spendingValues.findIndex((value) =>
+    approxEq(value, baseMonthlySpending, 0.01),
+  );
+  const baselineColumn = retirementAgeValues.findIndex((value) => value === baseRetirementAge);
+  const cells = spendingValues.map((monthlySpending) =>
+    retirementAgeValues.map((retirementAge) => {
+      const adjusted = cloneRetirementPlan(plan);
+      adjusted.personal.targetRetirementAge = retirementAge;
+      setTotalMonthlyExpense(adjusted.expenses, baseMonthlySpending, monthlySpending);
+      return decisionCellFromPlan(adjusted, currentPortfolio, mode);
+    }),
+  );
+
+  return {
+    rowLabel: "Monthly spending",
+    columnLabel: "Retirement age",
+    rowValues: spendingValues,
+    columnValues: retirementAgeValues,
+    rowLabels: spendingValues.map((value) => value.toFixed(0)),
+    columnLabels: retirementAgeValues.map((value) => `${value}`),
+    cells,
+    baselineRow: baselineRow === -1 ? null : baselineRow,
+    baselineColumn: baselineColumn === -1 ? null : baselineColumn,
+  };
+}
+
+function decisionCellFromPlan(
+  plan: RetirementPlan,
+  currentPortfolio: number,
+  mode: RetirementTimingMode,
+): DecisionSensitivityCell {
+  const outcome = riskLabPlanOutcome(plan, currentPortfolio, mode);
+  const targetFactor = inflationFactorToAge(plan, plan.personal.targetRetirementAge);
+  const horizonFactor = inflationFactorToAge(plan, plan.personal.planningHorizonAge);
+  return {
+    fiAge: outcome.fiAge,
+    retirementStartAge: outcome.retirementStartAge,
+    fundedAtGoalAge: outcome.fundedAtGoalAge,
+    shortfallAtGoalAge: outcome.shortfallAtGoalAge / targetFactor,
+    portfolioAtHorizon: outcome.portfolioAtHorizon / horizonFactor,
+  };
+}
+
+function inflationFactorToAge(plan: RetirementPlan, age: number): number {
+  const years = Math.max(age - plan.personal.currentAge, 0);
+  return boundedInflationFactor(plan.investment.inflationRate, years);
+}
+
+function applyReturnDelta(plan: RetirementPlan, delta: number): void {
+  plan.investment.preRetirementAnnualReturn = Math.max(
+    plan.investment.preRetirementAnnualReturn + delta,
+    -0.99,
+  );
+  plan.investment.retirementAnnualReturn = Math.max(
+    plan.investment.retirementAnnualReturn + delta,
+    -0.99,
+  );
+}
+
+function contributionAxis(base: number): number[] {
+  if (base <= 0) {
+    return [0, 500, 1_000, 1_500, 2_000];
+  }
+  const values: number[] = [];
+  for (const multiplier of [0.6, 0.8, 1.0, 1.2, 1.4]) {
+    const value = approxEq(multiplier, 1, 0.000001) ? base : roundMoneyAxis(base * multiplier);
+    pushUniqueAxisValue(values, value);
+  }
+  fillMoneyAxis(values, base);
+  return values.sort((left, right) => left - right);
+}
+
+function returnAxis(base: number): number[] {
+  return [-0.02, -0.01, 0, 0.01, 0.02].map((delta) => Math.max(base + delta, -0.95));
+}
+
+function spendingAxis(base: number): number[] {
+  if (base <= 0) {
+    return [0, 1_000, 2_000, 3_000, 4_000];
+  }
+  const values: number[] = [];
+  for (const multiplier of [0.8, 0.9, 1.0, 1.1, 1.2]) {
+    const value = approxEq(multiplier, 1, 0.000001) ? base : roundMoneyAxis(base * multiplier);
+    pushUniqueAxisValue(values, value);
+  }
+  fillMoneyAxis(values, base);
+  return values.sort((left, right) => left - right);
+}
+
+function retirementAgeAxis(plan: RetirementPlan): number[] {
+  const target = plan.personal.targetRetirementAge;
+  const minAge = plan.personal.currentAge + 1;
+  const maxAge = plan.personal.planningHorizonAge;
+  const values: number[] = [];
+  for (const offset of [-3, -1, 0, 2, 4]) {
+    const age = Math.min(Math.max(target + offset, minAge), maxAge);
+    if (!values.includes(age)) {
+      values.push(age);
+    }
+  }
+  let next = target;
+  while (values.length < 5 && next < maxAge) {
+    next += 1;
+    if (!values.includes(next)) {
+      values.push(next);
+    }
+  }
+  let previous = target;
+  while (values.length < 5 && previous > minAge) {
+    previous -= 1;
+    if (!values.includes(previous)) {
+      values.push(previous);
+    }
+  }
+  return values.sort((left, right) => left - right);
+}
+
+function activeMonthlyExpenseToday(plan: RetirementPlan, age: number): number {
+  return plan.expenses.items
+    .filter(
+      (item) =>
+        (item.startAge === undefined || item.startAge === null || age >= item.startAge) &&
+        (item.endAge === undefined || item.endAge === null || age < item.endAge),
+    )
+    .reduce((total, item) => total + item.monthlyAmount, 0);
+}
+
+function setTotalMonthlyExpense(
+  expenses: ExpenseBudget,
+  baseTotal: number,
+  targetTotal: number,
+): void {
+  if (baseTotal > 0) {
+    const factor = targetTotal / baseTotal;
+    for (const item of expenses.items) {
+      item.monthlyAmount *= factor;
+    }
+    return;
+  }
+
+  if (expenses.items[0]) {
+    expenses.items[0].monthlyAmount = targetTotal;
+  } else {
+    expenses.items.push({ monthlyAmount: targetTotal, essential: true });
+  }
+}
+
+function roundMoneyAxis(value: number): number {
+  const step = Math.abs(value) >= 1_000 ? 100 : 50;
+  return Math.round(value / step) * step;
+}
+
+function pushUniqueAxisValue(values: number[], value: number): void {
+  if (!values.some((existing) => approxEq(existing, value, 0.01))) {
+    values.push(Math.max(value, 0));
+  }
+}
+
+function fillMoneyAxis(values: number[], base: number): void {
+  const step = Math.max(roundMoneyAxis(Math.max(Math.abs(base) * 0.2, 100)), 100);
+  let next = base + step;
+  while (values.length < 5) {
+    pushUniqueAxisValue(values, roundMoneyAxis(next));
+    next += step;
+  }
+}
+
+function approxEq(left: number, right: number, epsilon: number): boolean {
+  return Math.abs(left - right) <= epsilon;
 }
 
 function runSorrScenario(

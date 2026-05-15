@@ -21,6 +21,7 @@ import {
   projectRetirementWithMode,
   retirementFeasibleFromCapital,
   resolvePlanDcPayouts,
+  runDecisionSensitivityMatrixWithMode,
   runScenarioAnalysisWithMode,
   runSorr,
   runStressTestsWithMode,
@@ -569,6 +570,61 @@ describe("retirement calculation primitives", () => {
     const earlyCrash = results.find((result) => result.id === "early-crash");
     expect(earlyCrash?.description).toBe("A 30% market drop happens in the first retirement year.");
     expect(earlyCrash?.stressed.retirementStartAge).toBe(earlyCrash?.baseline.retirementStartAge);
+  });
+
+  test("matches Rust decision sensitivity axes and cell current-value scaling", () => {
+    const plan = basePlan();
+    plan.personal.currentAge = 45;
+    plan.personal.targetRetirementAge = 55;
+    plan.personal.planningHorizonAge = 65;
+    plan.investment.monthlyContribution = 1_250;
+    plan.investment.preRetirementAnnualReturn = 0.07;
+    plan.investment.retirementAnnualReturn = 0.05;
+    plan.investment.annualInvestmentFeeRate = 0.01;
+    plan.expenses.items = [
+      { monthlyAmount: 2_000 },
+      { monthlyAmount: 500, startAge: 60 },
+      { monthlyAmount: 250, endAge: 55 },
+    ];
+
+    const contributionReturn = runDecisionSensitivityMatrixWithMode(
+      plan,
+      300_000,
+      "fire",
+      "contribution-return",
+    );
+    expect(contributionReturn.rowLabel).toBe("After-fee return");
+    expect(contributionReturn.columnLabel).toBe("Monthly contribution");
+    expect(contributionReturn.rowValues.map((value) => closeTo(value, 0.06))).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect(contributionReturn.rowLabels).toEqual(["4.0%", "5.0%", "6.0%", "7.0%", "8.0%"]);
+    expect(contributionReturn.columnValues).toEqual([750, 1_000, 1_250, 1_500, 1_800]);
+    expect(contributionReturn.baselineRow).toBe(2);
+    expect(contributionReturn.baselineColumn).toBe(2);
+    expect(contributionReturn.cells).toHaveLength(5);
+    expect(contributionReturn.cells[0]).toHaveLength(5);
+    expect(contributionReturn.cells[0][0].portfolioAtHorizon).toBeLessThan(
+      contributionReturn.cells[4][4].portfolioAtHorizon,
+    );
+
+    const spendingAge = runDecisionSensitivityMatrixWithMode(
+      plan,
+      300_000,
+      "fire",
+      "retirement-age-spending",
+    );
+    expect(spendingAge.rowLabel).toBe("Monthly spending");
+    expect(spendingAge.columnLabel).toBe("Retirement age");
+    expect(spendingAge.rowValues).toEqual([1_600, 1_800, 2_000, 2_200, 2_400]);
+    expect(spendingAge.columnValues).toEqual([52, 54, 55, 57, 59]);
+    expect(spendingAge.baselineRow).toBe(2);
+    expect(spendingAge.baselineColumn).toBe(2);
+    expect(spendingAge.cells[0][0].shortfallAtGoalAge).toBeGreaterThanOrEqual(0);
   });
 });
 
