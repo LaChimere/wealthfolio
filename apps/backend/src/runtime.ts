@@ -29,6 +29,7 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
+import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
 import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createSyncCryptoService } from "./domains/sync-crypto";
@@ -243,6 +244,10 @@ function createServicesFromDatabase(
     marketDataService: createMarketDataService(db, {
       exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
       fetch: runtimeOptions.marketDataFetch,
+    }),
+    portfolioMetricsService: createPortfolioMetricsService(db, {
+      baseCurrency,
+      exchangeRateService,
     }),
     restartRequired: () => restartRequired,
     secretService,

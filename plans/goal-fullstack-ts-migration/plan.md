@@ -132,6 +132,11 @@ health legacy-classification runtime slices in the standalone TS backend:
   including thread sort/search/cursor pagination, message reads, thread
   update/delete behavior, tool-result patch merging, and an explicit 501 for
   still-deferred AI chat streaming.
+- Add bounded net-worth current/history runtime for `/api/v1/net-worth` and
+  `/api/v1/net-worth/history`, including latest holdings snapshots, cash
+  balances, standalone alternative assets/liabilities, minor-currency quote
+  normalization, FX conversion/fallback behavior, staleness metadata, TOTAL
+  account valuation history, and filled alternative-asset quote history.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -154,9 +159,9 @@ No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync, portfolio recalculation side effects, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
-auto-classification side effects, portfolio metrics runtime, holdings runtime,
-add-on runtime, broader market-data runtime, broader activities/import runtime
-beyond mapping/templates/duplicate lookups, read-only search, transfer
+auto-classification side effects, portfolio metrics runtime beyond current and
+historical net-worth, holdings runtime, add-on runtime, broader market-data
+runtime beyond mapping/templates/duplicate lookups, read-only search, transfer
 link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation and bounded import

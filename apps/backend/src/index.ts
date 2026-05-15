@@ -254,7 +254,17 @@ export {
   type SnapshotRecalcMode,
   type ValuationRecalcMode,
 } from "./domains/portfolio-jobs";
-export type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
+export {
+  createPortfolioMetricsService,
+  type BalanceSheetSection,
+  type BreakdownItem,
+  type NetWorthHistoryPoint,
+  type NetWorthResponse,
+  type PerformanceRequest,
+  type PortfolioMetricsService,
+  type PortfolioMetricsServiceOptions,
+  type StaleAssetInfo,
+} from "./domains/portfolio-metrics";
 export {
   DEFAULT_SETTINGS,
   canonicalizeTimezone,

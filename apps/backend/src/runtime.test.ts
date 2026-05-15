@@ -75,6 +75,18 @@ describe("TS backend runtime composition", () => {
         timezone: "UTC",
       });
 
+      const netWorthResponse = await fetch(`${server.baseUrl}/api/v1/net-worth?date=2026-05-14`);
+      expect(netWorthResponse.status).toBe(200);
+      await expect(netWorthResponse.json()).resolves.toEqual({
+        date: "2026-05-14",
+        assets: { total: 0, breakdown: [] },
+        liabilities: { total: 0, breakdown: [] },
+        netWorth: 0,
+        currency: "USD",
+        oldestValuationDate: null,
+        staleAssets: [],
+      });
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);
