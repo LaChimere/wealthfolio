@@ -13,9 +13,10 @@ SQLite data.
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
 validation, bounded import-apply, activity mutation event production, goal-plan
-persistence, local AI chat thread/message persistence, domain-event planning and
-batch processing, bounded health status/check runtime, and bounded health
-legacy-classification runtime slices in the standalone TS backend:
+persistence, local AI chat thread/message persistence, domain-event planning,
+batch processing, and worker helper, bounded health status/check runtime, and
+bounded health legacy-classification runtime slices in the standalone TS
+backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -223,6 +224,10 @@ legacy-classification runtime slices in the standalone TS backend:
   enrichment, portfolio job enqueue, and broker-sync callbacks in Rust
   queue-worker order while keeping the real debounced worker/runtime wiring
   deferred.
+- Add a bounded TS domain-event worker helper that subscribes to the backend
+  event bus, debounces event batches, supports explicit flush/dispose, and
+  surfaces scheduled processing failures without wiring real runtime services
+  yet.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -256,8 +261,8 @@ read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation, bounded import
 apply, activity mutation event production, and domain-event planning/batch
-processing, save-up preview calculations, local AI chat thread/message
-persistence, bounded health account/timezone status/checks and
+processing/worker helper, save-up preview calculations, local AI chat
+thread/message persistence, bounded health account/timezone status/checks and
 legacy-classification issue generation, sync-crypto/device-sync integration,
 calculation-heavy health checks or non-classification `/health/fix` execution,
 holdings inline portfolio recalculation/job execution, real Connect runtime

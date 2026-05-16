@@ -322,6 +322,11 @@ export {
   type DomainEventProcessorOptions,
 } from "./domain-events/processor";
 export {
+  createDomainEventWorker,
+  type DomainEventWorkerHandle,
+  type DomainEventWorkerOptions,
+} from "./domain-events/worker";
+export {
   createTaxonomyRepository,
   createTaxonomyReadRepository,
   createTaxonomyReadService,

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 108
+turns_used: 109
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T14:22:10+08:00"
+updated_at: "2026-05-16T14:28:32+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -717,6 +717,11 @@ updated_at: "2026-05-16T14:22:10+08:00"
   asset enrichment, portfolio job enqueue, and broker-sync callbacks in the Rust
   queue-worker order while returning the derived plan and propagating callback
   failures. Targeted domain-event tests and backend type-check passed.
+- Turn 109: Added a TS domain-event worker helper that subscribes to the backend
+  event bus, debounces batches, supports explicit flush/dispose, and surfaces
+  scheduled processing failures through an error callback while keeping real
+  runtime wiring deferred. Targeted domain-event tests and backend type-check
+  passed.
 
 ## Deferred items
 
@@ -761,10 +766,11 @@ updated_at: "2026-05-16T14:22:10+08:00"
   follow-ups.
 - Actual portfolio job execution and broad domain-event worker behavior remain
   active follow-ups. reason=holdings snapshot mutation events now have bounded
-  TS runtime parity and the Rust domain-event planner plus injectable batch
-  processor now have TS ports, while debounced portfolio jobs still depend on
-  market sync, holdings, snapshot, valuation, account, health, and FX service
-  parity beyond route-level job enqueue and SSE transport semantics.
+  TS runtime parity and the Rust domain-event planner, injectable batch
+  processor, and debounced worker helper now have TS ports, while real debounced
+  portfolio jobs still depend on market sync, holdings, snapshot, valuation,
+  account, health, and FX service parity beyond route-level job enqueue and SSE
+  transport semantics.
 - Real keyring integration remains an active follow-up. reason=file-backed
   secret persistence now has TS runtime parity, while OS keyring support must
   move with a dedicated runtime/keyring parity slice.
