@@ -284,7 +284,32 @@ function createServicesFromDatabase(
             readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
         })
       : undefined,
-    aiChatService: createAiChatService(db),
+    aiChatService: createAiChatService(db, {
+      queueThreadSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "ai_threads",
+          entityId: event.threadId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+      queueMessageSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "ai_messages",
+          entityId: event.messageId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+      queueThreadTagSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "ai_thread_tags",
+          entityId: event.tagId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+    }),
     appUtilityService: createAppUtilityService({
       appDataDir,
       appVersion: readPackageVersion(runtimeOptions.repositoryRoot),

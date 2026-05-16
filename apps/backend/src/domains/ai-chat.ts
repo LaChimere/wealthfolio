@@ -99,6 +99,56 @@ export interface AiChatService {
   updateToolResult(request: AiChatUpdateToolResultRequest): Promise<unknown> | unknown;
 }
 
+export interface AiChatServiceOptions {
+  queueThreadSyncEvent?: (event: AiThreadSyncEvent) => void;
+  queueMessageSyncEvent?: (event: AiMessageSyncEvent) => void;
+  queueThreadTagSyncEvent?: (event: AiThreadTagSyncEvent) => void;
+}
+
+export type AiChatSyncOperation = "Create" | "Update" | "Delete";
+
+export interface AiThreadSyncEvent {
+  threadId: string;
+  operation: AiChatSyncOperation;
+  payload: AiThreadRowPayload | { id: string };
+}
+
+export interface AiMessageSyncEvent {
+  messageId: string;
+  operation: AiChatSyncOperation;
+  payload: AiMessageRowPayload | { id: string };
+}
+
+export interface AiThreadTagSyncEvent {
+  tagId: string;
+  operation: AiChatSyncOperation;
+  payload: AiThreadTagRowPayload | { id: string };
+}
+
+export interface AiThreadRowPayload {
+  id: string;
+  title: string | null;
+  configSnapshot: string | null;
+  isPinned: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiMessageRowPayload {
+  id: string;
+  threadId: string;
+  role: string;
+  contentJson: string;
+  createdAt: string;
+}
+
+export interface AiThreadTagRowPayload {
+  id: string;
+  threadId: string;
+  tag: string;
+  createdAt: string;
+}
+
 interface AiThreadRow {
   id: string;
   title: string | null;
@@ -116,10 +166,20 @@ interface AiMessageRow {
   created_at: string;
 }
 
+interface AiThreadTagRow {
+  id: string;
+  thread_id: string;
+  tag: string;
+  created_at: string;
+}
+
 const DEFAULT_THREAD_LIMIT = 20;
 const MAX_THREAD_LIMIT = 100;
 
-export function createAiChatService(db: Database): AiChatService {
+export function createAiChatService(
+  db: Database,
+  options: AiChatServiceOptions = {},
+): AiChatService {
   return {
     async sendMessage() {
       throw aiChatError(
@@ -152,15 +212,39 @@ export function createAiChatService(db: Database): AiChatService {
       return loadThreadTagList(db, threadId);
     },
     addTag(threadId, tag) {
-      db.prepare(
-        `
-          INSERT OR IGNORE INTO ai_thread_tags (id, thread_id, tag, created_at)
-          VALUES (?, ?, ?, ?)
-        `,
-      ).run(crypto.randomUUID(), threadId, tag, timestampNow());
+      db.transaction(() => {
+        const row: AiThreadTagRow = {
+          id: crypto.randomUUID(),
+          thread_id: threadId,
+          tag,
+          created_at: timestampNow(),
+        };
+        const result = db
+          .prepare(
+            `
+              INSERT OR IGNORE INTO ai_thread_tags (id, thread_id, tag, created_at)
+              VALUES (?, ?, ?, ?)
+            `,
+          )
+          .run(row.id, row.thread_id, row.tag, row.created_at);
+        if (result.changes > 0) {
+          queueThreadTagSyncEvent(options, row, "Create");
+        }
+      })();
     },
     removeTag(threadId, tag) {
-      db.prepare("DELETE FROM ai_thread_tags WHERE thread_id = ? AND tag = ?").run(threadId, tag);
+      db.transaction(() => {
+        const rows = db
+          .query<
+            AiThreadTagRow,
+            [string, string]
+          >("SELECT id, thread_id, tag, created_at FROM ai_thread_tags WHERE thread_id = ? AND tag = ?")
+          .all(threadId, tag);
+        db.prepare("DELETE FROM ai_thread_tags WHERE thread_id = ? AND tag = ?").run(threadId, tag);
+        for (const row of rows) {
+          queueThreadTagSyncDelete(options, row.id);
+        }
+      })();
     },
     updateThread(threadId, request) {
       const existing = readThreadRow(db, threadId);
@@ -179,25 +263,32 @@ export function createAiChatService(db: Database): AiChatService {
         return threadFromRow(existing, []);
       }
 
-      const updatedAt = timestampNow();
-      db.prepare(
-        `
-          UPDATE ai_threads
-          SET title = ?, is_pinned = ?, updated_at = ?
-          WHERE id = ?
-        `,
-      ).run(nextTitle, boolToInt(nextIsPinned), updatedAt, threadId);
-      return threadFromRow(readRequiredThreadRow(db, threadId), []);
+      return db.transaction(() => {
+        const updatedAt = timestampNow();
+        db.prepare(
+          `
+            UPDATE ai_threads
+            SET title = ?, is_pinned = ?, updated_at = ?
+            WHERE id = ?
+          `,
+        ).run(nextTitle, boolToInt(nextIsPinned), updatedAt, threadId);
+        const row = readRequiredThreadRow(db, threadId);
+        queueThreadSyncEvent(options, row, "Update");
+        return threadFromRow(row, []);
+      })();
     },
     async deleteThread(threadId) {
       db.transaction(() => {
         db.prepare("DELETE FROM ai_messages WHERE thread_id = ?").run(threadId);
         db.prepare("DELETE FROM ai_thread_tags WHERE thread_id = ?").run(threadId);
-        db.prepare("DELETE FROM ai_threads WHERE id = ?").run(threadId);
+        const result = db.prepare("DELETE FROM ai_threads WHERE id = ?").run(threadId);
+        if (result.changes > 0) {
+          queueThreadSyncDelete(options, threadId);
+        }
       })();
     },
     updateToolResult(request) {
-      return updateToolResult(db, request);
+      return updateToolResult(db, request, options.queueMessageSyncEvent);
     },
   };
 }
@@ -266,47 +357,138 @@ function listThreads(db: Database, request: AiChatListThreadsRequest): AiChatThr
   };
 }
 
-function updateToolResult(db: Database, request: AiChatUpdateToolResultRequest): AiChatMessage {
-  const messages = db
-    .query<AiMessageRow, [string]>(
-      `
-        SELECT id, thread_id, role, content_json, created_at
-        FROM ai_messages
-        WHERE thread_id = ?
-        ORDER BY created_at ASC
-      `,
-    )
-    .all(request.threadId);
+function updateToolResult(
+  db: Database,
+  request: AiChatUpdateToolResultRequest,
+  queueSyncEvent?: (event: AiMessageSyncEvent) => void,
+): AiChatMessage {
+  return db.transaction(() => {
+    const messages = db
+      .query<AiMessageRow, [string]>(
+        `
+          SELECT id, thread_id, role, content_json, created_at
+          FROM ai_messages
+          WHERE thread_id = ?
+          ORDER BY created_at ASC
+        `,
+      )
+      .all(request.threadId);
 
-  for (const row of messages) {
-    const message = messageFromRow(row);
-    const part = message.content.parts.find(
-      (candidate) => candidate.type === "toolResult" && candidate.toolCallId === request.toolCallId,
-    );
-    if (!part) {
-      continue;
-    }
-
-    if (isRecord(request.resultPatch)) {
-      if (isRecord(part.data)) {
-        part.data = { ...part.data, ...request.resultPatch };
+    for (const row of messages) {
+      const message = messageFromRow(row);
+      const part = message.content.parts.find(
+        (candidate) =>
+          candidate.type === "toolResult" && candidate.toolCallId === request.toolCallId,
+      );
+      if (!part) {
+        continue;
       }
-      const existingMeta = isRecord(part.meta) ? part.meta : {};
-      part.meta = { ...existingMeta, ...request.resultPatch };
+
+      if (isRecord(request.resultPatch)) {
+        if (isRecord(part.data)) {
+          part.data = { ...part.data, ...request.resultPatch };
+        }
+        const existingMeta = isRecord(part.meta) ? part.meta : {};
+        part.meta = { ...existingMeta, ...request.resultPatch };
+      }
+
+      db.prepare("UPDATE ai_messages SET content_json = ? WHERE id = ?").run(
+        JSON.stringify(message.content),
+        message.id,
+      );
+      const updatedRow = readRequiredMessageRow(db, message.id);
+      queueMessageSyncEvent(queueSyncEvent, updatedRow, "Update");
+      return message;
     }
 
-    db.prepare("UPDATE ai_messages SET content_json = ? WHERE id = ?").run(
-      JSON.stringify(message.content),
-      message.id,
+    throw aiChatError(
+      "invalid_input",
+      `Tool result not found for tool_call_id: ${request.toolCallId}`,
+      400,
     );
-    return message;
-  }
+  })();
+}
 
-  throw aiChatError(
-    "invalid_input",
-    `Tool result not found for tool_call_id: ${request.toolCallId}`,
-    400,
-  );
+function queueThreadSyncEvent(
+  options: AiChatServiceOptions,
+  row: AiThreadRow,
+  operation: Exclude<AiChatSyncOperation, "Delete">,
+): void {
+  options.queueThreadSyncEvent?.({
+    threadId: row.id,
+    operation,
+    payload: threadRowPayload(row),
+  });
+}
+
+function queueThreadSyncDelete(options: AiChatServiceOptions, threadId: string): void {
+  options.queueThreadSyncEvent?.({
+    threadId,
+    operation: "Delete",
+    payload: { id: threadId },
+  });
+}
+
+function queueMessageSyncEvent(
+  queueSyncEvent: ((event: AiMessageSyncEvent) => void) | undefined,
+  row: AiMessageRow,
+  operation: Exclude<AiChatSyncOperation, "Delete">,
+): void {
+  queueSyncEvent?.({
+    messageId: row.id,
+    operation,
+    payload: messageRowPayload(row),
+  });
+}
+
+function queueThreadTagSyncEvent(
+  options: AiChatServiceOptions,
+  row: AiThreadTagRow,
+  operation: Exclude<AiChatSyncOperation, "Delete">,
+): void {
+  options.queueThreadTagSyncEvent?.({
+    tagId: row.id,
+    operation,
+    payload: threadTagRowPayload(row),
+  });
+}
+
+function queueThreadTagSyncDelete(options: AiChatServiceOptions, tagId: string): void {
+  options.queueThreadTagSyncEvent?.({
+    tagId,
+    operation: "Delete",
+    payload: { id: tagId },
+  });
+}
+
+function threadRowPayload(row: AiThreadRow): AiThreadRowPayload {
+  return {
+    id: row.id,
+    title: row.title,
+    configSnapshot: row.config_snapshot,
+    isPinned: boolToInt(intToBool(row.is_pinned)),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function messageRowPayload(row: AiMessageRow): AiMessageRowPayload {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    role: row.role,
+    contentJson: row.content_json,
+    createdAt: row.created_at,
+  };
+}
+
+function threadTagRowPayload(row: AiThreadTagRow): AiThreadTagRowPayload {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    tag: row.tag,
+    createdAt: row.created_at,
+  };
 }
 
 function loadThreadTags(db: Database, threadIds: string[]): Map<string, string[]> {
@@ -348,6 +530,22 @@ function readRequiredThreadRow(db: Database, threadId: string): AiThreadRow {
   const row = readThreadRow(db, threadId);
   if (!row) {
     throw aiChatError("thread_not_found", `Thread ${threadId} not found`, 404);
+  }
+  return row;
+}
+
+function readRequiredMessageRow(db: Database, messageId: string): AiMessageRow {
+  const row = db
+    .query<AiMessageRow, [string]>(
+      `
+        SELECT id, thread_id, role, content_json, created_at
+        FROM ai_messages
+        WHERE id = ?
+      `,
+    )
+    .get(messageId);
+  if (!row) {
+    throw aiChatError("invalid_input", `Message ${messageId} not found`, 400);
   }
   return row;
 }

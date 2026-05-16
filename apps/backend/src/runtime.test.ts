@@ -1027,6 +1027,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime AI chat sync callbacks to sync_outbox", () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      let db = openSqliteDatabase(runtime.dbPath);
+      try {
+        db.prepare(
+          `
+            INSERT INTO ai_threads (
+              id, title, config_snapshot, is_pinned, created_at, updated_at
+            )
+            VALUES ('ai-thread-1', 'Original', NULL, 0, '2026-05-14T00:00:00Z',
+              '2026-05-14T00:00:00Z')
+          `,
+        ).run();
+        db.prepare(
+          `
+            INSERT INTO ai_messages (id, thread_id, role, content_json, created_at)
+            VALUES (
+              'ai-message-1',
+              'ai-thread-1',
+              'assistant',
+              '{"schemaVersion":1,"parts":[{"type":"toolResult","toolCallId":"tool-1","data":{"status":"pending"}}]}',
+              '2026-05-14T00:00:00Z'
+            )
+          `,
+        ).run();
+      } finally {
+        db.close();
+      }
+
+      runtime.options.aiChatService.updateThread("ai-thread-1", {
+        title: "Updated",
+        isPinned: true,
+      });
+      runtime.options.aiChatService.addTag("ai-thread-1", "favorite");
+      runtime.options.aiChatService.updateToolResult({
+        threadId: "ai-thread-1",
+        toolCallId: "tool-1",
+        resultPatch: { status: "submitted" },
+      });
+
+      db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["ai_thread", "update"],
+          ["ai_thread_tag", "create"],
+          ["ai_message", "update"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "ai-thread-1",
+          title: "Updated",
+          is_pinned: 1,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          thread_id: "ai-thread-1",
+          tag: "favorite",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: "ai-message-1",
+          thread_id: "ai-thread-1",
+        });
+        expect(String(rows[2]?.payload)).toContain("submitted");
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({

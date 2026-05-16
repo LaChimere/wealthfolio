@@ -1,7 +1,17 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createAiChatService } from "./ai-chat";
+import {
+  type AiMessageSyncEvent,
+  createAiChatService,
+  type AiThreadSyncEvent,
+  type AiThreadTagSyncEvent,
+} from "./ai-chat";
+
+type SyncEvent =
+  | { entity: "thread"; event: AiThreadSyncEvent }
+  | { entity: "message"; event: AiMessageSyncEvent }
+  | { entity: "tag"; event: AiThreadTagSyncEvent };
 
 describe("TS AI chat domain", () => {
   test("lists threads with Rust-compatible ordering, limits, cursor, search, and tags", () => {
@@ -195,6 +205,109 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("queues AI chat thread, message, and tag sync callbacks for local mutations", async () => {
+    const db = createAiChatDb();
+    const syncEvents: SyncEvent[] = [];
+    const service = createAiChatService(db, {
+      queueThreadSyncEvent: (event) => syncEvents.push({ entity: "thread", event }),
+      queueMessageSyncEvent: (event) => syncEvents.push({ entity: "message", event }),
+      queueThreadTagSyncEvent: (event) => syncEvents.push({ entity: "tag", event }),
+    });
+
+    try {
+      seedThread(db, { id: "thread-1", title: "Tools" });
+      seedMessage(db, {
+        id: "message-1",
+        threadId: "thread-1",
+        role: "assistant",
+        content: {
+          schemaVersion: 1,
+          parts: [
+            {
+              type: "toolResult",
+              toolCallId: "tool-1",
+              success: true,
+              data: { status: "pending" },
+            },
+          ],
+        },
+      });
+
+      service.addTag("thread-1", "favorite");
+      service.addTag("thread-1", "favorite");
+      const tagId = readThreadTagId(db, "thread-1", "favorite");
+      expect(syncEvents).toEqual([
+        {
+          entity: "tag",
+          event: expect.objectContaining({
+            tagId,
+            operation: "Create",
+            payload: expect.objectContaining({
+              id: tagId,
+              threadId: "thread-1",
+              tag: "favorite",
+            }),
+          }),
+        },
+      ]);
+
+      syncEvents.length = 0;
+      service.updateThread("thread-1", { title: "Updated", isPinned: true });
+      service.updateToolResult({
+        threadId: "thread-1",
+        toolCallId: "tool-1",
+        resultPatch: { status: "submitted" },
+      });
+      service.removeTag("thread-1", "favorite");
+      await service.deleteThread("thread-1");
+
+      expect(syncEvents).toEqual([
+        {
+          entity: "thread",
+          event: expect.objectContaining({
+            threadId: "thread-1",
+            operation: "Update",
+            payload: expect.objectContaining({
+              id: "thread-1",
+              title: "Updated",
+              isPinned: 1,
+            }),
+          }),
+        },
+        {
+          entity: "message",
+          event: expect.objectContaining({
+            messageId: "message-1",
+            operation: "Update",
+            payload: expect.objectContaining({
+              id: "message-1",
+              threadId: "thread-1",
+              contentJson: expect.stringContaining("submitted"),
+            }),
+          }),
+        },
+        {
+          entity: "tag",
+          event: {
+            tagId,
+            operation: "Delete",
+            payload: { id: tagId },
+          },
+        },
+        {
+          entity: "thread",
+          event: {
+            threadId: "thread-1",
+            operation: "Delete",
+            payload: { id: "thread-1" },
+          },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports streaming as a bounded deferred runtime", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
@@ -300,4 +413,17 @@ function seedTag(db: Database, threadId: string, tag: string): void {
       VALUES (?, ?, ?, ?)
     `,
   ).run(`${threadId}-${tag}`, threadId, tag, "2026-01-01T00:00:00Z");
+}
+
+function readThreadTagId(db: Database, threadId: string, tag: string): string {
+  const row = db
+    .query<
+      { id: string },
+      [string, string]
+    >("SELECT id FROM ai_thread_tags WHERE thread_id = ? AND tag = ?")
+    .get(threadId, tag);
+  if (!row) {
+    throw new Error(`missing tag ${threadId}:${tag}`);
+  }
+  return row.id;
 }
