@@ -421,6 +421,9 @@ describe("TS activities import domain", () => {
           activityType: "BUY",
           date: "2025-01-17",
           symbol: "UNKNOWN",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
           quantity: "1",
           unitPrice: "10",
           amount: "10",
@@ -463,16 +466,19 @@ describe("TS activities import domain", () => {
         warnings: { _duplicate: ["Duplicate of line 2 in this import batch"] },
       });
       expect(checked?.[3]).toMatchObject({
-        isValid: false,
-        errors: {
-          symbol: ["Symbol-based asset creation is not yet implemented in the TS runtime"],
-        },
+        accountId: "account-1",
+        accountName: "Alpha",
+        isValid: true,
+        symbol: "UNKNOWN",
       });
+      expect(checked?.[3]?.assetId).toBeString();
+      expect(checked?.[3]).not.toHaveProperty("errors");
       expect(checked?.[4]).toMatchObject({
         isValid: false,
         errors: { accountId: ["Account is required before running backend validation."] },
       });
       expect(readActivityCount(db)).toBe(1);
+      expect(readAssetCount(db)).toBe(1);
     } finally {
       db.close();
     }
@@ -563,6 +569,76 @@ describe("TS activities import domain", () => {
         skipped: 0,
         assetsCreated: 0,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("imports activities with new symbol assets", async () => {
+    const db = createActivitiesDb();
+    const events: BackendEvent[] = [];
+    const service = createActivityService(db, { eventBus: recordingEventBus(events) });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const rows = [
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "NVDA",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "USD",
+          lineNumber: 1,
+        },
+      ];
+      const checked = service.checkActivitiesImport?.(rows) as Array<Record<string, unknown>>;
+      const checkedAssetId = checked[0]?.assetId as string;
+      expect(checkedAssetId).toBeString();
+      expect(readAssetCount(db)).toBe(0);
+
+      const result = (await service.importActivities?.(checked)) as {
+        activities: Array<Record<string, unknown>>;
+        importRunId: string;
+        summary: Record<string, unknown>;
+      };
+
+      const assetId = result.activities[0]?.assetId as string;
+      expect(assetId).toBe(checkedAssetId);
+      expect(result.summary).toMatchObject({
+        total: 1,
+        imported: 1,
+        skipped: 0,
+        duplicates: 0,
+        assetsCreated: 1,
+        success: true,
+      });
+      expect(readAssetById(db, assetId)).toMatchObject({
+        display_code: "NVDA",
+        instrument_symbol: "NVDA",
+        instrument_exchange_mic: "XNAS",
+        instrument_type: "EQUITY",
+        quote_ccy: "USD",
+      });
+      expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
+        inserted: 1,
+        assetsCreated: 1,
+      });
+      expect(events).toEqual([
+        assetsCreatedEvent([assetId]),
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: [assetId],
+          currencies: ["USD"],
+          earliest: "2025-01-15T00:00:00.000Z",
+        }),
+      ]);
     } finally {
       db.close();
     }
@@ -972,7 +1048,7 @@ describe("TS activities import domain", () => {
           activityDate: "2025-01-15",
           currency: "USD",
         }),
-      ).toThrow("Symbol-based asset creation is not yet implemented");
+      ).toThrow("Instrument type is required to create asset from symbol UNKNOWN");
       insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
       insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
       expect(() =>
@@ -1441,16 +1517,41 @@ describe("TS activities import domain", () => {
       ]);
 
       events.length = 0;
-      expect(() =>
-        service.createActivity?.({
-          accountId: "account-1",
-          asset: { symbol: "UNKNOWN" },
-          activityType: "BUY",
-          activityDate: "2025-01-15",
-          currency: "USD",
+      const createdWithSymbol = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          symbol: "UNKNOWN",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          name: "Unknown Corp",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-16",
+        quantity: "2",
+        unitPrice: "5",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(createdWithSymbol.assetId).toBeString();
+      expect(readAssetById(db, createdWithSymbol.assetId ?? "")).toMatchObject({
+        name: "Unknown Corp",
+        display_code: "UNKNOWN",
+        instrument_symbol: "UNKNOWN",
+        instrument_exchange_mic: "XNAS",
+        instrument_type: "EQUITY",
+        quote_ccy: "USD",
+      });
+      expect(events).toEqual([
+        assetsCreatedEvent([createdWithSymbol.assetId ?? ""]),
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: [createdWithSymbol.assetId ?? ""],
+          currencies: ["USD"],
+          earliest: "2025-01-16T00:00:00.000Z",
         }),
-      ).toThrow("Symbol-based asset creation is not yet implemented");
-      expect(events).toEqual([]);
+      ]);
+      events.length = 0;
 
       const updated = service.updateActivity?.({
         id: created.id,
@@ -1985,6 +2086,16 @@ function activitiesChangedEvent(input: {
   };
 }
 
+function assetsCreatedEvent(assetIds: string[]): BackendEvent {
+  return {
+    name: "assets_created",
+    payload: {
+      type: "assets_created",
+      asset_ids: assetIds,
+    },
+  };
+}
+
 function insertTemplate(
   db: Database,
   template: { id: string; name: string; scope: string; kind: string },
@@ -2168,6 +2279,16 @@ function readActivityCount(db: Database): number {
   return (
     db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count ?? 0
   );
+}
+
+function readAssetCount(db: Database): number {
+  return db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM assets").get()?.count ?? 0;
+}
+
+function readAssetById(db: Database, assetId: string): Record<string, unknown> | null {
+  return db
+    .query<Record<string, unknown>, [string]>("SELECT * FROM assets WHERE id = ?")
+    .get(assetId);
 }
 
 function readActivityMetadata(db: Database, activityId: string): unknown {

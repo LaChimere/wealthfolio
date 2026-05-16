@@ -21,7 +21,8 @@ backend:
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
   provide cash activity data, an existing `asset.id`, or an `asset.symbol` that
-  resolves to exactly one existing SQLite asset.
+  resolves to exactly one existing SQLite asset or includes enough explicit
+  metadata to create a bounded local asset.
 - Preserve Rust-compatible generated activity IDs, strict date handling,
   subtype/status defaults, decimal patch semantics, absolute economic signs,
   minor-currency normalization, securities-transfer amount clearing,
@@ -239,9 +240,9 @@ backend:
 - Add bounded legacy-classification health issue generation by surfacing
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
-- Keep still-deferred symbol-only asset creation, quote fallback writes,
-  provider-backed asset resolution, device-sync outbox emission, and actual
-  portfolio job execution/valuation recalculation for dedicated parity slices.
+- Keep still-deferred quote fallback writes, provider-backed asset resolution,
+  device-sync outbox emission, and actual portfolio job execution/valuation
+  recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -258,16 +259,17 @@ fan-out, holding detail/by-asset fan-out, allocation reads, snapshot deletion,
 bounded manual snapshot saves, bounded snapshot import writes, add-on runtime,
 broader market-data runtime beyond mapping/templates/duplicate lookups,
 read-only search, transfer link/unlink, single activity delete, and bounded
-existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
-CSV parse/read-only asset preview/read-only import validation, bounded import
-apply, activity mutation event production, and domain-event planning/batch
-processing/worker helper, save-up preview calculations, local AI chat
-thread/message persistence, bounded health account/timezone status/checks and
-legacy-classification issue generation, sync-crypto/device-sync integration,
-calculation-heavy health checks or non-classification `/health/fix` execution,
-holdings inline portfolio recalculation/job execution, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+existing-asset/cash/symbol-resolved and bounded symbol-created activity
+create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
+import validation, bounded import apply, activity mutation event production, and
+domain-event planning/batch processing/worker helper, save-up preview
+calculations, local AI chat thread/message persistence, bounded health
+account/timezone status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, calculation-heavy health checks or
+non-classification `/health/fix` execution, holdings inline portfolio
+recalculation/job execution, real Connect runtime implementation, real
+device-sync runtime implementation, or Rust runtime removal is in scope for this
+slice.
 
 ## Next slices
 

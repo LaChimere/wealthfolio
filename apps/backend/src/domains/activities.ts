@@ -7,6 +7,7 @@ import type { BackendEventBus } from "../events";
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 export const ACTIVITIES_CHANGED_EVENT = "activities_changed";
+const ASSETS_CREATED_EVENT = "assets_created";
 export const ACTIVITY_IMPORT_CONTEXT_KIND = "ACTIVITY";
 export const CSV_ACTIVITY_CONTEXT_KIND = "CSV_ACTIVITY";
 export const CSV_HOLDINGS_CONTEXT_KIND = "CSV_HOLDINGS";
@@ -370,6 +371,27 @@ interface ActivityAssetInput {
   exchangeMic?: string;
   instrumentType?: string;
   quoteCcy?: string;
+  quoteMode?: string;
+  kind?: string;
+  name?: string;
+}
+
+interface PendingActivityAsset {
+  id: string;
+  kind: string;
+  name: string | null;
+  displayCode: string;
+  quoteMode: string;
+  quoteCcy: string;
+  instrumentType: string;
+  instrumentSymbol: string;
+  instrumentExchangeMic: string | null;
+}
+
+interface ActivityAssetResolutionContext {
+  pendingAssetsById: Map<string, PendingActivityAsset>;
+  pendingAssetIdByKey: Map<string, string>;
+  createdAssetIds: Set<string>;
 }
 
 interface ActivityCreateRowInput {
@@ -441,8 +463,9 @@ export function createActivityService(
 ): ActivityService {
   return {
     createActivity(input) {
-      const created = db.transaction(() => {
-        const activity = normalizeActivityCreateInput(db, input);
+      const outcome = db.transaction(() => {
+        const assetContext = createActivityAssetResolutionContext();
+        const activity = normalizeActivityCreateInput(db, input, assetContext);
         if (activity.idempotencyKey !== null) {
           const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
           if (existingId !== null) {
@@ -451,24 +474,31 @@ export function createActivityService(
         }
 
         try {
+          ensurePendingActivityAssets(db, assetContext);
           insertActivityRow(db, activity);
         } catch (error) {
           throw mapActivitySqliteError(error);
         }
 
-        return activityFromRow(readActivityRow(db, activity.id));
+        return {
+          created: activityFromRow(readActivityRow(db, activity.id)),
+          createdAssetIds: [...assetContext.createdAssetIds],
+        };
       })();
-      publishActivitiesChanged(options.eventBus, [activityEventRecord(created)]);
-      return created;
+      publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
+      publishActivitiesChanged(options.eventBus, [activityEventRecord(outcome.created)]);
+      return outcome.created;
     },
 
     updateActivity(input) {
       const result = db.transaction(() => {
+        const assetContext = createActivityAssetResolutionContext();
         const activityId = requiredNonEmptyString(input.id, "id");
         const existing = readActivityRow(db, activityId);
-        const update = normalizeActivityUpdateInput(db, input, existing);
+        const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
 
         try {
+          ensurePendingActivityAssets(db, assetContext);
           updateActivityRow(db, update);
         } catch (error) {
           throw mapActivitySqliteError(error);
@@ -477,8 +507,10 @@ export function createActivityService(
         return {
           existing: activityFromRow(existing),
           updated: activityFromRow(readActivityRow(db, activityId)),
+          createdAssetIds: [...assetContext.createdAssetIds],
         };
       })();
+      publishAssetsCreated(options.eventBus, result.createdAssetIds);
       publishActivitiesChanged(options.eventBus, [
         activityEventRecord(result.existing),
         activityEventRecord(result.updated),
@@ -488,6 +520,7 @@ export function createActivityService(
 
     bulkMutateActivities(input) {
       const outcome = db.transaction(() => {
+        const assetContext = createActivityAssetResolutionContext();
         const creates = recordArrayField(input, "creates");
         const updates = recordArrayField(input, "updates");
         const deleteIds = stringArrayField(input, "deleteIds");
@@ -505,7 +538,7 @@ export function createActivityService(
         for (const createInput of creates) {
           const tempId = stringFieldOrNull(createInput.id)?.trim() || null;
           try {
-            const activity = normalizeActivityCreateInput(db, createInput);
+            const activity = normalizeActivityCreateInput(db, createInput, assetContext);
             if (activity.idempotencyKey !== null) {
               const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
               if (existingId !== null && !deleteIdSet.has(existingId)) {
@@ -531,7 +564,9 @@ export function createActivityService(
             }
             const existing = readActivityRow(db, activityId);
             preparedUpdateExistingRows.push(existing);
-            preparedUpdates.push(normalizeActivityUpdateInput(db, updateInput, existing));
+            preparedUpdates.push(
+              normalizeActivityUpdateInput(db, updateInput, existing, assetContext),
+            );
           } catch (error) {
             errors.push({ id: targetId, action: "update", message: errorMessage(error) });
           }
@@ -549,11 +584,13 @@ export function createActivityService(
           return {
             result: emptyBulkMutationResult(errors),
             oldRows: [] as ActivityRow[],
+            createdAssetIds: [] as string[],
           };
         }
 
         const result = emptyBulkMutationResult([]);
         try {
+          ensurePendingActivityAssets(db, assetContext);
           for (const activity of preparedDeletes) {
             db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
             result.deleted.push(activityFromRow(activity));
@@ -574,8 +611,10 @@ export function createActivityService(
         return {
           result,
           oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
+          createdAssetIds: [...assetContext.createdAssetIds],
         };
       })();
+      publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
       publishBulkActivitiesChanged(options.eventBus, outcome.oldRows, outcome.result);
       return outcome.result;
     },
@@ -957,6 +996,18 @@ interface ActivityEventRecord {
   assetId: string | null;
   currency: string;
   activityDate: string;
+}
+
+function publishAssetsCreated(eventBus: BackendEventBus | undefined, assetIds: string[]): void {
+  const createdAssetIds = uniqueSortedStrings(assetIds);
+  if (!eventBus || createdAssetIds.length === 0) {
+    return;
+  }
+
+  eventBus.publish({
+    name: ASSETS_CREATED_EVENT,
+    payload: { type: ASSETS_CREATED_EVENT, asset_ids: createdAssetIds },
+  });
 }
 
 function publishActivitiesChanged(
@@ -1583,7 +1634,10 @@ function checkActivitiesImportRows(
   db: Database,
   activities: unknown[],
 ): Array<Record<string, unknown>> {
-  const checked = activities.map((activity, index) => checkActivityImportRow(db, activity, index));
+  const assetContext = createActivityAssetResolutionContext();
+  const checked = activities.map((activity, index) =>
+    checkActivityImportRow(db, activity, index, assetContext),
+  );
   const firstIndexByKey = new Map<string, number>();
   const existingByKey = new Map<string, string>();
 
@@ -1631,6 +1685,7 @@ function checkActivityImportRow(
   db: Database,
   input: unknown,
   index: number,
+  assetContext: ActivityAssetResolutionContext,
 ): { activity: Record<string, unknown>; idempotencyKey: string | null } {
   const activity = isRecord(input) ? { ...input } : {};
   const errors = cloneMessageMap(activity.errors);
@@ -1682,18 +1737,13 @@ function checkActivityImportRow(
     fxRate: activity.fxRate,
   };
   if (assetId) {
-    createInput.asset = { id: assetId };
+    createInput.asset = activityAssetInputFromImportFields(activity, assetId, symbol);
   } else if (needsAsset && symbol) {
-    createInput.asset = {
-      symbol,
-      exchangeMic: optionalTrimmedString(activity.exchangeMic),
-      instrumentType: optionalTrimmedString(activity.instrumentType),
-      quoteCcy: optionalTrimmedString(activity.quoteCcy),
-    };
+    createInput.asset = activityAssetInputFromImportFields(activity, undefined, symbol);
   }
 
   try {
-    const normalized = normalizeActivityCreateInput(db, createInput);
+    const normalized = normalizeActivityCreateInput(db, createInput, assetContext);
     activity.id = optionalTrimmedString(activity.id) ?? normalized.id;
     activity.accountId = normalized.accountId;
     activity.date = normalized.activityDate;
@@ -1800,6 +1850,7 @@ async function importActivityRows(
   const total = activities.length;
   const ordered: Array<Record<string, unknown> | null> = Array.from({ length: total }, () => null);
   const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
+  const assetContext = createActivityAssetResolutionContext();
   let hasValidationErrors = false;
 
   for (const [index, input] of activities.entries()) {
@@ -1848,7 +1899,7 @@ async function importActivityRows(
     }
 
     try {
-      const create = normalizeActivityCreateInput(db, createInput);
+      const create = normalizeActivityCreateInput(db, createInput, assetContext);
       const explicitId = optionalTrimmedString(activity.id);
       if (explicitId) {
         create.id = explicitId;
@@ -1951,7 +2002,7 @@ async function importActivityRows(
   }
 
   linkImportedTransferPairs(insertable);
-  const fxPairs = collectImportFxPairs(db, insertable);
+  const fxPairs = collectImportFxPairs(db, insertable, assetContext);
   if (fxPairs.length > 0 && options.ensureFxPairs) {
     await options.ensureFxPairs(fxPairs);
   }
@@ -1961,12 +2012,14 @@ async function importActivityRows(
     imported: insertable.length,
     skipped: duplicateCount,
     duplicates: duplicateCount,
-    assetsCreated: 0,
+    assetsCreated: pendingActivityAssetIdsForCreates(assetContext, insertable).size,
     success: true,
     errorMessage: null,
   };
+  const pendingAssetIds = pendingActivityAssetIdsForCreates(assetContext, insertable);
 
   const result = db.transaction(() => {
+    ensurePendingActivityAssets(db, assetContext, pendingAssetIds);
     const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
 
     try {
@@ -1989,6 +2042,7 @@ async function importActivityRows(
     };
   })();
   if (summary.imported > 0) {
+    publishAssetsCreated(options.eventBus, [...assetContext.createdAssetIds]);
     publishActivitiesChanged(
       options.eventBus,
       insertable.map((row) => activityEventRecordFromCreate(row.create)),
@@ -2020,16 +2074,31 @@ function importActivityCreateInput(activity: Record<string, unknown>): Record<st
     metadata: importActivityMetadata(activity),
   };
   if (assetId) {
-    createInput.asset = { id: assetId };
+    createInput.asset = activityAssetInputFromImportFields(activity, assetId, symbol);
   } else if (symbol) {
-    createInput.asset = {
-      symbol,
-      exchangeMic: optionalTrimmedString(activity.exchangeMic),
-      instrumentType: optionalTrimmedString(activity.instrumentType),
-      quoteCcy: optionalTrimmedString(activity.quoteCcy),
-    };
+    createInput.asset = activityAssetInputFromImportFields(activity, undefined, symbol);
   }
   return createInput;
+}
+
+function activityAssetInputFromImportFields(
+  activity: Record<string, unknown>,
+  id: string | undefined,
+  symbol: string | undefined,
+): Record<string, unknown> {
+  return {
+    id,
+    symbol,
+    exchangeMic: optionalTrimmedString(activity.exchangeMic),
+    instrumentType: optionalTrimmedString(activity.instrumentType),
+    quoteCcy: optionalTrimmedString(activity.quoteCcy),
+    quoteMode: optionalTrimmedString(activity.quoteMode),
+    kind: optionalTrimmedString(activity.assetKind) ?? optionalTrimmedString(activity.kind),
+    name:
+      optionalTrimmedString(activity.assetName) ??
+      optionalTrimmedString(activity.symbolName) ??
+      optionalTrimmedString(activity.name),
+  };
 }
 
 function importActivityMetadata(activity: Record<string, unknown>): Record<string, unknown> | null {
@@ -2229,6 +2298,7 @@ function applyImportedTransferLink(row: PreparedImportActivity, sourceGroupId: s
 function collectImportFxPairs(
   db: Database,
   rows: PreparedImportActivity[],
+  assetContext?: ActivityAssetResolutionContext,
 ): Array<[string, string]> {
   const pairs = new Map<string, [string, string]>();
   for (const row of rows) {
@@ -2238,7 +2308,7 @@ function collectImportFxPairs(
     addImportFxPair(pairs, activityCurrency, accountCurrency);
 
     if (row.create.assetId) {
-      const asset = readAssetRow(db, row.create.assetId);
+      const asset = readResolvedActivityAssetRow(db, row.create.assetId, assetContext);
       addImportFxPair(pairs, asset.quote_ccy, accountCurrency, activityCurrency);
     }
   }
@@ -2309,6 +2379,7 @@ function insertCompletedImportRun(
 function normalizeActivityCreateInput(
   db: Database,
   input: Record<string, unknown>,
+  assetContext?: ActivityAssetResolutionContext,
 ): ActivityCreateRowInput {
   const accountId = requiredNonEmptyString(input.accountId, "accountId");
   const account = readAccountRow(db, accountId);
@@ -2323,8 +2394,11 @@ function normalizeActivityCreateInput(
   validateAssetBackedIncomeValues(activityType, subtype, quantity, unitPrice, amount);
   validateSplitRatio(activityType, amount);
 
-  const assetId = resolveActivityAssetId(db, input, activityType, subtype);
-  const asset = assetId === null ? null : readAssetRow(db, assetId);
+  const assetId = resolveActivityAssetId(db, input, activityType, subtype, assetContext, [
+    stringFieldOrEmpty(input.currency),
+    account.currency,
+  ]);
+  const asset = assetId === null ? null : readResolvedActivityAssetRow(db, assetId, assetContext);
   let currency = resolveCurrency([
     stringFieldOrEmpty(input.currency),
     asset?.quote_ccy ?? "",
@@ -2392,6 +2466,7 @@ function normalizeActivityUpdateInput(
   db: Database,
   input: Record<string, unknown>,
   existing: ActivityRow,
+  assetContext?: ActivityAssetResolutionContext,
 ): ActivityRow {
   const accountId = requiredNonEmptyString(input.accountId, "accountId");
   const account = readAccountRow(db, accountId);
@@ -2422,8 +2497,11 @@ function normalizeActivityUpdateInput(
   );
   validateSplitRatio(activityType, effectiveAmount);
 
-  const assetId = resolveActivityAssetId(db, input, activityType, effectiveSubtype);
-  const asset = assetId === null ? null : readAssetRow(db, assetId);
+  const assetId = resolveActivityAssetId(db, input, activityType, effectiveSubtype, assetContext, [
+    stringFieldOrEmpty(input.currency),
+    account.currency,
+  ]);
+  const asset = assetId === null ? null : readResolvedActivityAssetRow(db, assetId, assetContext);
   let currency = resolveCurrency([
     stringFieldOrEmpty(input.currency),
     asset?.quote_ccy ?? "",
@@ -2485,18 +2563,28 @@ function resolveActivityAssetId(
   input: Record<string, unknown>,
   activityType: string,
   subtype: string | null,
+  assetContext: ActivityAssetResolutionContext | undefined,
+  fallbackCurrencies: string[] = [],
 ): string | null {
   const assetInput = activityAssetInputFromRecord(input);
   if (assetInput?.id) {
-    readAssetRow(db, assetInput.id);
-    return assetInput.id;
+    const existingAsset = findAssetRowById(db, assetInput.id);
+    if (existingAsset) {
+      return existingAsset.id;
+    }
+    if (!assetInput.symbol) {
+      readAssetRow(db, assetInput.id);
+    }
   }
   if (assetInput?.symbol) {
     const existingAsset = findExistingAssetBySymbol(db, assetInput);
     if (existingAsset) {
       return existingAsset.id;
     }
-    throw new Error("Symbol-based asset creation is not yet implemented in the TS runtime");
+    if (!assetContext) {
+      throw new Error("Symbol-based asset creation requires an asset resolution context");
+    }
+    return stageActivityAsset(assetInput, fallbackCurrencies, assetContext);
   }
   if (requiresAssetIdentity(activityType, subtype)) {
     throw new Error("Asset-backed activities need either asset_id or symbol");
@@ -2520,7 +2608,289 @@ function activityAssetInputFromRecord(input: Record<string, unknown>): ActivityA
     ? optionalTrimmedString(assetRecord.instrumentType)
     : undefined;
   const quoteCcy = assetRecord ? optionalTrimmedString(assetRecord.quoteCcy) : undefined;
-  return id || symbol ? { id, symbol, exchangeMic, instrumentType, quoteCcy } : null;
+  const quoteMode = assetRecord ? optionalTrimmedString(assetRecord.quoteMode) : undefined;
+  const kind = assetRecord ? optionalTrimmedString(assetRecord.kind) : undefined;
+  const name = assetRecord ? optionalTrimmedString(assetRecord.name) : undefined;
+  return id || symbol
+    ? { id, symbol, exchangeMic, instrumentType, quoteCcy, quoteMode, kind, name }
+    : null;
+}
+
+function createActivityAssetResolutionContext(): ActivityAssetResolutionContext {
+  return {
+    pendingAssetsById: new Map(),
+    pendingAssetIdByKey: new Map(),
+    createdAssetIds: new Set(),
+  };
+}
+
+function readResolvedActivityAssetRow(
+  db: Database,
+  assetId: string,
+  assetContext: ActivityAssetResolutionContext | undefined,
+): AssetRow {
+  const pending = assetContext?.pendingAssetsById.get(assetId);
+  if (pending) {
+    return pendingActivityAssetToRow(pending);
+  }
+  return readAssetRow(db, assetId);
+}
+
+function stageActivityAsset(
+  asset: ActivityAssetInput,
+  fallbackCurrencies: string[],
+  assetContext: ActivityAssetResolutionContext,
+): string {
+  const pending = pendingActivityAssetFromInput(asset, fallbackCurrencies);
+  const key = generatedActivityInstrumentKey(pending);
+  const existingPendingId = assetContext.pendingAssetIdByKey.get(key);
+  if (existingPendingId) {
+    return existingPendingId;
+  }
+
+  const existingById = assetContext.pendingAssetsById.get(pending.id);
+  if (existingById && generatedActivityInstrumentKey(existingById) !== key) {
+    throw new Error(`Conflicting asset identity for pending asset ${pending.id}`);
+  }
+
+  assetContext.pendingAssetsById.set(pending.id, pending);
+  assetContext.pendingAssetIdByKey.set(key, pending.id);
+  return pending.id;
+}
+
+function pendingActivityAssetFromInput(
+  asset: ActivityAssetInput,
+  fallbackCurrencies: string[],
+): PendingActivityAsset {
+  const rawSymbol = asset.symbol?.trim();
+  if (!rawSymbol) {
+    throw new Error("Invalid input: symbol is required to create an asset");
+  }
+
+  const instrumentType = normalizeInstrumentType(asset.instrumentType);
+  if (!instrumentType) {
+    throw new Error(`Instrument type is required to create asset from symbol ${rawSymbol}`);
+  }
+
+  const quoteMode = normalizeQuoteMode(asset.quoteMode) ?? "MARKET";
+  let instrumentSymbol = rawSymbol.trim().toUpperCase();
+  let displayCode = instrumentSymbol;
+  let exchangeMic = asset.exchangeMic?.trim().toUpperCase() || null;
+  let parsedQuoteCcy: string | undefined;
+
+  if (instrumentType === "CRYPTO") {
+    const parsed = parseActivityCryptoPairSymbol(rawSymbol);
+    if (parsed) {
+      instrumentSymbol = parsed.base;
+      displayCode = parsed.base;
+      parsedQuoteCcy = parsed.quote;
+    }
+    exchangeMic = null;
+  } else if (instrumentType === "FX") {
+    const parsed = parseActivityFxSymbol(rawSymbol);
+    if (parsed) {
+      instrumentSymbol = parsed.base;
+      displayCode = `${parsed.base}/${parsed.quote}`;
+      parsedQuoteCcy = parsed.quote;
+    }
+    exchangeMic = null;
+  } else if (instrumentType === "OPTION") {
+    exchangeMic = null;
+  }
+
+  const quoteCcy = normalizeActivityAssetQuoteCcy(parsedQuoteCcy ?? asset.quoteCcy, [
+    ...fallbackCurrencies,
+  ]);
+  if (instrumentType === "EQUITY" && quoteMode === "MARKET" && !exchangeMic) {
+    throw new Error(`Exchange MIC is required to create market asset ${instrumentSymbol}`);
+  }
+
+  return {
+    id: asset.id ?? crypto.randomUUID(),
+    kind: normalizeActivityAssetKind(asset.kind, instrumentType),
+    name: asset.name ?? null,
+    displayCode,
+    quoteMode,
+    quoteCcy,
+    instrumentType,
+    instrumentSymbol,
+    instrumentExchangeMic: exchangeMic,
+  };
+}
+
+function normalizeActivityAssetKind(kind: string | undefined, instrumentType: string): string {
+  if (instrumentType === "FX") {
+    return "FX";
+  }
+  switch (kind?.trim().toUpperCase()) {
+    case "PROPERTY":
+    case "VEHICLE":
+    case "COLLECTIBLE":
+    case "PRECIOUS_METAL":
+    case "PRIVATE_EQUITY":
+    case "LIABILITY":
+    case "OTHER":
+      return kind.trim().toUpperCase();
+    default:
+      return "INVESTMENT";
+  }
+}
+
+function normalizeActivityAssetQuoteCcy(
+  quoteCcy: string | undefined,
+  fallbackCurrencies: string[],
+): string {
+  if (quoteCcy !== undefined) {
+    const normalized = normalizeImportQuoteCurrency(quoteCcy);
+    if (!normalized) {
+      throw new Error(`Invalid input: quote currency '${quoteCcy}' is not supported`);
+    }
+    return normalized;
+  }
+
+  for (const fallback of fallbackCurrencies) {
+    const normalized = normalizeImportQuoteCurrency(fallback);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  throw new Error("Quote currency is required to create asset from symbol");
+}
+
+function parseActivityCryptoPairSymbol(symbol: string): { base: string; quote: string } | null {
+  const trimmed = symbol.trim();
+  const separator = trimmed.lastIndexOf("-");
+  if (separator <= 0 || separator === trimmed.length - 1) {
+    return null;
+  }
+  const base = trimmed.slice(0, separator).trim().toUpperCase();
+  const quote = trimmed
+    .slice(separator + 1)
+    .trim()
+    .toUpperCase();
+  if (base === "" || quote.length < 3 || quote.length > 5 || !/^[A-Z]+$/u.test(quote)) {
+    return null;
+  }
+  return { base, quote };
+}
+
+function parseActivityFxSymbol(symbol: string): { base: string; quote: string } | null {
+  const cleaned = symbol.trim().toUpperCase().replace(/=X$/u, "");
+  const slashParts = cleaned.split("/");
+  if (
+    slashParts.length === 2 &&
+    /^[A-Z]{3}$/u.test(slashParts[0] ?? "") &&
+    /^[A-Z]{3}$/u.test(slashParts[1] ?? "")
+  ) {
+    return { base: slashParts[0] ?? "", quote: slashParts[1] ?? "" };
+  }
+  if (/^[A-Z]{6}$/u.test(cleaned)) {
+    return { base: cleaned.slice(0, 3), quote: cleaned.slice(3) };
+  }
+  return null;
+}
+
+function generatedActivityInstrumentKey(asset: PendingActivityAsset): string {
+  if (asset.instrumentType === "CRYPTO" || asset.instrumentType === "FX") {
+    return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}/${asset.quoteCcy.toUpperCase()}`;
+  }
+  if (asset.instrumentExchangeMic) {
+    return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}@${asset.instrumentExchangeMic.toUpperCase()}`;
+  }
+  return `${asset.instrumentType}:${asset.instrumentSymbol.toUpperCase()}`;
+}
+
+function pendingActivityAssetToRow(asset: PendingActivityAsset): AssetRow {
+  return {
+    id: asset.id,
+    kind: asset.kind,
+    name: asset.name,
+    is_active: 1,
+    quote_ccy: asset.quoteCcy,
+    quote_mode: asset.quoteMode,
+    display_code: asset.displayCode,
+    notes: null,
+    instrument_symbol: asset.instrumentSymbol,
+    instrument_exchange_mic: asset.instrumentExchangeMic,
+    instrument_type: asset.instrumentType,
+  };
+}
+
+function ensurePendingActivityAssets(
+  db: Database,
+  assetContext: ActivityAssetResolutionContext,
+  onlyAssetIds?: Set<string>,
+): void {
+  for (const asset of assetContext.pendingAssetsById.values()) {
+    if (onlyAssetIds && !onlyAssetIds.has(asset.id)) {
+      continue;
+    }
+    insertPendingActivityAssetRow(db, asset);
+    assetContext.createdAssetIds.add(asset.id);
+  }
+}
+
+function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset): void {
+  const columns = [
+    "id",
+    "kind",
+    "name",
+    "display_code",
+    "is_active",
+    "quote_mode",
+    "quote_ccy",
+    "instrument_type",
+    "instrument_symbol",
+    "instrument_exchange_mic",
+  ];
+  const values: Array<string | number | null> = [
+    asset.id,
+    asset.kind,
+    asset.name,
+    asset.displayCode,
+    1,
+    asset.quoteMode,
+    asset.quoteCcy,
+    asset.instrumentType,
+    asset.instrumentSymbol,
+    asset.instrumentExchangeMic,
+  ];
+  if (assetTableColumns(db).has("provider_config")) {
+    columns.push("provider_config");
+    values.push(
+      asset.quoteMode === "MARKET" ? JSON.stringify({ preferred_provider: "YAHOO" }) : null,
+    );
+  }
+
+  db.query(
+    `
+      INSERT INTO assets (${columns.join(", ")})
+      VALUES (${columns.map(() => "?").join(", ")})
+    `,
+  ).run(...values);
+}
+
+function assetTableColumns(db: Database): Set<string> {
+  return new Set(
+    db
+      .query<{ name: string }, []>("PRAGMA table_info(assets)")
+      .all()
+      .map((row) => row.name),
+  );
+}
+
+function pendingActivityAssetIdsForCreates(
+  assetContext: ActivityAssetResolutionContext,
+  rows: PreparedImportActivity[],
+): Set<string> {
+  const assetIds = new Set<string>();
+  for (const row of rows) {
+    if (row.create.assetId && assetContext.pendingAssetsById.has(row.create.assetId)) {
+      assetIds.add(row.create.assetId);
+    }
+  }
+  return assetIds;
 }
 
 function readAccountRow(db: Database, accountId: string): AccountRow {
@@ -2540,30 +2910,36 @@ function readAccountRow(db: Database, accountId: string): AccountRow {
 }
 
 function readAssetRow(db: Database, assetId: string): AssetRow {
-  const row = db
-    .query<AssetRow, [string]>(
-      `
-        SELECT
-          id,
-          kind,
-          name,
-          is_active,
-          quote_ccy,
-          quote_mode,
-          display_code,
-          notes,
-          instrument_symbol,
-          instrument_exchange_mic,
-          instrument_type
-        FROM assets
-        WHERE id = ?
-      `,
-    )
-    .get(assetId);
+  const row = findAssetRowById(db, assetId);
   if (!row) {
     throw new Error(`Record not found: asset ${assetId}`);
   }
   return row;
+}
+
+function findAssetRowById(db: Database, assetId: string): AssetRow | null {
+  return (
+    db
+      .query<AssetRow, [string]>(
+        `
+          SELECT
+            id,
+            kind,
+            name,
+            is_active,
+            quote_ccy,
+            quote_mode,
+            display_code,
+            notes,
+            instrument_symbol,
+            instrument_exchange_mic,
+            instrument_type
+          FROM assets
+          WHERE id = ?
+        `,
+      )
+      .get(assetId) ?? null
+  );
 }
 
 function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): AssetRow | null {
