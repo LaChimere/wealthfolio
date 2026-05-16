@@ -317,6 +317,11 @@ export {
   planPortfolioJob,
 } from "./domain-events/planner";
 export {
+  processDomainEventBatch,
+  type DomainEventProcessingPlan,
+  type DomainEventProcessorOptions,
+} from "./domain-events/processor";
+export {
   createTaxonomyRepository,
   createTaxonomyReadRepository,
   createTaxonomyReadService,

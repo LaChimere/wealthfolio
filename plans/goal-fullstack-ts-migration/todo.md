@@ -155,25 +155,26 @@
     I/O, and update behavior are deferred to add-on runtime parity slices;
     market-data market sync and portfolio recalculation behavior are deferred to
     market-data/portfolio parity slices; activity mutation event production and
-    domain-event planning now have TS runtime parity, while symbol-only activity
-    asset creation, provider-backed asset resolution, device-sync outbox
-    emission for activity writes, and portfolio recalculation side effects are
-    deferred to activities/import runtime parity slices; AI chat persistence and
-    tool-result mutation now have TS runtime parity, while provider streaming,
-    tool execution, tag persistence, and attachments are deferred to AI runtime
-    parity slices; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; bounded account/timezone health
-    status/checks, cache behavior, legacy-classification health issues, and
-    classification migration health-fix dispatch now have TS runtime parity,
-    while calculation-heavy health checks, market sync fix execution, and
-    non-classification `/health/fix` dispatch are deferred to health/calculation
-    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    feature-flag errors, background workers, device-sync cloud clients, token
-    lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    domain-event planning/batch processing now have TS runtime parity, while
+    symbol-only activity asset creation, provider-backed asset resolution,
+    device-sync outbox emission for activity writes, and portfolio recalculation
+    side effects are deferred to activities/import runtime parity slices; AI
+    chat persistence and tool-result mutation now have TS runtime parity, while
+    provider streaming, tool execution, tag persistence, and attachments are
+    deferred to AI runtime parity slices; device-sync integration for sync
+    crypto is deferred to device-sync runtime parity slices; bounded
+    account/timezone health status/checks, cache behavior, legacy-classification
+    health issues, and classification migration health-fix dispatch now have TS
+    runtime parity, while calculation-heavy health checks, market sync fix
+    execution, and non-classification `/health/fix` dispatch are deferred to
+    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, local sync repositories, subscription
+    entitlement checks, event production, E2EE enrollment, sync engine,
+    snapshot/upload runtime, feature-flag errors, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1305,6 +1306,13 @@ contract:
   holdings-to-transactions recalc gating; broker-sync tracking-mode transition
   filtering; and asset-enrichment de-duplication while actual debounced worker
   execution remains deferred.
+- `pr5-domain-event-processor-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domain-events/planner.test.ts apps/backend/src/domain-events/processor.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust queue-worker action ordering for asset enrichment,
+  portfolio job enqueue, and broker sync; returning the derived processing plan
+  when callbacks are absent; and propagating callback failures instead of
+  reporting success while real debounced worker/runtime wiring remains deferred.
 
 ## Result
 
@@ -1353,8 +1361,8 @@ contract:
   snapshot deletion runtime, bounded manual snapshot save runtime, and bounded
   snapshot import-write runtime plus snapshot FX pair registration,
   provider-backed import-check lookup, holdings snapshot event production, and
-  activity mutation event production plus domain-event planning implemented;
-  broader migration remains active.
+  activity mutation event production plus domain-event planning/batch processing
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
