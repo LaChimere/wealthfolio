@@ -195,6 +195,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   local exact-symbol/minimal-asset creation, duplicate same-asset aggregation,
   invalid optional average-cost-to-zero behavior, and synthetic history
   backfill.
+- Add bounded holdings snapshot FX side effects for manual and imported snapshot
+  saves by collecting holding, asset quote-currency, cash, and account-to-base
+  currency pairs and calling the migrated `ensureFxPairs` hook before snapshot
+  persistence.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -231,7 +235,7 @@ apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, calculation-heavy health checks
 or non-classification `/health/fix` execution, provider-backed holdings import
-lookup, holdings FX/recalculation side effects, real Connect runtime
+lookup, holdings portfolio recalculation side effects, real Connect runtime
 implementation, real device-sync runtime implementation, or Rust runtime removal
 is in scope for this slice.
 

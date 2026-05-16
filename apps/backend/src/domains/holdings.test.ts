@@ -470,6 +470,97 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("ensures FX pairs before persisting manual and imported snapshots", async () => {
+    const db = createHoldingsDb();
+    const ensuredPairs: Array<[string, string]> = [];
+    let failFxEnsure = true;
+    const service = createHoldingsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: {
+        getLatestExchangeRate() {
+          return "1";
+        },
+        ensureFxPairs(pairs) {
+          ensuredPairs.push(...pairs);
+          if (failFxEnsure) {
+            throw new Error("FX pair registration failed");
+          }
+        },
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "asset-eur",
+        kind: "INVESTMENT",
+        name: "Euro Asset",
+        displayCode: "EURA",
+        quoteMode: "MARKET",
+        quoteCcy: "EUR",
+      });
+
+      await expect(
+        service.saveManualHoldings({
+          accountId: "a1",
+          snapshotDate: "2026-04-01",
+          holdings: [
+            {
+              assetId: "asset-eur",
+              symbol: "EURA",
+              quantity: "2",
+              currency: "GBP",
+              averageCost: "5",
+            },
+          ],
+          cashBalances: { JPY: "1000" },
+        }),
+      ).rejects.toThrow("FX pair registration failed");
+      expect(service.getSnapshots("a1")).toEqual([]);
+      expect(ensuredPairs).toEqual([
+        ["GBP", "CAD"],
+        ["EUR", "CAD"],
+        ["JPY", "CAD"],
+        ["CAD", "USD"],
+      ]);
+
+      failFxEnsure = false;
+      ensuredPairs.length = 0;
+      await expect(
+        service.importHoldingsCsv({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-04-01",
+              positions: [
+                {
+                  assetId: "asset-eur",
+                  symbol: "EURA",
+                  quantity: "2",
+                  avgCost: "5",
+                  currency: "GBP",
+                },
+              ],
+              cashBalances: { JPY: "1000" },
+            },
+          ],
+        }),
+      ).resolves.toEqual({ snapshotsImported: 1, snapshotsFailed: 0, errors: [] });
+      expect(ensuredPairs).toEqual([
+        ["GBP", "CAD"],
+        ["EUR", "CAD"],
+        ["JPY", "CAD"],
+        ["CAD", "USD"],
+      ]);
+      expect(service.getSnapshots("a1")).toEqual([
+        expect.objectContaining({ snapshotDate: "2026-01-01", source: "SYNTHETIC" }),
+        expect.objectContaining({ snapshotDate: "2026-04-01", source: "CSV_IMPORT" }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates live holdings from the latest snapshot with quotes and FX", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db, {

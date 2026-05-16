@@ -6,6 +6,9 @@ import Decimal from "decimal.js";
 
 import type { ExchangeRateService } from "./exchange-rates";
 
+type HoldingsExchangeRateService = Pick<ExchangeRateService, "getLatestExchangeRate"> &
+  Partial<Pick<ExchangeRateService, "ensureFxPairs">>;
+
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
 export interface HoldingInput {
@@ -100,7 +103,7 @@ export interface HoldingsService {
 
 export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
-  exchangeRateService?: Pick<ExchangeRateService, "getLatestExchangeRate">;
+  exchangeRateService?: HoldingsExchangeRateService;
   today?: () => string;
 }
 
@@ -490,11 +493,7 @@ export function createHoldingsService(
       }
     },
     saveManualHoldings(request) {
-      try {
-        saveManualHoldings(db, request, options);
-      } catch (error) {
-        return Promise.reject(error);
-      }
+      return saveManualHoldings(db, request, options);
     },
     checkHoldingsImport(request) {
       try {
@@ -504,11 +503,7 @@ export function createHoldingsService(
       }
     },
     importHoldingsCsv(request) {
-      try {
-        return importHoldingsCsv(db, request);
-      } catch (error) {
-        return Promise.reject(error);
-      }
+      return importHoldingsCsv(db, request, options);
     },
   };
 }
@@ -594,24 +589,32 @@ function deleteSnapshot(db: Database, accountId: string, date: string): void {
   );
 }
 
-function saveManualHoldings(
+async function saveManualHoldings(
   db: Database,
   request: SaveManualHoldingsRequest,
   options: HoldingsServiceOptions,
-): void {
+): Promise<void> {
   const accountCurrency = readAccountCurrency(db, request.accountId);
   const snapshotDate = request.snapshotDate ?? resolveToday(options);
-  persistHoldingsSnapshot(db, {
-    accountId: request.accountId,
-    accountCurrency,
-    snapshotDate,
-    holdings: request.holdings,
-    cashBalances: request.cashBalances,
-    source: "MANUAL_ENTRY",
-  });
+  return persistHoldingsSnapshot(
+    db,
+    {
+      accountId: request.accountId,
+      accountCurrency,
+      snapshotDate,
+      holdings: request.holdings,
+      cashBalances: request.cashBalances,
+      source: "MANUAL_ENTRY",
+    },
+    options,
+  );
 }
 
-function importHoldingsCsv(db: Database, request: HoldingsImportRequest): ImportHoldingsCsvResult {
+async function importHoldingsCsv(
+  db: Database,
+  request: HoldingsImportRequest,
+  options: HoldingsServiceOptions,
+): Promise<ImportHoldingsCsvResult> {
   const accountCurrency = readAccountCurrency(db, request.accountId);
   const result: ImportHoldingsCsvResult = {
     snapshotsImported: 0,
@@ -621,14 +624,18 @@ function importHoldingsCsv(db: Database, request: HoldingsImportRequest): Import
 
   for (const snapshot of request.snapshots) {
     try {
-      persistHoldingsSnapshot(db, {
-        accountId: request.accountId,
-        accountCurrency,
-        snapshotDate: snapshot.date,
-        holdings: snapshot.positions.map(importPositionToHoldingInput),
-        cashBalances: snapshot.cashBalances,
-        source: "CSV_IMPORT",
-      });
+      await persistHoldingsSnapshot(
+        db,
+        {
+          accountId: request.accountId,
+          accountCurrency,
+          snapshotDate: snapshot.date,
+          holdings: snapshot.positions.map(importPositionToHoldingInput),
+          cashBalances: snapshot.cashBalances,
+          source: "CSV_IMPORT",
+        },
+        options,
+      );
       result.snapshotsImported += 1;
     } catch (error) {
       result.snapshotsFailed += 1;
@@ -657,10 +664,93 @@ function importPositionToHoldingInput(position: HoldingsPositionInput): HoldingI
   return holding;
 }
 
-function persistHoldingsSnapshot(db: Database, request: PersistHoldingsSnapshotRequest): void {
+async function ensureSnapshotFxPairs(
+  db: Database,
+  request: PersistHoldingsSnapshotRequest,
+  options: HoldingsServiceOptions,
+): Promise<void> {
+  const ensureFxPairs = options.exchangeRateService?.ensureFxPairs;
+  if (!ensureFxPairs) {
+    return;
+  }
+
+  const pairs = collectSnapshotFxPairs(db, request, resolveBaseCurrency(options));
+  if (pairs.length > 0) {
+    await ensureFxPairs(pairs);
+  }
+}
+
+function collectSnapshotFxPairs(
+  db: Database,
+  request: PersistHoldingsSnapshotRequest,
+  baseCurrency: string | undefined,
+): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const holding of request.holdings) {
+    const quantity = decimalOrThrow(holding.quantity, `Invalid quantity for ${holding.symbol}`);
+    if (quantity.isZero()) {
+      continue;
+    }
+    if (holding.averageCost) {
+      decimalOrThrow(holding.averageCost, `Invalid average cost for ${holding.symbol}`);
+    }
+
+    addFxPair(pairs, holding.currency, request.accountCurrency);
+    const asset = readSnapshotAssetForFxPairs(db, holding);
+    if (asset && asset.quote_ccy !== holding.currency) {
+      addFxPair(pairs, asset.quote_ccy, request.accountCurrency);
+    }
+  }
+
+  for (const [currency, amount] of Object.entries(request.cashBalances)) {
+    if (!decimalOrThrow(amount, `Invalid cash amount for ${currency}`).isZero()) {
+      addFxPair(pairs, currency, request.accountCurrency);
+    }
+  }
+
+  if (baseCurrency) {
+    addFxPair(pairs, request.accountCurrency, baseCurrency);
+  }
+  return uniqueFxPairs(pairs);
+}
+
+function readSnapshotAssetForFxPairs(db: Database, holding: HoldingInput): AssetRow | null {
+  const explicitAssetId = holding.assetId?.trim();
+  if (explicitAssetId) {
+    return readAssetsById(db, [explicitAssetId]).get(explicitAssetId) ?? null;
+  }
+  return readExactAssetSymbol(db, holding.symbol.trim().toUpperCase());
+}
+
+function addFxPair(pairs: Array<[string, string]>, fromCurrency: string, toCurrency: string): void {
+  if (fromCurrency !== "" && toCurrency !== "" && fromCurrency !== toCurrency) {
+    pairs.push([fromCurrency, toCurrency]);
+  }
+}
+
+function uniqueFxPairs(pairs: Array<[string, string]>): Array<[string, string]> {
+  const seen = new Set<string>();
+  const uniquePairs: Array<[string, string]> = [];
+  for (const [fromCurrency, toCurrency] of pairs) {
+    const key = `${fromCurrency}\0${toCurrency}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniquePairs.push([fromCurrency, toCurrency]);
+    }
+  }
+  return uniquePairs;
+}
+
+async function persistHoldingsSnapshot(
+  db: Database,
+  request: PersistHoldingsSnapshotRequest,
+  options: HoldingsServiceOptions,
+): Promise<void> {
   if (!isValidDateString(request.snapshotDate)) {
     throw new Error(`Invalid date format: ${request.snapshotDate}`);
   }
+
+  await ensureSnapshotFxPairs(db, request, options);
 
   const now = new Date().toISOString();
   const positions: Record<string, SnapshotPosition> = {};
