@@ -100,9 +100,10 @@ describe("TS exchange rates domain", () => {
         expect.objectContaining({
           assetId: added.id,
           operation: "Create",
-          payload: expect.objectContaining({ instrumentKey: "FX:EUR/USD" }),
+          payload: expect.objectContaining({ instrumentSymbol: "EUR" }),
         }),
       ]);
+      expect(syncEvents[0]?.payload).not.toHaveProperty("instrumentKey");
 
       const second = await service.addExchangeRate({
         fromCurrency: "EUR",

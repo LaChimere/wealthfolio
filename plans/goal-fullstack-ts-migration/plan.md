@@ -238,6 +238,9 @@ backend:
   activity/import/asset sync callbacks through a shared outbox writer with
   Rust-compatible entity/op names, payload normalization, device/key metadata,
   and `sync_entity_metadata` updates.
+- Extend sync_outbox runtime wiring to exchange-rate FX asset callbacks,
+  including Rust-compatible AssetDB Create/Delete payloads that omit generated
+  `instrument_key` fields.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.

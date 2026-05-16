@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 116
+turns_used: 117
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T22:57:11+08:00"
+updated_at: "2026-05-16T23:07:55+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -761,6 +761,10 @@ updated_at: "2026-05-16T22:57:11+08:00"
   names, payload key normalization, key-version/device metadata, and runtime
   wiring. Targeted sync-outbox/runtime tests, backend type-check, and focused
   code review passed.
+- Turn 117: Extended TS runtime sync_outbox wiring to exchange-rate FX asset
+  callbacks: FX asset Create/Delete events now persist as `asset` outbox rows,
+  and FX asset Create payloads no longer include the generated `instrument_key`
+  column. Focused exchange-rate/runtime tests and backend type-check passed.
 
 ## Deferred items
 
@@ -777,11 +781,13 @@ updated_at: "2026-05-16T22:57:11+08:00"
   behavior, response safety limits, and preview metadata are implemented in the
   standalone TS backend; broader market-data provider quote/import/sync runtime
   remains deferred below.
-- FX currency converter, historical lookup, and register-pair behavior now have
-  TS runtime parity. reason=the standalone TS exchange-rate service initializes
-  the historical converter and can register required FX assets; automatic market
-  sync, provider HTTP, quote import/persistence, and portfolio recalculation
-  side effects remain deferred below.
+- FX currency converter, historical lookup, register-pair behavior, and runtime
+  FX asset sync_outbox persistence now have TS runtime parity. reason=the
+  standalone TS exchange-rate service initializes the historical converter, can
+  register required FX assets, and persists FX asset Create/Delete callbacks
+  without generated `instrument_key` payload fields; automatic market sync,
+  provider HTTP, quote import/persistence, quote outbox follow-ups, and
+  portfolio recalculation side effects remain deferred below.
 - Alternative asset persistence, manual valuation quotes, liability metadata
   linking/unlinking quirks, and alternative holdings reads now have TS runtime
   parity. reason=the standalone TS backend writes `assets`/`quotes` directly and

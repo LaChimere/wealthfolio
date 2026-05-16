@@ -758,6 +758,81 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime FX asset sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/exchange-rates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          rate: "1.23",
+          source: "YAHOO",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const createdRate = (await createResponse.json()) as { id: string };
+
+      let db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assetRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "asset");
+        expect(assetRows).toEqual([
+          expect.objectContaining({
+            entity: "asset",
+            entity_id: createdRate.id,
+            op: "create",
+          }),
+        ]);
+        const createPayload = JSON.parse(String(assetRows[0]?.payload)) as Record<string, unknown>;
+        expect(createPayload).toMatchObject({
+          id: createdRate.id,
+          kind: "FX",
+          quote_ccy: "USD",
+          instrument_type: "FX",
+          instrument_symbol: "EUR",
+        });
+        expect(createPayload).not.toHaveProperty("instrument_key");
+      } finally {
+        db.close();
+      }
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/exchange-rates/${encodeURIComponent(createdRate.id)}`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+
+      db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assetRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "asset");
+        expect(assetRows).toEqual([
+          expect.objectContaining({
+            entity_id: createdRate.id,
+            op: "create",
+          }),
+          expect.objectContaining({
+            entity_id: createdRate.id,
+            op: "delete",
+          }),
+        ]);
+        expect(JSON.parse(String(assetRows[1]?.payload))).toEqual({ id: createdRate.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      runtime.close();
+    }
+  });
+
   test("fails startup explicitly when TS runtime keyring secrets are requested", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 

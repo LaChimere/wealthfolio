@@ -86,7 +86,6 @@ export interface FxAssetPayload {
   instrumentType: "FX";
   instrumentSymbol: string;
   instrumentExchangeMic: string | null;
-  instrumentKey: string | null;
   providerConfig: string | null;
   createdAt: string;
   updatedAt: string;
@@ -831,7 +830,6 @@ function assetPayload(row: AssetRow): FxAssetPayload {
     instrumentType: "FX",
     instrumentSymbol: row.instrument_symbol ?? "",
     instrumentExchangeMic: row.instrument_exchange_mic,
-    instrumentKey: row.instrument_key,
     providerConfig: row.provider_config,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

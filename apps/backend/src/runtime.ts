@@ -172,10 +172,23 @@ function createServicesFromDatabase(
   };
   const settingsService = createSettingsService(db);
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
+  const syncOutboxQueue = createSyncOutboxQueue(db);
   const accountService = createRuntimeAccountService(db, eventBus, baseCurrency);
-  const exchangeRateService = createExchangeRateService(createExchangeRateRepository(db), {
-    eventBus,
-  });
+  const exchangeRateService = createExchangeRateService(
+    createExchangeRateRepository(db, {
+      queueAssetSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "assets",
+          entityId: event.assetId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+    }),
+    {
+      eventBus,
+    },
+  );
   exchangeRateService.initialize();
   const marketDataService = createMarketDataService(db, {
     exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
@@ -188,7 +201,6 @@ function createServicesFromDatabase(
     secretKey: runtimeOptions.secretKey,
   });
   const taxonomyService = createTaxonomyService(createTaxonomyRepository(db));
-  const syncOutboxQueue = createSyncOutboxQueue(db);
 
   const options: BackendRequestHandlerOptions = {
     accountService,
