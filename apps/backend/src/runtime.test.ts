@@ -909,6 +909,77 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime alternative asset and quote sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alt-asset-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { alternativeAssetService } = runtime.options;
+      const created = await alternativeAssetService.createAlternativeAsset({
+        kind: "property",
+        name: "Runtime Property",
+        currency: "USD",
+        currentValue: "125000.00",
+        valueDate: "2026-05-14",
+        purchasePrice: "100000.00",
+        purchaseDate: "2024-01-01",
+      });
+      await alternativeAssetService.updateValuation(created.assetId, {
+        value: "130000.00",
+        date: "2026-05-14",
+        notes: "Runtime appraisal",
+      });
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
+          ["asset", created.assetId, "create"],
+          ["quote", expect.any(String), "create"],
+          ["quote", created.quoteId, "create"],
+          ["quote", created.quoteId, "update"],
+        ]);
+
+        const assetPayload = JSON.parse(String(rows[0]?.payload)) as Record<string, unknown>;
+        expect(assetPayload).toMatchObject({
+          id: created.assetId,
+          kind: "PROPERTY",
+          name: "Runtime Property",
+          quote_mode: "MANUAL",
+          quote_ccy: "USD",
+        });
+        expect(assetPayload).not.toHaveProperty("instrument_key");
+
+        const purchaseQuotePayload = JSON.parse(String(rows[1]?.payload)) as Record<
+          string,
+          unknown
+        >;
+        expect(purchaseQuotePayload).toMatchObject({
+          asset_id: created.assetId,
+          day: "2024-01-01",
+          close: "100000.00",
+          source: "MANUAL",
+        });
+
+        const updatedQuotePayload = JSON.parse(String(rows[3]?.payload)) as Record<string, unknown>;
+        expect(updatedQuotePayload).toMatchObject({
+          id: created.quoteId,
+          asset_id: created.assetId,
+          close: "130000.00",
+          notes: "Runtime appraisal",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({

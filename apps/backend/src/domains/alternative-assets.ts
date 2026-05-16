@@ -89,6 +89,57 @@ export interface AlternativeAssetService {
 export interface AlternativeAssetServiceOptions {
   eventBus?: BackendEventBus;
   now?: () => Date;
+  queueAssetSyncEvent?: (event: AlternativeAssetSyncEvent) => void;
+  queueQuoteSyncEvent?: (event: AlternativeQuoteSyncEvent) => void;
+}
+
+export type AlternativeSyncOperation = "Create" | "Update" | "Delete";
+
+export interface AlternativeAssetSyncEvent {
+  assetId: string;
+  operation: AlternativeSyncOperation;
+  payload: AlternativeAssetRowPayload | { id: string };
+}
+
+export interface AlternativeQuoteSyncEvent {
+  quoteId: string;
+  operation: Exclude<AlternativeSyncOperation, "Delete">;
+  payload: AlternativeQuoteRowPayload;
+}
+
+export interface AlternativeAssetRowPayload {
+  id: string;
+  kind: string;
+  name: string | null;
+  displayCode: string | null;
+  notes: string | null;
+  metadata: string | null;
+  isActive: number;
+  quoteMode: string;
+  quoteCcy: string;
+  instrumentType: string | null;
+  instrumentSymbol: string | null;
+  instrumentExchangeMic: string | null;
+  providerConfig: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AlternativeQuoteRowPayload {
+  id: string;
+  assetId: string;
+  day: string;
+  source: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string;
+  adjclose: string | null;
+  volume: string | null;
+  currency: string;
+  notes: string | null;
+  createdAt: string;
+  timestamp: string;
 }
 
 interface AlternativeAssetRow {
@@ -224,32 +275,41 @@ export function createAlternativeAssetService(
           timestamp,
           timestamp,
         );
+        queueAlternativeAssetSyncEvent(options, readAlternativeAssetById(db, assetId), "Create");
 
         publishAssetsCreated(options.eventBus, assetId);
 
         if (purchasePrice && purchaseDate) {
-          saveManualQuote(db, {
-            assetId,
-            currency: request.currency,
-            day: purchaseDate,
-            id: crypto.randomUUID(),
-            notes: null,
-            timestamp: dateToNoonUtcTimestamp(purchaseDate),
-            value: purchasePrice,
-            now,
-          });
+          saveManualQuote(
+            db,
+            {
+              assetId,
+              currency: request.currency,
+              day: purchaseDate,
+              id: crypto.randomUUID(),
+              notes: null,
+              timestamp: dateToNoonUtcTimestamp(purchaseDate),
+              value: purchasePrice,
+              now,
+            },
+            options.queueQuoteSyncEvent,
+          );
         }
 
-        const quote = saveManualQuote(db, {
-          assetId,
-          currency: request.currency,
-          day: valueDate,
-          id: crypto.randomUUID(),
-          notes: null,
-          timestamp: dateToNoonUtcTimestamp(valueDate),
-          value: currentValue,
-          now,
-        });
+        const quote = saveManualQuote(
+          db,
+          {
+            assetId,
+            currency: request.currency,
+            day: valueDate,
+            id: crypto.randomUUID(),
+            notes: null,
+            timestamp: dateToNoonUtcTimestamp(valueDate),
+            value: currentValue,
+            now,
+          },
+          options.queueQuoteSyncEvent,
+        );
         response = { assetId, quoteId: quote.id };
       })();
 
@@ -259,36 +319,42 @@ export function createAlternativeAssetService(
       return response;
     },
     updateValuation(assetId, request) {
-      readAlternativeAssetById(db, assetId);
-      const latestQuote = readLatestQuoteByAssetId(db, assetId);
-      if (!latestQuote) {
-        throw new Error(
-          `Invalid input: Cannot find existing valuation for asset: ${assetId}. Please check the asset exists.`,
-        );
-      }
       const value = parseDecimalString(request.value, "value");
       const date = parseDateOnly(request.date, "date");
-      const quote = saveManualQuote(db, {
-        assetId,
-        currency: latestQuote.currency,
-        day: date,
-        id: crypto.randomUUID(),
-        notes: request.notes ?? null,
-        timestamp: dateToNoonUtcTimestamp(date),
-        value,
-        now,
-      });
-      return {
-        quoteId: quote.id,
-        valuationDate: date,
-        value,
-      };
+      return db.transaction(() => {
+        readAlternativeAssetById(db, assetId);
+        const latestQuote = readLatestQuoteByAssetId(db, assetId);
+        if (!latestQuote) {
+          throw new Error(
+            `Invalid input: Cannot find existing valuation for asset: ${assetId}. Please check the asset exists.`,
+          );
+        }
+        const quote = saveManualQuote(
+          db,
+          {
+            assetId,
+            currency: latestQuote.currency,
+            day: date,
+            id: crypto.randomUUID(),
+            notes: request.notes ?? null,
+            timestamp: dateToNoonUtcTimestamp(date),
+            value,
+            now,
+          },
+          options.queueQuoteSyncEvent,
+        );
+        return {
+          quoteId: quote.id,
+          valuationDate: date,
+          value,
+        };
+      })();
     },
     deleteAlternativeAsset(assetId) {
       const asset = readAlternativeAssetById(db, assetId);
       assertAlternativeAsset(asset, assetId);
       db.transaction(() => {
-        unlinkLiabilitiesReferencing(db, assetId, now);
+        unlinkLiabilitiesReferencing(db, assetId, now, options.queueAssetSyncEvent);
         db.prepare("DELETE FROM quotes WHERE asset_id = ? AND source = ?").run(
           assetId,
           DATA_SOURCE_MANUAL,
@@ -297,18 +363,26 @@ export function createAlternativeAssetService(
         if (result.changes === 0) {
           throw new Error(`Record not found: Alternative asset not found: ${assetId}`);
         }
+        queueAlternativeAssetSyncDelete(options, assetId);
       })();
     },
     linkLiability(liabilityId, request) {
-      const liability = readAlternativeAssetById(db, liabilityId);
-      if (liability.kind !== "LIABILITY") {
-        throw new Error(
-          `Invalid input: Asset ${liabilityId} is not a liability (kind: ${liability.kind})`,
+      db.transaction(() => {
+        const liability = readAlternativeAssetById(db, liabilityId);
+        if (liability.kind !== "LIABILITY") {
+          throw new Error(
+            `Invalid input: Asset ${liabilityId} is not a liability (kind: ${liability.kind})`,
+          );
+        }
+        const target = readAlternativeAssetById(db, request.targetAssetId);
+        assertAlternativeAsset(target, request.targetAssetId, "Target asset");
+        updateAssetMetadata(db, liabilityId, { linked_asset_id: request.targetAssetId }, now);
+        queueAlternativeAssetSyncEvent(
+          options,
+          readAlternativeAssetById(db, liabilityId),
+          "Update",
         );
-      }
-      const target = readAlternativeAssetById(db, request.targetAssetId);
-      assertAlternativeAsset(target, request.targetAssetId, "Target asset");
-      updateAssetMetadata(db, liabilityId, { linked_asset_id: request.targetAssetId }, now);
+      })();
     },
     unlinkLiability(liabilityId) {
       const liability = readAlternativeAssetById(db, liabilityId);
@@ -320,59 +394,70 @@ export function createAlternativeAssetService(
       // Rust passes None through update_asset_metadata, which the repository treats as no update.
     },
     updateAssetDetails(request) {
-      const asset = readAlternativeAssetById(db, request.assetId);
-      assertAlternativeAsset(asset, request.assetId);
-      const metadata = parseMetadataObject(asset.metadata);
-      const oldPurchasePrice = stringFromMetadata(metadata, "purchase_price");
-      const oldPurchaseDate = stringFromMetadata(metadata, "purchase_date");
+      db.transaction(() => {
+        const asset = readAlternativeAssetById(db, request.assetId);
+        assertAlternativeAsset(asset, request.assetId);
+        const metadata = parseMetadataObject(asset.metadata);
+        const oldPurchasePrice = stringFromMetadata(metadata, "purchase_price");
+        const oldPurchaseDate = stringFromMetadata(metadata, "purchase_date");
 
-      for (const [key, value] of Object.entries(request.metadata)) {
-        if (value !== null && value !== "") {
-          metadata[key] = value;
-        } else {
-          delete metadata[key];
+        for (const [key, value] of Object.entries(request.metadata)) {
+          if (value !== null && value !== "") {
+            metadata[key] = value;
+          } else {
+            delete metadata[key];
+          }
         }
-      }
 
-      const newPurchasePrice = stringFromMetadata(metadata, "purchase_price");
-      const newPurchaseDate = stringFromMetadata(metadata, "purchase_date");
-      const updatedMetadata = Object.keys(metadata).length === 0 ? null : metadata;
-      const displayCode = deriveDisplayCode(asset.kind, updatedMetadata);
-      db.prepare(
-        `
-          UPDATE assets
-          SET name = ?,
-              display_code = ?,
-              metadata = ?,
-              notes = ?,
-              updated_at = ?
-          WHERE id = ?
-        `,
-      ).run(
-        request.name ?? asset.name,
-        displayCode,
-        updatedMetadata ? JSON.stringify(updatedMetadata) : asset.metadata,
-        request.notes !== undefined ? request.notes : asset.notes,
-        timestampNow(now),
-        request.assetId,
-      );
+        const newPurchasePrice = stringFromMetadata(metadata, "purchase_price");
+        const newPurchaseDate = stringFromMetadata(metadata, "purchase_date");
+        const updatedMetadata = Object.keys(metadata).length === 0 ? null : metadata;
+        const displayCode = deriveDisplayCode(asset.kind, updatedMetadata);
+        db.prepare(
+          `
+            UPDATE assets
+            SET name = ?,
+                display_code = ?,
+                metadata = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE id = ?
+          `,
+        ).run(
+          request.name ?? asset.name,
+          displayCode,
+          updatedMetadata ? JSON.stringify(updatedMetadata) : asset.metadata,
+          request.notes !== undefined ? request.notes : asset.notes,
+          timestampNow(now),
+          request.assetId,
+        );
+        queueAlternativeAssetSyncEvent(
+          options,
+          readAlternativeAssetById(db, request.assetId),
+          "Update",
+        );
 
-      if (
-        (oldPurchasePrice !== newPurchasePrice || oldPurchaseDate !== newPurchaseDate) &&
-        newPurchasePrice &&
-        newPurchaseDate
-      ) {
-        saveManualQuote(db, {
-          assetId: request.assetId,
-          currency: asset.quote_ccy,
-          day: parseDateOnly(newPurchaseDate, "purchase date"),
-          id: crypto.randomUUID(),
-          notes: null,
-          timestamp: dateToNoonUtcTimestamp(newPurchaseDate),
-          value: parseDecimalString(newPurchasePrice, "purchase price"),
-          now,
-        });
-      }
+        if (
+          (oldPurchasePrice !== newPurchasePrice || oldPurchaseDate !== newPurchaseDate) &&
+          newPurchasePrice &&
+          newPurchaseDate
+        ) {
+          saveManualQuote(
+            db,
+            {
+              assetId: request.assetId,
+              currency: asset.quote_ccy,
+              day: parseDateOnly(newPurchaseDate, "purchase date"),
+              id: crypto.randomUUID(),
+              notes: null,
+              timestamp: dateToNoonUtcTimestamp(newPurchaseDate),
+              value: parseDecimalString(newPurchasePrice, "purchase price"),
+              now,
+            },
+            options.queueQuoteSyncEvent,
+          );
+        }
+      })();
     },
     getAlternativeHoldings() {
       const assets = db
@@ -502,6 +587,7 @@ function saveManualQuote(
     notes: string | null;
     now: () => Date;
   },
+  queueSyncEvent?: (event: AlternativeQuoteSyncEvent) => void,
 ): AlternativeQuoteRow {
   const existing = db
     .query<
@@ -510,6 +596,7 @@ function saveManualQuote(
     >("SELECT id FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
     .get(quote.assetId, quote.day, DATA_SOURCE_MANUAL);
   const quoteId = existing?.id ?? quote.id;
+  const operation = existing ? "Update" : "Create";
   const createdAt = timestampNow(quote.now);
   const optionalValue = decimalOrZero(quote.value).isZero() ? null : quote.value;
   db.prepare(
@@ -535,7 +622,94 @@ function saveManualQuote(
     createdAt,
     quote.timestamp,
   );
-  return readQuoteById(db, quoteId);
+  const row = readQuoteById(db, quoteId);
+  queueAlternativeQuoteSyncEvent(queueSyncEvent, row, operation);
+  return row;
+}
+
+function queueAlternativeAssetSyncEvent(
+  options: AlternativeAssetServiceOptions,
+  row: AlternativeAssetRow,
+  operation: Exclude<AlternativeSyncOperation, "Delete">,
+): void {
+  options.queueAssetSyncEvent?.({
+    assetId: row.id,
+    operation,
+    payload: alternativeAssetRowPayload(row),
+  });
+}
+
+function queueAlternativeAssetSyncDelete(
+  options: AlternativeAssetServiceOptions,
+  assetId: string,
+): void {
+  options.queueAssetSyncEvent?.({
+    assetId,
+    operation: "Delete",
+    payload: { id: assetId },
+  });
+}
+
+function queueAlternativeQuoteSyncEvent(
+  queueSyncEvent: ((event: AlternativeQuoteSyncEvent) => void) | undefined,
+  row: AlternativeQuoteRow,
+  operation: Exclude<AlternativeSyncOperation, "Delete">,
+): void {
+  if (!isUserSyncableQuote(row)) {
+    return;
+  }
+  queueSyncEvent?.({
+    quoteId: row.id,
+    operation,
+    payload: alternativeQuoteRowPayload(row),
+  });
+}
+
+function isUserSyncableQuote(row: AlternativeQuoteRow): boolean {
+  return row.source.toUpperCase() === DATA_SOURCE_MANUAL && isUuid(row.id);
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function alternativeAssetRowPayload(row: AlternativeAssetRow): AlternativeAssetRowPayload {
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    displayCode: row.display_code,
+    notes: row.notes,
+    metadata: row.metadata,
+    isActive: row.is_active ? 1 : 0,
+    quoteMode: row.quote_mode,
+    quoteCcy: row.quote_ccy,
+    instrumentType: row.instrument_type,
+    instrumentSymbol: row.instrument_symbol,
+    instrumentExchangeMic: row.instrument_exchange_mic,
+    providerConfig: row.provider_config,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function alternativeQuoteRowPayload(row: AlternativeQuoteRow): AlternativeQuoteRowPayload {
+  return {
+    id: row.id,
+    assetId: row.asset_id,
+    day: row.day,
+    source: row.source,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+    adjclose: row.adjclose,
+    volume: row.volume,
+    currency: row.currency,
+    notes: row.notes,
+    createdAt: row.created_at,
+    timestamp: row.timestamp,
+  };
 }
 
 function readAlternativeAssetById(db: Database, assetId: string): AlternativeAssetRow {
@@ -614,7 +788,12 @@ function latestQuotesByAssetId(db: Database, assetIds: string[]): Map<string, Al
   return new Map(rows.map((row) => [row.asset_id, row]));
 }
 
-function unlinkLiabilitiesReferencing(db: Database, assetId: string, now: () => Date): void {
+function unlinkLiabilitiesReferencing(
+  db: Database,
+  assetId: string,
+  now: () => Date,
+  queueSyncEvent?: (event: AlternativeAssetSyncEvent) => void,
+): void {
   const linkedPattern = `%"linked_asset_id":"${assetId}"%`;
   const linkedLiabilities = db
     .query<
@@ -633,6 +812,12 @@ function unlinkLiabilitiesReferencing(db: Database, assetId: string, now: () => 
       timestampNow(now),
       liability.id,
     );
+    const updatedLiability = readAlternativeAssetById(db, liability.id);
+    queueSyncEvent?.({
+      assetId: updatedLiability.id,
+      operation: "Update",
+      payload: alternativeAssetRowPayload(updatedLiability),
+    });
   }
 }
 

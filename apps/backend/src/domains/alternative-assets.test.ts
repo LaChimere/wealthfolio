@@ -2,7 +2,15 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createEventBus } from "../events";
-import { createAlternativeAssetService } from "./alternative-assets";
+import {
+  type AlternativeAssetSyncEvent,
+  createAlternativeAssetService,
+  type AlternativeQuoteSyncEvent,
+} from "./alternative-assets";
+
+type SyncEvent =
+  | { entity: "asset"; event: AlternativeAssetSyncEvent }
+  | { entity: "quote"; event: AlternativeQuoteSyncEvent };
 
 describe("TS alternative assets domain", () => {
   test("creates assets, manual quotes, events, and holdings with Rust-compatible metadata", async () => {
@@ -97,6 +105,79 @@ describe("TS alternative assets domain", () => {
     }
   });
 
+  test("queues alternative asset and UUID manual quote sync callbacks in write order", async () => {
+    const db = createAlternativeAssetsDb();
+    const syncEvents: SyncEvent[] = [];
+    const service = createAlternativeAssetService(db, {
+      now: fixedNow,
+      queueAssetSyncEvent: (event) => syncEvents.push({ entity: "asset", event }),
+      queueQuoteSyncEvent: (event) => syncEvents.push({ entity: "quote", event }),
+    });
+
+    try {
+      const created = await service.createAlternativeAsset({
+        kind: "property",
+        name: "Cabin",
+        currency: "USD",
+        currentValue: "125000.00",
+        valueDate: "2026-05-14",
+        purchasePrice: "100000.00",
+        purchaseDate: "2024-01-01",
+      });
+
+      const quoteEvents = syncEvents.filter((event) => event.entity === "quote");
+      expect(syncEvents).toEqual([
+        {
+          entity: "asset",
+          event: expect.objectContaining({
+            assetId: created.assetId,
+            operation: "Create",
+            payload: expect.objectContaining({
+              id: created.assetId,
+              kind: "PROPERTY",
+              name: "Cabin",
+              quoteMode: "MANUAL",
+              quoteCcy: "USD",
+            }),
+          }),
+        },
+        {
+          entity: "quote",
+          event: expect.objectContaining({
+            operation: "Create",
+            payload: expect.objectContaining({
+              assetId: created.assetId,
+              day: "2024-01-01",
+              close: "100000.00",
+              source: "MANUAL",
+            }),
+          }),
+        },
+        {
+          entity: "quote",
+          event: expect.objectContaining({
+            quoteId: created.quoteId,
+            operation: "Create",
+            payload: expect.objectContaining({
+              assetId: created.assetId,
+              day: "2026-05-14",
+              close: "125000.00",
+              source: "MANUAL",
+            }),
+          }),
+        },
+      ]);
+      expect(quoteEvents.map((entry) => entry.event.payload.id)).toEqual(
+        readQuotes(db, created.assetId).map((quote) => quote.id),
+      );
+      expect(
+        (syncEvents[0]?.event.payload as Record<string, unknown>).instrumentKey,
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   test("updates valuations by reusing existing manual quotes for the same asset day and source", async () => {
     const db = createAlternativeAssetsDb();
     const service = createAlternativeAssetService(db, { now: fixedNow });
@@ -129,6 +210,85 @@ describe("TS alternative assets domain", () => {
           close: "41000.00",
           currency: "CAD",
           notes: "Appraisal",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues quote update sync callbacks when valuation reuses an existing UUID quote", async () => {
+    const db = createAlternativeAssetsDb();
+    const quoteEvents: AlternativeQuoteSyncEvent[] = [];
+    const service = createAlternativeAssetService(db, {
+      now: fixedNow,
+      queueQuoteSyncEvent: (event) => quoteEvents.push(event),
+    });
+
+    try {
+      const created = await service.createAlternativeAsset({
+        kind: "vehicle",
+        name: "Truck",
+        currency: "CAD",
+        currentValue: "40000.00",
+        valueDate: "2026-05-14",
+      });
+      quoteEvents.length = 0;
+
+      await service.updateValuation(created.assetId, {
+        value: "41000.00",
+        date: "2026-05-14",
+        notes: "Appraisal",
+      });
+
+      expect(quoteEvents).toEqual([
+        {
+          quoteId: created.quoteId,
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: created.quoteId,
+            assetId: created.assetId,
+            close: "41000.00",
+            notes: "Appraisal",
+          }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not queue manual quote sync callbacks for non-UUID quote IDs", async () => {
+    const db = createAlternativeAssetsDb();
+    const quoteEvents: AlternativeQuoteSyncEvent[] = [];
+    const service = createAlternativeAssetService(db, {
+      now: fixedNow,
+      queueQuoteSyncEvent: (event) => quoteEvents.push(event),
+    });
+
+    try {
+      const created = await service.createAlternativeAsset({
+        kind: "vehicle",
+        name: "Truck",
+        currency: "CAD",
+        currentValue: "40000.00",
+        valueDate: "2026-05-14",
+      });
+      const directManualQuoteId = `${created.assetId}_2026-05-14_MANUAL`;
+      db.prepare("UPDATE quotes SET id = ? WHERE id = ?").run(directManualQuoteId, created.quoteId);
+      quoteEvents.length = 0;
+
+      await service.updateValuation(created.assetId, {
+        value: "41000.00",
+        date: "2026-05-14",
+      });
+
+      expect(quoteEvents).toEqual([]);
+      expect(readQuotes(db, created.assetId)).toEqual([
+        expect.objectContaining({
+          id: directManualQuoteId,
+          close: "41000.00",
+          source: "MANUAL",
         }),
       ]);
     } finally {
@@ -171,6 +331,75 @@ describe("TS alternative assets domain", () => {
       expect(readAssetOrNull(db, property.assetId)).toBeNull();
       expect(readQuotes(db, property.assetId)).toEqual([]);
       expect(JSON.parse(readAsset(db, liability.assetId).metadata ?? "{}")).toEqual({});
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues liability link and delete asset sync callbacks without quote deletes", async () => {
+    const db = createAlternativeAssetsDb();
+    const syncEvents: SyncEvent[] = [];
+    const service = createAlternativeAssetService(db, {
+      now: fixedNow,
+      queueAssetSyncEvent: (event) => syncEvents.push({ entity: "asset", event }),
+      queueQuoteSyncEvent: (event) => syncEvents.push({ entity: "quote", event }),
+    });
+
+    try {
+      const property = await service.createAlternativeAsset({
+        kind: "property",
+        name: "Home",
+        currency: "USD",
+        currentValue: "500000",
+        valueDate: "2026-05-14",
+      });
+      const liability = await service.createAlternativeAsset({
+        kind: "liability",
+        name: "Mortgage",
+        currency: "USD",
+        currentValue: "300000",
+        valueDate: "2026-05-14",
+      });
+      syncEvents.length = 0;
+
+      await service.linkLiability(liability.assetId, { targetAssetId: property.assetId });
+      expect(syncEvents).toEqual([
+        {
+          entity: "asset",
+          event: expect.objectContaining({
+            assetId: liability.assetId,
+            operation: "Update",
+            payload: expect.objectContaining({
+              id: liability.assetId,
+              metadata: JSON.stringify({ linked_asset_id: property.assetId }),
+            }),
+          }),
+        },
+      ]);
+
+      syncEvents.length = 0;
+      await service.unlinkLiability(liability.assetId);
+      expect(syncEvents).toEqual([]);
+
+      await service.deleteAlternativeAsset(property.assetId);
+      expect(syncEvents).toEqual([
+        {
+          entity: "asset",
+          event: expect.objectContaining({
+            assetId: liability.assetId,
+            operation: "Update",
+            payload: expect.objectContaining({ id: liability.assetId, metadata: "{}" }),
+          }),
+        },
+        {
+          entity: "asset",
+          event: {
+            assetId: property.assetId,
+            operation: "Delete",
+            payload: { id: property.assetId },
+          },
+        },
+      ]);
     } finally {
       db.close();
     }
@@ -234,6 +463,66 @@ describe("TS alternative assets domain", () => {
         purchase_price: "9000.00",
         purchase_date: "2025-01-01",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues detail update and purchase quote sync callbacks", async () => {
+    const db = createAlternativeAssetsDb();
+    const syncEvents: SyncEvent[] = [];
+    const service = createAlternativeAssetService(db, {
+      now: fixedNow,
+      queueAssetSyncEvent: (event) => syncEvents.push({ entity: "asset", event }),
+      queueQuoteSyncEvent: (event) => syncEvents.push({ entity: "quote", event }),
+    });
+
+    try {
+      const asset = await service.createAlternativeAsset({
+        kind: "collectible",
+        name: "Watch",
+        currency: "EUR",
+        currentValue: "10000",
+        valueDate: "2026-05-14",
+      });
+      syncEvents.length = 0;
+
+      await service.updateAssetDetails({
+        assetId: asset.assetId,
+        name: "Watch II",
+        notes: "insured",
+        metadata: {
+          purchase_price: "9000.00",
+          purchase_date: "2025-01-01",
+        },
+      });
+
+      expect(syncEvents).toEqual([
+        {
+          entity: "asset",
+          event: expect.objectContaining({
+            assetId: asset.assetId,
+            operation: "Update",
+            payload: expect.objectContaining({
+              id: asset.assetId,
+              name: "Watch II",
+              notes: "insured",
+            }),
+          }),
+        },
+        {
+          entity: "quote",
+          event: expect.objectContaining({
+            operation: "Create",
+            payload: expect.objectContaining({
+              assetId: asset.assetId,
+              day: "2025-01-01",
+              close: "9000.00",
+              source: "MANUAL",
+            }),
+          }),
+        },
+      ]);
     } finally {
       db.close();
     }

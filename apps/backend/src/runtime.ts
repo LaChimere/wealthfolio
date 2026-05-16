@@ -236,7 +236,25 @@ function createServicesFromDatabase(
         syncOutboxQueue.queueSyncEvent(event);
       },
     }),
-    alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
+    alternativeAssetService: createAlternativeAssetService(db, {
+      eventBus,
+      queueAssetSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "assets",
+          entityId: event.assetId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+      queueQuoteSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "quotes",
+          entityId: event.quoteId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+    }),
     assetService: createAssetService(db, {
       eventBus,
       exchangeMetadata: readExchangeMetadataLookup(runtimeOptions.repositoryRoot),

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 120
+turns_used: 121
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T23:40:18+08:00"
+updated_at: "2026-05-16T23:57:52+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -780,6 +780,13 @@ updated_at: "2026-05-16T23:40:18+08:00"
   payloads that omit the generated `instrument_key`. Focused assets/runtime
   tests, backend type-check, full `bun run check`, and focused code review
   passed.
+- Turn 121: Extended TS runtime sync_outbox wiring to alternative asset and UUID
+  MANUAL quote callbacks: alternative asset create/update/delete and liability
+  relink side effects now persist `asset` outbox rows, and alternative asset
+  valuation/purchase quotes persist `quote` Create/Update rows only when they
+  match Rust's MANUAL+UUID quote filter. Focused alternative-assets/runtime
+  tests, backend type-check, full `bun run check`, and focused code review
+  passed.
 
 ## Deferred items
 
@@ -805,11 +812,13 @@ updated_at: "2026-05-16T23:40:18+08:00"
   provider HTTP, quote import/persistence, quote outbox follow-ups, and
   portfolio recalculation side effects remain deferred below.
 - Alternative asset persistence, manual valuation quotes, liability metadata
-  linking/unlinking quirks, and alternative holdings reads now have TS runtime
-  parity. reason=the standalone TS backend writes `assets`/`quotes` directly and
-  preserves Rust response/metadata behavior; portfolio job enqueue and broader
-  portfolio recalculation side effects remain deferred to portfolio parity
-  slices.
+  linking/unlinking quirks, alternative holdings reads, and alternative
+  asset/UUID quote sync_outbox persistence now have TS runtime parity.
+  reason=the standalone TS backend writes `assets`/`quotes` directly, preserves
+  Rust response/metadata behavior, persists asset callbacks plus MANUAL+UUID
+  quote callbacks, and intentionally omits quote delete outbox rows on
+  alternative asset deletion; portfolio job enqueue and broader portfolio
+  recalculation side effects remain deferred to portfolio parity slices.
 - Full health status/fix coverage remains an active follow-up. reason=legacy
   classification migration now has TS runtime parity through taxonomy endpoints,
   bounded account/timezone status/checks are wired into standalone runtime, and
@@ -851,9 +860,9 @@ updated_at: "2026-05-16T23:40:18+08:00"
   persistence for direct asset Create/Update/Delete callbacks. reason=asset
   create/update now preserves generated `instrument_key` behavior, duplicate
   returns, provider inference, sync-state reset, and Rust-shaped outbox payloads
-  without generated `instrument_key`; quote-provider interactions, quote sync
-  outbox follow-ups, auto-classification side effects, and portfolio
-  recalculation behavior remain active follow-ups.
+  without generated `instrument_key`; quote-provider interactions, remaining
+  quote sync outbox follow-ups outside alternative assets, auto-classification
+  side effects, and portfolio recalculation behavior remain active follow-ups.
 - App utility database restore runtime now has TS runtime parity. reason=the
   standalone backend performs file-level restore after closing the live database
   handle and explicitly reports restart-required readiness afterward; future
@@ -901,10 +910,10 @@ updated_at: "2026-05-16T23:40:18+08:00"
   writes, Rust-compatible activity sync-event callback queuing for write paths,
   CSV import-run sync-event callback queuing, activity-created asset Create
   sync-event callback queuing, and runtime sync_outbox persistence for these
-  callbacks; provider-backed asset resolution, remaining asset/quote sync outbox
-  follow-ups, device-sync push/pull runtime wiring, and portfolio recalculation
-  side effects remain active follow-ups for dedicated
-  activities/import/device-sync/portfolio parity slices.
+  callbacks; provider-backed asset resolution, remaining quote sync outbox
+  follow-ups outside migrated asset paths, device-sync push/pull runtime wiring,
+  and portfolio recalculation side effects remain active follow-ups for
+  dedicated activities/import/device-sync/portfolio parity slices.
 - AI chat provider streaming, title generation, tool execution, attachment
   handling, and outbox writes remain active follow-ups. reason=local
   thread/message persistence, tool-result mutation, and tag persistence now have

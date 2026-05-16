@@ -250,6 +250,10 @@ backend:
 - Extend sync_outbox runtime wiring to direct asset callbacks from create,
   profile update, quote-mode update, and delete, preserving Rust-shaped `asset`
   payloads without generated `instrument_key` fields.
+- Extend sync_outbox runtime wiring to alternative asset callbacks and
+  alternative asset UUID MANUAL quote callbacks, preserving Rust-shaped `asset`
+  and `quote` payloads, create/update/delete ordering, MANUAL+UUID quote
+  filtering, and no quote delete outbox rows for alternative asset deletion.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
@@ -273,8 +277,9 @@ backend:
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
 - Keep still-deferred provider-backed asset resolution, remaining quote sync
-  outbox follow-ups, device-sync push/pull runtime wiring, and actual portfolio
-  job execution/valuation recalculation for dedicated parity slices.
+  outbox follow-ups outside migrated alternative-asset paths, device-sync
+  push/pull runtime wiring, and actual portfolio job execution/valuation
+  recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

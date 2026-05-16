@@ -159,27 +159,28 @@
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
-    asset taxonomy assignment callbacks, and direct asset Create/Update/Delete
-    callbacks, and domain-event planning/batch processing/worker helper now have
-    TS runtime parity, while provider-backed asset resolution, remaining quote
-    sync outbox follow-ups, device-sync push/pull runtime wiring, and portfolio
-    recalculation side effects are deferred to activities/import/device-sync
-    runtime parity slices; AI chat persistence, tag persistence, and tool-result
-    mutation now have TS runtime parity, while provider streaming, tool
-    execution, and attachments are deferred to AI runtime parity slices;
-    device-sync integration for sync crypto is deferred to device-sync runtime
-    parity slices; bounded account/timezone health status/checks, cache
-    behavior, legacy-classification health issues, and classification migration
-    health-fix dispatch now have TS runtime parity, while calculation-heavy
-    health checks, market sync fix execution, and non-classification
-    `/health/fix` dispatch are deferred to health/calculation parity slices;
-    real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-    local sync repositories, subscription entitlement checks, event production,
-    E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-    background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and secret side effects are deferred to
-    Connect/device-sync parity slices.
+    asset taxonomy assignment callbacks, direct asset Create/Update/Delete
+    callbacks, and alternative asset/UUID MANUAL quote callbacks, and
+    domain-event planning/batch processing/worker helper now have TS runtime
+    parity, while provider-backed asset resolution, remaining quote sync outbox
+    follow-ups outside migrated alternative-asset paths, device-sync push/pull
+    runtime wiring, and portfolio recalculation side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, and tool-result mutation now have TS runtime parity, while
+    provider streaming, tool execution, and attachments are deferred to AI
+    runtime parity slices; device-sync integration for sync crypto is deferred
+    to device-sync runtime parity slices; bounded account/timezone health
+    status/checks, cache behavior, legacy-classification health issues, and
+    classification migration health-fix dispatch now have TS runtime parity,
+    while calculation-heavy health checks, market sync fix execution, and
+    non-classification `/health/fix` dispatch are deferred to health/calculation
+    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+    orchestration, local sync repositories, subscription entitlement checks,
+    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
+    feature-flag errors, background workers, device-sync cloud clients, token
+    lifecycle, team-key operations, key material handling, pairing flows,
+    freshness gate persistence, bootstrap transfer, and secret side effects are
+    deferred to Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1415,6 +1416,16 @@ contract:
   runtime `sync_outbox` rows, normalized `asset` payloads, and generated
   `instrument_key` omission. Full repository check passed with `bun run check`;
   focused code review found no significant issues.
+- `pr5-alternative-asset-quote-sync-outbox-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/alternative-assets.test.ts apps/backend/src/runtime.test.ts --grep "alternative asset|alternative assets|sync_outbox"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes alternative asset Create/Update/Delete callbacks, liability
+  link/unlink/delete ordering, MANUAL+UUID quote Create/Update filtering,
+  purchase/current valuation quote payloads, no quote Delete callbacks on
+  alternative asset deletion, and runtime `asset`/`quote` sync_outbox rows. Full
+  repository check passed with `bun run check`; focused code review found no
+  required code changes after verifying payload casing is normalized by the
+  shared sync outbox writer.
 
 ## Result
 
@@ -1466,9 +1477,9 @@ contract:
   activity mutation event production plus activity/import-run/activity-created
   asset sync-event callback queuing, sync_outbox persistence for migrated
   goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
-  taxonomy assignment, and direct asset callbacks, and domain-event
-  planning/batch processing/worker helper implemented; broader migration remains
-  active.
+  taxonomy assignment, direct asset, and alternative asset/UUID quote callbacks,
+  and domain-event planning/batch processing/worker helper implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1487,15 +1498,16 @@ contract:
   recalculation side effects move with holdings/portfolio parity slices; add-on
   filesystem extraction, runtime loading, store HTTP, staging I/O, and update
   behavior move with add-on runtime parity slices; provider-backed asset
-  resolution, remaining quote sync-outbox emission, sync engine push/pull, and
-  portfolio recalculation side effects move with activities/import/device-sync
-  runtime parity slices; device-sync integration for sync crypto moves with
-  device-sync parity slices; broader health checks, market sync fix execution,
-  and non-classification `/health/fix` dispatch move with health/calculation
-  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-  orchestration, local sync repositories, subscription entitlement checks, event
-  production, E2EE enrollment, sync engine, snapshot/upload runtime,
-  feature-flag errors, background workers, device-sync cloud clients, token
-  lifecycle, team-key operations, key material handling, pairing flows,
-  freshness gate persistence, bootstrap transfer, and secret side effects move
-  with Connect/device-sync parity slices.
+  resolution, remaining quote sync-outbox emission outside migrated
+  alternative-asset paths, sync engine push/pull, and portfolio recalculation
+  side effects move with activities/import/device-sync runtime parity slices;
+  device-sync integration for sync crypto moves with device-sync parity slices;
+  broader health checks, market sync fix execution, and non-classification
+  `/health/fix` dispatch move with health/calculation parity slices; real
+  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
+  sync repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.
