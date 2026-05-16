@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import type { Database } from "bun:sqlite";
 
 import Decimal from "decimal.js";
@@ -255,6 +257,12 @@ interface SnapshotRow {
   cash_balances: string;
 }
 
+interface SyntheticSnapshotSourceRow extends SnapshotRow {
+  source: string;
+  cost_basis: string;
+  net_contribution: string;
+}
+
 interface SnapshotPosition {
   assetId: string;
   quantity: unknown;
@@ -271,6 +279,7 @@ interface AssetRow {
   display_code: string | null;
   notes: string | null;
   metadata: string | null;
+  is_active: number;
   quote_mode: string;
   quote_ccy: string;
   instrument_type: string | null;
@@ -332,6 +341,10 @@ interface AssetTaxonomyAssignment {
 
 interface AccountExistsRow {
   count: number;
+}
+
+interface AccountCurrencyRow {
+  currency: string;
 }
 
 interface SnapshotDateRow {
@@ -459,8 +472,12 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
-    saveManualHoldings() {
-      return notImplemented("Manual holdings save is not available in the TS runtime yet");
+    saveManualHoldings(request) {
+      try {
+        saveManualHoldings(db, request, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     checkHoldingsImport(request) {
       try {
@@ -557,6 +574,287 @@ function deleteSnapshot(db: Database, accountId: string, date: string): void {
   db.prepare("DELETE FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?").run(
     accountId,
     date,
+  );
+}
+
+function saveManualHoldings(
+  db: Database,
+  request: SaveManualHoldingsRequest,
+  options: HoldingsServiceOptions,
+): void {
+  const accountCurrency = readAccountCurrency(db, request.accountId);
+  const snapshotDate = request.snapshotDate ?? resolveToday(options);
+  if (!isValidDateString(snapshotDate)) {
+    throw new Error(`Invalid date format: ${snapshotDate}`);
+  }
+
+  const now = new Date().toISOString();
+  const positions: Record<string, SnapshotPosition> = {};
+
+  db.transaction(() => {
+    const manualQuotesByAsset = new Map<
+      string,
+      { quantity: Decimal; totalCostBasis: Decimal; currency: string }
+    >();
+    for (const holding of request.holdings) {
+      const quantity = decimalOrThrow(holding.quantity, `Invalid quantity for ${holding.symbol}`);
+      if (quantity.isZero()) {
+        continue;
+      }
+      const averageCost = holding.averageCost
+        ? decimalOrThrow(holding.averageCost, `Invalid average cost for ${holding.symbol}`)
+        : new Decimal(0);
+      const asset = getOrCreateManualSnapshotAsset(db, holding);
+      if (holding.dataSource === "MANUAL" && asset.quote_mode !== "MANUAL") {
+        db.prepare("UPDATE assets SET quote_mode = 'MANUAL' WHERE id = ?").run(asset.id);
+        asset.quote_mode = "MANUAL";
+      }
+
+      const totalCostBasis = quantity.mul(averageCost);
+      if (
+        (asset.quote_mode === "MANUAL" || holding.dataSource === "MANUAL") &&
+        !averageCost.isZero()
+      ) {
+        const existingQuote = manualQuotesByAsset.get(asset.id);
+        if (existingQuote && existingQuote.currency !== holding.currency) {
+          throw new Error(`Conflicting currencies for duplicate holding ${holding.symbol}`);
+        }
+        manualQuotesByAsset.set(asset.id, {
+          quantity: (existingQuote?.quantity ?? new Decimal(0)).add(quantity),
+          totalCostBasis: (existingQuote?.totalCostBasis ?? new Decimal(0)).add(totalCostBasis),
+          currency: holding.currency,
+        });
+      }
+
+      const existingPosition = positions[asset.id];
+      if (existingPosition) {
+        if (existingPosition.currency !== holding.currency) {
+          throw new Error(`Conflicting currencies for duplicate holding ${holding.symbol}`);
+        }
+        existingPosition.quantity = decimalOrFallback(existingPosition.quantity, new Decimal(0))
+          .add(quantity)
+          .toString();
+        existingPosition.totalCostBasis = decimalOrFallback(
+          existingPosition.totalCostBasis,
+          new Decimal(0),
+        )
+          .add(totalCostBasis)
+          .toString();
+      } else {
+        positions[asset.id] = {
+          assetId: asset.id,
+          quantity: quantity.toString(),
+          totalCostBasis: totalCostBasis.toString(),
+          currency: holding.currency,
+          inceptionDate: now,
+          contractMultiplier: "1",
+        };
+      }
+    }
+
+    for (const [assetId, quote] of manualQuotesByAsset) {
+      const weightedAverageCost = quote.quantity.isZero()
+        ? new Decimal(0)
+        : quote.totalCostBasis.div(quote.quantity);
+      if (!weightedAverageCost.isZero()) {
+        upsertManualQuote(db, assetId, snapshotDate, weightedAverageCost, quote.currency, now);
+      }
+    }
+
+    const cashBalances = Object.fromEntries(
+      Object.entries(request.cashBalances)
+        .map(([currency, amount]) => [
+          currency,
+          decimalOrThrow(amount, `Invalid cash amount for ${currency}`).toString(),
+        ])
+        .filter(([, amount]) => !new Decimal(amount).isZero()),
+    );
+    const costBasis = Object.values(positions)
+      .reduce(
+        (sum, position) => sum.add(decimalOrFallback(position.totalCostBasis, new Decimal(0))),
+        new Decimal(0),
+      )
+      .toString();
+    upsertHoldingsSnapshot(db, {
+      id: stableSnapshotId(request.accountId, snapshotDate),
+      accountId: request.accountId,
+      snapshotDate,
+      currency: accountCurrency,
+      positions,
+      cashBalances,
+      costBasis,
+      source: "MANUAL_ENTRY",
+      calculatedAt: now,
+    });
+    ensureSyntheticHoldingsSnapshot(db, request.accountId, now);
+  })();
+}
+
+function getOrCreateManualSnapshotAsset(db: Database, holding: HoldingInput): AssetRow {
+  const explicitAssetId = holding.assetId?.trim();
+  const existingAsset = explicitAssetId
+    ? readAssetsById(db, [explicitAssetId]).get(explicitAssetId)
+    : readExactAssetSymbol(db, holding.symbol.trim().toUpperCase());
+  if (existingAsset) {
+    if (existingAsset.is_active === 0) {
+      db.prepare("UPDATE assets SET is_active = 1 WHERE id = ?").run(existingAsset.id);
+      existingAsset.is_active = 1;
+    }
+    return existingAsset;
+  }
+
+  const assetId = explicitAssetId && explicitAssetId.length > 0 ? explicitAssetId : randomUUID();
+  const assetKind = holding.assetKind === "OTHER" ? "OTHER" : "INVESTMENT";
+  const quoteMode = holding.dataSource === "MANUAL" ? "MANUAL" : "MARKET";
+  const symbol = holding.symbol.trim();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, metadata, is_active, quote_mode, quote_ccy,
+        instrument_type, instrument_symbol, instrument_exchange_mic, provider_config
+      )
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    assetId,
+    assetKind,
+    holding.name ?? null,
+    symbol,
+    null,
+    quoteMode,
+    holding.currency,
+    symbol ? "EQUITY" : null,
+    symbol || null,
+    holding.exchangeMic ?? null,
+    quoteMode === "MARKET" ? JSON.stringify({ preferred_provider: "YAHOO" }) : null,
+  );
+  const created = readAssetsById(db, [assetId]).get(assetId);
+  if (!created) {
+    throw new Error(`Failed to create asset ${assetId}`);
+  }
+  return created;
+}
+
+function upsertManualQuote(
+  db: Database,
+  assetId: string,
+  day: string,
+  close: Decimal,
+  currency: string,
+  now: string,
+): void {
+  db.prepare(
+    `
+      INSERT OR REPLACE INTO quotes (
+        id, asset_id, day, source, close, currency, created_at, timestamp
+      )
+      VALUES (?, ?, ?, 'MANUAL', ?, ?, ?, ?)
+    `,
+  ).run(
+    `${assetId}_${day}_MANUAL`,
+    assetId,
+    day,
+    close.toString(),
+    currency,
+    now,
+    `${day}T00:00:00Z`,
+  );
+}
+
+function upsertHoldingsSnapshot(
+  db: Database,
+  snapshot: {
+    id: string;
+    accountId: string;
+    snapshotDate: string;
+    currency: string;
+    positions: Record<string, SnapshotPosition>;
+    cashBalances: Record<string, string>;
+    costBasis: string;
+    source: string;
+    calculatedAt: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT OR REPLACE INTO holdings_snapshots (
+        id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis,
+        net_contribution, calculated_at, source
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, '0', ?, ?)
+    `,
+  ).run(
+    snapshot.id,
+    snapshot.accountId,
+    snapshot.snapshotDate,
+    snapshot.currency,
+    JSON.stringify(snapshot.positions),
+    JSON.stringify(snapshot.cashBalances),
+    snapshot.costBasis,
+    snapshot.calculatedAt,
+    snapshot.source,
+  );
+}
+
+function ensureSyntheticHoldingsSnapshot(db: Database, accountId: string, now: string): void {
+  const row = db
+    .query<SyntheticSnapshotSourceRow, [string]>(
+      `
+        SELECT
+          id,
+          account_id,
+          snapshot_date,
+          currency,
+          positions,
+          cash_balances,
+          cost_basis,
+          net_contribution,
+          source
+        FROM holdings_snapshots
+        WHERE account_id = ? AND source != 'CALCULATED'
+        ORDER BY snapshot_date ASC
+      `,
+    )
+    .all(accountId);
+  if (row.length !== 1) {
+    return;
+  }
+
+  const earliest = row[0];
+  if (!earliest) {
+    return;
+  }
+  const syntheticDate = subtractMonths(earliest.snapshot_date, 3);
+  if (syntheticDate === earliest.snapshot_date) {
+    return;
+  }
+  const existingSynthetic = db
+    .query<
+      { count: number },
+      [string, string]
+    >("SELECT COUNT(*) AS count FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?")
+    .get(accountId, syntheticDate);
+  if (existingSynthetic && existingSynthetic.count > 0) {
+    return;
+  }
+  db.prepare(
+    `
+      INSERT INTO holdings_snapshots (
+        id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis,
+        net_contribution, calculated_at, source
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNTHETIC')
+    `,
+  ).run(
+    stableSnapshotId(accountId, syntheticDate),
+    accountId,
+    syntheticDate,
+    earliest.currency,
+    earliest.positions,
+    earliest.cash_balances,
+    earliest.cost_basis,
+    earliest.net_contribution,
+    now,
   );
 }
 
@@ -1994,6 +2292,7 @@ function readAssetsById(db: Database, assetIds: string[]): Map<string, AssetRow>
           display_code,
           notes,
           metadata,
+          is_active,
           quote_mode,
           quote_ccy,
           instrument_type,
@@ -2015,6 +2314,51 @@ function assertAccountExists(db: Database, accountId: string): void {
   if (!row || row.count === 0) {
     throw new Error(`Record not found: account ${accountId}`);
   }
+}
+
+function readAccountCurrency(db: Database, accountId: string): string {
+  const row = db
+    .query<AccountCurrencyRow, [string]>("SELECT currency FROM accounts WHERE id = ?")
+    .get(accountId);
+  if (!row) {
+    throw new Error(`Record not found: account ${accountId}`);
+  }
+  return row.currency;
+}
+
+function stableSnapshotId(accountId: string, snapshotDate: string): string {
+  const digest = createHash("sha256")
+    .update(`wealthfolio:snapshot:${accountId}:${snapshotDate}`)
+    .digest();
+  const bytes = Uint8Array.from(digest.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return [
+    bytesToHex(bytes.subarray(0, 4)),
+    bytesToHex(bytes.subarray(4, 6)),
+    bytesToHex(bytes.subarray(6, 8)),
+    bytesToHex(bytes.subarray(8, 10)),
+    bytesToHex(bytes.subarray(10, 16)),
+  ].join("-");
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function subtractMonths(date: string, months: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const targetMonthIndex = (year ?? 1970) * 12 + ((month ?? 1) - 1) - months;
+  const targetYear = Math.floor(targetMonthIndex / 12);
+  const targetMonth = (targetMonthIndex % 12) + 1;
+  const clampedDay = Math.min(day ?? 1, daysInMonth(targetYear, targetMonth));
+  return `${targetYear.toString().padStart(4, "0")}-${targetMonth
+    .toString()
+    .padStart(2, "0")}-${clampedDay.toString().padStart(2, "0")}`;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function readExistingSnapshotDates(
@@ -2078,6 +2422,7 @@ function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {
           display_code,
           notes,
           metadata,
+          is_active,
           quote_mode,
           quote_ccy,
           instrument_type,
@@ -2101,6 +2446,18 @@ function decimalOrFallback(value: unknown, fallback: Decimal): Decimal {
   } catch {
     return fallback;
   }
+}
+
+function decimalOrThrow(value: unknown, message: string): Decimal {
+  try {
+    const decimal = new Decimal(value as Decimal.Value);
+    if (decimal.isFinite()) {
+      return decimal;
+    }
+  } catch {
+    // Fall through to the uniform domain error below.
+  }
+  throw new Error(message);
 }
 
 function decimalToNumber(value: unknown, fallback: Decimal): number {

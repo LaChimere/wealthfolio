@@ -175,6 +175,16 @@ describe("TS backend runtime composition", () => {
         message: "No snapshot found for date 2026-01-01",
       });
 
+      const saveManualSnapshotResponse = await fetch(`${server.baseUrl}/api/v1/snapshots`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountId: "missing", holdings: [], cashBalances: {} }),
+      });
+      expect(saveManualSnapshotResponse.status).toBe(400);
+      await expect(saveManualSnapshotResponse.json()).resolves.toMatchObject({
+        message: "Record not found: account missing",
+      });
+
       const holdingsImportCheckResponse = await fetch(
         `${server.baseUrl}/api/v1/snapshots/import/check`,
         {

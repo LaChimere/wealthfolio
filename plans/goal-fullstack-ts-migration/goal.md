@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 100
+turns_used: 101
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T12:24:24+08:00"
+updated_at: "2026-05-16T12:52:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -663,6 +663,14 @@ updated_at: "2026-05-16T12:24:24+08:00"
   manual/imported SQLite snapshot rows, and keeps broader recalculation side
   effects deferred. Targeted holdings/runtime tests, backend type-check, and
   full `bun run check` passed.
+- Turn 101: Added bounded manual holdings snapshot save runtime parity:
+  `POST /api/v1/snapshots` now validates accounts/dates/decimals, creates
+  minimal manual assets, switches manual quote mode when requested, writes
+  weighted manual quotes, aggregates duplicate same-asset positions, upserts
+  stable manual snapshot rows, and creates the Rust-compatible synthetic
+  backfill snapshot. Provider-backed lookup, FX pair registration, device-sync
+  outbox, and portfolio recalculation side effects remain deferred. Targeted
+  holdings/runtime tests, backend type-check, and full `bun run check` passed.
 
 ## Deferred items
 
@@ -735,17 +743,20 @@ updated_at: "2026-05-16T12:24:24+08:00"
   polish can improve long-running file-copy offload but no Rust route behavior
   remains blocked on a `501`.
 - Net-worth current/history, income summary, simple account performance, account
-  performance history/summary, and holdings allocation reads now have bounded TS
-  runtime parity, while provider-backed symbol performance history, holdings
-  import provider-backed symbol search, snapshot writes/imports, and broader
-  valuation calculations remain active follow-ups. reason=the standalone backend
-  can calculate `/api/v1/net-worth`, `/api/v1/net-worth/history`,
-  `/api/v1/income/summary`, `/api/v1/performance/accounts/simple`, and
-  account-scoped `/api/v1/performance/{history,summary}`,
+  performance history/summary, holdings allocation reads, snapshot deletion, and
+  bounded manual snapshot saves now have bounded TS runtime parity, while
+  provider-backed symbol performance history, holdings import provider-backed
+  symbol search/import writes, and broader valuation calculations remain active
+  follow-ups. reason=the standalone backend can calculate `/api/v1/net-worth`,
+  `/api/v1/net-worth/history`, `/api/v1/income/summary`,
+  `/api/v1/performance/accounts/simple`, and account-scoped
+  `/api/v1/performance/{history,summary}`,
   `/api/v1/valuations/{history,latest}`, `/api/v1/snapshots`,
-  `/api/v1/snapshots/holdings`, `/api/v1/snapshots/import/check`, and
+  `/api/v1/snapshots/holdings`, `/api/v1/snapshots/import/check`,
+  `DELETE /api/v1/snapshots`, and bounded `POST /api/v1/snapshots`, plus
   `/api/v1/holdings`, `/api/v1/allocations`, and `/api/v1/allocations/holdings`;
-  remaining portfolio metrics still need dedicated calculation parity slices.
+  remaining portfolio metrics and snapshot import writes still need dedicated
+  calculation/import parity slices.
 - Activity import mapping/template storage, duplicate lookups, read-only
   activity search, transfer link/unlink mutations, single activity deletes,
   bounded existing-asset/cash activity create/update/bulk persistence, and
@@ -808,12 +819,12 @@ updated_at: "2026-05-16T12:24:24+08:00"
   errors, and pairing-flow runtime remain active follow-ups. reason=this slice
   only adds the guarded pairing HTTP seam, while runtime behavior must move with
   dedicated device-sync parity slices.
-- Holdings snapshot save/reconciliation, import symbol lookup/import writes, and
+- Holdings snapshot reconciliation, import symbol lookup/import writes, and
   portfolio recalculation side effects remain active follow-ups. reason=holdings
-  fan-out, valuation reads, allocation reads, and manual/imported snapshot
-  deletion now have TS runtime parity, while remaining
-  write/import/recalculation behavior must move with dedicated
-  holdings/portfolio parity slices.
+  fan-out, valuation reads, allocation reads, manual/imported snapshot deletion,
+  and bounded manual snapshot saves now have TS runtime parity, while remaining
+  import/recalculation behavior must move with dedicated holdings/portfolio
+  parity slices.
 - Add-on filesystem extraction, manifest validation, sandbox/runtime loading,
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime

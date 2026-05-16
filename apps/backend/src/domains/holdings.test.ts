@@ -218,6 +218,134 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("saves manual holdings snapshots and minimal manual assets", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db, { today: () => "2026-02-15" });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-02-15",
+        holdings: [
+          {
+            symbol: "MAN",
+            quantity: "2",
+            currency: "USD",
+            averageCost: "5",
+            name: "Manual Asset",
+            dataSource: "MANUAL",
+            assetKind: "INVESTMENT",
+          },
+          {
+            symbol: "ZERO",
+            quantity: "0",
+            currency: "USD",
+            averageCost: "1",
+          },
+          {
+            symbol: "MAN",
+            quantity: "1",
+            currency: "USD",
+            averageCost: "8",
+          },
+        ],
+        cashBalances: { CAD: "100", USD: "0" },
+      });
+
+      expect(service.getSnapshots("a1")).toEqual([
+        expect.objectContaining({
+          snapshotDate: "2025-11-15",
+          source: "SYNTHETIC",
+          positionCount: 1,
+          cashCurrencyCount: 1,
+        }),
+        expect.objectContaining({
+          snapshotDate: "2026-02-15",
+          source: "MANUAL_ENTRY",
+          positionCount: 1,
+          cashCurrencyCount: 1,
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { cost_basis: string; net_contribution: string },
+            [string]
+          >("SELECT cost_basis, net_contribution FROM holdings_snapshots WHERE snapshot_date = ?")
+          .get("2025-11-15"),
+      ).toEqual({ cost_basis: "18", net_contribution: "0" });
+
+      const asset = db
+        .query<
+          { id: string; quote_mode: string; quote_ccy: string },
+          [string]
+        >("SELECT id, quote_mode, quote_ccy FROM assets WHERE display_code = ?")
+        .get("MAN");
+      expect(asset).toEqual(expect.objectContaining({ quote_mode: "MANUAL", quote_ccy: "USD" }));
+      expect(
+        db
+          .query<
+            { close: string; currency: string },
+            [string]
+          >("SELECT close, currency FROM quotes WHERE asset_id = ?")
+          .get(asset?.id ?? ""),
+      ).toEqual({ close: "6", currency: "USD" });
+
+      expect(service.getSnapshotByDate("a1", "2026-02-15")).toEqual([
+        expect.objectContaining({
+          id: `SEC-a1-${asset?.id}`,
+          quantity: 3,
+          localCurrency: "USD",
+          baseCurrency: "CAD",
+          costBasis: { local: 18, base: 0 },
+        }),
+        expect.objectContaining({
+          id: "CASH-a1-CAD",
+          quantity: 100,
+          baseCurrency: "CAD",
+        }),
+      ]);
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-02-15",
+        holdings: [
+          {
+            assetId: asset?.id,
+            symbol: "MAN",
+            quantity: "3",
+            currency: "USD",
+            averageCost: "6",
+          },
+        ],
+        cashBalances: {},
+      });
+
+      expect(service.getSnapshots("a1").map((snapshot) => snapshot.snapshotDate)).toEqual([
+        "2025-11-15",
+        "2026-02-15",
+      ]);
+      expect(service.getSnapshotByDate("a1", "2026-02-15")).toEqual([
+        expect.objectContaining({
+          id: `SEC-a1-${asset?.id}`,
+          quantity: 3,
+          costBasis: { local: 18, base: 0 },
+        }),
+      ]);
+      await expect(
+        service.saveManualHoldings({
+          accountId: "missing",
+          holdings: [],
+          cashBalances: {},
+        }),
+      ).rejects.toThrow("Record not found: account missing");
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates live holdings from the latest snapshot with quotes and FX", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db, {
@@ -698,6 +826,7 @@ function createHoldingsDb(): Database {
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL DEFAULT '',
+      currency TEXT NOT NULL DEFAULT 'USD',
       is_active INTEGER NOT NULL DEFAULT 1,
       is_archived INTEGER NOT NULL DEFAULT 0
     );
@@ -723,6 +852,7 @@ function createHoldingsDb(): Database {
       source TEXT NOT NULL,
       close TEXT NOT NULL,
       currency TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       timestamp TEXT NOT NULL
     );
     CREATE TABLE daily_account_valuation (
@@ -790,11 +920,14 @@ function createHoldingsDb(): Database {
 
 function insertAccount(
   db: Database,
-  account: { id: string; name: string; isActive?: number; isArchived?: number },
+  account: { id: string; name: string; currency?: string; isActive?: number; isArchived?: number },
 ): void {
-  db.prepare("INSERT INTO accounts (id, name, is_active, is_archived) VALUES (?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO accounts (id, name, currency, is_active, is_archived) VALUES (?, ?, ?, ?, ?)",
+  ).run(
     account.id,
     account.name,
+    account.currency ?? "USD",
     account.isActive ?? 1,
     account.isArchived ?? 0,
   );
