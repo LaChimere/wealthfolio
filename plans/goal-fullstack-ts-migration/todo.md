@@ -158,7 +158,8 @@
     market-data/portfolio parity slices; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
-    callbacks, and custom provider callbacks, and domain-event planning/batch
+    callbacks, custom provider callbacks, custom taxonomy bundle callbacks, and
+    asset taxonomy assignment callbacks, and domain-event planning/batch
     processing/worker helper now have TS runtime parity, while provider-backed
     asset resolution, remaining asset/quote sync outbox follow-ups, device-sync
     push/pull runtime wiring, and portfolio recalculation side effects are
@@ -1062,6 +1063,13 @@ contract:
   Coverage includes runtime custom provider Create/Update/Delete callback
   persistence to UUID-keyed `custom_provider` outbox rows and normalized
   payloads.
+- `pr5-taxonomy-sync-outbox-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/taxonomies.test.ts apps/backend/src/sync-outbox.test.ts apps/backend/src/runtime.test.ts --grep "taxonom|sync outbox|runtime taxonomy"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes runtime custom taxonomy Create/Update/Delete bundle
+  persistence to `custom_taxonomy` outbox rows with Rust-shaped nested
+  taxonomy/category payloads, plus asset taxonomy assignment Update/Delete
+  persistence to `asset_taxonomy_assignment` rows.
 - `pr5-goal-plan-save-up-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1449,9 +1457,9 @@ contract:
   provider-backed import-check lookup, holdings snapshot event production, and
   activity mutation event production plus activity/import-run/activity-created
   asset sync-event callback queuing, sync_outbox persistence for migrated
-  goal/activity callbacks plus FX asset and custom provider callbacks, and
-  domain-event planning/batch processing/worker helper implemented; broader
-  migration remains active.
+  goal/activity callbacks plus FX asset, custom provider, custom taxonomy, and
+  asset taxonomy assignment callbacks, and domain-event planning/batch
+  processing/worker helper implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the

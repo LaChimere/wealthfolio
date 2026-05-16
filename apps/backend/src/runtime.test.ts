@@ -915,6 +915,109 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime taxonomy sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-taxonomy-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { taxonomyService } = runtime.options;
+      if (!taxonomyService) {
+        throw new Error("Runtime taxonomy sync test requires taxonomy service");
+      }
+
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-taxonomy-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const taxonomy = await taxonomyService.createTaxonomy({
+        id: "runtime-taxonomy",
+        name: "Runtime Taxonomy",
+        color: "#4385be",
+        description: null,
+        isSystem: false,
+        isSingleSelect: false,
+        sortOrder: 99,
+      });
+      const category = await taxonomyService.createCategory({
+        id: "runtime-category",
+        taxonomyId: taxonomy.id,
+        name: "Runtime Category",
+        key: "runtime",
+        color: "#879a39",
+        sortOrder: 1,
+      });
+      const assignment = await taxonomyService.assignAssetToCategory({
+        id: "runtime-assignment",
+        assetId: "runtime-taxonomy-asset",
+        taxonomyId: taxonomy.id,
+        categoryId: category.id,
+        weight: 5_000,
+        source: "manual",
+      });
+      await expect(taxonomyService.removeAssetAssignment(assignment.id)).resolves.toBe(1);
+      await expect(taxonomyService.deleteTaxonomy(taxonomy.id)).resolves.toBeGreaterThan(0);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        const taxonomyRows = rows.filter((row) => row.entity === "custom_taxonomy");
+        expect(taxonomyRows).toEqual([
+          expect.objectContaining({ entity_id: taxonomy.id, op: "create" }),
+          expect.objectContaining({ entity_id: taxonomy.id, op: "update" }),
+          expect.objectContaining({ entity_id: taxonomy.id, op: "delete" }),
+        ]);
+        const createPayload = JSON.parse(String(taxonomyRows[0]?.payload));
+        expect(createPayload).toMatchObject({
+          taxonomy: {
+            id: taxonomy.id,
+            is_system: 0,
+            is_single_select: 0,
+            sort_order: 99,
+          },
+          categories: [],
+        });
+        const updatePayload = JSON.parse(String(taxonomyRows[1]?.payload));
+        expect(updatePayload).toMatchObject({
+          taxonomy: { id: taxonomy.id },
+          categories: [
+            expect.objectContaining({
+              id: category.id,
+              taxonomy_id: taxonomy.id,
+              sort_order: 1,
+            }),
+          ],
+        });
+        expect(JSON.parse(String(taxonomyRows[2]?.payload))).toEqual({ id: taxonomy.id });
+
+        const assignmentRows = rows.filter((row) => row.entity === "asset_taxonomy_assignment");
+        expect(assignmentRows).toEqual([
+          expect.objectContaining({ entity_id: assignment.id, op: "update" }),
+          expect.objectContaining({ entity_id: assignment.id, op: "delete" }),
+        ]);
+        expect(JSON.parse(String(assignmentRows[0]?.payload))).toMatchObject({
+          id: assignment.id,
+          asset_id: "runtime-taxonomy-asset",
+          taxonomy_id: taxonomy.id,
+          category_id: category.id,
+          weight: 5_000,
+          source: "manual",
+        });
+        expect(JSON.parse(String(assignmentRows[1]?.payload))).toEqual({ id: assignment.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("fails startup explicitly when TS runtime keyring secrets are requested", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
@@ -1052,6 +1155,20 @@ function readRuntimeSyncOutbox(
   db: ReturnType<typeof openSqliteDatabase>,
 ): Array<Record<string, unknown>> {
   return db.query<Record<string, unknown>, []>("SELECT * FROM sync_outbox ORDER BY rowid").all();
+}
+
+function seedRuntimeAsset(db: ReturnType<typeof openSqliteDatabase>, assetId: string): void {
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES (?, 'INVESTMENT', 'Runtime Asset', 'RUNTIME', NULL, NULL, 1, 'MARKET',
+        'USD', 'EQUITY', 'RUNTIME', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run(assetId);
 }
 
 function seedRuntimeValuation(

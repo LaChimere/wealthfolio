@@ -35,6 +35,7 @@ const SYNC_ENTITY_BY_EVENT_ENTITY: Record<string, string> = {
   contribution_limits: "contribution_limit",
   platforms: "platform",
   holdings_snapshots: "snapshot",
+  taxonomies: "custom_taxonomy",
   market_data_custom_providers: "custom_provider",
   import_runs: "import_run",
 };

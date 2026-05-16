@@ -34,7 +34,13 @@ import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
 import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createSyncCryptoService } from "./domains/sync-crypto";
-import { createTaxonomyRepository, createTaxonomyService } from "./domains/taxonomies";
+import {
+  createTaxonomyRepository,
+  createTaxonomyService,
+  type Taxonomy,
+  type TaxonomyCategory,
+  type TaxonomySyncPayload,
+} from "./domains/taxonomies";
 import { createEventBus, type BackendEventBus } from "./events";
 import type { BackendRequestHandlerOptions, GoalValuationProvider } from "./http";
 import {
@@ -200,7 +206,26 @@ function createServicesFromDatabase(
     env: runtimeOptions.env,
     secretKey: runtimeOptions.secretKey,
   });
-  const taxonomyService = createTaxonomyService(createTaxonomyRepository(db));
+  const taxonomyService = createTaxonomyService(
+    createTaxonomyRepository(db, {
+      queueSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "taxonomies",
+          entityId: event.taxonomyId,
+          operation: event.operation,
+          payload: taxonomySyncPayloadForOutbox(event.payload),
+        });
+      },
+      queueAssignmentSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "asset_taxonomy_assignments",
+          entityId: event.assignmentId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
+    }),
+  );
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -344,6 +369,45 @@ function parseSecretBackend(raw: string | undefined): "file" | "keyring" {
     return normalized;
   }
   throw new Error(`Invalid WF_SECRET_BACKEND value '${trimmed}'. Expected 'file' or 'keyring'.`);
+}
+
+function taxonomySyncPayloadForOutbox(payload: TaxonomySyncPayload | { id: string }): unknown {
+  if (!("taxonomy" in payload)) {
+    return payload;
+  }
+  return {
+    taxonomy: taxonomyRowPayload(payload.taxonomy),
+    categories: payload.categories.map(taxonomyCategoryRowPayload),
+  };
+}
+
+function taxonomyRowPayload(taxonomy: Taxonomy): Record<string, unknown> {
+  return {
+    id: taxonomy.id,
+    name: taxonomy.name,
+    color: taxonomy.color,
+    description: taxonomy.description,
+    is_system: taxonomy.isSystem ? 1 : 0,
+    is_single_select: taxonomy.isSingleSelect ? 1 : 0,
+    sort_order: taxonomy.sortOrder,
+    created_at: taxonomy.createdAt,
+    updated_at: taxonomy.updatedAt,
+  };
+}
+
+function taxonomyCategoryRowPayload(category: TaxonomyCategory): Record<string, unknown> {
+  return {
+    id: category.id,
+    taxonomy_id: category.taxonomyId,
+    parent_id: category.parentId,
+    name: category.name,
+    key: category.key,
+    color: category.color,
+    description: category.description,
+    sort_order: category.sortOrder,
+    created_at: category.createdAt,
+    updated_at: category.updatedAt,
+  };
 }
 
 function createRuntimeAccountService(

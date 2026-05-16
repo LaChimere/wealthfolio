@@ -244,6 +244,9 @@ backend:
 - Extend sync_outbox runtime wiring to custom provider Create/Update/Delete
   callbacks, preserving UUID-keyed `custom_provider` rows and normalized
   payloads.
+- Extend sync_outbox runtime wiring to custom taxonomy bundle callbacks and
+  asset taxonomy assignment callbacks, preserving Rust-shaped nested
+  `custom_taxonomy` payloads and `asset_taxonomy_assignment` rows.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
