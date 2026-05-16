@@ -62,6 +62,12 @@ export interface CheckHoldingsImportResult {
   validationErrors: string[];
 }
 
+export interface ImportHoldingsCsvResult {
+  snapshotsImported: number;
+  snapshotsFailed: number;
+  errors: string[];
+}
+
 export interface HoldingsService {
   getHoldings(accountId: string): Promise<unknown[]> | unknown[];
   getHolding(accountId: string, assetId: string): Promise<unknown | null> | unknown | null;
@@ -87,7 +93,9 @@ export interface HoldingsService {
   deleteSnapshot(accountId: string, date: string): Promise<void> | void;
   saveManualHoldings(request: SaveManualHoldingsRequest): Promise<void> | void;
   checkHoldingsImport(request: HoldingsImportRequest): Promise<unknown> | unknown;
-  importHoldingsCsv(request: HoldingsImportRequest): Promise<unknown> | unknown;
+  importHoldingsCsv(
+    request: HoldingsImportRequest,
+  ): Promise<ImportHoldingsCsvResult> | ImportHoldingsCsvResult;
 }
 
 export interface HoldingsServiceOptions {
@@ -347,6 +355,15 @@ interface AccountCurrencyRow {
   currency: string;
 }
 
+interface PersistHoldingsSnapshotRequest {
+  accountId: string;
+  accountCurrency: string;
+  snapshotDate: string;
+  holdings: HoldingInput[];
+  cashBalances: Record<string, string>;
+  source: "MANUAL_ENTRY" | "CSV_IMPORT";
+}
+
 interface SnapshotDateRow {
   snapshot_date: string;
 }
@@ -486,14 +503,14 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
-    importHoldingsCsv() {
-      return notImplemented("Holdings import is not available in the TS runtime yet");
+    importHoldingsCsv(request) {
+      try {
+        return importHoldingsCsv(db, request);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
   };
-}
-
-function notImplemented(message: string): Promise<never> {
-  return Promise.reject(new HoldingsNotImplementedError(message));
 }
 
 function readSnapshotInfo(
@@ -584,8 +601,65 @@ function saveManualHoldings(
 ): void {
   const accountCurrency = readAccountCurrency(db, request.accountId);
   const snapshotDate = request.snapshotDate ?? resolveToday(options);
-  if (!isValidDateString(snapshotDate)) {
-    throw new Error(`Invalid date format: ${snapshotDate}`);
+  persistHoldingsSnapshot(db, {
+    accountId: request.accountId,
+    accountCurrency,
+    snapshotDate,
+    holdings: request.holdings,
+    cashBalances: request.cashBalances,
+    source: "MANUAL_ENTRY",
+  });
+}
+
+function importHoldingsCsv(db: Database, request: HoldingsImportRequest): ImportHoldingsCsvResult {
+  const accountCurrency = readAccountCurrency(db, request.accountId);
+  const result: ImportHoldingsCsvResult = {
+    snapshotsImported: 0,
+    snapshotsFailed: 0,
+    errors: [],
+  };
+
+  for (const snapshot of request.snapshots) {
+    try {
+      persistHoldingsSnapshot(db, {
+        accountId: request.accountId,
+        accountCurrency,
+        snapshotDate: snapshot.date,
+        holdings: snapshot.positions.map(importPositionToHoldingInput),
+        cashBalances: snapshot.cashBalances,
+        source: "CSV_IMPORT",
+      });
+      result.snapshotsImported += 1;
+    } catch (error) {
+      result.snapshotsFailed += 1;
+      result.errors.push(`Date ${snapshot.date}: ${errorMessage(error)}`);
+    }
+  }
+
+  return result;
+}
+
+function importPositionToHoldingInput(position: HoldingsPositionInput): HoldingInput {
+  const holding: HoldingInput = {
+    symbol: position.symbol,
+    quantity: position.quantity,
+    currency: position.currency,
+  };
+  if (position.assetId !== undefined) {
+    holding.assetId = position.assetId;
+  }
+  if (position.exchangeMic !== undefined) {
+    holding.exchangeMic = position.exchangeMic;
+  }
+  if (position.avgCost !== undefined && isValidFiniteDecimalString(position.avgCost)) {
+    holding.averageCost = position.avgCost;
+  }
+  return holding;
+}
+
+function persistHoldingsSnapshot(db: Database, request: PersistHoldingsSnapshotRequest): void {
+  if (!isValidDateString(request.snapshotDate)) {
+    throw new Error(`Invalid date format: ${request.snapshotDate}`);
   }
 
   const now = new Date().toISOString();
@@ -657,7 +731,14 @@ function saveManualHoldings(
         ? new Decimal(0)
         : quote.totalCostBasis.div(quote.quantity);
       if (!weightedAverageCost.isZero()) {
-        upsertManualQuote(db, assetId, snapshotDate, weightedAverageCost, quote.currency, now);
+        upsertManualQuote(
+          db,
+          assetId,
+          request.snapshotDate,
+          weightedAverageCost,
+          quote.currency,
+          now,
+        );
       }
     }
 
@@ -676,14 +757,14 @@ function saveManualHoldings(
       )
       .toString();
     upsertHoldingsSnapshot(db, {
-      id: stableSnapshotId(request.accountId, snapshotDate),
+      id: stableSnapshotId(request.accountId, request.snapshotDate),
       accountId: request.accountId,
-      snapshotDate,
-      currency: accountCurrency,
+      snapshotDate: request.snapshotDate,
+      currency: request.accountCurrency,
       positions,
       cashBalances,
       costBasis,
-      source: "MANUAL_ENTRY",
+      source: request.source,
       calculatedAt: now,
     });
     ensureSyntheticHoldingsSnapshot(db, request.accountId, now);
@@ -2467,6 +2548,10 @@ function decimalToNumber(value: unknown, fallback: Decimal): number {
   } catch {
     return Number(fallback.toString());
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isValidFiniteDecimalString(value: string): boolean {

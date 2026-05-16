@@ -235,6 +235,7 @@ export {
   type HoldingsPositionInput,
   type HoldingsService,
   type HoldingsSnapshotInput,
+  type ImportHoldingsCsvResult,
   type SaveManualHoldingsRequest,
   type SnapshotInfo,
   type SymbolCheckResult,

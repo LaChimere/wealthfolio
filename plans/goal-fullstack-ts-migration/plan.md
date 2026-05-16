@@ -189,6 +189,12 @@ health legacy-classification runtime slices in the standalone TS backend:
   manual asset creation, manual quote-mode updates, weighted manual quote
   upserts, duplicate same-asset aggregation, stable snapshot IDs, manual
   snapshot upserts, and synthetic backfill snapshot creation.
+- Add bounded holdings snapshot import-write runtime for
+  `POST /api/v1/snapshots/import`, including top-level account validation,
+  per-snapshot success/failure accounting, `CSV_IMPORT` snapshot persistence,
+  local exact-symbol/minimal-asset creation, duplicate same-asset aggregation,
+  invalid optional average-cost-to-zero behavior, and synthetic history
+  backfill.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -216,7 +222,7 @@ current/historical net-worth, income summary, simple account performance,
 account performance history/summary, valuation reads, snapshot metadata,
 historical snapshot holdings reads, holdings import checks, live holdings
 fan-out, holding detail/by-asset fan-out, allocation reads, snapshot deletion,
-and bounded manual snapshot saves, snapshot import runtime, add-on runtime,
+bounded manual snapshot saves, bounded snapshot import writes, add-on runtime,
 broader market-data runtime beyond mapping/templates/duplicate lookups,
 read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
@@ -224,7 +230,8 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, real Connect runtime
+or non-classification `/health/fix` execution, provider-backed holdings import
+lookup, holdings FX/recalculation side effects, real Connect runtime
 implementation, real device-sync runtime implementation, or Rust runtime removal
 is in scope for this slice.
 

@@ -346,6 +346,130 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("imports holdings snapshots with per-date failures", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db, { today: () => "2026-03-15" });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "asset-1",
+        kind: "INVESTMENT",
+        name: "Acme Corp",
+        displayCode: "ACME",
+        quoteMode: "MARKET",
+      });
+
+      expect(
+        await service.importHoldingsCsv({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-03-01",
+              positions: [
+                {
+                  assetId: "asset-1",
+                  symbol: "ACME",
+                  quantity: "2",
+                  avgCost: "10",
+                  currency: "USD",
+                },
+                { symbol: "acme", quantity: "1", avgCost: "7", currency: "USD" },
+                {
+                  symbol: "NEW",
+                  quantity: "3",
+                  avgCost: "bad",
+                  currency: "USD",
+                  exchangeMic: "XNYS",
+                },
+              ],
+              cashBalances: { CAD: "50", USD: "0" },
+            },
+            {
+              date: "2026-03-02",
+              positions: [{ symbol: "BAD", quantity: "oops", currency: "USD" }],
+              cashBalances: {},
+            },
+            {
+              date: "not-a-date",
+              positions: [{ symbol: "SKIP", quantity: "1", currency: "USD" }],
+              cashBalances: {},
+            },
+          ],
+        }),
+      ).toEqual({
+        snapshotsImported: 1,
+        snapshotsFailed: 2,
+        errors: [
+          "Date 2026-03-02: Invalid quantity for BAD",
+          "Date not-a-date: Invalid date format: not-a-date",
+        ],
+      });
+
+      expect(service.getSnapshots("a1")).toEqual([
+        expect.objectContaining({
+          snapshotDate: "2025-12-01",
+          source: "SYNTHETIC",
+          positionCount: 2,
+          cashCurrencyCount: 1,
+        }),
+        expect.objectContaining({
+          snapshotDate: "2026-03-01",
+          source: "CSV_IMPORT",
+          positionCount: 2,
+          cashCurrencyCount: 1,
+        }),
+      ]);
+
+      const importedAsset = db
+        .query<
+          {
+            id: string;
+            quote_mode: string;
+            quote_ccy: string;
+            instrument_exchange_mic: string | null;
+          },
+          []
+        >(
+          "SELECT id, quote_mode, quote_ccy, instrument_exchange_mic FROM assets WHERE display_code = 'NEW'",
+        )
+        .get();
+      expect(importedAsset).toEqual(
+        expect.objectContaining({
+          quote_mode: "MARKET",
+          quote_ccy: "USD",
+          instrument_exchange_mic: "XNYS",
+        }),
+      );
+      expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()).toEqual(
+        {
+          count: 0,
+        },
+      );
+      expect(service.getSnapshotByDate("a1", "2026-03-01")).toEqual([
+        expect.objectContaining({
+          id: "SEC-a1-asset-1",
+          quantity: 3,
+          costBasis: { local: 27, base: 0 },
+        }),
+        expect.objectContaining({
+          id: `SEC-a1-${importedAsset?.id}`,
+          quantity: 3,
+          costBasis: { local: 0, base: 0 },
+        }),
+        expect.objectContaining({
+          id: "CASH-a1-CAD",
+          quantity: 50,
+        }),
+      ]);
+      await expect(
+        service.importHoldingsCsv({ accountId: "missing", snapshots: [] }),
+      ).rejects.toThrow("Record not found: account missing");
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates live holdings from the latest snapshot with quotes and FX", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db, {

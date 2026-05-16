@@ -198,6 +198,16 @@ describe("TS backend runtime composition", () => {
         message: "Record not found: account missing",
       });
 
+      const holdingsImportResponse = await fetch(`${server.baseUrl}/api/v1/snapshots/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountId: "missing", snapshots: [] }),
+      });
+      expect(holdingsImportResponse.status).toBe(400);
+      await expect(holdingsImportResponse.json()).resolves.toMatchObject({
+        message: "Record not found: account missing",
+      });
+
       const holdingsResponse = await fetch(`${server.baseUrl}/api/v1/holdings?accountId=missing`);
       expect(holdingsResponse.status).toBe(200);
       await expect(holdingsResponse.json()).resolves.toEqual([]);
