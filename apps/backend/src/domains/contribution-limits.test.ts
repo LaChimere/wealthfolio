@@ -6,6 +6,7 @@ import {
   createContributionLimitRepository,
   createContributionLimitService,
   parseContributionLimitAccountIds,
+  type ContributionLimitSyncEvent,
   type NewContributionLimit,
 } from "./contribution-limits";
 import type { ExchangeRateService } from "./exchange-rates";
@@ -96,6 +97,68 @@ describe("TS contribution limits domain", () => {
 
       expect(service.getContributionLimits()).toEqual([]);
       expect(notifications).toEqual(["updated", "updated", "updated", "updated"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues contribution-limit sync callbacks for create, update, and existing deletes", async () => {
+    const db = createContributionLimitsDb();
+    const syncEvents: ContributionLimitSyncEvent[] = [];
+    const service = createContributionLimitService(
+      createContributionLimitRepository(db, {
+        queueSyncEvent: (event) => syncEvents.push(event),
+      }),
+    );
+
+    try {
+      const created = await service.createContributionLimit(
+        newLimit({
+          groupName: "TFSA",
+          contributionYear: 2027,
+          limitAmount: 7_000,
+          accountIds: "account-1,account-2",
+          startDate: "2027-01-01",
+          endDate: "2027-12-31",
+        }),
+      );
+      const updated = await service.updateContributionLimit(
+        created.id,
+        newLimit({
+          groupName: "FHSA",
+          contributionYear: 2028,
+          limitAmount: 8_000,
+        }),
+      );
+      await service.deleteContributionLimit(created.id);
+      await service.deleteContributionLimit("missing-limit");
+
+      expect(updated.groupName).toBe("FHSA");
+      expect(syncEvents).toHaveLength(3);
+      expect(syncEvents.map((event) => [event.operation, event.limitId])).toEqual([
+        ["Create", created.id],
+        ["Update", created.id],
+        ["Delete", created.id],
+      ]);
+      expect(syncEvents[0]?.payload).toMatchObject({
+        id: created.id,
+        groupName: "TFSA",
+        contributionYear: 2027,
+        limitAmount: 7_000,
+        accountIds: "account-1,account-2",
+        startDate: "2027-01-01",
+        endDate: "2027-12-31",
+      });
+      expect(syncEvents[1]?.payload).toMatchObject({
+        id: created.id,
+        groupName: "FHSA",
+        contributionYear: 2028,
+        limitAmount: 8_000,
+        accountIds: null,
+        startDate: null,
+        endDate: null,
+      });
+      expect(syncEvents[2]?.payload).toEqual({ id: created.id });
     } finally {
       db.close();
     }

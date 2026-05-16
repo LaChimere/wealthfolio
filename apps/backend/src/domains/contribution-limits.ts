@@ -46,6 +46,30 @@ export interface ContributionLimitRepository {
   deleteContributionLimit(id: string): void;
 }
 
+export interface ContributionLimitRepositoryOptions {
+  queueSyncEvent?: (event: ContributionLimitSyncEvent) => void;
+}
+
+export type ContributionLimitSyncOperation = "Create" | "Update" | "Delete";
+
+export interface ContributionLimitSyncEvent {
+  limitId: string;
+  operation: ContributionLimitSyncOperation;
+  payload: ContributionLimitRowPayload | { id: string };
+}
+
+export interface ContributionLimitRowPayload {
+  id: string;
+  groupName: string;
+  contributionYear: number;
+  limitAmount: number;
+  accountIds: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startDate: string | null;
+  endDate: string | null;
+}
+
 export interface ContributionLimitService {
   getContributionLimits(): ContributionLimit[];
   createContributionLimit(newLimit: NewContributionLimit): Promise<ContributionLimit>;
@@ -94,7 +118,10 @@ interface ContributionActivityRow {
 
 const CONTRIBUTION_ACTIVITY_TYPES = ["DEPOSIT", "TRANSFER_IN", "TRANSFER_OUT", "CREDIT"] as const;
 
-export function createContributionLimitRepository(db: Database): ContributionLimitRepository {
+export function createContributionLimitRepository(
+  db: Database,
+  options: ContributionLimitRepositoryOptions = {},
+): ContributionLimitRepository {
   return {
     getContributionLimit(id) {
       return readContributionLimitById(db, id);
@@ -133,7 +160,9 @@ export function createContributionLimitRepository(db: Database): ContributionLim
           sqliteNow(),
           sqliteNow(),
         );
-        created = readContributionLimitById(db, id);
+        const row = readContributionLimitRowById(db, id);
+        created = contributionLimitFromRow(row);
+        queueContributionLimitSyncEvent(options, row, "Create");
       })();
       if (!created) {
         throw new Error(`Record not found: contribution limit ${id}`);
@@ -171,7 +200,9 @@ export function createContributionLimitRepository(db: Database): ContributionLim
         if (result.changes === 0) {
           throw new Error(`Record not found: contribution limit ${id}`);
         }
-        updated = readContributionLimitById(db, id);
+        const row = readContributionLimitRowById(db, id);
+        updated = contributionLimitFromRow(row);
+        queueContributionLimitSyncEvent(options, row, "Update");
       })();
       if (!updated) {
         throw new Error(`Record not found: contribution limit ${id}`);
@@ -179,7 +210,12 @@ export function createContributionLimitRepository(db: Database): ContributionLim
       return updated;
     },
     deleteContributionLimit(id) {
-      db.prepare("DELETE FROM contribution_limits WHERE id = ?").run(id);
+      db.transaction(() => {
+        const result = db.prepare("DELETE FROM contribution_limits WHERE id = ?").run(id);
+        if (result.changes > 0) {
+          queueContributionLimitSyncDelete(options, id);
+        }
+      })();
     },
   };
 }
@@ -235,6 +271,10 @@ export function parseContributionLimitAccountIds(accountIds: string | null | und
 }
 
 function readContributionLimitById(db: Database, id: string): ContributionLimit {
+  return contributionLimitFromRow(readContributionLimitRowById(db, id));
+}
+
+function readContributionLimitRowById(db: Database, id: string): ContributionLimitRow {
   const row = db
     .query<ContributionLimitRow, [string]>(
       `
@@ -247,7 +287,44 @@ function readContributionLimitById(db: Database, id: string): ContributionLimit 
   if (!row) {
     throw new Error(`Record not found: contribution limit ${id}`);
   }
-  return contributionLimitFromRow(row);
+  return row;
+}
+
+function queueContributionLimitSyncEvent(
+  options: ContributionLimitRepositoryOptions,
+  row: ContributionLimitRow,
+  operation: Exclude<ContributionLimitSyncOperation, "Delete">,
+): void {
+  options.queueSyncEvent?.({
+    limitId: row.id,
+    operation,
+    payload: contributionLimitRowPayload(row),
+  });
+}
+
+function queueContributionLimitSyncDelete(
+  options: ContributionLimitRepositoryOptions,
+  limitId: string,
+): void {
+  options.queueSyncEvent?.({
+    limitId,
+    operation: "Delete",
+    payload: { id: limitId },
+  });
+}
+
+function contributionLimitRowPayload(row: ContributionLimitRow): ContributionLimitRowPayload {
+  return {
+    id: row.id,
+    groupName: row.group_name,
+    contributionYear: row.contribution_year,
+    limitAmount: row.limit_amount,
+    accountIds: row.account_ids,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    startDate: row.start_date,
+    endDate: row.end_date,
+  };
 }
 
 function contributionLimitColumns(): string {

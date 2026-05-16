@@ -262,6 +262,9 @@ backend:
   migrated persistence paths, preserving Rust-shaped `ai_thread`, `ai_message`,
   and `ai_thread_tag` Update/Create/Delete payloads while provider chat
   execution remains deferred.
+- Extend sync_outbox runtime wiring to contribution-limit Create/Update/Delete
+  callbacks, preserving Rust-shaped `contribution_limit` payloads and missing
+  delete no-op behavior.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.

@@ -320,7 +320,15 @@ function createServicesFromDatabase(
       prepareDatabaseRestore,
     }),
     contributionLimitService: createContributionLimitService(
-      createContributionLimitRepository(db),
+      createContributionLimitRepository(db, {
+        queueSyncEvent: (event) =>
+          syncOutboxQueue.queueSyncEvent({
+            entity: "contribution_limits",
+            entityId: event.limitId,
+            operation: event.operation,
+            payload: event.payload,
+          }),
+      }),
       {
         baseCurrency,
         calculateDeposits: createContributionDepositCalculator(

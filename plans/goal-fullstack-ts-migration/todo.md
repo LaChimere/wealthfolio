@@ -162,28 +162,28 @@
     asset taxonomy assignment callbacks, direct asset Create/Update/Delete
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
     update/delete/import callbacks, and local AI chat thread/message/tag
-    callbacks, and domain-event planning/batch processing/worker helper now have
-    TS runtime parity, while provider-backed asset resolution, remaining quote
-    sync outbox follow-ups outside migrated alternative-asset and market-data
-    quote paths, device-sync push/pull runtime wiring, and portfolio
-    recalculation side effects are deferred to activities/import/device-sync
-    runtime parity slices; AI chat persistence, tag persistence, tool-result
-    mutation, and local AI chat sync_outbox callbacks now have TS runtime
-    parity, while provider streaming, tool execution, and attachments are
-    deferred to AI runtime parity slices; device-sync integration for sync
-    crypto is deferred to device-sync runtime parity slices; bounded
-    account/timezone health status/checks, cache behavior, legacy-classification
-    health issues, and classification migration health-fix dispatch now have TS
-    runtime parity, while calculation-heavy health checks, market sync fix
-    execution, and non-classification `/health/fix` dispatch are deferred to
-    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, local sync repositories, subscription
-    entitlement checks, event production, E2EE enrollment, sync engine,
-    snapshot/upload runtime, feature-flag errors, background workers,
-    device-sync cloud clients, token lifecycle, team-key operations, key
-    material handling, pairing flows, freshness gate persistence, bootstrap
-    transfer, and secret side effects are deferred to Connect/device-sync parity
-    slices.
+    callbacks, contribution-limit callbacks, and domain-event planning/batch
+    processing/worker helper now have TS runtime parity, while provider-backed
+    asset resolution, remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and portfolio recalculation side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, and local AI chat sync_outbox
+    callbacks now have TS runtime parity, while provider streaming, tool
+    execution, and attachments are deferred to AI runtime parity slices;
+    device-sync integration for sync crypto is deferred to device-sync runtime
+    parity slices; bounded account/timezone health status/checks, cache
+    behavior, legacy-classification health issues, and classification migration
+    health-fix dispatch now have TS runtime parity, while calculation-heavy
+    health checks, market sync fix execution, and non-classification
+    `/health/fix` dispatch are deferred to health/calculation parity slices;
+    real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
+    local sync repositories, subscription entitlement checks, event production,
+    E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+    background workers, device-sync cloud clients, token lifecycle, team-key
+    operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1445,6 +1445,12 @@ contract:
   sync_outbox rows. Full repository check passed with `bun run check`; focused
   code review found no significant issues after confirming boolean-to-i32
   normalization is intentional for Rust payload parity.
+- `pr5-contribution-limit-sync-outbox-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/contribution-limits.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "contribution-limit sync|contribution limits domain"`.
+  Coverage includes contribution-limit Create/Update/Delete callbacks,
+  Rust-shaped payload fields, missing-delete sync no-op behavior, and runtime
+  `contribution_limit` sync_outbox rows. Backend type-check and full repository
+  check passed; focused code review found no significant issues.
 
 ## Result
 
@@ -1497,7 +1503,7 @@ contract:
   asset sync-event callback queuing, sync_outbox persistence for migrated
   goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
   taxonomy assignment, direct asset, alternative asset/UUID quote, market-data
-  quote, and local AI chat callbacks, and domain-event
+  quote, local AI chat, and contribution-limit callbacks, and domain-event
   planning/batch-processing/worker helper implemented; broader migration remains
   active.
 - Follow-ups: continue other low-risk domain slices; broader health

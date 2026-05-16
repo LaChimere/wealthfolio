@@ -1104,6 +1104,67 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime contribution-limit sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-limit-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { contributionLimitService } = runtime.options;
+      const created = await contributionLimitService.createContributionLimit({
+        groupName: "TFSA",
+        contributionYear: 2027,
+        limitAmount: 7_000,
+        accountIds: "account-1",
+        startDate: "2027-01-01",
+        endDate: "2027-12-31",
+      });
+      await contributionLimitService.updateContributionLimit(created.id, {
+        groupName: "FHSA",
+        contributionYear: 2028,
+        limitAmount: 8_000,
+      });
+      await contributionLimitService.deleteContributionLimit(created.id);
+      await contributionLimitService.deleteContributionLimit("missing-limit");
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
+          ["contribution_limit", created.id, "create"],
+          ["contribution_limit", created.id, "update"],
+          ["contribution_limit", created.id, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.id,
+          group_name: "TFSA",
+          contribution_year: 2027,
+          limit_amount: 7_000,
+          account_ids: "account-1",
+          start_date: "2027-01-01",
+          end_date: "2027-12-31",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: created.id,
+          group_name: "FHSA",
+          contribution_year: 2028,
+          limit_amount: 8_000,
+          account_ids: null,
+          start_date: null,
+          end_date: null,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({
