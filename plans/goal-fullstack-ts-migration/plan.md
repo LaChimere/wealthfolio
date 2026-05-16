@@ -234,6 +234,10 @@ backend:
   asset inserts performed by activity create/update/bulk/import paths, including
   Rust-compatible AssetDB payloads and post-transaction callback ordering before
   dependent activity/import events.
+- Add first TS sync_outbox persistence wiring by routing migrated goal and
+  activity/import/asset sync callbacks through a shared outbox writer with
+  Rust-compatible entity/op names, payload normalization, device/key metadata,
+  and `sync_entity_metadata` updates.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
@@ -257,9 +261,8 @@ backend:
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
 - Keep still-deferred provider-backed asset resolution, remaining asset/quote
-  sync outbox follow-ups, real sync_outbox persistence/runtime wiring, and
-  actual portfolio job execution/valuation recalculation for dedicated parity
-  slices.
+  sync outbox follow-ups, device-sync push/pull runtime wiring, and actual
+  portfolio job execution/valuation recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

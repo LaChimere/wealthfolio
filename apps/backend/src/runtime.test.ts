@@ -812,6 +812,26 @@ describe("TS backend runtime composition", () => {
 
       const db = openSqliteDatabase(runtime.dbPath);
       try {
+        const initialSyncOutbox = readRuntimeSyncOutbox(db);
+        expect(initialSyncOutbox).toEqual([
+          expect.objectContaining({ entity: "goal", entity_id: goal.id, op: "create" }),
+          expect.objectContaining({
+            entity: "goals_allocation",
+            entity_id: expect.any(String),
+            op: "create",
+          }),
+          expect.objectContaining({
+            entity: "goals_allocation",
+            entity_id: expect.any(String),
+            op: "create",
+          }),
+        ]);
+        expect(JSON.parse(String(initialSyncOutbox[0]?.payload))).toMatchObject({
+          id: goal.id,
+          goal_type: "custom_save_up",
+          target_amount: 1000,
+        });
+
         seedRuntimeValuation(db, {
           accountId: account.id,
           date: "2026-05-13",
@@ -856,6 +876,12 @@ describe("TS backend runtime composition", () => {
           targetAmount: 1000,
           progress: 0.5,
         });
+        const postRefreshDb = openSqliteDatabase(runtime.dbPath);
+        try {
+          expect(readRuntimeSyncOutbox(postRefreshDb)).toHaveLength(3);
+        } finally {
+          postRefreshDb.close();
+        }
       } finally {
         server.stop();
       }
@@ -864,6 +890,12 @@ describe("TS backend runtime composition", () => {
     }
   });
 });
+
+function readRuntimeSyncOutbox(
+  db: ReturnType<typeof openSqliteDatabase>,
+): Array<Record<string, unknown>> {
+  return db.query<Record<string, unknown>, []>("SELECT * FROM sync_outbox ORDER BY rowid").all();
+}
 
 function seedRuntimeValuation(
   db: ReturnType<typeof openSqliteDatabase>,

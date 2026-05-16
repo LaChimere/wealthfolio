@@ -42,6 +42,7 @@ import {
   resolveMigrationsDir,
   type InitializedSqliteDatabase,
 } from "./storage/sqlite";
+import { createSyncOutboxQueue } from "./sync-outbox";
 
 export interface SqliteBackedBackendServicesOptions {
   appDataDir?: string;
@@ -187,12 +188,16 @@ function createServicesFromDatabase(
     secretKey: runtimeOptions.secretKey,
   });
   const taxonomyService = createTaxonomyService(createTaxonomyRepository(db));
+  const syncOutboxQueue = createSyncOutboxQueue(db);
 
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService: createActivityService(db, {
       eventBus,
       ensureFxPairs: (pairs) => exchangeRateService.ensureFxPairs(pairs),
+      queueSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent(event);
+      },
     }),
     alternativeAssetService: createAlternativeAssetService(db, { eventBus }),
     assetService: createAssetService(db, {
@@ -234,10 +239,17 @@ function createServicesFromDatabase(
     }),
     eventBus,
     exchangeRateService,
-    goalService: createGoalService(createGoalRepository(db), {
-      accountProvider: accountService,
-      baseCurrency,
-    }),
+    goalService: createGoalService(
+      createGoalRepository(db, {
+        queueSyncEvent: (event) => {
+          syncOutboxQueue.queueSyncEvent(event);
+        },
+      }),
+      {
+        accountProvider: accountService,
+        baseCurrency,
+      },
+    ),
     goalValuationProvider: createGoalValuationProvider(db, accountService),
     healthService: createHealthService(createHealthRepository(db), undefined, {
       accountProvider: accountService,

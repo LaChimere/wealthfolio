@@ -21,6 +21,13 @@ export {
 } from "./events";
 export { sidecarTokenAuthorized } from "./sidecar-auth";
 export {
+  createSyncOutboxQueue,
+  insertSyncOutboxEvent,
+  type SyncOutboxOperation,
+  type SyncOutboxQueue,
+  type SyncOutboxQueueEvent,
+} from "./sync-outbox";
+export {
   createSqliteBackedBackendServices,
   resolveBackendAppDataDir,
   resolveBackendMigrationsDir,
