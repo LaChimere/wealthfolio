@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 105
+turns_used: 106
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T13:48:04+08:00"
+updated_at: "2026-05-16T14:07:42+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -703,6 +703,12 @@ updated_at: "2026-05-16T13:48:04+08:00"
   valuation/TOTAL recalculation path remains deferred to the broader TS
   portfolio job worker slice. Targeted holdings/runtime tests and backend
   type-check passed.
+- Turn 106: Added activity mutation event production: create, update, delete,
+  bulk, import, transfer link, and transfer unlink now publish Rust-shaped
+  `activities_changed` events through the shared standalone TS event bus with
+  account/asset/currency sets and UTC earliest-activity timestamps. Targeted
+  activities/runtime tests, backend type-check, full `bun run check`, and
+  focused code review passed.
 
 ## Deferred items
 
@@ -809,11 +815,12 @@ updated_at: "2026-05-16T13:48:04+08:00"
   previewed as existing matches, bounded drafts, or explicit fixing errors, and
   mapped import rows are validated read-only with duplicate warnings; apply rows
   are persisted with CSV import-run metadata, duplicate skipping/force-import
-  behavior, cross-account transfer-pair source-group metadata, and FX pair
-  ensure through the TS exchange-rate runtime; symbol-only asset creation, quote
-  fallback writes, provider-backed asset resolution, device-sync outbox emission
-  for writes, and portfolio recalculation side effects remain active follow-ups
-  for dedicated activities/import/portfolio parity slices.
+  behavior, cross-account transfer-pair source-group metadata, FX pair ensure
+  through the TS exchange-rate runtime, and Rust-shaped mutation event
+  production; symbol-only asset creation, quote fallback writes, provider-backed
+  asset resolution, device-sync outbox emission for writes, and portfolio
+  recalculation side effects remain active follow-ups for dedicated
+  activities/import/portfolio parity slices.
 - AI chat provider streaming, title generation, tool execution, tag mutations,
   attachment handling, and outbox writes remain active follow-ups. reason=local
   thread/message persistence and tool-result mutation now have TS runtime

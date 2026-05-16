@@ -2,11 +2,13 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import {
+  ACTIVITIES_CHANGED_EVENT,
   createActivityService,
   type Activity,
   type ActivityBulkMutationResult,
   type ActivitySearchRequest,
 } from "./activities";
+import type { BackendEvent, BackendEventBus } from "../events";
 
 describe("TS activities import domain", () => {
   test("searches activities with Rust-compatible filters, ordering, and detail mapping", async () => {
@@ -1408,6 +1410,251 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("emits activities_changed events after successful activity mutations", async () => {
+    const db = createActivitiesDb();
+    const events: BackendEvent[] = [];
+    const service = createActivityService(db, { eventBus: recordingEventBus(events) });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAccount(db, { id: "account-2", name: "Beta", currency: "CAD" });
+      insertAsset(db, { id: "AAPL", displayCode: "AAPL", name: "Apple", quoteCcy: "USD" });
+      insertAsset(db, { id: "MSFT", displayCode: "MSFT", name: "Microsoft", quoteCcy: "CAD" });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15T10:00:00-05:00",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: ["AAPL"],
+          currencies: ["USD"],
+          earliest: "2025-01-15T15:00:00.000Z",
+        }),
+      ]);
+
+      events.length = 0;
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "UNKNOWN" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          currency: "USD",
+        }),
+      ).toThrow("Symbol-based asset creation is not yet implemented");
+      expect(events).toEqual([]);
+
+      const updated = service.updateActivity?.({
+        id: created.id,
+        accountId: "account-2",
+        asset: { id: "MSFT" },
+        activityType: "BUY",
+        activityDate: "2025-01-14",
+        quantity: "1",
+        unitPrice: "12",
+        amount: "12",
+        currency: "CAD",
+      }) as Activity;
+      expect(updated.accountId).toBe("account-2");
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1", "account-2"],
+          assetIds: ["AAPL", "MSFT"],
+          currencies: ["CAD", "USD"],
+          earliest: "2025-01-14T00:00:00.000Z",
+        }),
+      ]);
+
+      events.length = 0;
+      expect(service.deleteActivity?.(created.id)).toMatchObject({ id: created.id });
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-2"],
+          assetIds: ["MSFT"],
+          currencies: ["CAD"],
+          earliest: "2025-01-14T00:00:00.000Z",
+        }),
+      ]);
+
+      insertActivity(db, {
+        id: "transfer-in",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-11T00:00:00Z",
+      });
+      insertActivity(db, {
+        id: "transfer-out",
+        accountId: "account-2",
+        activityType: "TRANSFER_OUT",
+        activityDate: "2025-01-10T00:00:00Z",
+      });
+      events.length = 0;
+      service.linkTransferActivities?.("transfer-in", "transfer-out");
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1", "account-2"],
+          assetIds: [],
+          currencies: ["USD"],
+          earliest: "2025-01-10T00:00:00.000Z",
+        }),
+      ]);
+      events.length = 0;
+      service.unlinkTransferActivities?.("transfer-in", "transfer-out");
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1", "account-2"],
+          assetIds: [],
+          currencies: ["USD"],
+          earliest: "2025-01-10T00:00:00.000Z",
+        }),
+      ]);
+
+      insertActivity(db, {
+        id: "bulk-update",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        activityDate: "2024-01-01T00:00:00Z",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "EUR",
+      });
+      insertActivity(db, {
+        id: "bulk-delete",
+        accountId: "account-2",
+        assetId: "MSFT",
+        activityType: "BUY",
+        activityDate: "2024-01-02T00:00:00Z",
+        quantity: "1",
+        unitPrice: "20",
+        amount: "20",
+        currency: "JPY",
+      });
+      events.length = 0;
+      expect(
+        service.bulkMutateActivities?.({
+          creates: [
+            {
+              id: "bulk-create-temp",
+              accountId: "account-1",
+              activityType: "DEPOSIT",
+              activityDate: "2025-02-01",
+              amount: "5",
+              currency: "USD",
+            },
+          ],
+          updates: [
+            {
+              id: "bulk-update",
+              accountId: "account-2",
+              asset: { id: "MSFT" },
+              activityType: "BUY",
+              activityDate: "2025-02-02",
+              quantity: "1",
+              unitPrice: "12",
+              amount: "12",
+              currency: "CAD",
+            },
+          ],
+          deleteIds: ["bulk-delete"],
+        }) as ActivityBulkMutationResult,
+      ).toMatchObject({ errors: [], created: [expect.any(Object)], updated: [expect.any(Object)] });
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1", "account-2"],
+          assetIds: ["AAPL", "MSFT"],
+          currencies: ["CAD", "USD"],
+          earliest: "2024-01-02T00:00:00.000Z",
+        }),
+      ]);
+
+      events.length = 0;
+      expect(
+        service.bulkMutateActivities?.({
+          updates: [
+            {
+              id: "missing-update",
+              accountId: "account-1",
+              activityType: "DEPOSIT",
+              activityDate: "2025-02-03",
+              currency: "USD",
+            },
+          ],
+        }) as ActivityBulkMutationResult,
+      ).toMatchObject({ errors: [expect.objectContaining({ id: "missing-update" })] });
+      expect(events).toEqual([]);
+
+      const duplicateSource = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-03-01",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(duplicateSource.id).toBeString();
+      events.length = 0;
+      const importResult = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-03-01",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          assetId: "AAPL",
+          activityType: "BUY",
+          date: "2025-03-02",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          forceImport: true,
+          lineNumber: 2,
+        },
+      ])) as { summary: Record<string, unknown> };
+      expect(importResult.summary).toMatchObject({ imported: 1, skipped: 1 });
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: ["AAPL"],
+          currencies: ["USD"],
+          earliest: "2025-03-02T00:00:00.000Z",
+        }),
+      ]);
+
+      events.length = 0;
+      const allDuplicateResult = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-03-01",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+      ])) as { summary: Record<string, unknown> };
+      expect(allDuplicateResult.summary).toMatchObject({ imported: 0, skipped: 1 });
+      expect(events).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns Rust-compatible default import mapping with legacy context normalization", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -1707,6 +1954,35 @@ function createActivitiesDb(): Database {
     WHERE idempotency_key IS NOT NULL;
   `);
   return db;
+}
+
+function recordingEventBus(events: BackendEvent[]): BackendEventBus {
+  return {
+    publish(event) {
+      events.push(event);
+    },
+    subscribe() {
+      return () => undefined;
+    },
+  };
+}
+
+function activitiesChangedEvent(input: {
+  accountIds: string[];
+  assetIds: string[];
+  currencies: string[];
+  earliest: string | null;
+}): BackendEvent {
+  return {
+    name: ACTIVITIES_CHANGED_EVENT,
+    payload: {
+      type: ACTIVITIES_CHANGED_EVENT,
+      account_ids: input.accountIds,
+      asset_ids: input.assetIds,
+      currencies: input.currencies,
+      earliest_activity_at_utc: input.earliest,
+    },
+  };
 }
 
 function insertTemplate(

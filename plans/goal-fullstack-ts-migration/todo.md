@@ -154,12 +154,13 @@
     slices; add-on filesystem extraction, runtime loading, store HTTP, staging
     I/O, and update behavior are deferred to add-on runtime parity slices;
     market-data market sync and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; symbol-only activity asset creation,
-    import execution, provider-backed asset resolution, device-sync outbox
-    emission for activity writes, and portfolio recalculation side effects are
-    deferred to activities/import runtime parity slices; AI chat persistence and
-    tool-result mutation now have TS runtime parity, while provider streaming,
-    tool execution, tag persistence, and attachments are deferred to AI runtime
+    market-data/portfolio parity slices; activity mutation event production now
+    has TS runtime parity, while symbol-only activity asset creation,
+    provider-backed asset resolution, device-sync outbox emission for activity
+    writes, and portfolio recalculation side effects are deferred to
+    activities/import runtime parity slices; AI chat persistence and tool-result
+    mutation now have TS runtime parity, while provider streaming, tool
+    execution, tag persistence, and attachments are deferred to AI runtime
     parity slices; device-sync integration for sync crypto is deferred to
     device-sync runtime parity slices; bounded account/timezone health
     status/checks, cache behavior, legacy-classification health issues, and
@@ -1285,6 +1286,16 @@ contract:
   asset ID payloads from persisted positions, and standalone runtime event-bus
   wiring while device-sync outbox and actual portfolio job execution/inline
   valuation recalculation remain deferred.
+- `pr5-activities-mutation-events-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts apps/backend/src/runtime.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-shaped `activities_changed` event emission after
+  successful create, update, delete, transfer link/unlink, bulk, and import
+  mutations; UTC `earliest_activity_at_utc` serialization; old/new update
+  account/asset/currency sets; Rust-compatible bulk old account/asset and new
+  currency aggregation; no emission for failed create/bulk/import or
+  all-duplicate imports; standalone runtime event-bus wiring; full repository
+  check with `bun run check`; and focused code review.
 
 ## Result
 
@@ -1331,8 +1342,9 @@ contract:
   snapshot metadata/runtime conversion/import-check reads, live holdings fan-out
   runtime, holding detail/by-asset fan-out runtime, allocation read runtime,
   snapshot deletion runtime, bounded manual snapshot save runtime, and bounded
-  snapshot import-write runtime plus snapshot FX pair registration and
-  provider-backed import-check lookup implemented; broader migration remains
+  snapshot import-write runtime plus snapshot FX pair registration,
+  provider-backed import-check lookup, holdings snapshot event production, and
+  activity mutation event production implemented; broader migration remains
   active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification

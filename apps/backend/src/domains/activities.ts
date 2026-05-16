@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import Decimal from "decimal.js";
 
+import type { BackendEventBus } from "../events";
+
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
+export const ACTIVITIES_CHANGED_EVENT = "activities_changed";
 export const ACTIVITY_IMPORT_CONTEXT_KIND = "ACTIVITY";
 export const CSV_ACTIVITY_CONTEXT_KIND = "CSV_ACTIVITY";
 export const CSV_HOLDINGS_CONTEXT_KIND = "CSV_HOLDINGS";
@@ -195,6 +198,7 @@ interface ImportActivitiesResult {
 }
 
 export interface ActivityServiceOptions {
+  eventBus?: BackendEventBus;
   ensureFxPairs?: (pairs: Array<[string, string]>) => Promise<void> | void;
 }
 
@@ -437,7 +441,7 @@ export function createActivityService(
 ): ActivityService {
   return {
     createActivity(input) {
-      return db.transaction(() => {
+      const created = db.transaction(() => {
         const activity = normalizeActivityCreateInput(db, input);
         if (activity.idempotencyKey !== null) {
           const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
@@ -454,10 +458,12 @@ export function createActivityService(
 
         return activityFromRow(readActivityRow(db, activity.id));
       })();
+      publishActivitiesChanged(options.eventBus, [activityEventRecord(created)]);
+      return created;
     },
 
     updateActivity(input) {
-      return db.transaction(() => {
+      const result = db.transaction(() => {
         const activityId = requiredNonEmptyString(input.id, "id");
         const existing = readActivityRow(db, activityId);
         const update = normalizeActivityUpdateInput(db, input, existing);
@@ -468,12 +474,20 @@ export function createActivityService(
           throw mapActivitySqliteError(error);
         }
 
-        return activityFromRow(readActivityRow(db, activityId));
+        return {
+          existing: activityFromRow(existing),
+          updated: activityFromRow(readActivityRow(db, activityId)),
+        };
       })();
+      publishActivitiesChanged(options.eventBus, [
+        activityEventRecord(result.existing),
+        activityEventRecord(result.updated),
+      ]);
+      return result.updated;
     },
 
     bulkMutateActivities(input) {
-      return db.transaction(() => {
+      const outcome = db.transaction(() => {
         const creates = recordArrayField(input, "creates");
         const updates = recordArrayField(input, "updates");
         const deleteIds = stringArrayField(input, "deleteIds");
@@ -483,6 +497,7 @@ export function createActivityService(
           tempId: string | null;
         }> = [];
         const preparedUpdates: ActivityRow[] = [];
+        const preparedUpdateExistingRows: ActivityRow[] = [];
         const preparedDeletes: ActivityRow[] = [];
         const createIdempotencyKeys = new Set<string>();
         const deleteIdSet = new Set(deleteIds);
@@ -515,6 +530,7 @@ export function createActivityService(
               throw new Error("Cannot update and delete the same activity");
             }
             const existing = readActivityRow(db, activityId);
+            preparedUpdateExistingRows.push(existing);
             preparedUpdates.push(normalizeActivityUpdateInput(db, updateInput, existing));
           } catch (error) {
             errors.push({ id: targetId, action: "update", message: errorMessage(error) });
@@ -530,7 +546,10 @@ export function createActivityService(
         }
 
         if (errors.length > 0) {
-          return emptyBulkMutationResult(errors);
+          return {
+            result: emptyBulkMutationResult(errors),
+            oldRows: [] as ActivityRow[],
+          };
         }
 
         const result = emptyBulkMutationResult([]);
@@ -552,8 +571,13 @@ export function createActivityService(
           throw mapActivitySqliteError(error);
         }
 
-        return result;
+        return {
+          result,
+          oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
+        };
       })();
+      publishBulkActivitiesChanged(options.eventBus, outcome.oldRows, outcome.result);
+      return outcome.result;
     },
 
     searchActivities(request) {
@@ -644,7 +668,7 @@ export function createActivityService(
         throw new Error("Cannot link an activity to itself");
       }
 
-      return db.transaction(() => {
+      const updatedPair = db.transaction(() => {
         const activityA = readActivityRow(db, activityAId);
         const activityB = readActivityRow(db, activityBId);
         const [transferIn, transferOut] = transferPairByType(
@@ -682,6 +706,8 @@ export function createActivityService(
         ];
         return updatedPair;
       })();
+      publishActivitiesChanged(options.eventBus, updatedPair.map(activityEventRecord));
+      return updatedPair;
     },
 
     unlinkTransferActivities(activityAId, activityBId) {
@@ -689,7 +715,7 @@ export function createActivityService(
         throw new Error("Cannot unlink an activity from itself");
       }
 
-      return db.transaction(() => {
+      const updatedPair = db.transaction(() => {
         const activityA = readActivityRow(db, activityAId);
         const activityB = readActivityRow(db, activityBId);
         const [transferIn, transferOut] = transferPairByType(
@@ -726,14 +752,18 @@ export function createActivityService(
         ];
         return updatedPair;
       })();
+      publishActivitiesChanged(options.eventBus, updatedPair.map(activityEventRecord));
+      return updatedPair;
     },
 
     deleteActivity(activityId) {
-      return db.transaction(() => {
+      const deleted = db.transaction(() => {
         const deleted = readActivityRow(db, activityId);
         db.query("DELETE FROM activities WHERE id = ?").run(activityId);
         return activityFromRow(deleted);
       })();
+      publishActivitiesChanged(options.eventBus, [activityEventRecord(deleted)]);
+      return deleted;
     },
 
     async getImportMapping(accountId, contextKind) {
@@ -920,6 +950,114 @@ export function createActivityService(
       return duplicates;
     },
   };
+}
+
+interface ActivityEventRecord {
+  accountId: string;
+  assetId: string | null;
+  currency: string;
+  activityDate: string;
+}
+
+function publishActivitiesChanged(
+  eventBus: BackendEventBus | undefined,
+  activities: ActivityEventRecord[],
+): void {
+  if (!eventBus || activities.length === 0) {
+    return;
+  }
+
+  const accountIds = uniqueSortedStrings(activities.map((activity) => activity.accountId));
+  if (accountIds.length === 0) {
+    return;
+  }
+
+  eventBus.publish({
+    name: ACTIVITIES_CHANGED_EVENT,
+    payload: {
+      type: ACTIVITIES_CHANGED_EVENT,
+      account_ids: accountIds,
+      asset_ids: uniqueSortedStrings(
+        activities.flatMap((activity) => (activity.assetId ? [activity.assetId] : [])),
+      ),
+      currencies: uniqueSortedStrings(activities.map((activity) => activity.currency)),
+      earliest_activity_at_utc: earliestActivityAtUtc(activities),
+    },
+  });
+}
+
+function publishBulkActivitiesChanged(
+  eventBus: BackendEventBus | undefined,
+  oldRows: ActivityRow[],
+  result: ActivityBulkMutationResult,
+): void {
+  if (!eventBus || result.errors.length > 0) {
+    return;
+  }
+
+  const accountIds = uniqueSortedStrings([
+    ...oldRows.map((row) => row.account_id),
+    ...result.created.map((activity) => activity.accountId),
+    ...result.updated.map((activity) => activity.accountId),
+  ]);
+  if (accountIds.length === 0) {
+    return;
+  }
+
+  eventBus.publish({
+    name: ACTIVITIES_CHANGED_EVENT,
+    payload: {
+      type: ACTIVITIES_CHANGED_EVENT,
+      account_ids: accountIds,
+      asset_ids: uniqueSortedStrings([
+        ...oldRows.flatMap((row) => (row.asset_id ? [row.asset_id] : [])),
+        ...result.created.flatMap((activity) => (activity.assetId ? [activity.assetId] : [])),
+        ...result.updated.flatMap((activity) => (activity.assetId ? [activity.assetId] : [])),
+      ]),
+      currencies: uniqueSortedStrings([
+        ...result.created.map((activity) => activity.currency),
+        ...result.updated.map((activity) => activity.currency),
+      ]),
+      earliest_activity_at_utc: earliestActivityAtUtc([
+        ...result.created.map(activityEventRecord),
+        ...result.updated.map(activityEventRecord),
+        ...result.deleted.map(activityEventRecord),
+      ]),
+    },
+  });
+}
+
+function activityEventRecord(activity: Activity): ActivityEventRecord {
+  return {
+    accountId: activity.accountId,
+    assetId: activity.assetId && activity.assetId.length > 0 ? activity.assetId : null,
+    currency: activity.currency,
+    activityDate: activity.activityDate,
+  };
+}
+
+function activityEventRecordFromCreate(activity: ActivityCreateRowInput): ActivityEventRecord {
+  return {
+    accountId: activity.accountId,
+    assetId: activity.assetId && activity.assetId.length > 0 ? activity.assetId : null,
+    currency: activity.currency,
+    activityDate: activity.activityDate,
+  };
+}
+
+function earliestActivityAtUtc(activities: ActivityEventRecord[]): string | null {
+  let earliest: number | null = null;
+  for (const activity of activities) {
+    const timestamp = new Date(activity.activityDate).getTime();
+    if (!Number.isNaN(timestamp) && (earliest === null || timestamp < earliest)) {
+      earliest = timestamp;
+    }
+  }
+  return earliest === null ? null : new Date(earliest).toISOString();
+}
+
+function uniqueSortedStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.length > 0))).sort();
 }
 
 export function normalizeContextKindValue(raw: string): string {
@@ -1828,7 +1966,7 @@ async function importActivityRows(
     errorMessage: null,
   };
 
-  return db.transaction(() => {
+  const result = db.transaction(() => {
     const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
 
     try {
@@ -1850,6 +1988,13 @@ async function importActivityRows(
       summary,
     };
   })();
+  if (summary.imported > 0) {
+    publishActivitiesChanged(
+      options.eventBus,
+      insertable.map((row) => activityEventRecordFromCreate(row.create)),
+    );
+  }
+  return result;
 }
 
 function importActivityCreateInput(activity: Record<string, unknown>): Record<string, unknown> {
