@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 111
+turns_used: 112
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T21:43:18+08:00"
+updated_at: "2026-05-16T21:59:33+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -733,6 +733,12 @@ updated_at: "2026-05-16T21:43:18+08:00"
   requested asset quote mode and upsert MANUAL quote rows transactionally while
   preserving MARKET assets and income activities. Targeted activities tests,
   backend type-check, full `bun run check`, and focused code review passed.
+- Turn 112: Added bounded activity sync-event queuing for device-sync parity:
+  create/update/delete, bulk, transfer link/unlink, and CSV import writes now
+  produce post-transaction `activities` sync callback events with
+  Rust-compatible `ActivityDB` payloads and outbox filtering rules. Targeted
+  activities tests, backend type-check, full `bun run check`, and focused code
+  review passed.
 
 ## Deferred items
 
@@ -846,9 +852,11 @@ updated_at: "2026-05-16T21:43:18+08:00"
   through the TS exchange-rate runtime, Rust-shaped mutation event production,
   transactional `assets_created` events for newly staged assets, and
   Rust-compatible MANUAL quote fallback writes for price-bearing activity
-  writes; provider-backed asset resolution, device-sync outbox emission for
-  writes, and portfolio recalculation side effects remain active follow-ups for
-  dedicated activities/import/portfolio parity slices.
+  writes, and Rust-compatible activity sync-event callback queuing for write
+  paths; provider-backed asset resolution, import-run/asset sync outbox
+  follow-ups, actual sync_outbox persistence/runtime wiring, and portfolio
+  recalculation side effects remain active follow-ups for dedicated
+  activities/import/device-sync/portfolio parity slices.
 - AI chat provider streaming, title generation, tool execution, tag mutations,
   attachment handling, and outbox writes remain active follow-ups. reason=local
   thread/message persistence and tool-result mutation now have TS runtime

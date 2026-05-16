@@ -201,6 +201,21 @@ interface ImportActivitiesResult {
 export interface ActivityServiceOptions {
   eventBus?: BackendEventBus;
   ensureFxPairs?: (pairs: Array<[string, string]>) => Promise<void> | void;
+  queueSyncEvent?: (event: ActivitySyncEvent) => void;
+}
+
+export type ActivitySyncOperation = "Create" | "Update" | "Delete";
+export type ActivitySyncPayload = ActivityRow;
+export type ActivitySyncFilterInput = Pick<
+  ActivityRow,
+  "import_run_id" | "is_user_modified" | "source_record_id" | "source_system"
+>;
+
+export interface ActivitySyncEvent {
+  entity: "activities";
+  entityId: string;
+  operation: ActivitySyncOperation;
+  payload: ActivitySyncPayload | { id: string };
 }
 
 export interface ActivityService {
@@ -315,7 +330,7 @@ interface ActivityDetailsRow {
   metadata: string | null;
 }
 
-interface ActivityRow {
+export interface ActivityRow {
   id: string;
   account_id: string;
   asset_id: string | null;
@@ -484,12 +499,15 @@ export function createActivityService(
           throw mapActivitySqliteError(error);
         }
 
+        const createdRow = readActivityRow(db, activity.id);
         return {
-          created: activityFromRow(readActivityRow(db, activity.id)),
+          created: activityFromRow(createdRow),
           createdAssetIds: [...assetContext.createdAssetIds],
+          syncEvents: activitySyncEvents([{ operation: "Create", row: createdRow }]),
         };
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
+      queueActivitySyncEvents(options, outcome.syncEvents);
       publishActivitiesChanged(options.eventBus, [activityEventRecord(outcome.created)]);
       return outcome.created;
     },
@@ -511,13 +529,16 @@ export function createActivityService(
           throw mapActivitySqliteError(error);
         }
 
+        const updatedRow = readActivityRow(db, activityId);
         return {
           existing: activityFromRow(existing),
-          updated: activityFromRow(readActivityRow(db, activityId)),
+          updated: activityFromRow(updatedRow),
           createdAssetIds: [...assetContext.createdAssetIds],
+          syncEvents: activitySyncEvents([{ operation: "Update", row: updatedRow }]),
         };
       })();
       publishAssetsCreated(options.eventBus, result.createdAssetIds);
+      queueActivitySyncEvents(options, result.syncEvents);
       publishActivitiesChanged(options.eventBus, [
         activityEventRecord(result.existing),
         activityEventRecord(result.updated),
@@ -598,26 +619,33 @@ export function createActivityService(
             result: emptyBulkMutationResult(errors),
             oldRows: [] as ActivityRow[],
             createdAssetIds: [] as string[],
+            syncEvents: [] as ActivitySyncEvent[],
           };
         }
 
         const result = emptyBulkMutationResult([]);
+        const syncInputs: ActivitySyncInput[] = [];
         try {
           ensurePendingActivityAssets(db, assetContext);
           for (const activity of preparedDeletes) {
             db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
             result.deleted.push(activityFromRow(activity));
+            syncInputs.push({ operation: "Delete", row: activity });
           }
           for (const { activity, assetQuoteMode, shouldWriteQuote } of preparedUpdates) {
             applyActivityQuoteSideEffects(db, activity, assetQuoteMode, shouldWriteQuote);
             updateActivityRow(db, activity);
-            result.updated.push(activityFromRow(readActivityRow(db, activity.id)));
+            const updatedRow = readActivityRow(db, activity.id);
+            result.updated.push(activityFromRow(updatedRow));
+            syncInputs.push({ operation: "Update", row: updatedRow });
           }
           for (const { activity, tempId } of preparedCreates) {
             applyActivityQuoteSideEffects(db, activity, activity.assetQuoteMode, true);
             insertActivityRow(db, activity);
-            result.created.push(activityFromRow(readActivityRow(db, activity.id)));
+            const createdRow = readActivityRow(db, activity.id);
+            result.created.push(activityFromRow(createdRow));
             result.createdMappings.push({ tempId, activityId: activity.id });
+            syncInputs.push({ operation: "Create", row: createdRow });
           }
         } catch (error) {
           throw mapActivitySqliteError(error);
@@ -627,9 +655,11 @@ export function createActivityService(
           result,
           oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
           createdAssetIds: [...assetContext.createdAssetIds],
+          syncEvents: activitySyncEvents(syncInputs),
         };
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
+      queueActivitySyncEvents(options, outcome.syncEvents);
       publishBulkActivitiesChanged(options.eventBus, outcome.oldRows, outcome.result);
       return outcome.result;
     },
@@ -722,7 +752,7 @@ export function createActivityService(
         throw new Error("Cannot link an activity to itself");
       }
 
-      const updatedPair = db.transaction(() => {
+      const result = db.transaction(() => {
         const activityA = readActivityRow(db, activityAId);
         const activityB = readActivityRow(db, activityBId);
         const [transferIn, transferOut] = transferPairByType(
@@ -754,14 +784,21 @@ export function createActivityService(
           setTransferFlowExternal(transferOut.metadata, false),
           now,
         );
-        const updatedPair: [Activity, Activity] = [
-          activityFromRow(readActivityRow(db, transferIn.id)),
-          activityFromRow(readActivityRow(db, transferOut.id)),
+        const updatedRows: [ActivityRow, ActivityRow] = [
+          readActivityRow(db, transferIn.id),
+          readActivityRow(db, transferOut.id),
         ];
-        return updatedPair;
+        return {
+          updatedPair: updatedRows.map(activityFromRow) as [Activity, Activity],
+          syncEvents: activitySyncEvents([
+            { operation: "Update", row: updatedRows[0] },
+            { operation: "Update", row: updatedRows[1] },
+          ]),
+        };
       })();
-      publishActivitiesChanged(options.eventBus, updatedPair.map(activityEventRecord));
-      return updatedPair;
+      queueActivitySyncEvents(options, result.syncEvents);
+      publishActivitiesChanged(options.eventBus, result.updatedPair.map(activityEventRecord));
+      return result.updatedPair;
     },
 
     unlinkTransferActivities(activityAId, activityBId) {
@@ -769,7 +806,7 @@ export function createActivityService(
         throw new Error("Cannot unlink an activity from itself");
       }
 
-      const updatedPair = db.transaction(() => {
+      const result = db.transaction(() => {
         const activityA = readActivityRow(db, activityAId);
         const activityB = readActivityRow(db, activityBId);
         const [transferIn, transferOut] = transferPairByType(
@@ -800,24 +837,35 @@ export function createActivityService(
           setTransferFlowExternal(transferOut.metadata, true),
           now,
         );
-        const updatedPair: [Activity, Activity] = [
-          activityFromRow(readActivityRow(db, transferIn.id)),
-          activityFromRow(readActivityRow(db, transferOut.id)),
+        const updatedRows: [ActivityRow, ActivityRow] = [
+          readActivityRow(db, transferIn.id),
+          readActivityRow(db, transferOut.id),
         ];
-        return updatedPair;
+        return {
+          updatedPair: updatedRows.map(activityFromRow) as [Activity, Activity],
+          syncEvents: activitySyncEvents([
+            { operation: "Update", row: updatedRows[0] },
+            { operation: "Update", row: updatedRows[1] },
+          ]),
+        };
       })();
-      publishActivitiesChanged(options.eventBus, updatedPair.map(activityEventRecord));
-      return updatedPair;
+      queueActivitySyncEvents(options, result.syncEvents);
+      publishActivitiesChanged(options.eventBus, result.updatedPair.map(activityEventRecord));
+      return result.updatedPair;
     },
 
     deleteActivity(activityId) {
-      const deleted = db.transaction(() => {
+      const result = db.transaction(() => {
         const deleted = readActivityRow(db, activityId);
         db.query("DELETE FROM activities WHERE id = ?").run(activityId);
-        return activityFromRow(deleted);
+        return {
+          deleted: activityFromRow(deleted),
+          syncEvents: activitySyncEvents([{ operation: "Delete", row: deleted }]),
+        };
       })();
-      publishActivitiesChanged(options.eventBus, [activityEventRecord(deleted)]);
-      return deleted;
+      queueActivitySyncEvents(options, result.syncEvents);
+      publishActivitiesChanged(options.eventBus, [activityEventRecord(result.deleted)]);
+      return result.deleted;
     },
 
     async getImportMapping(accountId, contextKind) {
@@ -1011,6 +1059,63 @@ interface ActivityEventRecord {
   assetId: string | null;
   currency: string;
   activityDate: string;
+}
+
+interface ActivitySyncInput {
+  operation: ActivitySyncOperation;
+  row: ActivityRow;
+}
+
+function queueActivitySyncEvents(
+  options: ActivityServiceOptions,
+  events: ActivitySyncEvent[],
+): void {
+  if (!options.queueSyncEvent) {
+    return;
+  }
+  for (const event of events) {
+    options.queueSyncEvent(event);
+  }
+}
+
+function activitySyncEvents(inputs: ActivitySyncInput[]): ActivitySyncEvent[] {
+  return inputs.flatMap(({ operation, row }) => {
+    if (!shouldQueueActivitySyncEvent(operation, row)) {
+      return [];
+    }
+    return [
+      {
+        entity: "activities" as const,
+        entityId: row.id,
+        operation,
+        payload: operation === "Delete" ? { id: row.id } : { ...row },
+      },
+    ];
+  });
+}
+
+export function shouldQueueActivitySyncEvent(
+  operation: ActivitySyncOperation,
+  activity: ActivitySyncFilterInput,
+): boolean {
+  if (operation === "Delete") {
+    return true;
+  }
+  if (activity.is_user_modified !== 0) {
+    return true;
+  }
+
+  const sourceSystem = activity.source_system?.trim();
+  if (sourceSystem) {
+    const normalizedSource = sourceSystem.toUpperCase();
+    return normalizedSource === "MANUAL" || normalizedSource === "CSV";
+  }
+
+  return isBlankSyncText(activity.import_run_id) && isBlankSyncText(activity.source_record_id);
+}
+
+function isBlankSyncText(value: string | null): boolean {
+  return value === null || value.trim() === "";
 }
 
 function publishAssetsCreated(eventBus: BackendEventBus | undefined, assetIds: string[]): void {
@@ -2036,12 +2141,14 @@ async function importActivityRows(
   const result = db.transaction(() => {
     ensurePendingActivityAssets(db, assetContext, pendingAssetIds);
     const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
+    const syncInputs: ActivitySyncInput[] = [];
 
     try {
       for (const row of insertable) {
         row.create.importRunId = importRunId;
         applyActivityQuoteSideEffects(db, row.create, row.create.assetQuoteMode, true);
         insertActivityRow(db, row.create);
+        syncInputs.push({ operation: "Create", row: readActivityRow(db, row.create.id) });
       }
     } catch (error) {
       throw mapActivitySqliteError(error);
@@ -2055,10 +2162,12 @@ async function importActivityRows(
       activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
       importRunId,
       summary,
+      syncEvents: activitySyncEvents(syncInputs),
     };
   })();
   if (summary.imported > 0) {
     publishAssetsCreated(options.eventBus, [...assetContext.createdAssetIds]);
+    queueActivitySyncEvents(options, result.syncEvents);
     publishActivitiesChanged(
       options.eventBus,
       insertable.map((row) => activityEventRecordFromCreate(row.create)),

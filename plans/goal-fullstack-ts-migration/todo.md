@@ -155,26 +155,28 @@
     slices; add-on filesystem extraction, runtime loading, store HTTP, staging
     I/O, and update behavior are deferred to add-on runtime parity slices;
     market-data market sync and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; activity mutation event production and
-    domain-event planning/batch processing/worker helper now have TS runtime
-    parity, while provider-backed asset resolution, device-sync outbox emission
-    for activity writes, and portfolio recalculation side effects are deferred
-    to activities/import runtime parity slices; AI chat persistence and
-    tool-result mutation now have TS runtime parity, while provider streaming,
-    tool execution, tag persistence, and attachments are deferred to AI runtime
-    parity slices; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; bounded account/timezone health
-    status/checks, cache behavior, legacy-classification health issues, and
-    classification migration health-fix dispatch now have TS runtime parity,
-    while calculation-heavy health checks, market sync fix execution, and
-    non-classification `/health/fix` dispatch are deferred to health/calculation
-    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    feature-flag errors, background workers, device-sync cloud clients, token
-    lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    market-data/portfolio parity slices; activity mutation event production,
+    activity sync-event callback queuing, and domain-event planning/batch
+    processing/worker helper now have TS runtime parity, while provider-backed
+    asset resolution, import-run/asset sync outbox follow-ups, real sync_outbox
+    persistence/runtime wiring, and portfolio recalculation side effects are
+    deferred to activities/import/device-sync runtime parity slices; AI chat
+    persistence and tool-result mutation now have TS runtime parity, while
+    provider streaming, tool execution, tag persistence, and attachments are
+    deferred to AI runtime parity slices; device-sync integration for sync
+    crypto is deferred to device-sync runtime parity slices; bounded
+    account/timezone health status/checks, cache behavior, legacy-classification
+    health issues, and classification migration health-fix dispatch now have TS
+    runtime parity, while calculation-heavy health checks, market sync fix
+    execution, and non-classification `/health/fix` dispatch are deferred to
+    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, local sync repositories, subscription
+    entitlement checks, event production, E2EE enrollment, sync engine,
+    snapshot/upload runtime, feature-flag errors, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1007,6 +1009,16 @@ contract:
   quote writes in import, transaction-bound writes, and focused code review with
   no blocking issues. Provider-backed asset resolution, device-sync outbox, and
   portfolio recalculation remain deferred.
+- `pr5-activities-sync-event-queueing`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, and full
+  `bun run check`. Coverage includes Rust `should_sync_outbox_for_activity`
+  filtering, post-transaction Create/Update/Delete activity sync callback events
+  for create/update/delete, bulk, transfer link, and CSV import writes, bulk
+  no-event behavior on validation errors, Rust-shaped ActivityDB payloads, and
+  focused code review with no material issues. Provider-backed asset resolution,
+  import-run/asset sync outbox follow-ups, real sync_outbox persistence/runtime
+  wiring, and portfolio recalculation remain deferred.
 - `pr5-goal-plan-save-up-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

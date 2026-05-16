@@ -4,9 +4,11 @@ import { describe, expect, test } from "bun:test";
 import {
   ACTIVITIES_CHANGED_EVENT,
   createActivityService,
+  shouldQueueActivitySyncEvent,
   type Activity,
   type ActivityBulkMutationResult,
   type ActivitySearchRequest,
+  type ActivitySyncEvent,
 } from "./activities";
 import type { BackendEvent, BackendEventBus } from "../events";
 
@@ -1842,6 +1844,254 @@ describe("TS activities import domain", () => {
       ])) as { summary: Record<string, unknown> };
       expect(allDuplicateResult.summary).toMatchObject({ imported: 0, skipped: 1 });
       expect(events).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches Rust activity sync-outbox filtering rules", () => {
+    expect(
+      shouldQueueActivitySyncEvent("Create", {
+        source_system: " PLAID ",
+        is_user_modified: 0,
+        import_run_id: null,
+        source_record_id: "provider-row",
+      }),
+    ).toBe(false);
+    expect(
+      shouldQueueActivitySyncEvent("Update", {
+        source_system: "PLAID",
+        is_user_modified: 1,
+        import_run_id: "broker-run",
+        source_record_id: "provider-row",
+      }),
+    ).toBe(true);
+    expect(
+      shouldQueueActivitySyncEvent("Create", {
+        source_system: " csv ",
+        is_user_modified: 0,
+        import_run_id: "csv-run",
+        source_record_id: "row-1",
+      }),
+    ).toBe(true);
+    expect(
+      shouldQueueActivitySyncEvent("Create", {
+        source_system: null,
+        is_user_modified: 0,
+        import_run_id: null,
+        source_record_id: "provider-row",
+      }),
+    ).toBe(false);
+    expect(
+      shouldQueueActivitySyncEvent("Create", {
+        source_system: null,
+        is_user_modified: 0,
+        import_run_id: null,
+        source_record_id: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldQueueActivitySyncEvent("Delete", {
+        source_system: "PLAID",
+        is_user_modified: 0,
+        import_run_id: "broker-run",
+        source_record_id: "provider-row",
+      }),
+    ).toBe(true);
+  });
+
+  test("queues activity sync events after successful activity writes", async () => {
+    const db = createActivitiesDb();
+    const syncEvents: ActivitySyncEvent[] = [];
+    const service = createActivityService(db, {
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAccount(db, { id: "account-2", name: "Beta", currency: "CAD" });
+      insertAsset(db, { id: "AAPL", displayCode: "AAPL", name: "Apple", quoteCcy: "USD" });
+      insertAsset(db, { id: "MSFT", displayCode: "MSFT", name: "Microsoft", quoteCcy: "CAD" });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entity: "activities",
+          entityId: created.id,
+          operation: "Create",
+          payload: expect.objectContaining({
+            id: created.id,
+            source_system: "MANUAL",
+            is_user_modified: 0,
+          }),
+        }),
+      ]);
+
+      syncEvents.length = 0;
+      service.updateActivity?.({
+        id: created.id,
+        accountId: "account-2",
+        asset: { id: "MSFT" },
+        activityType: "BUY",
+        activityDate: "2025-01-16",
+        quantity: "1",
+        unitPrice: "12",
+        amount: "12",
+        currency: "CAD",
+      });
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entityId: created.id,
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: created.id,
+            account_id: "account-2",
+            asset_id: "MSFT",
+            is_user_modified: 1,
+          }),
+        }),
+      ]);
+
+      syncEvents.length = 0;
+      service.deleteActivity?.(created.id);
+      expect(syncEvents).toEqual([
+        {
+          entity: "activities",
+          entityId: created.id,
+          operation: "Delete",
+          payload: { id: created.id },
+        },
+      ]);
+
+      insertActivity(db, {
+        id: "broker-in",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        sourceSystem: "PLAID",
+        sourceRecordId: "broker-in-row",
+        isUserModified: false,
+      });
+      insertActivity(db, {
+        id: "broker-out",
+        accountId: "account-2",
+        activityType: "TRANSFER_OUT",
+        sourceSystem: "PLAID",
+        sourceRecordId: "broker-out-row",
+        isUserModified: false,
+      });
+      syncEvents.length = 0;
+      service.linkTransferActivities?.("broker-in", "broker-out");
+      expect(syncEvents.map((event) => `${event.operation}:${event.entityId}`)).toEqual([
+        "Update:broker-in",
+        "Update:broker-out",
+      ]);
+      expect(
+        syncEvents.every(
+          (event) => (event.payload as Record<string, unknown>).is_user_modified === 1,
+        ),
+      ).toBe(true);
+
+      insertActivity(db, {
+        id: "bulk-update",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+      });
+      insertActivity(db, {
+        id: "bulk-delete",
+        accountId: "account-2",
+        assetId: "MSFT",
+        activityType: "BUY",
+        quantity: "1",
+        unitPrice: "20",
+        amount: "20",
+      });
+      syncEvents.length = 0;
+      const bulk = service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "bulk-create-temp",
+            accountId: "account-1",
+            activityType: "DEPOSIT",
+            activityDate: "2025-02-01",
+            amount: "5",
+            currency: "USD",
+          },
+        ],
+        updates: [
+          {
+            id: "bulk-update",
+            accountId: "account-2",
+            asset: { id: "MSFT" },
+            activityType: "BUY",
+            activityDate: "2025-02-02",
+            quantity: "1",
+            unitPrice: "12",
+            amount: "12",
+            currency: "CAD",
+          },
+        ],
+        deleteIds: ["bulk-delete"],
+      }) as ActivityBulkMutationResult;
+      expect(syncEvents.map((event) => `${event.operation}:${event.entityId}`)).toEqual([
+        "Delete:bulk-delete",
+        "Update:bulk-update",
+        `Create:${bulk.created[0]?.id}`,
+      ]);
+
+      syncEvents.length = 0;
+      expect(
+        service.bulkMutateActivities?.({
+          updates: [
+            {
+              id: "missing-update",
+              accountId: "account-1",
+              activityType: "DEPOSIT",
+              activityDate: "2025-02-03",
+              currency: "USD",
+            },
+          ],
+        }) as ActivityBulkMutationResult,
+      ).toMatchObject({ errors: [expect.objectContaining({ id: "missing-update" })] });
+      expect(syncEvents).toEqual([]);
+
+      syncEvents.length = 0;
+      const importResult = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          assetId: "AAPL",
+          activityType: "BUY",
+          date: "2025-03-02",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+      ])) as { importRunId: string; summary: Record<string, unknown> };
+      expect(importResult.summary).toMatchObject({ imported: 1, skipped: 0 });
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          operation: "Create",
+          payload: expect.objectContaining({
+            source_system: "CSV",
+            import_run_id: importResult.importRunId,
+          }),
+        }),
+      ]);
     } finally {
       db.close();
     }

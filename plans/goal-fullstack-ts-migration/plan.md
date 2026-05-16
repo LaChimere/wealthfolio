@@ -222,6 +222,11 @@ backend:
   create/update/bulk/import paths when assets are or are requested as MANUAL,
   including transaction-bound quote-mode updates and preserving MARKET-mode
   provider behavior.
+- Add bounded activity sync-event queuing for create/update/delete, bulk,
+  transfer link/unlink, and CSV import writes, including Rust-compatible
+  ActivityDB payloads, post-transaction callback ordering, and Rust
+  `should_sync_outbox_for_activity` filtering semantics while keeping real
+  sync_outbox persistence/runtime wiring deferred.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
@@ -244,9 +249,9 @@ backend:
 - Add bounded legacy-classification health issue generation by surfacing
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
-- Keep still-deferred provider-backed asset resolution, device-sync outbox
-  emission, and actual portfolio job execution/valuation recalculation for
-  dedicated parity slices.
+- Keep still-deferred provider-backed asset resolution, import-run/asset sync
+  outbox follow-ups, real sync_outbox persistence/runtime wiring, and actual
+  portfolio job execution/valuation recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
