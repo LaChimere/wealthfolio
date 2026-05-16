@@ -416,6 +416,7 @@ interface ActivityCreateRowInput {
   idempotencyKey: string | null;
   importRunId: string | null;
   needsReview: boolean;
+  assetQuoteMode: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -439,6 +440,8 @@ const ACTIVITY_TYPES = [
   "ADJUSTMENT",
 ] as const;
 const SYMBOL_REQUIRED_ACTIVITY_TYPES = new Set(["BUY", "SELL", "SPLIT", "DIVIDEND", "ADJUSTMENT"]);
+const PRICE_BEARING_ACTIVITY_TYPES = new Set(["BUY", "SELL", "TRANSFER_IN"]);
+const MANUAL_QUOTE_SOURCE = "MANUAL";
 const CURRENCY_NORMALIZATION_RULES: Record<string, { majorCode: string; factor: Decimal }> = {
   GBp: { majorCode: "GBP", factor: new Decimal("0.01") },
   GBX: { majorCode: "GBP", factor: new Decimal("0.01") },
@@ -475,6 +478,7 @@ export function createActivityService(
 
         try {
           ensurePendingActivityAssets(db, assetContext);
+          applyActivityQuoteSideEffects(db, activity, activity.assetQuoteMode, true);
           insertActivityRow(db, activity);
         } catch (error) {
           throw mapActivitySqliteError(error);
@@ -496,9 +500,12 @@ export function createActivityService(
         const activityId = requiredNonEmptyString(input.id, "id");
         const existing = readActivityRow(db, activityId);
         const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
+        const assetQuoteMode = activityAssetQuoteModeFromRecord(input);
+        const shouldWriteQuote = shouldWriteManualQuoteForUpdate(input);
 
         try {
           ensurePendingActivityAssets(db, assetContext);
+          applyActivityQuoteSideEffects(db, update, assetQuoteMode, shouldWriteQuote);
           updateActivityRow(db, update);
         } catch (error) {
           throw mapActivitySqliteError(error);
@@ -529,7 +536,11 @@ export function createActivityService(
           activity: ActivityCreateRowInput;
           tempId: string | null;
         }> = [];
-        const preparedUpdates: ActivityRow[] = [];
+        const preparedUpdates: Array<{
+          activity: ActivityRow;
+          assetQuoteMode: string | null;
+          shouldWriteQuote: boolean;
+        }> = [];
         const preparedUpdateExistingRows: ActivityRow[] = [];
         const preparedDeletes: ActivityRow[] = [];
         const createIdempotencyKeys = new Set<string>();
@@ -564,9 +575,11 @@ export function createActivityService(
             }
             const existing = readActivityRow(db, activityId);
             preparedUpdateExistingRows.push(existing);
-            preparedUpdates.push(
-              normalizeActivityUpdateInput(db, updateInput, existing, assetContext),
-            );
+            preparedUpdates.push({
+              activity: normalizeActivityUpdateInput(db, updateInput, existing, assetContext),
+              assetQuoteMode: activityAssetQuoteModeFromRecord(updateInput),
+              shouldWriteQuote: shouldWriteManualQuoteForUpdate(updateInput),
+            });
           } catch (error) {
             errors.push({ id: targetId, action: "update", message: errorMessage(error) });
           }
@@ -595,11 +608,13 @@ export function createActivityService(
             db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
             result.deleted.push(activityFromRow(activity));
           }
-          for (const activity of preparedUpdates) {
+          for (const { activity, assetQuoteMode, shouldWriteQuote } of preparedUpdates) {
+            applyActivityQuoteSideEffects(db, activity, assetQuoteMode, shouldWriteQuote);
             updateActivityRow(db, activity);
             result.updated.push(activityFromRow(readActivityRow(db, activity.id)));
           }
           for (const { activity, tempId } of preparedCreates) {
+            applyActivityQuoteSideEffects(db, activity, activity.assetQuoteMode, true);
             insertActivityRow(db, activity);
             result.created.push(activityFromRow(readActivityRow(db, activity.id)));
             result.createdMappings.push({ tempId, activityId: activity.id });
@@ -2025,6 +2040,7 @@ async function importActivityRows(
     try {
       for (const row of insertable) {
         row.create.importRunId = importRunId;
+        applyActivityQuoteSideEffects(db, row.create, row.create.assetQuoteMode, true);
         insertActivityRow(db, row.create);
       }
     } catch (error) {
@@ -2457,6 +2473,7 @@ function normalizeActivityCreateInput(
     idempotencyKey,
     importRunId: stringFieldOrNull(input.importRunId),
     needsReview: input.needsReview === true,
+    assetQuoteMode: activityAssetQuoteModeFromRecord(input),
     createdAt: now,
     updatedAt: now,
   };
@@ -2616,6 +2633,10 @@ function activityAssetInputFromRecord(input: Record<string, unknown>): ActivityA
     : null;
 }
 
+function activityAssetQuoteModeFromRecord(input: Record<string, unknown>): string | null {
+  return normalizeRequestedQuoteMode(activityAssetInputFromRecord(input)?.quoteMode);
+}
+
 function createActivityAssetResolutionContext(): ActivityAssetResolutionContext {
   return {
     pendingAssetsById: new Map(),
@@ -2672,7 +2693,7 @@ function pendingActivityAssetFromInput(
     throw new Error(`Instrument type is required to create asset from symbol ${rawSymbol}`);
   }
 
-  const quoteMode = normalizeQuoteMode(asset.quoteMode) ?? "MARKET";
+  const quoteMode = normalizeRequestedQuoteMode(asset.quoteMode) ?? "MARKET";
   let instrumentSymbol = rawSymbol.trim().toUpperCase();
   let displayCode = instrumentSymbol;
   let exchangeMic = asset.exchangeMic?.trim().toUpperCase() || null;
@@ -2756,6 +2777,144 @@ function normalizeActivityAssetQuoteCcy(
   }
 
   throw new Error("Quote currency is required to create asset from symbol");
+}
+
+function normalizeRequestedQuoteMode(value: string | undefined): string | null {
+  switch (value?.trim().toUpperCase()) {
+    case "MANUAL":
+      return "MANUAL";
+    case "MARKET":
+      return "MARKET";
+    default:
+      return null;
+  }
+}
+
+function shouldWriteManualQuoteForUpdate(input: Record<string, unknown>): boolean {
+  return parseDecimalPatch(input, "unitPrice").kind === "set";
+}
+
+function applyActivityQuoteSideEffects(
+  db: Database,
+  activity: ActivityCreateRowInput | ActivityRow,
+  requestedQuoteMode: string | null,
+  shouldWriteQuote: boolean,
+): void {
+  const assetId = activityQuoteAssetId(activity);
+  if (!assetId) {
+    return;
+  }
+
+  if (requestedQuoteMode) {
+    updateActivityAssetQuoteMode(db, assetId, requestedQuoteMode);
+  }
+
+  const unitPrice = activityQuoteUnitPrice(activity);
+  if (
+    !shouldWriteQuote ||
+    unitPrice === null ||
+    !PRICE_BEARING_ACTIVITY_TYPES.has(activityQuoteType(activity)) ||
+    readActivityAssetQuoteMode(db, assetId) !== "MANUAL"
+  ) {
+    return;
+  }
+
+  upsertManualQuoteFromActivity(db, {
+    assetId,
+    activityDate: activityQuoteDate(activity),
+    unitPrice,
+    currency: activity.currency,
+  });
+}
+
+function activityQuoteAssetId(activity: ActivityCreateRowInput | ActivityRow): string | null {
+  return "assetId" in activity ? activity.assetId : activity.asset_id;
+}
+
+function activityQuoteType(activity: ActivityCreateRowInput | ActivityRow): string {
+  return "activityType" in activity ? activity.activityType : activity.activity_type;
+}
+
+function activityQuoteDate(activity: ActivityCreateRowInput | ActivityRow): string {
+  return "activityDate" in activity ? activity.activityDate : activity.activity_date;
+}
+
+function activityQuoteUnitPrice(activity: ActivityCreateRowInput | ActivityRow): Decimal | null {
+  if ("unitPrice" in activity) {
+    return activity.unitPrice;
+  }
+  return activity.unit_price === null ? null : new Decimal(activity.unit_price);
+}
+
+function updateActivityAssetQuoteMode(db: Database, assetId: string, quoteMode: string): void {
+  db.query(
+    `
+      UPDATE assets
+      SET quote_mode = ?
+      WHERE id = ? AND UPPER(COALESCE(quote_mode, '')) <> UPPER(?)
+    `,
+  ).run(quoteMode, assetId, quoteMode);
+}
+
+function readActivityAssetQuoteMode(db: Database, assetId: string): string {
+  const row = db
+    .query<{ quote_mode: string | null }, [string]>("SELECT quote_mode FROM assets WHERE id = ?")
+    .get(assetId);
+  return row?.quote_mode?.toUpperCase() ?? "MARKET";
+}
+
+function upsertManualQuoteFromActivity(
+  db: Database,
+  input: { assetId: string; activityDate: string; unitPrice: Decimal; currency: string },
+): void {
+  const timestamp = activityQuoteTimestamp(input.activityDate);
+  const day = timestamp.slice(0, 10);
+  const quoteId = `${input.assetId}_${day}_${MANUAL_QUOTE_SOURCE}`;
+  const price = decimalToStorage(input.unitPrice);
+  const optionalPrice = input.unitPrice.isZero() ? null : price;
+  const now = activityTimestampNow();
+
+  db.query(
+    `
+      INSERT INTO quotes (
+        id, asset_id, day, source, open, high, low, close, adjclose, volume,
+        currency, notes, created_at, timestamp
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+      ON CONFLICT(asset_id, day, source) DO UPDATE SET
+        id = excluded.id,
+        open = excluded.open,
+        high = excluded.high,
+        low = excluded.low,
+        close = excluded.close,
+        adjclose = excluded.adjclose,
+        volume = excluded.volume,
+        currency = excluded.currency,
+        notes = excluded.notes,
+        created_at = excluded.created_at,
+        timestamp = excluded.timestamp
+    `,
+  ).run(
+    quoteId,
+    input.assetId,
+    day,
+    MANUAL_QUOTE_SOURCE,
+    optionalPrice,
+    optionalPrice,
+    optionalPrice,
+    price,
+    optionalPrice,
+    input.currency,
+    now,
+    timestamp,
+  );
+}
+
+function activityQuoteTimestamp(activityDate: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(activityDate)) {
+    return `${activityDate}T12:00:00.000Z`;
+  }
+  return new Date(activityDate).toISOString();
 }
 
 function parseActivityCryptoPairSymbol(symbol: string): { base: string; quote: string } | null {

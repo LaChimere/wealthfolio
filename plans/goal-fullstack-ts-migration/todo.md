@@ -998,6 +998,15 @@ contract:
   pair collection from pending assets, and focused code review with no remaining
   actionable issues. Provider-backed asset resolution, device-sync outbox, and
   portfolio recalculation remain deferred.
+- `pr5-activities-manual-quote-side-effects`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check`, and full `bun run check`.
+  Coverage includes requested MANUAL quote-mode updates, MANUAL quote upserts
+  for BUY/SELL/TRANSFER_IN create/update/import paths, preserved MARKET-mode and
+  income-activity no-write behavior, deterministic quote IDs, pending-asset
+  quote writes in import, transaction-bound writes, and focused code review with
+  no blocking issues. Provider-backed asset resolution, device-sync outbox, and
+  portfolio recalculation remain deferred.
 - `pr5-goal-plan-save-up-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1397,16 +1406,15 @@ contract:
   market-data/provider parity slices; portfolio recalculation side effects move
   with holdings/portfolio parity slices; add-on filesystem extraction, runtime
   loading, store HTTP, staging I/O, and update behavior move with add-on runtime
-  parity slices; quote fallback writes, provider-backed asset resolution,
-  device-sync outbox emission for activity writes, and portfolio recalculation
-  side effects move with activities/import runtime parity slices; device-sync
-  integration for sync crypto moves with device-sync parity slices; broader
-  health checks, market sync fix execution, and non-classification `/health/fix`
-  dispatch move with health/calculation parity slices; real Connect token
-  lifecycle, cloud HTTP clients, broker sync orchestration, local sync
-  repositories, subscription entitlement checks, event production, E2EE
-  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  parity slices; provider-backed asset resolution, device-sync outbox emission
+  for activity writes, and portfolio recalculation side effects move with
+  activities/import runtime parity slices; device-sync integration for sync
+  crypto moves with device-sync parity slices; broader health checks, market
+  sync fix execution, and non-classification `/health/fix` dispatch move with
+  health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+  clients, broker sync orchestration, local sync repositories, subscription
+  entitlement checks, event production, E2EE enrollment, sync engine,
+  snapshot/upload runtime, feature-flag errors, background workers, device-sync
+  cloud clients, token lifecycle, team-key operations, key material handling,
+  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
+  effects move with Connect/device-sync parity slices.

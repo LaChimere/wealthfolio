@@ -591,6 +591,7 @@ describe("TS activities import domain", () => {
           exchangeMic: "XNAS",
           instrumentType: "EQUITY",
           quoteCcy: "USD",
+          quoteMode: "MANUAL",
           quantity: "1",
           unitPrice: "100",
           amount: "100",
@@ -624,7 +625,12 @@ describe("TS activities import domain", () => {
         instrument_symbol: "NVDA",
         instrument_exchange_mic: "XNAS",
         instrument_type: "EQUITY",
+        quote_mode: "MANUAL",
         quote_ccy: "USD",
+      });
+      expect(readQuoteByAssetDay(db, assetId, "2025-01-15", "MANUAL")).toMatchObject({
+        close: "100",
+        currency: "USD",
       });
       expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
         inserted: 1,
@@ -1020,6 +1026,91 @@ describe("TS activities import domain", () => {
         assetId: "VOD-LN",
         activityType: "BUY",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("writes manual fallback quotes for price-bearing activity writes", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+      });
+      insertAsset(db, {
+        id: "MSFT",
+        displayCode: "MSFT",
+        name: "Microsoft",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+      });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL", quoteMode: "MANUAL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10.50",
+        amount: "10.50",
+        currency: "USD",
+      }) as Activity;
+      expect(readAssetById(db, "AAPL")).toMatchObject({ quote_mode: "MANUAL" });
+      expect(readQuoteByAssetDay(db, "AAPL", "2025-01-15", "MANUAL")).toMatchObject({
+        id: "AAPL_2025-01-15_MANUAL",
+        open: "10.5",
+        high: "10.5",
+        low: "10.5",
+        close: "10.5",
+        adjclose: "10.5",
+        volume: null,
+        currency: "USD",
+        timestamp: "2025-01-15T00:00:00.000Z",
+      });
+
+      service.updateActivity?.({
+        id: created.id,
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        unitPrice: "12.25",
+        currency: "USD",
+      });
+      expect(readQuoteByAssetDay(db, "AAPL", "2025-01-15", "MANUAL")).toMatchObject({
+        close: "12.25",
+      });
+
+      service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "MSFT" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "20",
+        amount: "20",
+        currency: "USD",
+      });
+      expect(readQuoteByAssetDay(db, "MSFT", "2025-01-15", "MANUAL")).toBeNull();
+
+      service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "DIVIDEND",
+        activityDate: "2025-01-16",
+        quantity: "1",
+        unitPrice: "2",
+        amount: "2",
+        currency: "USD",
+      });
+      expect(readQuoteByAssetDay(db, "AAPL", "2025-01-16", "MANUAL")).toBeNull();
     } finally {
       db.close();
     }
@@ -2050,6 +2141,27 @@ function createActivitiesDb(): Database {
       instrument_type TEXT
     );
 
+    CREATE TABLE quotes (
+      id TEXT PRIMARY KEY NOT NULL,
+      asset_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      source TEXT NOT NULL,
+      open TEXT,
+      high TEXT,
+      low TEXT,
+      close TEXT NOT NULL,
+      adjclose TEXT,
+      volume TEXT,
+      currency TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (asset_id) REFERENCES assets (id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX uq_quotes_asset_day_source
+    ON quotes(asset_id, day, source);
+
     CREATE UNIQUE INDEX ux_activities_idempotency_key
     ON activities(idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -2289,6 +2401,20 @@ function readAssetById(db: Database, assetId: string): Record<string, unknown> |
   return db
     .query<Record<string, unknown>, [string]>("SELECT * FROM assets WHERE id = ?")
     .get(assetId);
+}
+
+function readQuoteByAssetDay(
+  db: Database,
+  assetId: string,
+  day: string,
+  source: string,
+): Record<string, unknown> | null {
+  return db
+    .query<
+      Record<string, unknown>,
+      [string, string, string]
+    >("SELECT * FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
+    .get(assetId, day, source);
 }
 
 function readActivityMetadata(db: Database, activityId: string): unknown {
