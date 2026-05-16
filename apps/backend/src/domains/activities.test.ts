@@ -2109,6 +2109,136 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("queues asset sync events for activity-created assets after commit", async () => {
+    const db = createActivitiesDb();
+    const syncEvents: ActivitySyncEvent[] = [];
+    const service = createActivityService(db, {
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          id: "NVDA-ASSET",
+          symbol: "NVDA",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          name: "Nvidia",
+        },
+        activityType: "BUY",
+        activityDate: "2025-04-01",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(created.assetId).toBe("NVDA-ASSET");
+      expect(syncEvents).toEqual([
+        {
+          entity: "assets",
+          entityId: "NVDA-ASSET",
+          operation: "Create",
+          payload: expect.objectContaining({
+            id: "NVDA-ASSET",
+            kind: "INVESTMENT",
+            name: "Nvidia",
+            display_code: "NVDA",
+            metadata: null,
+            quote_mode: "MARKET",
+            quote_ccy: "USD",
+            instrument_type: "EQUITY",
+            instrument_symbol: "NVDA",
+            instrument_exchange_mic: "XNAS",
+            provider_config: '{"preferred_provider":"YAHOO"}',
+            created_at: expect.any(String),
+            updated_at: expect.any(String),
+          }),
+        },
+        expect.objectContaining({
+          entity: "activities",
+          entityId: created.id,
+          operation: "Create",
+        }),
+      ]);
+      expect(syncEvents[0]?.payload).not.toHaveProperty("instrument_key");
+
+      syncEvents.length = 0;
+      const importResult = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          assetId: "NFLX-ASSET",
+          symbol: "NFLX",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          activityType: "BUY",
+          date: "2025-04-02",
+          quantity: "1",
+          unitPrice: "20",
+          amount: "20",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+      ])) as { importRunId: string; summary: Record<string, unknown> };
+      expect(importResult.summary).toMatchObject({ imported: 1, assetsCreated: 1 });
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entity: "assets",
+          entityId: "NFLX-ASSET",
+          operation: "Create",
+          payload: expect.objectContaining({
+            id: "NFLX-ASSET",
+            display_code: "NFLX",
+            instrument_symbol: "NFLX",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "import_runs",
+          entityId: importResult.importRunId,
+          operation: "Create",
+        }),
+        expect.objectContaining({
+          entity: "activities",
+          operation: "Create",
+          payload: expect.objectContaining({ import_run_id: importResult.importRunId }),
+        }),
+      ]);
+
+      syncEvents.length = 0;
+      const failedBulk = service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "failed-create",
+            accountId: "missing-account",
+            asset: {
+              id: "FAIL-ASSET",
+              symbol: "FAIL",
+              exchangeMic: "XNAS",
+              instrumentType: "EQUITY",
+              quoteCcy: "USD",
+            },
+            activityType: "BUY",
+            activityDate: "2025-04-03",
+            quantity: "1",
+            unitPrice: "30",
+            amount: "30",
+            currency: "USD",
+          },
+        ],
+      }) as ActivityBulkMutationResult;
+      expect(failedBulk.errors).toEqual([expect.objectContaining({ id: "failed-create" })]);
+      expect(syncEvents).toEqual([]);
+      expect(readAssetById(db, "FAIL-ASSET")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns Rust-compatible default import mapping with legacy context normalization", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -2395,12 +2525,16 @@ function createActivitiesDb(): Database {
       name TEXT,
       display_code TEXT,
       notes TEXT,
+      metadata TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
       quote_mode TEXT,
       quote_ccy TEXT NOT NULL DEFAULT 'USD',
-      instrument_type TEXT
+      instrument_type TEXT,
+      provider_config TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 
     CREATE TABLE quotes (

@@ -230,6 +230,10 @@ backend:
 - Add bounded CSV import-run sync-event queuing for activity imports, including
   Rust-compatible ImportRunDB payloads, import-run-before-activity callback
   ordering, and Rust `should_sync_outbox_for_import_run` filtering semantics.
+- Add bounded activity-created asset sync-event queuing for explicit-symbol
+  asset inserts performed by activity create/update/bulk/import paths, including
+  Rust-compatible AssetDB payloads and post-transaction callback ordering before
+  dependent activity/import events.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
@@ -252,9 +256,10 @@ backend:
 - Add bounded legacy-classification health issue generation by surfacing
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
-- Keep still-deferred provider-backed asset resolution, asset sync outbox
-  follow-ups, real sync_outbox persistence/runtime wiring, and actual portfolio
-  job execution/valuation recalculation for dedicated parity slices.
+- Keep still-deferred provider-backed asset resolution, remaining asset/quote
+  sync outbox follow-ups, real sync_outbox persistence/runtime wiring, and
+  actual portfolio job execution/valuation recalculation for dedicated parity
+  slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
@@ -273,10 +278,11 @@ broader market-data runtime beyond mapping/templates/duplicate lookups,
 read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved and bounded symbol-created activity
 create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
-import validation, bounded import apply, activity mutation event production, and
-domain-event planning/batch processing/worker helper, save-up preview
-calculations, local AI chat thread/message/tag persistence, bounded health
-account/timezone status/checks and legacy-classification issue generation,
+import validation, bounded import apply, activity mutation event production,
+activity/import/asset sync-event callback queuing, and domain-event
+planning/batch processing/worker helper, save-up preview calculations, local AI
+chat thread/message/tag persistence, bounded health account/timezone
+status/checks and legacy-classification issue generation,
 sync-crypto/device-sync integration, calculation-heavy health checks or
 non-classification `/health/fix` execution, holdings inline portfolio
 recalculation/job execution, real Connect runtime implementation, real

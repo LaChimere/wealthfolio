@@ -205,13 +205,16 @@ export interface ActivityServiceOptions {
 }
 
 export type ActivitySyncOperation = "Create" | "Update" | "Delete";
-export type ActivitySyncPayload = ActivityRow | ImportRunRow;
+export type ActivitySyncPayload = ActivityRow | ImportRunRow | ActivityAssetSyncRow;
 export type ActivitySyncFilterInput = Pick<
   ActivityRow,
   "import_run_id" | "is_user_modified" | "source_record_id" | "source_system"
 >;
 
-export type ActivitySyncEvent = ActivityRowSyncEvent | ActivityImportRunSyncEvent;
+export type ActivitySyncEvent =
+  | ActivityRowSyncEvent
+  | ActivityImportRunSyncEvent
+  | ActivityAssetSyncEvent;
 
 export interface ActivityRowSyncEvent {
   entity: "activities";
@@ -225,6 +228,13 @@ export interface ActivityImportRunSyncEvent {
   entityId: string;
   operation: "Create";
   payload: ImportRunRow;
+}
+
+export interface ActivityAssetSyncEvent {
+  entity: "assets";
+  entityId: string;
+  operation: "Create";
+  payload: ActivityAssetSyncRow;
 }
 
 export interface ActivityService {
@@ -409,6 +419,24 @@ interface AssetRow {
   instrument_type: string | null;
 }
 
+export interface ActivityAssetSyncRow {
+  id: string;
+  kind: string;
+  name: string | null;
+  display_code: string | null;
+  notes: string | null;
+  metadata: string | null;
+  is_active: number;
+  quote_mode: string;
+  quote_ccy: string;
+  instrument_type: string | null;
+  instrument_symbol: string | null;
+  instrument_exchange_mic: string | null;
+  provider_config: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface ActivityAssetInput {
   id?: string;
   symbol?: string;
@@ -529,10 +557,14 @@ export function createActivityService(
         }
 
         const createdRow = readActivityRow(db, activity.id);
+        const createdAssetIds = [...assetContext.createdAssetIds];
         return {
           created: activityFromRow(createdRow),
-          createdAssetIds: [...assetContext.createdAssetIds],
-          syncEvents: activitySyncEvents([{ operation: "Create", row: createdRow }]),
+          createdAssetIds,
+          syncEvents: [
+            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+            ...activitySyncEvents([{ operation: "Create", row: createdRow }]),
+          ],
         };
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
@@ -559,11 +591,15 @@ export function createActivityService(
         }
 
         const updatedRow = readActivityRow(db, activityId);
+        const createdAssetIds = [...assetContext.createdAssetIds];
         return {
           existing: activityFromRow(existing),
           updated: activityFromRow(updatedRow),
-          createdAssetIds: [...assetContext.createdAssetIds],
-          syncEvents: activitySyncEvents([{ operation: "Update", row: updatedRow }]),
+          createdAssetIds,
+          syncEvents: [
+            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+            ...activitySyncEvents([{ operation: "Update", row: updatedRow }]),
+          ],
         };
       })();
       publishAssetsCreated(options.eventBus, result.createdAssetIds);
@@ -680,11 +716,15 @@ export function createActivityService(
           throw mapActivitySqliteError(error);
         }
 
+        const createdAssetIds = [...assetContext.createdAssetIds];
         return {
           result,
           oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
-          createdAssetIds: [...assetContext.createdAssetIds],
-          syncEvents: activitySyncEvents(syncInputs),
+          createdAssetIds,
+          syncEvents: [
+            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+            ...activitySyncEvents(syncInputs),
+          ],
         };
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
@@ -1121,6 +1161,15 @@ function activitySyncEvents(inputs: ActivitySyncInput[]): ActivitySyncEvent[] {
       },
     ];
   });
+}
+
+function assetSyncEvents(rows: ActivityAssetSyncRow[]): ActivitySyncEvent[] {
+  return rows.map((row) => ({
+    entity: "assets" as const,
+    entityId: row.id,
+    operation: "Create" as const,
+    payload: { ...row },
+  }));
 }
 
 function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
@@ -2189,6 +2238,7 @@ async function importActivityRows(
 
   const result = db.transaction(() => {
     ensurePendingActivityAssets(db, assetContext, pendingAssetIds);
+    const createdAssetIds = [...assetContext.createdAssetIds];
     const importRun = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
     const syncInputs: ActivitySyncInput[] = [];
 
@@ -2211,7 +2261,11 @@ async function importActivityRows(
       activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
       importRunId: importRun.id,
       summary,
-      syncEvents: [...importRunSyncEvents(importRun), ...activitySyncEvents(syncInputs)],
+      syncEvents: [
+        ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+        ...importRunSyncEvents(importRun),
+        ...activitySyncEvents(syncInputs),
+      ],
     };
   })();
   if (summary.imported > 0) {
@@ -3247,6 +3301,41 @@ function readAccountRow(db: Database, accountId: string): AccountRow {
 
 function readAssetRow(db: Database, assetId: string): AssetRow {
   const row = findAssetRowById(db, assetId);
+  if (!row) {
+    throw new Error(`Record not found: asset ${assetId}`);
+  }
+  return row;
+}
+
+function readAssetSyncRows(db: Database, assetIds: string[]): ActivityAssetSyncRow[] {
+  return assetIds.map((assetId) => readAssetSyncRow(db, assetId));
+}
+
+function readAssetSyncRow(db: Database, assetId: string): ActivityAssetSyncRow {
+  const row = db
+    .query<ActivityAssetSyncRow, [string]>(
+      `
+        SELECT
+          id,
+          kind,
+          name,
+          display_code,
+          notes,
+          metadata,
+          is_active,
+          quote_mode,
+          quote_ccy,
+          instrument_type,
+          instrument_symbol,
+          instrument_exchange_mic,
+          provider_config,
+          created_at,
+          updated_at
+        FROM assets
+        WHERE id = ?
+      `,
+    )
+    .get(assetId);
   if (!row) {
     throw new Error(`Record not found: asset ${assetId}`);
   }
