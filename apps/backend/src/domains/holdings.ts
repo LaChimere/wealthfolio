@@ -452,8 +452,12 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
-    deleteSnapshot() {
-      return notImplemented("Snapshot deletion is not available in the TS runtime yet");
+    deleteSnapshot(accountId, date) {
+      try {
+        deleteSnapshot(db, accountId, date);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     saveManualHoldings() {
       return notImplemented("Manual holdings save is not available in the TS runtime yet");
@@ -528,6 +532,31 @@ function readSnapshotHoldings(
     baseCurrency ?? snapshot.currency,
     snapshot.snapshot_date,
     false,
+  );
+}
+
+function deleteSnapshot(db: Database, accountId: string, date: string): void {
+  const snapshot = db
+    .query<{ id: string; source: string | null }, [string, string]>(
+      `
+        SELECT id, source
+        FROM holdings_snapshots
+        WHERE account_id = ? AND snapshot_date = ?
+      `,
+    )
+    .get(accountId, date);
+  if (!snapshot) {
+    throw new Error(`No snapshot found for date ${date}`);
+  }
+  if ((snapshot.source ?? "CALCULATED") === "CALCULATED") {
+    throw new Error(
+      "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted.",
+    );
+  }
+
+  db.prepare("DELETE FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?").run(
+    accountId,
+    date,
   );
 }
 

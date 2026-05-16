@@ -204,6 +204,14 @@ describe("TS holdings domain", () => {
           "Date 2026-01-05: invalid quantity 'NaN' for ",
         ],
       });
+      await service.deleteSnapshot("a1", "2026-01-01");
+      expect(service.getSnapshots("a1", "2026-01-01", "2026-01-01")).toEqual([]);
+      await expect(service.deleteSnapshot("a1", "2026-01-02")).rejects.toThrow(
+        "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted.",
+      );
+      await expect(service.deleteSnapshot("a1", "2026-01-03")).rejects.toThrow(
+        "No snapshot found for date 2026-01-03",
+      );
       expect(await service.getHoldings("a1")).toEqual([]);
     } finally {
       db.close();

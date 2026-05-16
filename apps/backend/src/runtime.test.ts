@@ -166,6 +166,15 @@ describe("TS backend runtime composition", () => {
         message: "No snapshot found for date 2026-01-01",
       });
 
+      const deleteSnapshotResponse = await fetch(
+        `${server.baseUrl}/api/v1/snapshots?accountId=missing&date=2026-01-01`,
+        { method: "DELETE" },
+      );
+      expect(deleteSnapshotResponse.status).toBe(400);
+      await expect(deleteSnapshotResponse.json()).resolves.toMatchObject({
+        message: "No snapshot found for date 2026-01-01",
+      });
+
       const holdingsImportCheckResponse = await fetch(
         `${server.baseUrl}/api/v1/snapshots/import/check`,
         {
