@@ -176,6 +176,10 @@ function createServicesFromDatabase(
     eventBus,
   });
   exchangeRateService.initialize();
+  const marketDataService = createMarketDataService(db, {
+    exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
+    fetch: runtimeOptions.marketDataFetch,
+  });
   const appDataDir = runtimeOptions.appDataDir;
   const secretService = createRuntimeSecretService({
     appDataDir,
@@ -239,14 +243,15 @@ function createServicesFromDatabase(
       classificationMigrationProvider: taxonomyService,
       settingsProvider: settingsService,
     }),
-    holdingsService: createHoldingsService(db, { baseCurrency, exchangeRateService }),
+    holdingsService: createHoldingsService(db, {
+      baseCurrency,
+      exchangeRateService,
+      symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
+    }),
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),
-    marketDataService: createMarketDataService(db, {
-      exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
-      fetch: runtimeOptions.marketDataFetch,
-    }),
+    marketDataService,
     portfolioMetricsService: createPortfolioMetricsService(db, {
       baseCurrency,
       exchangeRateService,

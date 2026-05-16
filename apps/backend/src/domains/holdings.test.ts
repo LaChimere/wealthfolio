@@ -146,7 +146,7 @@ describe("TS holdings domain", () => {
         "No snapshot found for date 2026-01-03",
       );
       expect(
-        service.checkHoldingsImport({
+        await service.checkHoldingsImport({
           accountId: "a1",
           snapshots: [
             {
@@ -465,6 +465,100 @@ describe("TS holdings domain", () => {
       await expect(
         service.importHoldingsCsv({ accountId: "missing", snapshots: [] }),
       ).rejects.toThrow("Record not found: account missing");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses provider-backed exact symbol matches for holdings import checks", async () => {
+    const db = createHoldingsDb();
+    const searchedSymbols: string[] = [];
+    const service = createHoldingsService(db, {
+      symbolSearch(symbol) {
+        searchedSymbols.push(symbol);
+        if (symbol === "FAIL") {
+          throw new Error("provider unavailable");
+        }
+        return [
+          {
+            symbol: symbol === "FUZZY" ? "FUZZY.TO" : symbol,
+            shortName: `${symbol} short`,
+            longName: `${symbol} long`,
+            exchange: "TOR",
+            exchangeMic: "XTSE",
+            exchangeName: "Toronto Stock Exchange",
+            quoteType: "EQUITY",
+            typeDisplay: "Equity",
+            currency: "CAD",
+            currencySource: "provider",
+            dataSource: "YAHOO",
+            isExisting: false,
+            existingAssetId: null,
+            index: "quotes",
+            score: 100,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha" });
+
+      await expect(
+        service.checkHoldingsImport({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-03-01",
+              positions: [
+                { symbol: "SHOP", quantity: "1", currency: "CAD" },
+                { symbol: "FUZZY", quantity: "1", currency: "CAD" },
+                { symbol: "FAIL", quantity: "1", currency: "CAD" },
+                { symbol: "", quantity: "1", currency: "CAD" },
+              ],
+              cashBalances: {},
+            },
+          ],
+        }),
+      ).resolves.toEqual({
+        existingDates: [],
+        validationErrors: ["Date 2026-03-01: empty symbol found"],
+        symbols: [
+          {
+            symbol: "SHOP",
+            found: true,
+            assetName: "SHOP long",
+            assetId: null,
+            currency: "CAD",
+            exchangeMic: "XTSE",
+          },
+          {
+            symbol: "FUZZY",
+            found: false,
+            assetName: null,
+            assetId: null,
+            currency: null,
+            exchangeMic: null,
+          },
+          {
+            symbol: "FAIL",
+            found: false,
+            assetName: null,
+            assetId: null,
+            currency: null,
+            exchangeMic: null,
+          },
+          {
+            symbol: "",
+            found: false,
+            assetName: null,
+            assetId: null,
+            currency: null,
+            exchangeMic: null,
+          },
+        ],
+      });
+      expect(searchedSymbols).toEqual(["SHOP", "FUZZY", "FAIL"]);
     } finally {
       db.close();
     }

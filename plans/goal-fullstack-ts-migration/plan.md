@@ -199,6 +199,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   saves by collecting holding, asset quote-currency, cash, and account-to-base
   currency pairs and calling the migrated `ensureFxPairs` hook before snapshot
   persistence.
+- Add provider-backed holdings import-check symbol lookup by routing
+  `/api/v1/snapshots/import/check` through the migrated market-data search
+  runtime after local exact-symbol lookup, requiring exact provider symbol
+  matches, and treating provider failures as non-fatal misses.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -234,10 +238,9 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, provider-backed holdings import
-lookup, holdings portfolio recalculation side effects, real Connect runtime
-implementation, real device-sync runtime implementation, or Rust runtime removal
-is in scope for this slice.
+or non-classification `/health/fix` execution, holdings portfolio recalculation
+side effects, real Connect runtime implementation, real device-sync runtime
+implementation, or Rust runtime removal is in scope for this slice.
 
 ## Next slices
 

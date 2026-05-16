@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import Decimal from "decimal.js";
 
 import type { ExchangeRateService } from "./exchange-rates";
+import type { SymbolSearchResult } from "./market-data";
 
 type HoldingsExchangeRateService = Pick<ExchangeRateService, "getLatestExchangeRate"> &
   Partial<Pick<ExchangeRateService, "ensureFxPairs">>;
@@ -104,6 +105,7 @@ export interface HoldingsService {
 export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
   exchangeRateService?: HoldingsExchangeRateService;
+  symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   today?: () => string;
 }
 
@@ -496,11 +498,7 @@ export function createHoldingsService(
       return saveManualHoldings(db, request, options);
     },
     checkHoldingsImport(request) {
-      try {
-        return checkHoldingsImport(db, request);
-      } catch (error) {
-        return Promise.reject(error);
-      }
+      return checkHoldingsImport(db, request, options);
     },
     importHoldingsCsv(request) {
       return importHoldingsCsv(db, request, options);
@@ -1956,10 +1954,11 @@ function applyPortfolioWeights(holdings: Holding[]): void {
   }
 }
 
-function checkHoldingsImport(
+async function checkHoldingsImport(
   db: Database,
   request: HoldingsImportRequest,
-): CheckHoldingsImportResult {
+  options: HoldingsServiceOptions,
+): Promise<CheckHoldingsImportResult> {
   assertAccountExists(db, request.accountId);
 
   const validationErrors: string[] = [];
@@ -1995,7 +1994,9 @@ function checkHoldingsImport(
 
   return {
     existingDates: readExistingSnapshotDates(db, request.accountId, validDates),
-    symbols: [...uniqueSymbols].map((symbol) => symbolCheckResult(db, symbol)),
+    symbols: await Promise.all(
+      [...uniqueSymbols].map((symbol) => symbolCheckResult(db, symbol, options)),
+    ),
     validationErrors,
   };
 }
@@ -2557,26 +2558,58 @@ function readExistingSnapshotDates(
     .map((row) => row.snapshot_date);
 }
 
-function symbolCheckResult(db: Database, symbol: string): SymbolCheckResult {
+async function symbolCheckResult(
+  db: Database,
+  symbol: string,
+  options: HoldingsServiceOptions,
+): Promise<SymbolCheckResult> {
   const row = readExactAssetSymbol(db, symbol);
-  if (!row) {
+  if (row) {
     return {
       symbol,
-      found: false,
-      assetName: null,
-      assetId: null,
-      currency: null,
-      exchangeMic: null,
+      found: true,
+      assetName: row.name,
+      assetId: row.id,
+      currency: row.quote_ccy,
+      exchangeMic: row.instrument_exchange_mic,
     };
   }
+
+  const providerResult = await exactProviderSymbolResult(symbol, options);
+  if (providerResult) {
+    return {
+      symbol,
+      found: true,
+      assetName: providerResult.longName,
+      assetId: providerResult.existingAssetId ?? null,
+      currency: providerResult.currency ?? null,
+      exchangeMic: providerResult.exchangeMic ?? null,
+    };
+  }
+
   return {
     symbol,
-    found: true,
-    assetName: row.name,
-    assetId: row.id,
-    currency: row.quote_ccy,
-    exchangeMic: row.instrument_exchange_mic,
+    found: false,
+    assetName: null,
+    assetId: null,
+    currency: null,
+    exchangeMic: null,
   };
+}
+
+async function exactProviderSymbolResult(
+  symbol: string,
+  options: HoldingsServiceOptions,
+): Promise<SymbolSearchResult | null> {
+  if (!options.symbolSearch || symbol.trim() === "") {
+    return null;
+  }
+  try {
+    const results = await options.symbolSearch(symbol);
+    return results.find((result) => result.symbol.toUpperCase() === symbol.toUpperCase()) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {
