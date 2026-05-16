@@ -2768,6 +2768,16 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["messages", threadId]);
         return [{ id: "message-1", threadId }];
       },
+      getTags(threadId) {
+        calls.push(["get-tags", threadId]);
+        return threadId === "missing" ? [] : ["tag/1"];
+      },
+      addTag(threadId, tag) {
+        calls.push(["add-tag", { threadId, tag }]);
+      },
+      removeTag(threadId, tag) {
+        calls.push(["remove-tag", { threadId, tag }]);
+      },
       updateThread(threadId, request) {
         calls.push(["update-thread", { threadId, request }]);
         return { id: threadId, ...request };
@@ -3010,8 +3020,10 @@ describe("TS backend HTTP skeleton", () => {
       ["messages", "thread/1"],
       ["update-thread", { threadId: "thread/1", request: { isPinned: true } }],
       ["delete-thread", "thread/1"],
-      ["get-thread", "thread/1"],
-      ["get-thread", "missing"],
+      ["get-tags", "thread/1"],
+      ["get-tags", "missing"],
+      ["add-tag", { threadId: "thread/1", tag: "tag/1" }],
+      ["remove-tag", { threadId: "thread/1", tag: "tag/1" }],
       ["tool-result", { threadId: "thread/1", toolCallId: "tool/1", resultPatch: null }],
     ]);
   });

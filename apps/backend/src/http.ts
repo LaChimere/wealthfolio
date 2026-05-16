@@ -1252,17 +1252,19 @@ function routeAiChatRequest(
   const tagRoute = aiThreadTagRouteFromPath(url.pathname);
   if (tagRoute !== undefined) {
     if (request.method === "GET" && tagRoute.tag === undefined) {
-      return Promise.resolve(aiChatService.getThread(tagRoute.threadId))
-        .then((thread) => jsonResponse(parseAiThreadTags(thread)))
+      return Promise.resolve(aiChatService.getTags(tagRoute.threadId))
+        .then(jsonResponse)
         .catch(aiChatErrorResponse);
     }
     if (request.method === "POST" && tagRoute.tag === undefined) {
-      return handleJsonMutationNoContent(request, parseAiChatTagRequest, async () => {
-        // Rust currently validates the JSON body and treats tag add/remove as no-ops.
-      });
+      return handleAiChatJsonMutationNoContent(request, parseAiChatTagRequest, (input) =>
+        Promise.resolve(aiChatService.addTag(tagRoute.threadId, input.tag)).then(() => undefined),
+      );
     }
     if (request.method === "DELETE" && tagRoute.tag !== undefined) {
-      return new Response(null, { status: 204 });
+      return Promise.resolve(aiChatService.removeTag(tagRoute.threadId, tagRoute.tag))
+        .then(() => new Response(null, { status: 204 }))
+        .catch(aiChatErrorResponse);
     }
   }
 
@@ -3347,6 +3349,27 @@ async function handleAiChatJsonMutation<TInput, TOutput>(
   }
 }
 
+async function handleAiChatJsonMutationNoContent<TInput>(
+  request: Request,
+  parse: (payload: Record<string, unknown>) => TInput | Response,
+  mutate: (input: TInput) => Promise<void>,
+): Promise<Response> {
+  const payload = await parseJsonBody(request);
+  if (payload instanceof Response) {
+    return payload;
+  }
+  const input = parse(payload);
+  if (input instanceof Response) {
+    return input;
+  }
+  try {
+    await mutate(input);
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    return aiChatErrorResponse(error);
+  }
+}
+
 async function handleJsonMutationEmpty<TInput>(
   request: Request,
   parse: (payload: Record<string, unknown>) => TInput | Response,
@@ -4801,12 +4824,6 @@ function parseAiChatUpdateToolResultRequest(
     return jsonResponse({ code: 400, message: "resultPatch is required" }, 400);
   }
   return { threadId, toolCallId, resultPatch: payload.resultPatch };
-}
-
-function parseAiThreadTags(thread: Record<string, unknown> | null): string[] {
-  return Array.isArray(thread?.tags) && thread.tags.every((tag) => typeof tag === "string")
-    ? thread.tags
-    : [];
 }
 
 function aiChatErrorResponse(error: unknown): Response {

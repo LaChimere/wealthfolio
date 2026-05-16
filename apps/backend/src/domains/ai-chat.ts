@@ -91,6 +91,9 @@ export interface AiChatService {
     threadId: string,
   ): Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
   getMessages(threadId: string): Promise<unknown[]> | unknown[];
+  getTags(threadId: string): Promise<string[]> | string[];
+  addTag(threadId: string, tag: string): Promise<void> | void;
+  removeTag(threadId: string, tag: string): Promise<void> | void;
   updateThread(threadId: string, request: AiChatUpdateThreadRequest): Promise<unknown> | unknown;
   deleteThread(threadId: string): Promise<void> | void;
   updateToolResult(request: AiChatUpdateToolResultRequest): Promise<unknown> | unknown;
@@ -144,6 +147,20 @@ export function createAiChatService(db: Database): AiChatService {
         )
         .all(threadId)
         .map(messageFromRow);
+    },
+    getTags(threadId) {
+      return loadThreadTagList(db, threadId);
+    },
+    addTag(threadId, tag) {
+      db.prepare(
+        `
+          INSERT OR IGNORE INTO ai_thread_tags (id, thread_id, tag, created_at)
+          VALUES (?, ?, ?, ?)
+        `,
+      ).run(crypto.randomUUID(), threadId, tag, timestampNow());
+    },
+    removeTag(threadId, tag) {
+      db.prepare("DELETE FROM ai_thread_tags WHERE thread_id = ? AND tag = ?").run(threadId, tag);
     },
     updateThread(threadId, request) {
       const existing = readThreadRow(db, threadId);
@@ -295,21 +312,22 @@ function updateToolResult(db: Database, request: AiChatUpdateToolResultRequest):
 function loadThreadTags(db: Database, threadIds: string[]): Map<string, string[]> {
   const tags = new Map<string, string[]>();
   for (const threadId of threadIds) {
-    tags.set(
-      threadId,
-      db
-        .query<{ tag: string }, [string]>(
-          `
-            SELECT tag
-            FROM ai_thread_tags
-            WHERE thread_id = ?
-          `,
-        )
-        .all(threadId)
-        .map((row) => row.tag),
-    );
+    tags.set(threadId, loadThreadTagList(db, threadId));
   }
   return tags;
+}
+
+function loadThreadTagList(db: Database, threadId: string): string[] {
+  return db
+    .query<{ tag: string }, [string]>(
+      `
+        SELECT tag
+        FROM ai_thread_tags
+        WHERE thread_id = ?
+      `,
+    )
+    .all(threadId)
+    .map((row) => row.tag);
 }
 
 function readThreadRow(db: Database, threadId: string): AiThreadRow | null {

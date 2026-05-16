@@ -133,8 +133,8 @@ backend:
 - Add local AI chat thread/message persistence for `/api/v1/ai/threads`,
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
-  update/delete behavior, tool-result patch merging, and an explicit 501 for
-  still-deferred AI chat streaming.
+  update/delete behavior, tool-result patch merging, thread tag add/remove/list
+  persistence, and an explicit 501 for still-deferred AI chat streaming.
 - Add bounded net-worth current/history runtime for `/api/v1/net-worth` and
   `/api/v1/net-worth/history`, including latest holdings snapshots, cash
   balances, standalone alternative assets/liabilities, minor-currency quote
@@ -275,7 +275,7 @@ existing-asset/cash/symbol-resolved and bounded symbol-created activity
 create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
 import validation, bounded import apply, activity mutation event production, and
 domain-event planning/batch processing/worker helper, save-up preview
-calculations, local AI chat thread/message persistence, bounded health
+calculations, local AI chat thread/message/tag persistence, bounded health
 account/timezone status/checks and legacy-classification issue generation,
 sync-crypto/device-sync integration, calculation-heavy health checks or
 non-classification `/health/fix` execution, holdings inline portfolio

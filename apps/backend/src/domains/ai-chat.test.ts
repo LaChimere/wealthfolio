@@ -60,6 +60,46 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("persists thread tags with Rust-compatible idempotency", () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db);
+
+    try {
+      seedThread(db, {
+        id: "thread-a",
+        title: "Budget planning",
+        updatedAt: "2026-01-03T00:00:00Z",
+      });
+      seedThread(db, {
+        id: "thread-b",
+        title: "Portfolio review",
+        updatedAt: "2026-01-02T00:00:00Z",
+      });
+
+      service.addTag("thread-a", "favorite");
+      service.addTag("thread-a", "favorite");
+      service.addTag("thread-a", "planning");
+      service.addTag("thread-b", "favorite");
+
+      expect(service.getTags("thread-a")).toEqual(["favorite", "planning"]);
+      expect(service.getTags("missing")).toEqual([]);
+      expect(service.listThreads({ limit: 10 })).toMatchObject({
+        threads: [
+          { id: "thread-a", tags: ["favorite", "planning"] },
+          { id: "thread-b", tags: ["favorite"] },
+        ],
+      });
+      expect(service.getThread("thread-a")).toMatchObject({ id: "thread-a", tags: [] });
+
+      service.removeTag("thread-a", "missing");
+      service.removeTag("thread-a", "favorite");
+      expect(service.getTags("thread-a")).toEqual(["planning"]);
+      expect(() => service.addTag("missing", "orphan")).toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
   test("updates and deletes threads with missing-thread parity", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
@@ -173,6 +213,8 @@ describe("TS AI chat domain", () => {
 function createAiChatDb(): Database {
   const db = new Database(":memory:");
   db.exec(`
+    PRAGMA foreign_keys = ON;
+
     CREATE TABLE ai_threads (
       id TEXT PRIMARY KEY NOT NULL,
       title TEXT,
@@ -184,7 +226,7 @@ function createAiChatDb(): Database {
 
     CREATE TABLE ai_messages (
       id TEXT PRIMARY KEY NOT NULL,
-      thread_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL REFERENCES ai_threads(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       content_json TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -192,7 +234,7 @@ function createAiChatDb(): Database {
 
     CREATE TABLE ai_thread_tags (
       id TEXT PRIMARY KEY NOT NULL,
-      thread_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL REFERENCES ai_threads(id) ON DELETE CASCADE,
       tag TEXT NOT NULL,
       created_at TEXT NOT NULL,
       UNIQUE(thread_id, tag)

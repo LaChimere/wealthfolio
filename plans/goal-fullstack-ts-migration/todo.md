@@ -161,8 +161,8 @@
     asset resolution, asset sync outbox follow-ups, real sync_outbox
     persistence/runtime wiring, and portfolio recalculation side effects are
     deferred to activities/import/device-sync runtime parity slices; AI chat
-    persistence and tool-result mutation now have TS runtime parity, while
-    provider streaming, tool execution, tag persistence, and attachments are
+    persistence, tag persistence, and tool-result mutation now have TS runtime
+    parity, while provider streaming, tool execution, and attachments are
     deferred to AI runtime parity slices; device-sync integration for sync
     crypto is deferred to device-sync runtime parity slices; bounded
     account/timezone health status/checks, cache behavior, legacy-classification
@@ -1081,8 +1081,7 @@ contract:
   reads, thread update/delete behavior, message reads, tool-result patch
   merging, standalone runtime route wiring, and an explicit `501` for deferred
   AI chat streaming while provider streaming, title generation, tool execution,
-  attachment handling, tag mutations, and device-sync outbox writes remain
-  deferred.
+  attachment handling, and device-sync outbox writes remain deferred.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1359,6 +1358,13 @@ contract:
   flush/dispose behavior, pending-event clearing, scheduled error reporting, and
   flush-time failure propagation while real runtime service wiring remains
   deferred.
+- `pr5-ai-chat-tags-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/ai-chat.test.ts apps/backend/src/http.test.ts --grep "AI chat|routes migrated AI chat"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`; full
+  repository check passed with `bun run check`. Coverage includes SQLite-backed
+  `ai_thread_tags` reads, idempotent tag inserts, idempotent removals,
+  missing-thread FK behavior, list-thread tag loading, direct `getThread`
+  empty-tag parity, and HTTP tag add/list/remove routing.
 
 ## Result
 
@@ -1392,7 +1398,7 @@ contract:
   import validation plus bounded import apply and import transfer-pair auto-link
   plus import FX pair ensure, save-up and retirement goal-plan persistence,
   save-up preview calculation runtime, save-up goal overview service logic, AI
-  chat thread/message persistence, non-retirement/no-plan retirement summary
+  chat thread/message/tag persistence, non-retirement/no-plan retirement summary
   refresh service logic, deterministic retirement calculation primitives,
   projection engine, overview assembly, guarded retirement overview HTTP
   routing, plan-backed retirement summary refresh, retirement projection
@@ -1416,26 +1422,26 @@ contract:
   provider resolution/sync behavior move with calculation/market-data slices;
   actual portfolio job execution moves with portfolio/calculation slices; OS
   keyring integration moves with a dedicated runtime parity slice; AI chat
-  provider streaming, title generation, tool execution, tag mutations,
-  attachment handling, and outbox writes move with AI runtime parity slices;
-  alternative asset portfolio job enqueue and recalculation side effects move
-  with portfolio parity slices; asset quote-provider interactions,
-  auto-classification, and portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; market-data market sync and
-  quote-triggered recalculation side effects move with market-data/portfolio
-  parity slices; provider-backed symbol performance history moves with
-  market-data/provider parity slices; portfolio recalculation side effects move
-  with holdings/portfolio parity slices; add-on filesystem extraction, runtime
-  loading, store HTTP, staging I/O, and update behavior move with add-on runtime
-  parity slices; provider-backed asset resolution, device-sync outbox emission
-  for activity writes, and portfolio recalculation side effects move with
-  activities/import runtime parity slices; device-sync integration for sync
-  crypto moves with device-sync parity slices; broader health checks, market
-  sync fix execution, and non-classification `/health/fix` dispatch move with
-  health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-  clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, E2EE enrollment, sync engine,
-  snapshot/upload runtime, feature-flag errors, background workers, device-sync
-  cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
-  effects move with Connect/device-sync parity slices.
+  provider streaming, title generation, tool execution, attachment handling, and
+  outbox writes move with AI runtime parity slices; alternative asset portfolio
+  job enqueue and recalculation side effects move with portfolio parity slices;
+  asset quote-provider interactions, auto-classification, and portfolio
+  recalculation side effects move with asset/market-data/portfolio parity
+  slices; market-data market sync and quote-triggered recalculation side effects
+  move with market-data/portfolio parity slices; provider-backed symbol
+  performance history moves with market-data/provider parity slices; portfolio
+  recalculation side effects move with holdings/portfolio parity slices; add-on
+  filesystem extraction, runtime loading, store HTTP, staging I/O, and update
+  behavior move with add-on runtime parity slices; provider-backed asset
+  resolution, device-sync outbox emission for activity writes, and portfolio
+  recalculation side effects move with activities/import runtime parity slices;
+  device-sync integration for sync crypto moves with device-sync parity slices;
+  broader health checks, market sync fix execution, and non-classification
+  `/health/fix` dispatch move with health/calculation parity slices; real
+  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
+  sync repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.
