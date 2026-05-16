@@ -165,6 +165,54 @@ export interface Holding {
   metadata: unknown | null;
 }
 
+export interface HoldingSummary {
+  id: string;
+  symbol: string;
+  name: string | null;
+  holdingType: Holding["holdingType"];
+  quantity: number;
+  marketValue: number;
+  currency: string;
+  weightInCategory: number;
+}
+
+export interface CategoryAllocation {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  value: number;
+  percentage: number;
+  children?: CategoryAllocation[];
+}
+
+export interface TaxonomyAllocation {
+  taxonomyId: string;
+  taxonomyName: string;
+  color: string;
+  categories: CategoryAllocation[];
+}
+
+export interface PortfolioAllocations {
+  assetClasses: TaxonomyAllocation;
+  sectors: TaxonomyAllocation;
+  regions: TaxonomyAllocation;
+  riskCategory: TaxonomyAllocation;
+  securityTypes: TaxonomyAllocation;
+  customGroups: TaxonomyAllocation[];
+  totalValue: number;
+}
+
+export interface AllocationHoldings {
+  taxonomyId: string;
+  taxonomyName: string;
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  holdings: HoldingSummary[];
+  totalValue: number;
+  currency: string;
+}
+
 export class HoldingsNotImplementedError extends Error {
   readonly status = 501;
   readonly code = "not_implemented";
@@ -231,6 +279,57 @@ interface AssetRow {
   provider_config: string | null;
 }
 
+interface TaxonomyRow {
+  id: string;
+  name: string;
+  color: string;
+  is_system: number;
+  sort_order: number;
+}
+
+interface TaxonomyCategoryRow {
+  id: string;
+  taxonomy_id: string;
+  parent_id: string | null;
+  name: string;
+  color: string;
+  sort_order: number;
+}
+
+interface AssetTaxonomyAssignmentRow {
+  asset_id: string;
+  taxonomy_id: string;
+  category_id: string;
+  weight: number;
+}
+
+interface Taxonomy {
+  id: string;
+  name: string;
+  color: string;
+  isSystem: boolean;
+}
+
+interface TaxonomyCategory {
+  id: string;
+  taxonomyId: string;
+  parentId: string | null;
+  name: string;
+  color: string;
+}
+
+interface TaxonomyWithCategories {
+  taxonomy: Taxonomy;
+  categories: TaxonomyCategory[];
+}
+
+interface AssetTaxonomyAssignment {
+  assetId: string;
+  taxonomyId: string;
+  categoryId: string;
+  weight: number;
+}
+
 interface AccountExistsRow {
   count: number;
 }
@@ -278,6 +377,24 @@ const CURRENCY_NORMALIZATION_RULES = new Map<string, CurrencyNormalizationRule>(
 
 const DECIMAL_PRECISION = 8;
 
+const UNKNOWN_CATEGORY_ID = "__UNKNOWN__";
+const UNKNOWN_CATEGORY_NAME = "Unknown";
+const UNKNOWN_CATEGORY_COLOR = "#878580";
+const CASH_BANK_DEPOSITS_CATEGORY_ID = "CASH_BANK_DEPOSITS";
+const CASH_CATEGORY_ID = "CASH";
+
+const DEFAULT_TAXONOMY_ALLOCATIONS = {
+  assetClasses: { taxonomyId: "asset_classes", taxonomyName: "Asset Classes", color: "#879a39" },
+  sectors: { taxonomyId: "industries_gics", taxonomyName: "Sectors", color: "#da702c" },
+  regions: { taxonomyId: "regions", taxonomyName: "Regions", color: "#8b7ec8" },
+  riskCategory: { taxonomyId: "risk_category", taxonomyName: "Risk Category", color: "#d14d41" },
+  securityTypes: {
+    taxonomyId: "instrument_type",
+    taxonomyName: "Instrument Type",
+    color: "#4385be",
+  },
+} as const;
+
 export function createHoldingsService(
   db: Database,
   options: HoldingsServiceOptions = {},
@@ -311,11 +428,19 @@ export function createHoldingsService(
       const ids = accountIds && accountIds.length > 0 ? accountIds : readActiveAccountIds(db);
       return ids.length === 0 ? [] : readLatestValuations(db, ids);
     },
-    getPortfolioAllocations() {
-      return notImplemented("Portfolio allocations are not available in the TS runtime yet");
+    getPortfolioAllocations(accountId) {
+      try {
+        return readPortfolioAllocations(db, accountId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
-    getHoldingsByAllocation() {
-      return notImplemented("Allocation holdings are not available in the TS runtime yet");
+    getHoldingsByAllocation(accountId, taxonomyId, categoryId) {
+      try {
+        return readHoldingsByAllocation(db, accountId, taxonomyId, categoryId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     getSnapshots(accountId, dateFrom, dateTo) {
       return readSnapshotInfo(db, accountId, dateFrom, dateTo);
@@ -467,6 +592,440 @@ function readAssetHoldings(
     }
   }
   return holdings;
+}
+
+function readPortfolioAllocations(
+  db: Database,
+  accountId: string,
+  options: HoldingsServiceOptions,
+): PortfolioAllocations {
+  const holdings = readLiveHoldings(db, accountId, options);
+  if (holdings.length === 0) {
+    return defaultPortfolioAllocations();
+  }
+
+  const totalValue = sumHoldingValues(holdings.filter((holding) => holding.holdingType !== "cash"));
+  const totalWithCash = sumHoldingValues(holdings);
+  const taxonomies = readTaxonomiesWithCategories(db);
+  const assetIds = holdings.flatMap((holding) =>
+    holding.instrument ? [holding.instrument.id] : [],
+  );
+  const assignmentsByAsset = readAssignmentsByAsset(db, assetIds);
+
+  let assetClasses = emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.assetClasses);
+  let sectors = emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.sectors);
+  let regions = emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.regions);
+  let riskCategory = emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.riskCategory);
+  let securityTypes = emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.securityTypes);
+  const customGroups: TaxonomyAllocation[] = [];
+
+  for (const taxonomyWithCategories of taxonomies) {
+    const { taxonomy, categories } = taxonomyWithCategories;
+    switch (taxonomy.id) {
+      case "asset_classes":
+        assetClasses = aggregateByTaxonomy(
+          holdings,
+          taxonomy,
+          categories,
+          assignmentsByAsset,
+          totalWithCash,
+          true,
+        );
+        break;
+      case "industries_gics":
+        sectors = aggregateByTaxonomy(
+          holdings,
+          { ...taxonomy, name: DEFAULT_TAXONOMY_ALLOCATIONS.sectors.taxonomyName },
+          categories,
+          assignmentsByAsset,
+          totalValue,
+          true,
+        );
+        break;
+      case "regions":
+        regions = aggregateByTaxonomy(
+          holdings,
+          { ...taxonomy, name: DEFAULT_TAXONOMY_ALLOCATIONS.regions.taxonomyName },
+          categories,
+          assignmentsByAsset,
+          totalValue,
+          true,
+        );
+        break;
+      case "risk_category":
+        riskCategory = aggregateByTaxonomy(
+          holdings,
+          { ...taxonomy, name: DEFAULT_TAXONOMY_ALLOCATIONS.riskCategory.taxonomyName },
+          categories,
+          assignmentsByAsset,
+          totalValue,
+          false,
+        );
+        break;
+      case "instrument_type":
+        securityTypes = aggregateByTaxonomy(
+          holdings,
+          { ...taxonomy, name: DEFAULT_TAXONOMY_ALLOCATIONS.securityTypes.taxonomyName },
+          categories,
+          assignmentsByAsset,
+          totalValue,
+          true,
+        );
+        break;
+      default:
+        if (!taxonomy.isSystem) {
+          const customAllocation = aggregateByTaxonomy(
+            holdings,
+            taxonomy,
+            categories,
+            assignmentsByAsset,
+            totalValue,
+            false,
+          );
+          if (customAllocation.categories.length > 0) {
+            customGroups.push(customAllocation);
+          }
+        }
+    }
+  }
+
+  return {
+    assetClasses,
+    sectors,
+    regions,
+    riskCategory,
+    securityTypes,
+    customGroups,
+    totalValue: decimalToNumber(totalWithCash, new Decimal(0)),
+  };
+}
+
+function readHoldingsByAllocation(
+  db: Database,
+  accountId: string,
+  taxonomyId: string,
+  categoryId: string,
+  options: HoldingsServiceOptions,
+): AllocationHoldings {
+  const taxonomyWithCategories = readTaxonomyWithCategories(db, taxonomyId);
+  const taxonomy = taxonomyWithCategories?.taxonomy ?? {
+    id: taxonomyId,
+    name: UNKNOWN_CATEGORY_NAME,
+    color: "#808080",
+    isSystem: true,
+  };
+  const categories = taxonomyWithCategories?.categories ?? [];
+  const category = categories.find((candidate) => candidate.id === categoryId);
+  const categoryName =
+    categoryId === UNKNOWN_CATEGORY_ID ? UNKNOWN_CATEGORY_NAME : (category?.name ?? categoryId);
+  const categoryColor =
+    categoryId === UNKNOWN_CATEGORY_ID
+      ? UNKNOWN_CATEGORY_COLOR
+      : (category?.color ?? taxonomy.color);
+  const holdings = readLiveHoldings(db, accountId, options);
+  const currency = holdings[0]?.baseCurrency ?? resolveBaseCurrency(options) ?? "";
+
+  if (holdings.length === 0) {
+    return {
+      taxonomyId,
+      taxonomyName: taxonomy.name,
+      categoryId,
+      categoryName,
+      color: categoryColor,
+      holdings: [],
+      totalValue: 0,
+      currency,
+    };
+  }
+
+  const topLevelMap = buildTopLevelMap(categories);
+  const matchingCategoryIds =
+    categoryId === UNKNOWN_CATEGORY_ID
+      ? [UNKNOWN_CATEGORY_ID]
+      : categories
+          .filter(
+            (candidate) =>
+              candidate.id === categoryId || topLevelMap.get(candidate.id) === categoryId,
+          )
+          .map((candidate) => candidate.id);
+  const categoryAssignments = readAssignmentsByTaxonomyAndCategories(
+    db,
+    taxonomyId,
+    matchingCategoryIds.filter((id) => id !== UNKNOWN_CATEGORY_ID),
+  );
+  const assetToWeight = new Map<string, Decimal>();
+  for (const assignment of categoryAssignments) {
+    assetToWeight.set(
+      assignment.assetId,
+      (assetToWeight.get(assignment.assetId) ?? new Decimal(0)).add(assignment.weight),
+    );
+  }
+
+  const assetIds = holdings.flatMap((holding) =>
+    holding.instrument ? [holding.instrument.id] : [],
+  );
+  const assignmentsByAsset = readAssignmentsByAsset(db, assetIds);
+  const matchedHoldings: { holding: Holding; weight: Decimal }[] = [];
+
+  for (const holding of holdings) {
+    const assetId = holding.instrument?.id;
+    if (!assetId) {
+      continue;
+    }
+
+    if (
+      holding.holdingType === "cash" &&
+      taxonomyId === "asset_classes" &&
+      matchingCategoryIds.some(
+        (id) => id === CASH_CATEGORY_ID || id === CASH_BANK_DEPOSITS_CATEGORY_ID,
+      )
+    ) {
+      matchedHoldings.push({ holding, weight: new Decimal(10_000) });
+      continue;
+    }
+
+    if (categoryId === UNKNOWN_CATEGORY_ID) {
+      const hasTaxonomyAssignment = (assignmentsByAsset.get(assetId) ?? []).some(
+        (assignment) => assignment.taxonomyId === taxonomyId,
+      );
+      if (!hasTaxonomyAssignment) {
+        matchedHoldings.push({ holding, weight: new Decimal(10_000) });
+      }
+      continue;
+    }
+
+    const weight = assetToWeight.get(assetId);
+    if (weight) {
+      matchedHoldings.push({ holding, weight });
+    }
+  }
+
+  const totalMatchedValue = matchedHoldings.reduce(
+    (sum, matched) => sum.add(weightedHoldingValue(matched.holding, matched.weight)),
+    new Decimal(0),
+  );
+  const summaries = matchedHoldings
+    .map(({ holding, weight }) => {
+      const weightedValue = weightedHoldingValue(holding, weight);
+      const weightInCategory = totalMatchedValue.gt(0)
+        ? weightedValue.div(totalMatchedValue).mul(100).toDecimalPlaces(2)
+        : new Decimal(0);
+      return {
+        id: holding.instrument?.id ?? holding.id,
+        symbol: holding.instrument?.symbol ?? "",
+        name: holding.instrument?.name ?? null,
+        holdingType: holding.holdingType,
+        quantity: holding.quantity,
+        marketValue: decimalToNumber(weightedValue, new Decimal(0)),
+        currency: holding.baseCurrency,
+        weightInCategory: decimalToNumber(weightInCategory, new Decimal(0)),
+      };
+    })
+    .sort((left, right) => right.marketValue - left.marketValue);
+
+  return {
+    taxonomyId,
+    taxonomyName: taxonomy.name,
+    categoryId,
+    categoryName,
+    color: categoryColor,
+    holdings: summaries,
+    totalValue: decimalToNumber(totalMatchedValue, new Decimal(0)),
+    currency,
+  };
+}
+
+function aggregateByTaxonomy(
+  holdings: Holding[],
+  taxonomy: Taxonomy,
+  categories: TaxonomyCategory[],
+  assignmentsByAsset: Map<string, AssetTaxonomyAssignment[]>,
+  totalValue: Decimal,
+  rollupToTopLevel: boolean,
+): TaxonomyAllocation {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const topLevelMap = rollupToTopLevel
+    ? buildTopLevelMap(categories)
+    : new Map(categories.map((category) => [category.id, category.id]));
+  const originalValues = new Map<string, { value: Decimal; topLevelId: string }>();
+  const rolledUpValues = new Map<string, Decimal>();
+
+  for (const holding of holdings) {
+    if (holding.holdingType === "cash" && taxonomy.id !== "asset_classes") {
+      continue;
+    }
+
+    const assetId = holding.instrument?.id;
+    if (!assetId) {
+      continue;
+    }
+
+    const marketValue = decimalOrFallback(holding.marketValue.base, new Decimal(0));
+    if (holding.holdingType === "cash" && taxonomy.id === "asset_classes") {
+      const topLevelId = rollupToTopLevel
+        ? (topLevelMap.get(CASH_BANK_DEPOSITS_CATEGORY_ID) ?? CASH_BANK_DEPOSITS_CATEGORY_ID)
+        : CASH_BANK_DEPOSITS_CATEGORY_ID;
+      addOriginalAllocationValue(
+        originalValues,
+        CASH_BANK_DEPOSITS_CATEGORY_ID,
+        marketValue,
+        topLevelId,
+      );
+      addRolledAllocationValue(rolledUpValues, topLevelId, marketValue);
+      continue;
+    }
+
+    const taxonomyAssignments = (assignmentsByAsset.get(assetId) ?? []).filter(
+      (assignment) => assignment.taxonomyId === taxonomy.id,
+    );
+    if (taxonomyAssignments.length === 0) {
+      addRolledAllocationValue(rolledUpValues, UNKNOWN_CATEGORY_ID, marketValue);
+      continue;
+    }
+
+    for (const assignment of taxonomyAssignments) {
+      const weightedValue = marketValue.mul(new Decimal(assignment.weight).div(10_000));
+      const topLevelId = rollupToTopLevel
+        ? (topLevelMap.get(assignment.categoryId) ?? assignment.categoryId)
+        : assignment.categoryId;
+      addOriginalAllocationValue(originalValues, assignment.categoryId, weightedValue, topLevelId);
+      addRolledAllocationValue(rolledUpValues, topLevelId, weightedValue);
+    }
+  }
+
+  const childrenByTopLevel = new Map<string, CategoryAllocation[]>();
+  if (rollupToTopLevel) {
+    for (const [categoryId, allocationValue] of originalValues) {
+      if (categoryId === allocationValue.topLevelId || !allocationValue.value.gt(0)) {
+        continue;
+      }
+      const category = categoryById.get(categoryId);
+      const children = childrenByTopLevel.get(allocationValue.topLevelId) ?? [];
+      children.push(
+        categoryAllocationFromValue(
+          categoryId,
+          category?.name ?? categoryId,
+          category?.color ?? "#808080",
+          allocationValue.value,
+          totalValue,
+        ),
+      );
+      childrenByTopLevel.set(allocationValue.topLevelId, children);
+    }
+    for (const children of childrenByTopLevel.values()) {
+      children.sort((left, right) => right.value - left.value);
+    }
+  }
+
+  const categoriesOut = [...rolledUpValues.entries()]
+    .filter(([, value]) => value.gt(0))
+    .map(([categoryId, value]) => {
+      const category = categoryById.get(categoryId);
+      const children = childrenByTopLevel.get(categoryId) ?? [];
+      return categoryAllocationFromValue(
+        categoryId,
+        categoryId === UNKNOWN_CATEGORY_ID ? UNKNOWN_CATEGORY_NAME : (category?.name ?? categoryId),
+        categoryId === UNKNOWN_CATEGORY_ID
+          ? UNKNOWN_CATEGORY_COLOR
+          : (category?.color ?? "#808080"),
+        value,
+        totalValue,
+        children,
+      );
+    })
+    .sort((left, right) => right.value - left.value);
+
+  return {
+    taxonomyId: taxonomy.id,
+    taxonomyName: taxonomy.name,
+    color: taxonomy.color,
+    categories: categoriesOut,
+  };
+}
+
+function addOriginalAllocationValue(
+  values: Map<string, { value: Decimal; topLevelId: string }>,
+  categoryId: string,
+  value: Decimal,
+  topLevelId: string,
+): void {
+  const existing = values.get(categoryId);
+  values.set(categoryId, {
+    value: (existing?.value ?? new Decimal(0)).add(value),
+    topLevelId,
+  });
+}
+
+function addRolledAllocationValue(
+  values: Map<string, Decimal>,
+  categoryId: string,
+  value: Decimal,
+): void {
+  values.set(categoryId, (values.get(categoryId) ?? new Decimal(0)).add(value));
+}
+
+function categoryAllocationFromValue(
+  categoryId: string,
+  categoryName: string,
+  color: string,
+  value: Decimal,
+  totalValue: Decimal,
+  children: CategoryAllocation[] = [],
+): CategoryAllocation {
+  const percentage = totalValue.gt(0)
+    ? value.div(totalValue).mul(100).toDecimalPlaces(2)
+    : new Decimal(0);
+  return {
+    categoryId,
+    categoryName,
+    color,
+    value: decimalToNumber(value, new Decimal(0)),
+    percentage: decimalToNumber(percentage, new Decimal(0)),
+    ...(children.length > 0 ? { children } : {}),
+  };
+}
+
+function sumHoldingValues(holdings: Holding[]): Decimal {
+  return holdings.reduce(
+    (sum, holding) => sum.add(decimalOrFallback(holding.marketValue.base, new Decimal(0))),
+    new Decimal(0),
+  );
+}
+
+function weightedHoldingValue(holding: Holding, weight: Decimal): Decimal {
+  return decimalOrFallback(holding.marketValue.base, new Decimal(0)).mul(weight.div(10_000));
+}
+
+function defaultPortfolioAllocations(): PortfolioAllocations {
+  return {
+    assetClasses: emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.assetClasses),
+    sectors: emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.sectors),
+    regions: emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.regions),
+    riskCategory: emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.riskCategory),
+    securityTypes: emptyTaxonomyAllocation(DEFAULT_TAXONOMY_ALLOCATIONS.securityTypes),
+    customGroups: [],
+    totalValue: 0,
+  };
+}
+
+function emptyTaxonomyAllocation(input: {
+  taxonomyId: string;
+  taxonomyName: string;
+  color: string;
+}): TaxonomyAllocation {
+  return { ...input, categories: [] };
+}
+
+function buildTopLevelMap(categories: TaxonomyCategory[]): Map<string, string> {
+  const parentById = new Map(categories.map((category) => [category.id, category.parentId]));
+  return new Map(
+    categories.map((category) => [category.id, findTopLevelAncestor(category.id, parentById)]),
+  );
+}
+
+function findTopLevelAncestor(categoryId: string, parentById: Map<string, string | null>): string {
+  const parentId = parentById.get(categoryId);
+  return parentId ? findTopLevelAncestor(parentId, parentById) : categoryId;
 }
 
 function readLiveHoldingsFromSnapshot(
@@ -1230,6 +1789,164 @@ function normalizeAmount(value: unknown, currency: string): [Decimal, string] {
 
 function normalizeCurrencyCode(currency: string): string {
   return CURRENCY_NORMALIZATION_RULES.get(currency)?.majorCode ?? currency;
+}
+
+function readTaxonomiesWithCategories(db: Database): TaxonomyWithCategories[] {
+  const taxonomies = db
+    .query<TaxonomyRow, []>(
+      `
+        SELECT id, name, color, is_system, sort_order
+        FROM taxonomies
+        ORDER BY sort_order ASC
+      `,
+    )
+    .all()
+    .map(taxonomyFromRow);
+  const categoriesByTaxonomyId = readCategoriesByTaxonomyId(db);
+  return taxonomies.map((taxonomy) => ({
+    taxonomy,
+    categories: categoriesByTaxonomyId.get(taxonomy.id) ?? [],
+  }));
+}
+
+function readTaxonomyWithCategories(
+  db: Database,
+  taxonomyId: string,
+): TaxonomyWithCategories | null {
+  const row = db
+    .query<TaxonomyRow, [string]>(
+      `
+        SELECT id, name, color, is_system, sort_order
+        FROM taxonomies
+        WHERE id = ?
+      `,
+    )
+    .get(taxonomyId);
+  if (!row) {
+    return null;
+  }
+  return {
+    taxonomy: taxonomyFromRow(row),
+    categories: readCategoriesForTaxonomy(db, taxonomyId),
+  };
+}
+
+function readCategoriesByTaxonomyId(db: Database): Map<string, TaxonomyCategory[]> {
+  const rows = db
+    .query<TaxonomyCategoryRow, []>(
+      `
+        SELECT id, taxonomy_id, parent_id, name, color, sort_order
+        FROM taxonomy_categories
+        ORDER BY taxonomy_id ASC, sort_order ASC
+      `,
+    )
+    .all();
+  const categoriesByTaxonomyId = new Map<string, TaxonomyCategory[]>();
+  for (const row of rows) {
+    const category = taxonomyCategoryFromRow(row);
+    const categories = categoriesByTaxonomyId.get(category.taxonomyId) ?? [];
+    categories.push(category);
+    categoriesByTaxonomyId.set(category.taxonomyId, categories);
+  }
+  return categoriesByTaxonomyId;
+}
+
+function readCategoriesForTaxonomy(db: Database, taxonomyId: string): TaxonomyCategory[] {
+  return db
+    .query<TaxonomyCategoryRow, [string]>(
+      `
+        SELECT id, taxonomy_id, parent_id, name, color, sort_order
+        FROM taxonomy_categories
+        WHERE taxonomy_id = ?
+        ORDER BY sort_order ASC
+      `,
+    )
+    .all(taxonomyId)
+    .map(taxonomyCategoryFromRow);
+}
+
+function readAssignmentsByAsset(
+  db: Database,
+  assetIds: string[],
+): Map<string, AssetTaxonomyAssignment[]> {
+  const uniqueAssetIds = [...new Set(assetIds)];
+  if (uniqueAssetIds.length === 0) {
+    return new Map();
+  }
+  const placeholders = uniqueAssetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<AssetTaxonomyAssignmentRow, string[]>(
+      `
+        SELECT asset_id, taxonomy_id, category_id, weight
+        FROM asset_taxonomy_assignments
+        WHERE asset_id IN (${placeholders})
+      `,
+    )
+    .all(...uniqueAssetIds);
+  return assignmentsByAssetFromRows(rows);
+}
+
+function readAssignmentsByTaxonomyAndCategories(
+  db: Database,
+  taxonomyId: string,
+  categoryIds: string[],
+): AssetTaxonomyAssignment[] {
+  const uniqueCategoryIds = [...new Set(categoryIds)];
+  if (uniqueCategoryIds.length === 0) {
+    return [];
+  }
+  const placeholders = uniqueCategoryIds.map(() => "?").join(", ");
+  return db
+    .query<AssetTaxonomyAssignmentRow, string[]>(
+      `
+        SELECT asset_id, taxonomy_id, category_id, weight
+        FROM asset_taxonomy_assignments
+        WHERE taxonomy_id = ? AND category_id IN (${placeholders})
+      `,
+    )
+    .all(taxonomyId, ...uniqueCategoryIds)
+    .map(assetTaxonomyAssignmentFromRow);
+}
+
+function assignmentsByAssetFromRows(
+  rows: AssetTaxonomyAssignmentRow[],
+): Map<string, AssetTaxonomyAssignment[]> {
+  const assignmentsByAsset = new Map<string, AssetTaxonomyAssignment[]>();
+  for (const row of rows) {
+    const assignment = assetTaxonomyAssignmentFromRow(row);
+    const assignments = assignmentsByAsset.get(assignment.assetId) ?? [];
+    assignments.push(assignment);
+    assignmentsByAsset.set(assignment.assetId, assignments);
+  }
+  return assignmentsByAsset;
+}
+
+function taxonomyFromRow(row: TaxonomyRow): Taxonomy {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    isSystem: row.is_system !== 0,
+  };
+}
+
+function taxonomyCategoryFromRow(row: TaxonomyCategoryRow): TaxonomyCategory {
+  return {
+    id: row.id,
+    taxonomyId: row.taxonomy_id,
+    parentId: row.parent_id,
+    name: row.name,
+    color: row.color,
+  };
+}
+
+function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetTaxonomyAssignment {
+  return {
+    assetId: row.asset_id,
+    taxonomyId: row.taxonomy_id,
+    categoryId: row.category_id,
+    weight: row.weight,
+  };
 }
 
 function readAssetsById(db: Database, assetIds: string[]): Map<string, AssetRow> {

@@ -195,6 +195,32 @@ describe("TS backend runtime composition", () => {
       expect(assetHoldingsResponse.status).toBe(200);
       await expect(assetHoldingsResponse.json()).resolves.toEqual([]);
 
+      const allocationsResponse = await fetch(
+        `${server.baseUrl}/api/v1/allocations?accountId=missing`,
+      );
+      expect(allocationsResponse.status).toBe(200);
+      await expect(allocationsResponse.json()).resolves.toMatchObject({
+        assetClasses: { taxonomyId: "asset_classes", categories: [] },
+        sectors: { taxonomyId: "industries_gics", categories: [] },
+        regions: { taxonomyId: "regions", categories: [] },
+        riskCategory: { taxonomyId: "risk_category", categories: [] },
+        securityTypes: { taxonomyId: "instrument_type", categories: [] },
+        customGroups: [],
+        totalValue: 0,
+      });
+
+      const allocationHoldingsResponse = await fetch(
+        `${server.baseUrl}/api/v1/allocations/holdings?accountId=missing&taxonomyId=asset_classes&categoryId=__UNKNOWN__`,
+      );
+      expect(allocationHoldingsResponse.status).toBe(200);
+      await expect(allocationHoldingsResponse.json()).resolves.toMatchObject({
+        taxonomyId: "asset_classes",
+        categoryId: "__UNKNOWN__",
+        categoryName: "Unknown",
+        holdings: [],
+        totalValue: 0,
+      });
+
       const accountsResponse = await fetch(`${server.baseUrl}/api/v1/accounts`);
       expect(accountsResponse.status).toBe(200);
       await expect(accountsResponse.json()).resolves.toEqual([]);

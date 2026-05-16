@@ -153,8 +153,7 @@ health legacy-classification runtime slices in the standalone TS backend:
 - Add bounded holdings valuation read runtime for `/api/v1/valuations/history`
   and `/api/v1/valuations/latest`, including active-account defaulting,
   request-order preservation, filtered history ranges, numeric valuation fields,
-  and explicit 501 gates for still-deferred allocations, snapshot writes, and
-  imports.
+  and explicit 501 gates for still-deferred snapshot writes and imports.
 - Add bounded holdings snapshot metadata read runtime for `/api/v1/snapshots`,
   including account/date filters, source defaults, position/cash currency
   counts, and explicit 501 gates for still-deferred deletion, save/import, and
@@ -178,6 +177,10 @@ health legacy-classification runtime slices in the standalone TS backend:
   `/api/v1/holdings/item` and `/api/v1/holdings/by-asset`, including null
   missing/expired behavior, build-failure error parity, active-account fan-out,
   and per-account weight semantics.
+- Add bounded portfolio allocation read runtime for `/api/v1/allocations` and
+  `/api/v1/allocations/holdings`, including taxonomy rollups, cash bucket
+  behavior, Unknown categories, partial assignment weights, custom taxonomies,
+  omitted empty children, and weighted drill-down holding summaries.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -204,8 +207,8 @@ auto-classification side effects, portfolio metrics runtime beyond
 current/historical net-worth, income summary, simple account performance,
 account performance history/summary, valuation reads, snapshot metadata,
 historical snapshot holdings reads, holdings import checks, live holdings
-fan-out, and holding detail/by-asset fan-out, allocation/snapshot writes/import
-runtime, add-on runtime, broader market-data runtime beyond
+fan-out, holding detail/by-asset fan-out, and allocation reads, snapshot
+writes/import runtime, add-on runtime, broader market-data runtime beyond
 mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
 single activity delete, and bounded existing-asset/cash/symbol-resolved activity
 create/update/bulk persistence plus CSV parse/read-only asset preview/read-only

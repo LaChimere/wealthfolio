@@ -2,7 +2,12 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createHoldingsService } from "./holdings";
-import type { Holding, HoldingsServiceOptions } from "./holdings";
+import type {
+  AllocationHoldings,
+  Holding,
+  HoldingsServiceOptions,
+  PortfolioAllocations,
+} from "./holdings";
 
 describe("TS holdings domain", () => {
   test("reads historical and latest account valuations from SQLite", async () => {
@@ -392,6 +397,291 @@ describe("TS holdings domain", () => {
       db.close();
     }
   });
+
+  test("calculates taxonomy allocations and drill-down holdings from live holdings", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+      today: () => "2026-01-06",
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha" });
+      insertAsset(db, {
+        id: "stock",
+        kind: "INVESTMENT",
+        name: "Stock Co",
+        displayCode: "STK",
+        quoteMode: "MARKET",
+      });
+      insertAsset(db, {
+        id: "bond",
+        kind: "INVESTMENT",
+        name: "Bond Co",
+        displayCode: "BND",
+        quoteMode: "MARKET",
+      });
+      insertAsset(db, {
+        id: "partial",
+        kind: "INVESTMENT",
+        name: "Partial ETF",
+        displayCode: "PRT",
+        quoteMode: "MARKET",
+      });
+      insertAsset(db, {
+        id: "unknown",
+        kind: "INVESTMENT",
+        name: "Unclassified",
+        displayCode: "UNK",
+        quoteMode: "MARKET",
+      });
+      insertSnapshot(db, {
+        id: "a1-2026-01-05",
+        accountId: "a1",
+        date: "2026-01-05",
+        positions: {
+          stock: snapshotPosition("stock", "1", "0", "USD", "1"),
+          bond: snapshotPosition("bond", "1", "0", "USD", "1"),
+          partial: snapshotPosition("partial", "1", "0", "USD", "1"),
+          unknown: snapshotPosition("unknown", "1", "0", "USD", "1"),
+        },
+        cashBalances: { USD: "50" },
+      });
+      insertQuote(db, {
+        id: "stock-2026-01-05",
+        assetId: "stock",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "100",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "bond-2026-01-05",
+        assetId: "bond",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "40",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "partial-2026-01-05",
+        assetId: "partial",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "200",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: "unknown-2026-01-05",
+        assetId: "unknown",
+        day: "2026-01-05",
+        source: "MANUAL",
+        close: "10",
+        currency: "USD",
+      });
+      seedAllocationTaxonomies(db);
+      insertAssignment(db, {
+        assetId: "stock",
+        taxonomyId: "asset_classes",
+        categoryId: "EQUITY_US",
+        weight: 10_000,
+      });
+      insertAssignment(db, {
+        assetId: "partial",
+        taxonomyId: "asset_classes",
+        categoryId: "EQUITY_US",
+        weight: 2_500,
+      });
+      insertAssignment(db, {
+        assetId: "bond",
+        taxonomyId: "asset_classes",
+        categoryId: "DEBT",
+        weight: 10_000,
+      });
+      insertAssignment(db, {
+        assetId: "stock",
+        taxonomyId: "industries_gics",
+        categoryId: "SOFTWARE",
+        weight: 10_000,
+      });
+      insertAssignment(db, {
+        assetId: "stock",
+        taxonomyId: "custom_theme",
+        categoryId: "GROWTH",
+        weight: 10_000,
+      });
+
+      const allocations = (await service.getPortfolioAllocations("a1")) as PortfolioAllocations;
+
+      expect(allocations.totalValue).toBe(400);
+      expect(allocations.assetClasses.taxonomyName).toBe("Asset Classes");
+      expect(allocations.assetClasses.categories).toEqual([
+        {
+          categoryId: "EQUITY",
+          categoryName: "Equity",
+          color: "#00aa00",
+          value: 150,
+          percentage: 37.5,
+          children: [
+            {
+              categoryId: "EQUITY_US",
+              categoryName: "US Equity",
+              color: "#00bb00",
+              value: 150,
+              percentage: 37.5,
+            },
+          ],
+        },
+        {
+          categoryId: "CASH",
+          categoryName: "Cash",
+          color: "#999999",
+          value: 50,
+          percentage: 12.5,
+          children: [
+            {
+              categoryId: "CASH_BANK_DEPOSITS",
+              categoryName: "Bank Deposits",
+              color: "#aaaaaa",
+              value: 50,
+              percentage: 12.5,
+            },
+          ],
+        },
+        {
+          categoryId: "DEBT",
+          categoryName: "Debt",
+          color: "#0000aa",
+          value: 40,
+          percentage: 10,
+        },
+        {
+          categoryId: "__UNKNOWN__",
+          categoryName: "Unknown",
+          color: "#878580",
+          value: 10,
+          percentage: 2.5,
+        },
+      ]);
+      expect(allocations.assetClasses.categories[2]?.children).toBeUndefined();
+      expect(allocations.sectors.taxonomyName).toBe("Sectors");
+      expect(allocations.sectors.categories[0]).toMatchObject({
+        categoryId: "__UNKNOWN__",
+        value: 250,
+        percentage: 71.43,
+      });
+      expect(allocations.customGroups.map((group) => group.taxonomyId)).toEqual([
+        "custom_theme",
+        "custom_unassigned",
+      ]);
+      expect(allocations.customGroups[1]?.categories).toEqual([
+        {
+          categoryId: "__UNKNOWN__",
+          categoryName: "Unknown",
+          color: "#878580",
+          value: 350,
+          percentage: 100,
+        },
+      ]);
+
+      const equityHoldings = (await service.getHoldingsByAllocation(
+        "a1",
+        "asset_classes",
+        "EQUITY",
+      )) as AllocationHoldings;
+      expect(equityHoldings).toMatchObject({
+        taxonomyId: "asset_classes",
+        taxonomyName: "Asset Classes",
+        categoryId: "EQUITY",
+        categoryName: "Equity",
+        totalValue: 150,
+        currency: "USD",
+      });
+      expect(equityHoldings.holdings).toEqual([
+        expect.objectContaining({
+          id: "stock",
+          symbol: "STK",
+          holdingType: "security",
+          marketValue: 100,
+          weightInCategory: 66.67,
+        }),
+        expect.objectContaining({
+          id: "partial",
+          symbol: "PRT",
+          marketValue: 50,
+          weightInCategory: 33.33,
+        }),
+      ]);
+
+      const cashHoldings = (await service.getHoldingsByAllocation(
+        "a1",
+        "asset_classes",
+        "CASH",
+      )) as AllocationHoldings;
+      expect(cashHoldings.totalValue).toBe(50);
+      expect(cashHoldings.holdings).toEqual([
+        expect.objectContaining({ id: "cash:USD", marketValue: 50, weightInCategory: 100 }),
+      ]);
+
+      const unknownAssetClassHoldings = (await service.getHoldingsByAllocation(
+        "a1",
+        "asset_classes",
+        "__UNKNOWN__",
+      )) as AllocationHoldings;
+      expect(unknownAssetClassHoldings.totalValue).toBe(60);
+      expect(unknownAssetClassHoldings.holdings.map((holding) => holding.id)).toEqual([
+        "cash:USD",
+        "unknown",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns empty default allocations when no live holdings exist", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db);
+
+    try {
+      expect(await service.getPortfolioAllocations("missing")).toEqual({
+        assetClasses: {
+          taxonomyId: "asset_classes",
+          taxonomyName: "Asset Classes",
+          color: "#879a39",
+          categories: [],
+        },
+        sectors: {
+          taxonomyId: "industries_gics",
+          taxonomyName: "Sectors",
+          color: "#da702c",
+          categories: [],
+        },
+        regions: {
+          taxonomyId: "regions",
+          taxonomyName: "Regions",
+          color: "#8b7ec8",
+          categories: [],
+        },
+        riskCategory: {
+          taxonomyId: "risk_category",
+          taxonomyName: "Risk Category",
+          color: "#d14d41",
+          categories: [],
+        },
+        securityTypes: {
+          taxonomyId: "instrument_type",
+          taxonomyName: "Instrument Type",
+          color: "#4385be",
+          categories: [],
+        },
+        customGroups: [],
+        totalValue: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createHoldingsDb(): Database {
@@ -452,6 +742,39 @@ function createHoldingsDb(): Database {
       net_contribution TEXT NOT NULL DEFAULT '0',
       calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       source TEXT NOT NULL DEFAULT 'CALCULATED'
+    );
+    CREATE TABLE taxonomies (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL,
+      description TEXT,
+      is_system INTEGER NOT NULL DEFAULT 0,
+      is_single_select INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+    CREATE TABLE taxonomy_categories (
+      id TEXT PRIMARY KEY NOT NULL,
+      taxonomy_id TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      key TEXT NOT NULL,
+      color TEXT NOT NULL,
+      description TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+    CREATE TABLE asset_taxonomy_assignments (
+      id TEXT PRIMARY KEY NOT NULL,
+      asset_id TEXT NOT NULL,
+      taxonomy_id TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      weight INTEGER NOT NULL DEFAULT 10000,
+      source TEXT NOT NULL DEFAULT 'MANUAL',
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     );
   `);
   return db;
@@ -573,6 +896,183 @@ function insertQuote(
     quote.close,
     quote.currency,
     `${quote.day}T00:00:00Z`,
+  );
+}
+
+function seedAllocationTaxonomies(db: Database): void {
+  insertTaxonomy(db, {
+    id: "asset_classes",
+    name: "Asset Classes",
+    color: "#879a39",
+    isSystem: 1,
+    sortOrder: 1,
+  });
+  insertCategory(db, {
+    id: "EQUITY",
+    taxonomyId: "asset_classes",
+    name: "Equity",
+    color: "#00aa00",
+    sortOrder: 1,
+  });
+  insertCategory(db, {
+    id: "EQUITY_US",
+    taxonomyId: "asset_classes",
+    parentId: "EQUITY",
+    name: "US Equity",
+    color: "#00bb00",
+    sortOrder: 2,
+  });
+  insertCategory(db, {
+    id: "DEBT",
+    taxonomyId: "asset_classes",
+    name: "Debt",
+    color: "#0000aa",
+    sortOrder: 3,
+  });
+  insertCategory(db, {
+    id: "CASH",
+    taxonomyId: "asset_classes",
+    name: "Cash",
+    color: "#999999",
+    sortOrder: 4,
+  });
+  insertCategory(db, {
+    id: "CASH_BANK_DEPOSITS",
+    taxonomyId: "asset_classes",
+    parentId: "CASH",
+    name: "Bank Deposits",
+    color: "#aaaaaa",
+    sortOrder: 5,
+  });
+  insertTaxonomy(db, {
+    id: "industries_gics",
+    name: "Industries",
+    color: "#da702c",
+    isSystem: 1,
+    sortOrder: 2,
+  });
+  insertCategory(db, {
+    id: "TECH",
+    taxonomyId: "industries_gics",
+    name: "Technology",
+    color: "#ff8800",
+    sortOrder: 1,
+  });
+  insertCategory(db, {
+    id: "SOFTWARE",
+    taxonomyId: "industries_gics",
+    parentId: "TECH",
+    name: "Software",
+    color: "#ffaa00",
+    sortOrder: 2,
+  });
+  insertTaxonomy(db, {
+    id: "regions",
+    name: "Regions",
+    color: "#8b7ec8",
+    isSystem: 1,
+    sortOrder: 3,
+  });
+  insertTaxonomy(db, {
+    id: "risk_category",
+    name: "Risk",
+    color: "#d14d41",
+    isSystem: 1,
+    sortOrder: 4,
+  });
+  insertTaxonomy(db, {
+    id: "instrument_type",
+    name: "Types",
+    color: "#4385be",
+    isSystem: 1,
+    sortOrder: 5,
+  });
+  insertTaxonomy(db, {
+    id: "custom_theme",
+    name: "Theme",
+    color: "#123456",
+    isSystem: 0,
+    sortOrder: 6,
+  });
+  insertCategory(db, {
+    id: "GROWTH",
+    taxonomyId: "custom_theme",
+    name: "Growth",
+    color: "#654321",
+    sortOrder: 1,
+  });
+  insertTaxonomy(db, {
+    id: "custom_unassigned",
+    name: "Unassigned Theme",
+    color: "#abcdef",
+    isSystem: 0,
+    sortOrder: 7,
+  });
+  insertCategory(db, {
+    id: "UNUSED",
+    taxonomyId: "custom_unassigned",
+    name: "Unused",
+    color: "#fedcba",
+    sortOrder: 1,
+  });
+}
+
+function insertTaxonomy(
+  db: Database,
+  taxonomy: { id: string; name: string; color: string; isSystem: number; sortOrder: number },
+): void {
+  db.prepare(
+    `
+      INSERT INTO taxonomies (id, name, color, is_system, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+  ).run(taxonomy.id, taxonomy.name, taxonomy.color, taxonomy.isSystem, taxonomy.sortOrder);
+}
+
+function insertCategory(
+  db: Database,
+  category: {
+    id: string;
+    taxonomyId: string;
+    parentId?: string;
+    name: string;
+    color: string;
+    sortOrder: number;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    category.id,
+    category.taxonomyId,
+    category.parentId ?? null,
+    category.name,
+    category.id,
+    category.color,
+    category.sortOrder,
+  );
+}
+
+function insertAssignment(
+  db: Database,
+  assignment: { assetId: string; taxonomyId: string; categoryId: string; weight: number },
+): void {
+  db.prepare(
+    `
+      INSERT INTO asset_taxonomy_assignments (
+        id, asset_id, taxonomy_id, category_id, weight, source
+      )
+      VALUES (?, ?, ?, ?, ?, 'MANUAL')
+    `,
+  ).run(
+    `${assignment.assetId}-${assignment.taxonomyId}-${assignment.categoryId}`,
+    assignment.assetId,
+    assignment.taxonomyId,
+    assignment.categoryId,
+    assignment.weight,
   );
 }
 
