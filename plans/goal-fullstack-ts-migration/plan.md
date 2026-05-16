@@ -254,6 +254,10 @@ backend:
   alternative asset UUID MANUAL quote callbacks, preserving Rust-shaped `asset`
   and `quote` payloads, create/update/delete ordering, MANUAL+UUID quote
   filtering, and no quote delete outbox rows for alternative asset deletion.
+- Extend sync_outbox runtime wiring to market-data quote update/delete/import
+  writes, preserving Rust's MANUAL+UUID quote filter, deterministic manual quote
+  no-op behavior, explicit UUID manual quote Delete emission, and normalized
+  runtime `quote` payloads.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
@@ -277,9 +281,9 @@ backend:
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
 - Keep still-deferred provider-backed asset resolution, remaining quote sync
-  outbox follow-ups outside migrated alternative-asset paths, device-sync
-  push/pull runtime wiring, and actual portfolio job execution/valuation
-  recalculation for dedicated parity slices.
+  outbox follow-ups outside migrated alternative-asset and market-data quote
+  paths, device-sync push/pull runtime wiring, and actual portfolio job
+  execution/valuation recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.

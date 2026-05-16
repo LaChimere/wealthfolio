@@ -2,6 +2,11 @@ import type { Database } from "bun:sqlite";
 
 import { parseCsvRecords } from "../csv";
 import type { MarketSyncMode } from "./portfolio-jobs";
+import {
+  type QuoteSyncEvent,
+  type QuoteSyncOperation,
+  queueUserQuoteSyncEvent,
+} from "./quote-sync";
 
 export interface ExchangeInfo {
   mic: string;
@@ -119,6 +124,7 @@ export interface MarketDataServiceOptions {
   exchangeCatalogJson?: string;
   fetch?: typeof fetch;
   now?: () => Date;
+  queueQuoteSyncEvent?: (event: QuoteSyncEvent) => void;
 }
 
 interface QuoteRow {
@@ -319,15 +325,17 @@ export function createMarketDataService(
         if (payload.source === "MANUAL") {
           const oldId = optionalString(quote.id);
           if (oldId && oldId !== payload.id) {
-            db.query("DELETE FROM quotes WHERE id = ?").run(oldId);
+            deleteQuoteWrite(db, oldId, options.queueQuoteSyncEvent);
           }
         }
-        upsertQuoteWrite(db, payload);
+        upsertQuoteWrite(db, payload, options.queueQuoteSyncEvent);
       })();
     },
 
     deleteQuote(id) {
-      db.query("DELETE FROM quotes WHERE id = ?").run(id);
+      db.transaction(() => {
+        deleteQuoteWrite(db, id, options.queueQuoteSyncEvent);
+      })();
     },
 
     checkQuotesImport(content, hasHeaderRow) {
@@ -335,7 +343,7 @@ export function createMarketDataService(
     },
 
     importQuotesCsv(quotes, overwriteExisting) {
-      return importQuoteRows(db, quotes, overwriteExisting);
+      return importQuoteRows(db, quotes, overwriteExisting, options.queueQuoteSyncEvent);
     },
   };
 }
@@ -1547,6 +1555,7 @@ function importQuoteRows(
   db: Database,
   quotes: unknown[],
   overwriteExisting: boolean,
+  queueSyncEvent?: (event: QuoteSyncEvent) => void,
 ): QuoteImport[] {
   const normalizedQuotes = quotes.map(normalizeQuoteImportInput);
   db.transaction(() => {
@@ -1562,7 +1571,7 @@ function importQuoteRows(
       }
 
       const payload = quoteImportToQuoteWrite(quote);
-      upsertQuoteWrite(db, payload);
+      upsertQuoteWrite(db, payload, queueSyncEvent);
       quote.validationStatus = "valid";
     }
   })();
@@ -1728,13 +1737,18 @@ function normalizeQuoteWrite(symbol: string, quote: Record<string, unknown>): Qu
   };
 }
 
-function upsertQuoteWrite(db: Database, payload: QuoteWrite): void {
+function upsertQuoteWrite(
+  db: Database,
+  payload: QuoteWrite,
+  queueSyncEvent?: (event: QuoteSyncEvent) => void,
+): void {
   const existing = db
     .query<
       { id: string },
       [string, string, string]
     >("SELECT id FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
     .get(payload.assetId, payload.day, payload.source);
+  const operation: Exclude<QuoteSyncOperation, "Delete"> = existing ? "Update" : "Create";
   if (existing) {
     payload.id = existing.id;
   }
@@ -1775,6 +1789,26 @@ function upsertQuoteWrite(db: Database, payload: QuoteWrite): void {
     payload.createdAt,
     payload.timestamp,
   );
+  const row = readQuoteRowById(db, payload.id);
+  if (row) {
+    queueUserQuoteSyncEvent(queueSyncEvent, row, operation);
+  }
+}
+
+function deleteQuoteWrite(
+  db: Database,
+  id: string,
+  queueSyncEvent?: (event: QuoteSyncEvent) => void,
+): void {
+  const existing = readQuoteRowById(db, id);
+  db.query("DELETE FROM quotes WHERE id = ?").run(id);
+  if (existing) {
+    queueUserQuoteSyncEvent(queueSyncEvent, existing, "Delete");
+  }
+}
+
+function readQuoteRowById(db: Database, id: string): QuoteRow | null {
+  return db.query<QuoteRow, [string]>("SELECT * FROM quotes WHERE id = ?").get(id);
 }
 
 function rowToQuote(row: QuoteRow): Quote {

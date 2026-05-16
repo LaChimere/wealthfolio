@@ -160,11 +160,12 @@
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
     asset taxonomy assignment callbacks, direct asset Create/Update/Delete
-    callbacks, and alternative asset/UUID MANUAL quote callbacks, and
-    domain-event planning/batch processing/worker helper now have TS runtime
-    parity, while provider-backed asset resolution, remaining quote sync outbox
-    follow-ups outside migrated alternative-asset paths, device-sync push/pull
-    runtime wiring, and portfolio recalculation side effects are deferred to
+    callbacks, alternative asset/UUID MANUAL quote callbacks, and market-data
+    quote update/delete/import callbacks, and domain-event planning/batch
+    processing/worker helper now have TS runtime parity, while provider-backed
+    asset resolution, remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and portfolio recalculation side effects are deferred to
     activities/import/device-sync runtime parity slices; AI chat persistence,
     tag persistence, and tool-result mutation now have TS runtime parity, while
     provider streaming, tool execution, and attachments are deferred to AI
@@ -1426,6 +1427,13 @@ contract:
   repository check passed with `bun run check`; focused code review found no
   required code changes after verifying payload casing is normalized by the
   shared sync outbox writer.
+- `pr5-market-data-quote-sync-outbox-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/market-data.test.ts apps/backend/src/domains/alternative-assets.test.ts apps/backend/src/runtime.test.ts --grep "quote sync|market-data|alternative asset|alternative assets|sync_outbox"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes market-data quote update/delete/import callbacks, shared
+  MANUAL+UUID filtering, deterministic manual/provider no-op cases, explicit
+  UUID manual quote replacement Delete callbacks, imported existing UUID manual
+  quote Update callbacks, and runtime `quote` sync_outbox Delete rows.
 
 ## Result
 
@@ -1477,9 +1485,9 @@ contract:
   activity mutation event production plus activity/import-run/activity-created
   asset sync-event callback queuing, sync_outbox persistence for migrated
   goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
-  taxonomy assignment, direct asset, and alternative asset/UUID quote callbacks,
-  and domain-event planning/batch processing/worker helper implemented; broader
-  migration remains active.
+  taxonomy assignment, direct asset, alternative asset/UUID quote, and
+  market-data quote callbacks, and domain-event planning/batch processing/worker
+  helper implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1499,15 +1507,15 @@ contract:
   filesystem extraction, runtime loading, store HTTP, staging I/O, and update
   behavior move with add-on runtime parity slices; provider-backed asset
   resolution, remaining quote sync-outbox emission outside migrated
-  alternative-asset paths, sync engine push/pull, and portfolio recalculation
-  side effects move with activities/import/device-sync runtime parity slices;
-  device-sync integration for sync crypto moves with device-sync parity slices;
-  broader health checks, market sync fix execution, and non-classification
-  `/health/fix` dispatch move with health/calculation parity slices; real
-  Connect token lifecycle, cloud HTTP clients, broker sync orchestration, local
-  sync repositories, subscription entitlement checks, event production, E2EE
-  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  alternative-asset and market-data quote paths, sync engine push/pull, and
+  portfolio recalculation side effects move with activities/import/device-sync
+  runtime parity slices; device-sync integration for sync crypto moves with
+  device-sync parity slices; broader health checks, market sync fix execution,
+  and non-classification `/health/fix` dispatch move with health/calculation
+  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, local sync repositories, subscription entitlement checks, event
+  production, E2EE enrollment, sync engine, snapshot/upload runtime,
+  feature-flag errors, background workers, device-sync cloud clients, token
+  lifecycle, team-key operations, key material handling, pairing flows,
+  freshness gate persistence, bootstrap transfer, and secret side effects move
+  with Connect/device-sync parity slices.

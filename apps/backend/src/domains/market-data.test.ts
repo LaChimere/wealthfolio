@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createMarketDataService } from "./market-data";
+import type { QuoteSyncEvent } from "./quote-sync";
 
 describe("TS market data domain", () => {
   test("lists exchanges and reads quote history with Rust-compatible mapping", () => {
@@ -507,6 +508,176 @@ describe("TS market data domain", () => {
 
       service.deleteQuote?.("EQUITY:AAPL@XNAS_2026-01-02_MANUAL");
       expect(readQuote(db, "EQUITY:AAPL@XNAS_2026-01-02_MANUAL")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues market-data quote sync callbacks only for UUID manual quote rows", () => {
+    const db = createMarketDataDb();
+    const syncEvents: QuoteSyncEvent[] = [];
+    const service = createMarketDataService(db, {
+      queueQuoteSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      const uuidManualId = crypto.randomUUID();
+      insertQuote(db, {
+        id: uuidManualId,
+        asset_id: "EQUITY:AAPL@XNAS",
+        day: "2026-01-02",
+        source: "MANUAL",
+        close: "10.00",
+        currency: "USD",
+      });
+      service.updateQuote?.("EQUITY:AAPL@XNAS", {
+        timestamp: "2026-01-02T15:30:00Z",
+        dataSource: "MANUAL",
+        close: "10.25",
+        currency: "USD",
+      });
+      expect(syncEvents).toEqual([
+        {
+          quoteId: uuidManualId,
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: uuidManualId,
+            assetId: "EQUITY:AAPL@XNAS",
+            day: "2026-01-02",
+            source: "MANUAL",
+            close: "10.25",
+          }),
+        },
+      ]);
+
+      syncEvents.length = 0;
+      service.deleteQuote?.(uuidManualId);
+      expect(syncEvents).toEqual([
+        {
+          quoteId: uuidManualId,
+          operation: "Delete",
+          payload: { id: uuidManualId },
+        },
+      ]);
+
+      syncEvents.length = 0;
+      insertQuote(db, {
+        id: "EQUITY:AAPL@XNAS_2026-01-03_MANUAL",
+        asset_id: "EQUITY:AAPL@XNAS",
+        day: "2026-01-03",
+        source: "MANUAL",
+        close: "11.00",
+        currency: "USD",
+      });
+      insertQuote(db, {
+        id: crypto.randomUUID(),
+        asset_id: "EQUITY:AAPL@XNAS",
+        day: "2026-01-04",
+        source: "YAHOO",
+        close: "12.00",
+        currency: "USD",
+      });
+      service.deleteQuote?.("EQUITY:AAPL@XNAS_2026-01-03_MANUAL");
+      service.deleteQuote?.(String(readQuoteByDay(db, "EQUITY:AAPL@XNAS", "2026-01-04")?.id));
+      expect(syncEvents).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues delete when market-data update replaces an explicit UUID manual quote", () => {
+    const db = createMarketDataDb();
+    const syncEvents: QuoteSyncEvent[] = [];
+    const service = createMarketDataService(db, {
+      queueQuoteSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      const uuidManualId = crypto.randomUUID();
+      insertQuote(db, {
+        id: uuidManualId,
+        asset_id: "EQUITY:AAPL@XNAS",
+        day: "2026-01-02",
+        source: "MANUAL",
+        close: "10.00",
+        currency: "USD",
+      });
+
+      service.updateQuote?.("EQUITY:AAPL@XNAS", {
+        id: uuidManualId,
+        timestamp: "2026-01-02T15:30:00Z",
+        dataSource: "MANUAL",
+        close: "10.25",
+        currency: "USD",
+      });
+
+      expect(syncEvents).toEqual([
+        {
+          quoteId: uuidManualId,
+          operation: "Delete",
+          payload: { id: uuidManualId },
+        },
+      ]);
+      expect(readQuote(db, uuidManualId)).toBeNull();
+      expect(readQuote(db, "EQUITY:AAPL@XNAS_2026-01-02_MANUAL")).toMatchObject({
+        close: "10.25",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues quote sync callbacks for imported rows only when the persisted manual ID is UUID", () => {
+    const db = createMarketDataDb();
+    const syncEvents: QuoteSyncEvent[] = [];
+    const service = createMarketDataService(db, {
+      queueQuoteSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      const uuidManualId = crypto.randomUUID();
+      insertQuote(db, {
+        id: uuidManualId,
+        asset_id: "asset-1",
+        day: "2026-01-06",
+        source: "MANUAL",
+        close: "12.00",
+        currency: "USD",
+      });
+
+      service.importQuotesCsv?.(
+        [
+          {
+            symbol: "asset-1",
+            date: "2026-01-05",
+            close: 11,
+            currency: "USD",
+            validationStatus: "valid",
+          },
+          {
+            symbol: "asset-1",
+            date: "2026-01-06",
+            close: 12.5,
+            currency: "USD",
+            validationStatus: "valid",
+          },
+        ],
+        true,
+      );
+
+      expect(syncEvents).toEqual([
+        {
+          quoteId: uuidManualId,
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: uuidManualId,
+            assetId: "asset-1",
+            day: "2026-01-06",
+            close: "12.5",
+          }),
+        },
+      ]);
+      expect(readQuote(db, "asset-1_2026-01-05_MANUAL")).toMatchObject({ close: "11" });
     } finally {
       db.close();
     }
@@ -1167,6 +1338,19 @@ function insertQuote(
 
 function readQuote(db: Database, id: string): Record<string, unknown> | null {
   return db.query<Record<string, unknown>, [string]>("SELECT * FROM quotes WHERE id = ?").get(id);
+}
+
+function readQuoteByDay(
+  db: Database,
+  assetId: string,
+  day: string,
+): Record<string, unknown> | null {
+  return db
+    .query<
+      Record<string, unknown>,
+      [string, string]
+    >("SELECT * FROM quotes WHERE asset_id = ? AND day = ?")
+    .get(assetId, day);
 }
 
 function bytes(value: string): Uint8Array {

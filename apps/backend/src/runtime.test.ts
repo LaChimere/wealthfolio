@@ -980,6 +980,53 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime market-data UUID manual quote deletes to sync_outbox", () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const quoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7b";
+
+    try {
+      let db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(db, "runtime-quote-asset");
+        db.prepare(
+          `
+            INSERT INTO quotes (
+              id, asset_id, day, source, close, currency, created_at, timestamp
+            )
+            VALUES (?, 'runtime-quote-asset', '2026-05-14', 'MANUAL', '10.00', 'USD',
+              '2026-05-14T00:00:00Z', '2026-05-14T16:00:00Z')
+          `,
+        ).run(quoteId);
+      } finally {
+        db.close();
+      }
+
+      runtime.options.marketDataService.deleteQuote?.(quoteId);
+
+      db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const quoteRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "quote");
+        expect(quoteRows).toEqual([
+          expect.objectContaining({
+            entity: "quote",
+            entity_id: quoteId,
+            op: "delete",
+          }),
+        ]);
+        expect(JSON.parse(String(quoteRows[0]?.payload))).toEqual({ id: quoteId });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({

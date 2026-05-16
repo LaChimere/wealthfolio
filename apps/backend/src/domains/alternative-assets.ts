@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import Decimal from "decimal.js";
 
 import type { BackendEventBus } from "../events";
+import { type QuoteRowPayload, type QuoteSyncEvent, queueUserQuoteSyncEvent } from "./quote-sync";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
@@ -101,11 +102,7 @@ export interface AlternativeAssetSyncEvent {
   payload: AlternativeAssetRowPayload | { id: string };
 }
 
-export interface AlternativeQuoteSyncEvent {
-  quoteId: string;
-  operation: Exclude<AlternativeSyncOperation, "Delete">;
-  payload: AlternativeQuoteRowPayload;
-}
+export type AlternativeQuoteSyncEvent = QuoteSyncEvent;
 
 export interface AlternativeAssetRowPayload {
   id: string;
@@ -125,22 +122,7 @@ export interface AlternativeAssetRowPayload {
   updatedAt: string;
 }
 
-export interface AlternativeQuoteRowPayload {
-  id: string;
-  assetId: string;
-  day: string;
-  source: string;
-  open: string | null;
-  high: string | null;
-  low: string | null;
-  close: string;
-  adjclose: string | null;
-  volume: string | null;
-  currency: string;
-  notes: string | null;
-  createdAt: string;
-  timestamp: string;
-}
+export type AlternativeQuoteRowPayload = QuoteRowPayload;
 
 interface AlternativeAssetRow {
   id: string;
@@ -655,22 +637,7 @@ function queueAlternativeQuoteSyncEvent(
   row: AlternativeQuoteRow,
   operation: Exclude<AlternativeSyncOperation, "Delete">,
 ): void {
-  if (!isUserSyncableQuote(row)) {
-    return;
-  }
-  queueSyncEvent?.({
-    quoteId: row.id,
-    operation,
-    payload: alternativeQuoteRowPayload(row),
-  });
-}
-
-function isUserSyncableQuote(row: AlternativeQuoteRow): boolean {
-  return row.source.toUpperCase() === DATA_SOURCE_MANUAL && isUuid(row.id);
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  queueUserQuoteSyncEvent(queueSyncEvent, row, operation);
 }
 
 function alternativeAssetRowPayload(row: AlternativeAssetRow): AlternativeAssetRowPayload {
@@ -690,25 +657,6 @@ function alternativeAssetRowPayload(row: AlternativeAssetRow): AlternativeAssetR
     providerConfig: row.provider_config,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-function alternativeQuoteRowPayload(row: AlternativeQuoteRow): AlternativeQuoteRowPayload {
-  return {
-    id: row.id,
-    assetId: row.asset_id,
-    day: row.day,
-    source: row.source,
-    open: row.open,
-    high: row.high,
-    low: row.low,
-    close: row.close,
-    adjclose: row.adjclose,
-    volume: row.volume,
-    currency: row.currency,
-    notes: row.notes,
-    createdAt: row.created_at,
-    timestamp: row.timestamp,
   };
 }
 
