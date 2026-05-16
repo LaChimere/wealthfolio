@@ -146,33 +146,33 @@
     calculations, holdings valuation reads, holdings snapshot metadata reads,
     historical snapshot holdings reads, holdings import checks, live holdings
     fan-out, holding detail/by-asset fan-out, allocation reads, snapshot
-    deletion, bounded manual/imported snapshot saves, and snapshot FX pair
-    registration now have TS runtime parity, while provider-backed symbol
-    performance history is deferred to portfolio/market-data parity slices;
-    portfolio recalculation side effects are deferred to holdings/portfolio
-    parity slices; add-on filesystem extraction, runtime loading, store HTTP,
-    staging I/O, and update behavior are deferred to add-on runtime parity
-    slices; market-data market sync and portfolio recalculation behavior are
-    deferred to market-data/portfolio parity slices; symbol-only activity asset
-    creation, import execution, provider-backed asset resolution, device-sync
-    outbox emission for activity writes, and portfolio recalculation side
-    effects are deferred to activities/import runtime parity slices; AI chat
-    persistence and tool-result mutation now have TS runtime parity, while
-    provider streaming, tool execution, tag persistence, and attachments are
-    deferred to AI runtime parity slices; device-sync integration for sync
-    crypto is deferred to device-sync runtime parity slices; bounded
-    account/timezone health status/checks, cache behavior, legacy-classification
-    health issues, and classification migration health-fix dispatch now have TS
-    runtime parity, while calculation-heavy health checks, market sync fix
-    execution, and non-classification `/health/fix` dispatch are deferred to
-    health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, local sync repositories, subscription
-    entitlement checks, event production, E2EE enrollment, sync engine,
-    snapshot/upload runtime, feature-flag errors, background workers,
-    device-sync cloud clients, token lifecycle, team-key operations, key
-    material handling, pairing flows, freshness gate persistence, bootstrap
-    transfer, and secret side effects are deferred to Connect/device-sync parity
-    slices.
+    deletion, bounded manual/imported snapshot saves, snapshot FX pair
+    registration, and holdings snapshot mutation event production now have TS
+    runtime parity, while provider-backed symbol performance history is deferred
+    to portfolio/market-data parity slices; actual portfolio job execution and
+    inline valuation recalculation are deferred to holdings/portfolio parity
+    slices; add-on filesystem extraction, runtime loading, store HTTP, staging
+    I/O, and update behavior are deferred to add-on runtime parity slices;
+    market-data market sync and portfolio recalculation behavior are deferred to
+    market-data/portfolio parity slices; symbol-only activity asset creation,
+    import execution, provider-backed asset resolution, device-sync outbox
+    emission for activity writes, and portfolio recalculation side effects are
+    deferred to activities/import runtime parity slices; AI chat persistence and
+    tool-result mutation now have TS runtime parity, while provider streaming,
+    tool execution, tag persistence, and attachments are deferred to AI runtime
+    parity slices; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; bounded account/timezone health
+    status/checks, cache behavior, legacy-classification health issues, and
+    classification migration health-fix dispatch now have TS runtime parity,
+    while calculation-heavy health checks, market sync fix execution, and
+    non-classification `/health/fix` dispatch are deferred to health/calculation
+    parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+    orchestration, local sync repositories, subscription entitlement checks,
+    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
+    feature-flag errors, background workers, device-sync cloud clients, token
+    lifecycle, team-key operations, key material handling, pairing flows,
+    freshness gate persistence, bootstrap transfer, and secret side effects are
+    deferred to Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1275,6 +1275,16 @@ contract:
   symbol match requirements, provider currency/exchange/asset metadata mapping,
   and non-fatal provider failure fallback while device-sync outbox and portfolio
   recalculation side effects remain deferred.
+- `pr5-holdings-snapshot-events-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/runtime.test.ts`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-shaped `holdings_changed` and `manual_snapshot_saved`
+  event emission after successful manual/imported snapshot saves,
+  `holdings_changed` emission after manual/imported snapshot deletes, no event
+  emission for failed imported/calculated-delete mutations, event ordering,
+  asset ID payloads from persisted positions, and standalone runtime event-bus
+  wiring while device-sync outbox and actual portfolio job execution/inline
+  valuation recalculation remain deferred.
 
 ## Result
 

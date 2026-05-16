@@ -6,11 +6,15 @@ import Decimal from "decimal.js";
 
 import type { ExchangeRateService } from "./exchange-rates";
 import type { SymbolSearchResult } from "./market-data";
+import type { BackendEventBus } from "../events";
 
 type HoldingsExchangeRateService = Pick<ExchangeRateService, "getLatestExchangeRate"> &
   Partial<Pick<ExchangeRateService, "ensureFxPairs">>;
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
+
+export const HOLDINGS_CHANGED_EVENT = "holdings_changed";
+export const MANUAL_SNAPSHOT_SAVED_EVENT = "manual_snapshot_saved";
 
 export interface HoldingInput {
   assetId?: string;
@@ -104,6 +108,7 @@ export interface HoldingsService {
 
 export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
+  eventBus?: BackendEventBus;
   exchangeRateService?: HoldingsExchangeRateService;
   symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   today?: () => string;
@@ -489,7 +494,7 @@ export function createHoldingsService(
     },
     deleteSnapshot(accountId, date) {
       try {
-        deleteSnapshot(db, accountId, date);
+        deleteSnapshot(db, accountId, date, options);
       } catch (error) {
         return Promise.reject(error);
       }
@@ -562,11 +567,16 @@ function readSnapshotHoldings(
   );
 }
 
-function deleteSnapshot(db: Database, accountId: string, date: string): void {
+function deleteSnapshot(
+  db: Database,
+  accountId: string,
+  date: string,
+  options: HoldingsServiceOptions,
+): void {
   const snapshot = db
-    .query<{ id: string; source: string | null }, [string, string]>(
+    .query<{ id: string; source: string | null; positions: string }, [string, string]>(
       `
-        SELECT id, source
+        SELECT id, source, positions
         FROM holdings_snapshots
         WHERE account_id = ? AND snapshot_date = ?
       `,
@@ -584,6 +594,43 @@ function deleteSnapshot(db: Database, accountId: string, date: string): void {
   db.prepare("DELETE FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?").run(
     accountId,
     date,
+  );
+  publishHoldingsChanged(options.eventBus, accountId, snapshotAssetIds(snapshot.positions));
+}
+
+function publishManualSnapshotSavedEvents(
+  eventBus: BackendEventBus | undefined,
+  accountId: string,
+  assetIds: string[],
+): void {
+  publishHoldingsChanged(eventBus, accountId, assetIds);
+  eventBus?.publish({
+    name: MANUAL_SNAPSHOT_SAVED_EVENT,
+    payload: {
+      type: MANUAL_SNAPSHOT_SAVED_EVENT,
+      account_id: accountId,
+    },
+  });
+}
+
+function publishHoldingsChanged(
+  eventBus: BackendEventBus | undefined,
+  accountId: string,
+  assetIds: string[],
+): void {
+  eventBus?.publish({
+    name: HOLDINGS_CHANGED_EVENT,
+    payload: {
+      type: HOLDINGS_CHANGED_EVENT,
+      account_ids: [accountId],
+      asset_ids: assetIds,
+    },
+  });
+}
+
+function snapshotAssetIds(rawPositionsJson: string): string[] {
+  return uniqueSortedStrings(
+    snapshotPositionsFromJson(rawPositionsJson).map((position) => position.assetId),
   );
 }
 
@@ -739,6 +786,10 @@ function uniqueFxPairs(pairs: Array<[string, string]>): Array<[string, string]> 
   return uniquePairs;
 }
 
+function uniqueSortedStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.length > 0))).sort();
+}
+
 async function persistHoldingsSnapshot(
   db: Database,
   request: PersistHoldingsSnapshotRequest,
@@ -753,7 +804,7 @@ async function persistHoldingsSnapshot(
   const now = new Date().toISOString();
   const positions: Record<string, SnapshotPosition> = {};
 
-  db.transaction(() => {
+  const assetIds = db.transaction(() => {
     const manualQuotesByAsset = new Map<
       string,
       { quantity: Decimal; totalCostBasis: Decimal; currency: string }
@@ -856,7 +907,9 @@ async function persistHoldingsSnapshot(
       calculatedAt: now,
     });
     ensureSyntheticHoldingsSnapshot(db, request.accountId, now);
+    return uniqueSortedStrings(Object.keys(positions));
   })();
+  publishManualSnapshotSavedEvents(options.eventBus, request.accountId, assetIds);
 }
 
 function getOrCreateManualSnapshotAsset(db: Database, holding: HoldingInput): AssetRow {

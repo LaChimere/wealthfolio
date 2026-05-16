@@ -1,13 +1,18 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { createHoldingsService } from "./holdings";
+import {
+  createHoldingsService,
+  HOLDINGS_CHANGED_EVENT,
+  MANUAL_SNAPSHOT_SAVED_EVENT,
+} from "./holdings";
 import type {
   AllocationHoldings,
   Holding,
   HoldingsServiceOptions,
   PortfolioAllocations,
 } from "./holdings";
+import type { BackendEvent, BackendEventBus } from "../events";
 
 describe("TS holdings domain", () => {
   test("reads historical and latest account valuations from SQLite", async () => {
@@ -655,6 +660,119 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("emits holdings mutation events after successful snapshot changes", async () => {
+    const db = createHoldingsDb();
+    const events: BackendEvent[] = [];
+    const service = createHoldingsService(db, {
+      eventBus: recordingEventBus(events),
+      today: () => "2026-05-01",
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "asset-1",
+        kind: "INVESTMENT",
+        name: "Acme Corp",
+        displayCode: "ACME",
+        quoteMode: "MARKET",
+      });
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-05-01",
+        holdings: [{ assetId: "asset-1", symbol: "ACME", quantity: "2", currency: "USD" }],
+        cashBalances: {},
+      });
+      expect(events).toEqual([
+        {
+          name: HOLDINGS_CHANGED_EVENT,
+          payload: {
+            type: HOLDINGS_CHANGED_EVENT,
+            account_ids: ["a1"],
+            asset_ids: ["asset-1"],
+          },
+        },
+        {
+          name: MANUAL_SNAPSHOT_SAVED_EVENT,
+          payload: {
+            type: MANUAL_SNAPSHOT_SAVED_EVENT,
+            account_id: "a1",
+          },
+        },
+      ]);
+
+      events.length = 0;
+      await expect(
+        service.importHoldingsCsv({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-05-02",
+              positions: [{ assetId: "asset-1", symbol: "ACME", quantity: "3", currency: "USD" }],
+              cashBalances: {},
+            },
+            {
+              date: "2026-05-03",
+              positions: [{ symbol: "BAD", quantity: "oops", currency: "USD" }],
+              cashBalances: {},
+            },
+          ],
+        }),
+      ).resolves.toEqual({
+        snapshotsImported: 1,
+        snapshotsFailed: 1,
+        errors: ["Date 2026-05-03: Invalid quantity for BAD"],
+      });
+      expect(events).toEqual([
+        {
+          name: HOLDINGS_CHANGED_EVENT,
+          payload: {
+            type: HOLDINGS_CHANGED_EVENT,
+            account_ids: ["a1"],
+            asset_ids: ["asset-1"],
+          },
+        },
+        {
+          name: MANUAL_SNAPSHOT_SAVED_EVENT,
+          payload: {
+            type: MANUAL_SNAPSHOT_SAVED_EVENT,
+            account_id: "a1",
+          },
+        },
+      ]);
+
+      events.length = 0;
+      await service.deleteSnapshot("a1", "2026-05-02");
+      expect(events).toEqual([
+        {
+          name: HOLDINGS_CHANGED_EVENT,
+          payload: {
+            type: HOLDINGS_CHANGED_EVENT,
+            account_ids: ["a1"],
+            asset_ids: ["asset-1"],
+          },
+        },
+      ]);
+
+      events.length = 0;
+      insertSnapshot(db, {
+        id: "a1-2026-05-04",
+        accountId: "a1",
+        date: "2026-05-04",
+        source: "CALCULATED",
+        positions: { "asset-1": snapshotPosition("asset-1", "1", "1", "USD", "1") },
+        cashBalances: {},
+      });
+      await expect(service.deleteSnapshot("a1", "2026-05-04")).rejects.toThrow(
+        "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted.",
+      );
+      expect(events).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("calculates live holdings from the latest snapshot with quotes and FX", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db, {
@@ -1225,6 +1343,17 @@ function createHoldingsDb(): Database {
     );
   `);
   return db;
+}
+
+function recordingEventBus(events: BackendEvent[]): BackendEventBus {
+  return {
+    publish(event) {
+      events.push(event);
+    },
+    subscribe() {
+      return () => undefined;
+    },
+  };
 }
 
 function insertAccount(

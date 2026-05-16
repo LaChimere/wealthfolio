@@ -245,6 +245,7 @@ function createServicesFromDatabase(
     }),
     holdingsService: createHoldingsService(db, {
       baseCurrency,
+      eventBus,
       exchangeRateService,
       symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
     }),

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 104
+turns_used: 105
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T13:27:16+08:00"
+updated_at: "2026-05-16T13:48:04+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -695,6 +695,14 @@ updated_at: "2026-05-16T13:27:16+08:00"
   check results, and keeps provider failures non-fatal. Device-sync outbox and
   portfolio recalculation side effects remain deferred. Targeted
   holdings/runtime tests and backend type-check passed.
+- Turn 105: Added holdings snapshot mutation event production: manual/imported
+  snapshot saves now publish Rust-shaped `holdings_changed` followed by
+  `manual_snapshot_saved`, manual/imported snapshot deletes publish
+  `holdings_changed`, and the standalone TS runtime wires holdings to the shared
+  event bus. Delete emission is an intentional bridge while Rust's inline delete
+  valuation/TOTAL recalculation path remains deferred to the broader TS
+  portfolio job worker slice. Targeted holdings/runtime tests and backend
+  type-check passed.
 
 ## Deferred items
 
@@ -737,10 +745,11 @@ updated_at: "2026-05-16T13:27:16+08:00"
   injectable HTTP paths, and can merge search results against existing SQLite
   assets; market sync and portfolio recalculation side effects remain active
   follow-ups.
-- Actual portfolio job execution and event production remain active follow-ups.
-  reason=they depend on market sync, holdings, snapshot, valuation, account,
-  health, and FX service parity beyond route-level job enqueue and SSE transport
-  semantics.
+- Actual portfolio job execution and broad domain-event worker behavior remain
+  active follow-ups. reason=holdings snapshot mutation events now have bounded
+  TS runtime parity, while debounced portfolio jobs still depend on market sync,
+  holdings, snapshot, valuation, account, health, and FX service parity beyond
+  route-level job enqueue and SSE transport semantics.
 - Real keyring integration remains an active follow-up. reason=file-backed
   secret persistence now has TS runtime parity, while OS keyring support must
   move with a dedicated runtime/keyring parity slice.
@@ -768,18 +777,19 @@ updated_at: "2026-05-16T13:27:16+08:00"
   remains blocked on a `501`.
 - Net-worth current/history, income summary, simple account performance, account
   performance history/summary, holdings allocation reads, snapshot deletion, and
-  bounded manual/imported snapshot saves with FX pair registration now have
-  bounded TS runtime parity, while provider-backed symbol performance history
-  and broader valuation calculations remain active follow-ups. reason=the
-  standalone backend can calculate `/api/v1/net-worth`,
+  bounded manual/imported snapshot saves with FX pair registration and mutation
+  event production now have bounded TS runtime parity, while provider-backed
+  symbol performance history and broader valuation calculations remain active
+  follow-ups. reason=the standalone backend can calculate `/api/v1/net-worth`,
   `/api/v1/net-worth/history`, `/api/v1/income/summary`,
   `/api/v1/performance/accounts/simple`, and account-scoped
   `/api/v1/performance/{history,summary}`,
   `/api/v1/valuations/{history,latest}`, `/api/v1/snapshots`,
   `/api/v1/snapshots/holdings`, `/api/v1/snapshots/import/check`,
   `DELETE /api/v1/snapshots`, and bounded `POST /api/v1/snapshots`, plus
-  `/api/v1/holdings`, `/api/v1/allocations`, and `/api/v1/allocations/holdings`;
-  remaining portfolio metrics and recalculation side effects still need
+  `/api/v1/holdings`, `/api/v1/allocations`, and `/api/v1/allocations/holdings`,
+  and publish holdings snapshot mutation events; remaining portfolio metrics,
+  debounced job execution, and inline valuation recalculation still need
   dedicated calculation/import parity slices.
 - Activity import mapping/template storage, duplicate lookups, read-only
   activity search, transfer link/unlink mutations, single activity deletes,
@@ -843,13 +853,13 @@ updated_at: "2026-05-16T13:27:16+08:00"
   errors, and pairing-flow runtime remain active follow-ups. reason=this slice
   only adds the guarded pairing HTTP seam, while runtime behavior must move with
   dedicated device-sync parity slices.
-- Holdings snapshot reconciliation and portfolio recalculation side effects
-  remain active follow-ups. reason=holdings fan-out, valuation reads, allocation
-  reads, manual/imported snapshot deletion, bounded manual snapshot saves,
-  bounded snapshot import writes, snapshot FX pair registration, and
-  provider-backed import-check symbol lookup now have TS runtime parity, while
-  remaining recalculation behavior must move with dedicated holdings/portfolio
-  parity slices.
+- Holdings snapshot reconciliation and actual portfolio recalculation/job
+  execution remain active follow-ups. reason=holdings fan-out, valuation reads,
+  allocation reads, manual/imported snapshot deletion, bounded manual snapshot
+  saves, bounded snapshot import writes, snapshot FX pair registration,
+  provider-backed import-check symbol lookup, and snapshot mutation event
+  production now have TS runtime parity, while remaining recalculation behavior
+  must move with dedicated holdings/portfolio parity slices.
 - Add-on filesystem extraction, manifest validation, sandbox/runtime loading,
   store HTTP requests, staging I/O, and update behavior remain active
   follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime

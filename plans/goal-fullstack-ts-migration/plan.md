@@ -203,6 +203,13 @@ health legacy-classification runtime slices in the standalone TS backend:
   `/api/v1/snapshots/import/check` through the migrated market-data search
   runtime after local exact-symbol lookup, requiring exact provider symbol
   matches, and treating provider failures as non-fatal misses.
+- Add bounded holdings snapshot mutation event production by publishing
+  Rust-shaped `holdings_changed` and `manual_snapshot_saved` events after
+  successful manual/imported snapshot saves, publishing `holdings_changed` after
+  manual/imported snapshot deletes, and wiring the standalone runtime shared
+  event bus into holdings. Delete events are an intentional TS bridge until the
+  broader TS portfolio job worker can replace Rust's inline delete recalculation
+  path.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -215,15 +222,15 @@ health legacy-classification runtime slices in the standalone TS backend:
   migrated taxonomy migration status as `classification:legacy_migration:*`
   health issues with a `migrate_legacy_classifications` fix action.
 - Keep still-deferred symbol-only asset creation, quote fallback writes,
-  provider-backed asset resolution, device-sync outbox emission, and portfolio
-  recalculation side effects for dedicated parity slices.
+  provider-backed asset resolution, device-sync outbox emission, and actual
+  portfolio job execution/valuation recalculation for dedicated parity slices.
 - Preserve the existing guarded handler model for unimplemented/high-risk
   domains and keep Electron/Rust sidecar defaults unchanged until cutover gates
   are ready.
 
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
-provider sync, portfolio recalculation side effects, keyring storage, AI chat
+provider sync, actual portfolio job execution, keyring storage, AI chat
 streaming/provider/tool execution runtime, quote-provider interactions,
 auto-classification side effects, portfolio metrics runtime beyond
 current/historical net-worth, income summary, simple account performance,
@@ -238,9 +245,10 @@ CSV parse/read-only asset preview/read-only import validation and bounded import
 apply, save-up preview calculations, local AI chat thread/message persistence,
 bounded health account/timezone status/checks and legacy-classification issue
 generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, holdings portfolio recalculation
-side effects, real Connect runtime implementation, real device-sync runtime
-implementation, or Rust runtime removal is in scope for this slice.
+or non-classification `/health/fix` execution, holdings inline portfolio
+recalculation/job execution, real Connect runtime implementation, real
+device-sync runtime implementation, or Rust runtime removal is in scope for this
+slice.
 
 ## Next slices
 
