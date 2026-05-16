@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 112
+turns_used: 113
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-16T21:59:33+08:00"
+updated_at: "2026-05-16T22:09:26+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -739,6 +739,11 @@ updated_at: "2026-05-16T21:59:33+08:00"
   Rust-compatible `ActivityDB` payloads and outbox filtering rules. Targeted
   activities tests, backend type-check, full `bun run check`, and focused code
   review passed.
+- Turn 113: Added CSV import-run sync-event queuing: activity import apply now
+  queues a Rust-compatible `import_runs` Create callback before activity Create
+  callbacks, with `ImportRunDB` payload shape and the Rust
+  `should_sync_outbox_for_import_run` filter. Targeted activities tests, backend
+  type-check, full `bun run check`, and focused code review passed.
 
 ## Deferred items
 
@@ -852,11 +857,12 @@ updated_at: "2026-05-16T21:59:33+08:00"
   through the TS exchange-rate runtime, Rust-shaped mutation event production,
   transactional `assets_created` events for newly staged assets, and
   Rust-compatible MANUAL quote fallback writes for price-bearing activity
-  writes, and Rust-compatible activity sync-event callback queuing for write
-  paths; provider-backed asset resolution, import-run/asset sync outbox
-  follow-ups, actual sync_outbox persistence/runtime wiring, and portfolio
-  recalculation side effects remain active follow-ups for dedicated
-  activities/import/device-sync/portfolio parity slices.
+  writes, Rust-compatible activity sync-event callback queuing for write paths,
+  and CSV import-run sync-event callback queuing; provider-backed asset
+  resolution, asset sync outbox follow-ups, actual sync_outbox
+  persistence/runtime wiring, and portfolio recalculation side effects remain
+  active follow-ups for dedicated activities/import/device-sync/portfolio parity
+  slices.
 - AI chat provider streaming, title generation, tool execution, tag mutations,
   attachment handling, and outbox writes remain active follow-ups. reason=local
   thread/message persistence and tool-result mutation now have TS runtime

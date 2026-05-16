@@ -2085,6 +2085,18 @@ describe("TS activities import domain", () => {
       expect(importResult.summary).toMatchObject({ imported: 1, skipped: 0 });
       expect(syncEvents).toEqual([
         expect.objectContaining({
+          entity: "import_runs",
+          entityId: importResult.importRunId,
+          operation: "Create",
+          payload: expect.objectContaining({
+            id: importResult.importRunId,
+            source_system: "csv",
+            run_type: "IMPORT",
+            status: "APPLIED",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "activities",
           operation: "Create",
           payload: expect.objectContaining({
             source_system: "CSV",

@@ -205,17 +205,26 @@ export interface ActivityServiceOptions {
 }
 
 export type ActivitySyncOperation = "Create" | "Update" | "Delete";
-export type ActivitySyncPayload = ActivityRow;
+export type ActivitySyncPayload = ActivityRow | ImportRunRow;
 export type ActivitySyncFilterInput = Pick<
   ActivityRow,
   "import_run_id" | "is_user_modified" | "source_record_id" | "source_system"
 >;
 
-export interface ActivitySyncEvent {
+export type ActivitySyncEvent = ActivityRowSyncEvent | ActivityImportRunSyncEvent;
+
+export interface ActivityRowSyncEvent {
   entity: "activities";
   entityId: string;
   operation: ActivitySyncOperation;
-  payload: ActivitySyncPayload | { id: string };
+  payload: ActivityRow | { id: string };
+}
+
+export interface ActivityImportRunSyncEvent {
+  entity: "import_runs";
+  entityId: string;
+  operation: "Create";
+  payload: ImportRunRow;
 }
 
 export interface ActivityService {
@@ -294,6 +303,26 @@ interface ImportAccountTemplateRow {
 interface DuplicateRow {
   id: string;
   idempotency_key: string | null;
+}
+
+export interface ImportRunRow {
+  id: string;
+  account_id: string;
+  source_system: string;
+  run_type: string;
+  mode: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  review_mode: string;
+  applied_at: string | null;
+  checkpoint_in: string | null;
+  checkpoint_out: string | null;
+  summary: string | null;
+  warnings: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ActivityDetailsRow {
@@ -1094,6 +1123,20 @@ function activitySyncEvents(inputs: ActivitySyncInput[]): ActivitySyncEvent[] {
   });
 }
 
+function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
+  if (!shouldQueueImportRunSyncEvent(row)) {
+    return [];
+  }
+  return [
+    {
+      entity: "import_runs",
+      entityId: row.id,
+      operation: "Create",
+      payload: { ...row },
+    },
+  ];
+}
+
 export function shouldQueueActivitySyncEvent(
   operation: ActivitySyncOperation,
   activity: ActivitySyncFilterInput,
@@ -1112,6 +1155,12 @@ export function shouldQueueActivitySyncEvent(
   }
 
   return isBlankSyncText(activity.import_run_id) && isBlankSyncText(activity.source_record_id);
+}
+
+function shouldQueueImportRunSyncEvent(row: ImportRunRow): boolean {
+  const runType = row.run_type.trim().toUpperCase();
+  const sourceSystem = row.source_system.trim().toUpperCase();
+  return runType === "IMPORT" && (sourceSystem === "CSV" || sourceSystem === "MANUAL");
 }
 
 function isBlankSyncText(value: string | null): boolean {
@@ -2140,12 +2189,12 @@ async function importActivityRows(
 
   const result = db.transaction(() => {
     ensurePendingActivityAssets(db, assetContext, pendingAssetIds);
-    const importRunId = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
+    const importRun = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
     const syncInputs: ActivitySyncInput[] = [];
 
     try {
       for (const row of insertable) {
-        row.create.importRunId = importRunId;
+        row.create.importRunId = importRun.id;
         applyActivityQuoteSideEffects(db, row.create, row.create.assetQuoteMode, true);
         insertActivityRow(db, row.create);
         syncInputs.push({ operation: "Create", row: readActivityRow(db, row.create.id) });
@@ -2160,9 +2209,9 @@ async function importActivityRows(
 
     return {
       activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
-      importRunId,
+      importRunId: importRun.id,
       summary,
-      syncEvents: activitySyncEvents(syncInputs),
+      syncEvents: [...importRunSyncEvents(importRun), ...activitySyncEvents(syncInputs)],
     };
   })();
   if (summary.imported > 0) {
@@ -2467,9 +2516,37 @@ function insertCompletedImportRun(
   db: Database,
   accountId: string,
   summary: ImportActivitiesSummary,
-): string {
+): ImportRunRow {
   const id = crypto.randomUUID();
   const now = activityTimestampNow();
+  const row: ImportRunRow = {
+    id,
+    account_id: accountId,
+    source_system: "csv",
+    run_type: "IMPORT",
+    mode: "INCREMENTAL",
+    status: "APPLIED",
+    started_at: now,
+    finished_at: now,
+    review_mode: "NEVER",
+    applied_at: now,
+    checkpoint_in: null,
+    checkpoint_out: null,
+    summary: JSON.stringify({
+      fetched: summary.total,
+      inserted: summary.imported,
+      updated: 0,
+      skipped: summary.skipped,
+      warnings: summary.duplicates,
+      errors: 0,
+      removed: 0,
+      assetsCreated: summary.assetsCreated,
+    }),
+    warnings: null,
+    error: null,
+    created_at: now,
+    updated_at: now,
+  };
   db.query(
     `
       INSERT INTO import_runs (
@@ -2480,25 +2557,16 @@ function insertCompletedImportRun(
       VALUES (?, ?, 'csv', 'IMPORT', 'INCREMENTAL', 'APPLIED', ?, ?, 'NEVER', ?, NULL, NULL, ?, NULL, NULL, ?, ?)
     `,
   ).run(
-    id,
-    accountId,
-    now,
-    now,
-    now,
-    JSON.stringify({
-      fetched: summary.total,
-      inserted: summary.imported,
-      updated: 0,
-      skipped: summary.skipped,
-      warnings: summary.duplicates,
-      errors: 0,
-      removed: 0,
-      assetsCreated: summary.assetsCreated,
-    }),
-    now,
-    now,
+    row.id,
+    row.account_id,
+    row.started_at,
+    row.finished_at,
+    row.applied_at,
+    row.summary,
+    row.created_at,
+    row.updated_at,
   );
-  return id;
+  return row;
 }
 
 function normalizeActivityCreateInput(

@@ -158,7 +158,7 @@
     market-data/portfolio parity slices; activity mutation event production,
     activity sync-event callback queuing, and domain-event planning/batch
     processing/worker helper now have TS runtime parity, while provider-backed
-    asset resolution, import-run/asset sync outbox follow-ups, real sync_outbox
+    asset resolution, asset sync outbox follow-ups, real sync_outbox
     persistence/runtime wiring, and portfolio recalculation side effects are
     deferred to activities/import/device-sync runtime parity slices; AI chat
     persistence and tool-result mutation now have TS runtime parity, while
@@ -1018,7 +1018,16 @@ contract:
   no-event behavior on validation errors, Rust-shaped ActivityDB payloads, and
   focused code review with no material issues. Provider-backed asset resolution,
   import-run/asset sync outbox follow-ups, real sync_outbox persistence/runtime
-  wiring, and portfolio recalculation remain deferred.
+  wiring, and portfolio recalculation remained deferred at that slice.
+- `pr5-activities-import-run-sync-event-queueing`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, and full
+  `bun run check`. Coverage includes CSV import-run Create sync callback events
+  queued before per-activity Create callbacks, Rust-shaped ImportRunDB payloads,
+  Rust `should_sync_outbox_for_import_run` filtering, and focused code review
+  with no material issues. Provider-backed asset resolution, asset sync outbox
+  follow-ups, real sync_outbox persistence/runtime wiring, and portfolio
+  recalculation remain deferred.
 - `pr5-goal-plan-save-up-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/goals.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
