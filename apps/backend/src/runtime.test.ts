@@ -833,6 +833,88 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/custom-providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: "runtime-provider",
+          name: "Runtime Provider",
+          sources: [
+            {
+              kind: "latest",
+              format: "json",
+              url: "https://example.test/latest/{SYMBOL}",
+              pricePath: "$.price",
+            },
+          ],
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      await expect(createResponse.json()).resolves.toMatchObject({
+        id: "runtime-provider",
+        sources: [expect.objectContaining({ id: "runtime-provider:latest" })],
+      });
+
+      const updateResponse = await fetch(
+        `${server.baseUrl}/api/v1/custom-providers/runtime-provider`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Runtime Provider Updated" }),
+        },
+      );
+      expect(updateResponse.status).toBe(200);
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/custom-providers/runtime-provider`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const providerRows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "custom_provider",
+        );
+        expect(providerRows).toEqual([
+          expect.objectContaining({ op: "create" }),
+          expect.objectContaining({ op: "update" }),
+          expect.objectContaining({ op: "delete" }),
+        ]);
+        expect(new Set(providerRows.map((row) => row.entity_id)).size).toBe(1);
+        const providerUuid = String(providerRows[0]?.entity_id);
+        expect(JSON.parse(String(providerRows[0]?.payload))).toMatchObject({
+          id: providerUuid,
+          code: "runtime-provider",
+          name: "Runtime Provider",
+          enabled: true,
+          priority: 50,
+        });
+        expect(JSON.parse(String(providerRows[1]?.payload))).toMatchObject({
+          id: providerUuid,
+          code: "runtime-provider",
+          name: "Runtime Provider Updated",
+        });
+        expect(JSON.parse(String(providerRows[2]?.payload))).toEqual({ id: providerUuid });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      runtime.close();
+    }
+  });
+
   test("fails startup explicitly when TS runtime keyring secrets are requested", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 

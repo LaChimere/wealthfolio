@@ -246,9 +246,21 @@ function createServicesFromDatabase(
         ),
       },
     ),
-    customProviderService: createCustomProviderService(createCustomProviderRepository(db), {
-      secretService,
-    }),
+    customProviderService: createCustomProviderService(
+      createCustomProviderRepository(db, {
+        queueSyncEvent: (event) => {
+          syncOutboxQueue.queueSyncEvent({
+            entity: "market_data_custom_providers",
+            entityId: event.providerUuid,
+            operation: event.operation,
+            payload: event.payload,
+          });
+        },
+      }),
+      {
+        secretService,
+      },
+    ),
     eventBus,
     exchangeRateService,
     goalService: createGoalService(

@@ -241,6 +241,9 @@ backend:
 - Extend sync_outbox runtime wiring to exchange-rate FX asset callbacks,
   including Rust-compatible AssetDB Create/Delete payloads that omit generated
   `instrument_key` fields.
+- Extend sync_outbox runtime wiring to custom provider Create/Update/Delete
+  callbacks, preserving UUID-keyed `custom_provider` rows and normalized
+  payloads.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.
