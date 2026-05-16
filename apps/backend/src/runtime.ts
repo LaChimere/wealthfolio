@@ -240,6 +240,14 @@ function createServicesFromDatabase(
     assetService: createAssetService(db, {
       eventBus,
       exchangeMetadata: readExchangeMetadataLookup(runtimeOptions.repositoryRoot),
+      queueSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "assets",
+          entityId: event.assetId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
     }),
     aiProviderService: secretService
       ? createAiProviderService({

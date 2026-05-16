@@ -65,6 +65,33 @@ export interface AssetServiceOptions {
   eventBus?: BackendEventBus;
   exchangeMetadata?: ExchangeMetadata;
   exchangeNameByMic?: ReadonlyMap<string, string> | Record<string, string>;
+  queueSyncEvent?: (event: AssetSyncEvent) => void;
+}
+
+export type AssetSyncOperation = "Create" | "Update" | "Delete";
+
+export interface AssetSyncEvent {
+  assetId: string;
+  operation: AssetSyncOperation;
+  payload: AssetRowPayload | { id: string };
+}
+
+export interface AssetRowPayload {
+  id: string;
+  kind: string;
+  name: string | null;
+  displayCode: string | null;
+  notes: string | null;
+  metadata: string | null;
+  isActive: number;
+  quoteMode: string;
+  quoteCcy: string;
+  instrumentType: string | null;
+  instrumentSymbol: string | null;
+  instrumentExchangeMic: string | null;
+  providerConfig: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface AssetRow {
@@ -177,7 +204,9 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
           now,
           now,
         );
-        return { created: true, row: readAssetRow(db, assetId) };
+        const row = readAssetRow(db, assetId);
+        queueAssetSyncEvent(options, row, "Create");
+        return { created: true, row };
       });
       const result = createAssetRow();
       const created = rowToAsset(result.row, exchangeMetadata.nameByMic);
@@ -231,6 +260,7 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
         if (quoteSyncStateExists && shouldResetSyncStateAfterProfileChange(existing, updated)) {
           resetQuoteSyncStateForProfileChange(db, assetId);
         }
+        queueAssetSyncEvent(options, updated, "Update");
         return updated;
       });
       const asset = rowToAsset(updateAssetProfileRow(), exchangeMetadata.nameByMic);
@@ -260,6 +290,7 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
         if (normalizedQuoteMode === "MANUAL" && quoteSyncStateExists) {
           db.query("DELETE FROM quote_sync_state WHERE asset_id = ?").run(assetId);
         }
+        queueAssetSyncEvent(options, updated, "Update");
         return rowToAsset(updated, exchangeMetadata.nameByMic);
       });
       const asset = updateAssetQuoteMode();
@@ -295,6 +326,7 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
         }
         db.query("DELETE FROM quotes WHERE asset_id = ?").run(assetId);
         db.query("DELETE FROM assets WHERE id = ?").run(assetId);
+        queueAssetSyncDelete(options, assetId);
       });
       deleteAsset();
     },
@@ -581,6 +613,46 @@ function rowToAsset(row: AssetRow, exchangeNameByMic: ReadonlyMap<string, string
       : null,
     createdAt: normalizeTimestamp(row.created_at),
     updatedAt: normalizeTimestamp(row.updated_at),
+  };
+}
+
+function queueAssetSyncEvent(
+  options: AssetServiceOptions,
+  row: AssetRow,
+  operation: Exclude<AssetSyncOperation, "Delete">,
+): void {
+  options.queueSyncEvent?.({
+    assetId: row.id,
+    operation,
+    payload: assetRowPayload(row),
+  });
+}
+
+function queueAssetSyncDelete(options: AssetServiceOptions, assetId: string): void {
+  options.queueSyncEvent?.({
+    assetId,
+    operation: "Delete",
+    payload: { id: assetId },
+  });
+}
+
+function assetRowPayload(row: AssetRow): AssetRowPayload {
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    displayCode: row.display_code,
+    notes: row.notes,
+    metadata: row.metadata,
+    isActive: row.is_active,
+    quoteMode: row.quote_mode,
+    quoteCcy: row.quote_ccy,
+    instrumentType: row.instrument_type,
+    instrumentSymbol: row.instrument_symbol,
+    instrumentExchangeMic: row.instrument_exchange_mic,
+    providerConfig: row.provider_config,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

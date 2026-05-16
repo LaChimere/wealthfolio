@@ -833,6 +833,82 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime direct asset sync callbacks to sync_outbox", () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { assetService } = runtime.options;
+      const created = assetService.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        name: "Runtime Asset",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "AAPL",
+        instrumentExchangeMic: "XNAS",
+      });
+      assetService.updateAssetProfile(created.id, {
+        notes: "moved",
+        instrumentExchangeMic: "XTSE",
+      });
+      assetService.updateQuoteMode(created.id, "MANUAL");
+      assetService.deleteAsset(created.id);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assetRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "asset");
+        expect(assetRows).toEqual([
+          expect.objectContaining({
+            entity_id: created.id,
+            op: "create",
+          }),
+          expect.objectContaining({
+            entity_id: created.id,
+            op: "update",
+          }),
+          expect.objectContaining({
+            entity_id: created.id,
+            op: "update",
+          }),
+          expect.objectContaining({
+            entity_id: created.id,
+            op: "delete",
+          }),
+        ]);
+        const createPayload = JSON.parse(String(assetRows[0]?.payload)) as Record<string, unknown>;
+        expect(createPayload).toMatchObject({
+          id: created.id,
+          kind: "INVESTMENT",
+          name: "Runtime Asset",
+          quote_mode: "MARKET",
+          quote_ccy: "USD",
+          instrument_type: "EQUITY",
+          instrument_symbol: "AAPL",
+          instrument_exchange_mic: "XNAS",
+        });
+        expect(createPayload).not.toHaveProperty("instrument_key");
+        const profilePayload = JSON.parse(String(assetRows[1]?.payload)) as Record<string, unknown>;
+        expect(profilePayload).toMatchObject({
+          notes: "moved",
+          quote_ccy: "CAD",
+          instrument_exchange_mic: "XTSE",
+        });
+        expect(profilePayload).not.toHaveProperty("instrument_key");
+        expect(JSON.parse(String(assetRows[2]?.payload))).toMatchObject({ quote_mode: "MANUAL" });
+        expect(JSON.parse(String(assetRows[3]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({

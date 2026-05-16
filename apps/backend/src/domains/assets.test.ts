@@ -2,7 +2,12 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import { createEventBus } from "../events";
-import { createAssetService, parseExchangeMetadataLookup, parseExchangeNameLookup } from "./assets";
+import {
+  createAssetService,
+  parseExchangeMetadataLookup,
+  parseExchangeNameLookup,
+  type AssetSyncEvent,
+} from "./assets";
 
 describe("TS assets domain", () => {
   test("lists and reads assets with Rust-compatible response shape and exchange names", () => {
@@ -176,6 +181,82 @@ describe("TS assets domain", () => {
           ?.count,
       ).toBe(0);
       expect(readAssetOrNull(db, "in-use")).toMatchObject({ id: "in-use" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues Rust-compatible asset sync callbacks after successful writes", () => {
+    const db = createAssetsDb();
+    const syncEvents: AssetSyncEvent[] = [];
+    const service = createAssetService(db, {
+      exchangeMetadata: testExchangeMetadata(),
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      const created = service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "usd",
+        name: "Apple",
+        notes: "core",
+        metadata: { sector: "technology" },
+        instrumentType: "equity",
+        instrumentSymbol: "aapl",
+        instrumentExchangeMic: "xnas",
+        providerConfig: { preferred_provider: "YAHOO" },
+      });
+      service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "AAPL",
+        instrumentExchangeMic: "XNAS",
+      });
+      service.updateAssetProfile(created.id, { notes: "updated", instrumentExchangeMic: "xtse" });
+      service.updateQuoteMode(created.id, "MANUAL");
+      service.deleteAsset(created.id);
+      expect(() => service.deleteAsset("missing")).toThrow("Record not found");
+
+      expect(syncEvents.map((event) => event.operation)).toEqual([
+        "Create",
+        "Update",
+        "Update",
+        "Delete",
+      ]);
+      expect(syncEvents.map((event) => event.assetId)).toEqual([
+        created.id,
+        created.id,
+        created.id,
+        created.id,
+      ]);
+      expect(syncEvents[0].payload).toMatchObject({
+        id: created.id,
+        kind: "INVESTMENT",
+        name: "Apple",
+        displayCode: "AAPL",
+        notes: "core",
+        metadata: JSON.stringify({ sector: "technology" }),
+        isActive: 1,
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "AAPL",
+        instrumentExchangeMic: "XNAS",
+        providerConfig: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      expect(syncEvents[1].payload).toMatchObject({
+        notes: "updated",
+        quoteCcy: "CAD",
+        instrumentExchangeMic: "XTSE",
+      });
+      expect(syncEvents[2].payload).toMatchObject({ quoteMode: "MANUAL" });
+      expect(syncEvents[3].payload).toEqual({ id: created.id });
+      expect("instrumentKey" in syncEvents[0].payload).toBe(false);
+      expect("instrumentKey" in syncEvents[1].payload).toBe(false);
+      expect("instrumentKey" in syncEvents[2].payload).toBe(false);
     } finally {
       db.close();
     }
