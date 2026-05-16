@@ -13,9 +13,9 @@ SQLite data.
 PR 5 continues vertical slices by extending contained activity
 create/update/bulk, CSV parse, read-only asset-preview, read-only import
 validation, bounded import-apply, activity mutation event production, goal-plan
-persistence, local AI chat thread/message persistence, bounded health
-status/check runtime, and bounded health legacy-classification runtime slices in
-the standalone TS backend:
+persistence, local AI chat thread/message persistence, domain-event planning,
+bounded health status/check runtime, and bounded health legacy-classification
+runtime slices in the standalone TS backend:
 
 - Add TS SQLite runtime behavior for `POST /api/v1/activities`,
   `PUT /api/v1/activities`, and `POST /api/v1/activities/bulk` when requests
@@ -216,6 +216,9 @@ the standalone TS backend:
   import, transfer link, and transfer unlink mutations with account/asset/
   currency sets plus UTC earliest-activity timestamps, and wiring the standalone
   runtime shared event bus into activities.
+- Add bounded TS domain-event planning by deriving portfolio job configs,
+  broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
+  event batches while keeping the actual debounced worker execution deferred.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -248,9 +251,9 @@ broader market-data runtime beyond mapping/templates/duplicate lookups,
 read-only search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved activity create/update/bulk persistence plus
 CSV parse/read-only asset preview/read-only import validation, bounded import
-apply, and activity mutation event production, save-up preview calculations,
-local AI chat thread/message persistence, bounded health account/timezone
-status/checks and legacy-classification issue generation,
+apply, activity mutation event production, and domain-event planning, save-up
+preview calculations, local AI chat thread/message persistence, bounded health
+account/timezone status/checks and legacy-classification issue generation,
 sync-crypto/device-sync integration, calculation-heavy health checks or
 non-classification `/health/fix` execution, holdings inline portfolio
 recalculation/job execution, real Connect runtime implementation, real
