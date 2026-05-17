@@ -267,6 +267,20 @@ function createServicesFromDatabase(
       syncOutboxQueue.queueSyncEvent(event);
     },
   });
+  const holdingsService = createHoldingsService(db, {
+    baseCurrency,
+    eventBus,
+    exchangeRateService,
+    queueSnapshotSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent({
+        entity: "holdings_snapshots",
+        entityId: event.snapshotId,
+        operation: event.operation,
+        payload: event.payload,
+      });
+    },
+    symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
+  });
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -310,7 +324,7 @@ function createServicesFromDatabase(
     aiProviderService,
     aiChatService: createAiChatService(db, {
       aiProviderService,
-      tools: createPortfolioAiChatTools({ accountService }),
+      tools: createPortfolioAiChatTools({ accountService, holdingsService, baseCurrency }),
       queueThreadSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "ai_threads",
@@ -401,20 +415,7 @@ function createServicesFromDatabase(
       classificationMigrationProvider: taxonomyService,
       settingsProvider: settingsService,
     }),
-    holdingsService: createHoldingsService(db, {
-      baseCurrency,
-      eventBus,
-      exchangeRateService,
-      queueSnapshotSyncEvent: (event) => {
-        syncOutboxQueue.queueSyncEvent({
-          entity: "holdings_snapshots",
-          entityId: event.snapshotId,
-          operation: event.operation,
-          payload: event.payload,
-        });
-      },
-      symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
-    }),
+    holdingsService,
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
     ),

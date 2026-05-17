@@ -15,13 +15,14 @@ and richer provider-specific orchestration. The TypeScript/Bun backend now
 supports a bounded text streaming path for configured providers, provider-native
 and `<think>` fallback reasoning deltas, generated/refined thread titles,
 OpenAI-compatible/Ollama injected tool-call execution, the built-in
-`get_accounts` portfolio tool, and validated text/CSV attachment content
-injected into the provider prompt while persisting only attachment filename
-markers. It preserves the Rust-shaped NDJSON event contract (`system`,
-`textDelta`, `reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`,
-`done`, `error`) and persists user/assistant messages, but it intentionally does
-not wire the remaining portfolio tool registry, Anthropic/Gemini tool protocols,
-or multimodal attachments until those parity slices are migrated.
+`get_accounts` and `get_holdings` portfolio tools, and validated text/CSV
+attachment content injected into the provider prompt while persisting only
+attachment filename markers. It preserves the Rust-shaped NDJSON event contract
+(`system`, `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`,
+`threadTitleUpdated`, `done`, `error`) and persists user/assistant messages, but
+it intentionally does not wire the remaining portfolio tool registry,
+Anthropic/Gemini tool protocols, or multimodal attachments until those parity
+slices are migrated.
 
 ## Architecture Diagram
 
