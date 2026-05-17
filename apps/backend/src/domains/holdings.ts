@@ -110,8 +110,17 @@ export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
   eventBus?: BackendEventBus;
   exchangeRateService?: HoldingsExchangeRateService;
+  queueSnapshotSyncEvent?: (event: HoldingsSnapshotSyncEvent) => void;
   symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   today?: () => string;
+}
+
+export type HoldingsSnapshotSyncOperation = "Create" | "Delete";
+
+export interface HoldingsSnapshotSyncEvent {
+  snapshotId: string;
+  operation: HoldingsSnapshotSyncOperation;
+  payload: SnapshotSyncRow | { id: string };
 }
 
 export interface DailyAccountValuation {
@@ -273,6 +282,16 @@ interface SnapshotRow {
   currency: string;
   positions: string;
   cash_balances: string;
+}
+
+interface SnapshotSyncRow extends SnapshotRow {
+  cost_basis: string;
+  net_contribution: string;
+  calculated_at: string;
+  net_contribution_base: string;
+  cash_total_account_currency: string;
+  cash_total_base_currency: string;
+  source: string;
 }
 
 interface SyntheticSnapshotSourceRow extends SnapshotRow {
@@ -573,29 +592,29 @@ function deleteSnapshot(
   date: string,
   options: HoldingsServiceOptions,
 ): void {
-  const snapshot = db
-    .query<{ id: string; source: string | null; positions: string }, [string, string]>(
-      `
-        SELECT id, source, positions
-        FROM holdings_snapshots
-        WHERE account_id = ? AND snapshot_date = ?
-      `,
-    )
-    .get(accountId, date);
-  if (!snapshot) {
+  let deletedSnapshot: SnapshotSyncRow | undefined;
+  db.transaction(() => {
+    const snapshot = readSnapshotSyncRowByDate(db, accountId, date);
+    if (!snapshot) {
+      throw new Error(`No snapshot found for date ${date}`);
+    }
+    if (snapshot.source === "CALCULATED") {
+      throw new Error(
+        "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted.",
+      );
+    }
+
+    db.prepare("DELETE FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?").run(
+      accountId,
+      date,
+    );
+    deletedSnapshot = snapshot;
+  })();
+  if (!deletedSnapshot) {
     throw new Error(`No snapshot found for date ${date}`);
   }
-  if ((snapshot.source ?? "CALCULATED") === "CALCULATED") {
-    throw new Error(
-      "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted.",
-    );
-  }
-
-  db.prepare("DELETE FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?").run(
-    accountId,
-    date,
-  );
-  publishHoldingsChanged(options.eventBus, accountId, snapshotAssetIds(snapshot.positions));
+  queueSnapshotSyncEvents(options, snapshotSyncDeleteEvents([deletedSnapshot]));
+  publishHoldingsChanged(options.eventBus, accountId, snapshotAssetIds(deletedSnapshot.positions));
 }
 
 function publishManualSnapshotSavedEvents(
@@ -803,6 +822,7 @@ async function persistHoldingsSnapshot(
 
   const now = new Date().toISOString();
   const positions: Record<string, SnapshotPosition> = {};
+  const snapshotSyncEvents: HoldingsSnapshotSyncEvent[] = [];
 
   const assetIds = db.transaction(() => {
     const manualQuotesByAsset = new Map<
@@ -906,9 +926,18 @@ async function persistHoldingsSnapshot(
       source: request.source,
       calculatedAt: now,
     });
-    ensureSyntheticHoldingsSnapshot(db, request.accountId, now);
+    snapshotSyncEvents.push(
+      ...snapshotSyncCreateEvents([
+        readSnapshotSyncRowByDateOrThrow(db, request.accountId, request.snapshotDate),
+      ]),
+    );
+    const syntheticSnapshot = ensureSyntheticHoldingsSnapshot(db, request.accountId, now);
+    if (syntheticSnapshot) {
+      snapshotSyncEvents.push(...snapshotSyncCreateEvents([syntheticSnapshot]));
+    }
     return uniqueSortedStrings(Object.keys(positions));
   })();
+  queueSnapshotSyncEvents(options, snapshotSyncEvents);
   publishManualSnapshotSavedEvents(options.eventBus, request.accountId, assetIds);
 }
 
@@ -1018,7 +1047,11 @@ function upsertHoldingsSnapshot(
   );
 }
 
-function ensureSyntheticHoldingsSnapshot(db: Database, accountId: string, now: string): void {
+function ensureSyntheticHoldingsSnapshot(
+  db: Database,
+  accountId: string,
+  now: string,
+): SnapshotSyncRow | null {
   const row = db
     .query<SyntheticSnapshotSourceRow, [string]>(
       `
@@ -1039,16 +1072,16 @@ function ensureSyntheticHoldingsSnapshot(db: Database, accountId: string, now: s
     )
     .all(accountId);
   if (row.length !== 1) {
-    return;
+    return null;
   }
 
   const earliest = row[0];
   if (!earliest) {
-    return;
+    return null;
   }
   const syntheticDate = subtractMonths(earliest.snapshot_date, 3);
   if (syntheticDate === earliest.snapshot_date) {
-    return;
+    return null;
   }
   const existingSynthetic = db
     .query<
@@ -1057,7 +1090,7 @@ function ensureSyntheticHoldingsSnapshot(db: Database, accountId: string, now: s
     >("SELECT COUNT(*) AS count FROM holdings_snapshots WHERE account_id = ? AND snapshot_date = ?")
     .get(accountId, syntheticDate);
   if (existingSynthetic && existingSynthetic.count > 0) {
-    return;
+    return null;
   }
   db.prepare(
     `
@@ -1078,6 +1111,7 @@ function ensureSyntheticHoldingsSnapshot(db: Database, accountId: string, now: s
     earliest.net_contribution,
     now,
   );
+  return readSnapshotSyncRowByDateOrThrow(db, accountId, syntheticDate);
 }
 
 function readLiveHoldings(
@@ -1603,6 +1637,98 @@ function readSnapshotByDate(db: Database, accountId: string, date: string): Snap
       `,
     )
     .get(accountId, date);
+}
+
+function readSnapshotSyncRowByDate(
+  db: Database,
+  accountId: string,
+  date: string,
+): SnapshotSyncRow | null {
+  return db
+    .query<SnapshotSyncRow, [string, string]>(
+      `
+        SELECT
+          id,
+          account_id,
+          snapshot_date,
+          currency,
+          positions,
+          cash_balances,
+          cost_basis,
+          net_contribution,
+          calculated_at,
+          net_contribution_base,
+          cash_total_account_currency,
+          cash_total_base_currency,
+          source
+        FROM holdings_snapshots
+        WHERE account_id = ? AND snapshot_date = ?
+      `,
+    )
+    .get(accountId, date);
+}
+
+function readSnapshotSyncRowByDateOrThrow(
+  db: Database,
+  accountId: string,
+  date: string,
+): SnapshotSyncRow {
+  const snapshot = readSnapshotSyncRowByDate(db, accountId, date);
+  if (!snapshot) {
+    throw new Error(`No snapshot found for date ${date}`);
+  }
+  return snapshot;
+}
+
+function queueSnapshotSyncEvents(
+  options: HoldingsServiceOptions,
+  events: HoldingsSnapshotSyncEvent[],
+): void {
+  if (!options.queueSnapshotSyncEvent) {
+    return;
+  }
+  for (const event of events) {
+    options.queueSnapshotSyncEvent(event);
+  }
+}
+
+function snapshotSyncCreateEvents(rows: SnapshotSyncRow[]): HoldingsSnapshotSyncEvent[] {
+  return rows.flatMap((row) =>
+    shouldQueueSnapshotSyncEvent(row)
+      ? [
+          {
+            snapshotId: row.id,
+            operation: "Create" as const,
+            payload: { ...row },
+          },
+        ]
+      : [],
+  );
+}
+
+function snapshotSyncDeleteEvents(rows: SnapshotSyncRow[]): HoldingsSnapshotSyncEvent[] {
+  return rows.flatMap((row) =>
+    shouldQueueSnapshotSyncEvent(row)
+      ? [
+          {
+            snapshotId: row.id,
+            operation: "Delete" as const,
+            payload: { id: row.id },
+          },
+        ]
+      : [],
+  );
+}
+
+function shouldQueueSnapshotSyncEvent(row: SnapshotSyncRow): boolean {
+  return (
+    (row.source === "MANUAL_ENTRY" || row.source === "CSV_IMPORT" || row.source === "SYNTHETIC") &&
+    isUuid(row.id)
+  );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function readLatestSnapshot(db: Database, accountId: string): SnapshotRow | null {

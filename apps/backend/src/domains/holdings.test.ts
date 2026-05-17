@@ -9,6 +9,7 @@ import {
 import type {
   AllocationHoldings,
   Holding,
+  HoldingsSnapshotSyncEvent,
   HoldingsServiceOptions,
   PortfolioAllocations,
 } from "./holdings";
@@ -346,6 +347,84 @@ describe("TS holdings domain", () => {
           cashBalances: {},
         }),
       ).rejects.toThrow("Record not found: account missing");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues sync events for syncable holdings snapshots after successful writes", async () => {
+    const db = createHoldingsDb();
+    const syncEvents: HoldingsSnapshotSyncEvent[] = [];
+    const service = createHoldingsService(db, {
+      queueSnapshotSyncEvent: (event) => syncEvents.push(event),
+      today: () => "2026-02-15",
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-02-15",
+        holdings: [
+          {
+            symbol: "MAN",
+            quantity: "2",
+            currency: "USD",
+            averageCost: "5",
+            name: "Manual Asset",
+          },
+        ],
+        cashBalances: { CAD: "100" },
+      });
+
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          operation: "Create",
+          payload: expect.objectContaining({
+            account_id: "a1",
+            snapshot_date: "2026-02-15",
+            source: "MANUAL_ENTRY",
+            net_contribution_base: "0",
+            cash_total_account_currency: "0",
+            cash_total_base_currency: "0",
+          }),
+        }),
+        expect.objectContaining({
+          operation: "Create",
+          payload: expect.objectContaining({
+            account_id: "a1",
+            snapshot_date: "2025-11-15",
+            source: "SYNTHETIC",
+          }),
+        }),
+      ]);
+      expect(syncEvents[0]?.snapshotId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+      const manualSnapshotId = syncEvents[0]?.snapshotId;
+
+      syncEvents.length = 0;
+      await service.deleteSnapshot("a1", "2026-02-15");
+      expect(syncEvents).toEqual([
+        {
+          snapshotId: manualSnapshotId,
+          operation: "Delete",
+          payload: { id: manualSnapshotId },
+        },
+      ]);
+
+      syncEvents.length = 0;
+      insertSnapshot(db, {
+        id: "not-a-uuid",
+        accountId: "a1",
+        date: "2026-02-14",
+        source: "CSV_IMPORT",
+        positions: {},
+        cashBalances: {},
+      });
+      await service.deleteSnapshot("a1", "2026-02-14");
+      expect(syncEvents).toEqual([]);
     } finally {
       db.close();
     }
@@ -1305,6 +1384,9 @@ function createHoldingsDb(): Database {
       cash_balances TEXT NOT NULL DEFAULT '{}',
       cost_basis TEXT NOT NULL DEFAULT '0',
       net_contribution TEXT NOT NULL DEFAULT '0',
+      net_contribution_base TEXT NOT NULL DEFAULT '0',
+      cash_total_account_currency TEXT NOT NULL DEFAULT '0',
+      cash_total_base_currency TEXT NOT NULL DEFAULT '0',
       calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       source TEXT NOT NULL DEFAULT 'CALCULATED'
     );

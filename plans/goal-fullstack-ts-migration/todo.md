@@ -163,17 +163,17 @@
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
-    template/account-template callbacks, and domain-event planning/batch
-    processing/worker helper now have TS runtime parity, while provider-backed
-    asset resolution, remaining quote sync outbox follow-ups outside migrated
-    alternative-asset and market-data quote paths, device-sync push/pull runtime
-    wiring, and portfolio recalculation side effects are deferred to
-    activities/import/device-sync runtime parity slices; AI chat persistence,
-    tag persistence, tool-result mutation, and local AI chat sync_outbox
-    callbacks now have TS runtime parity, while provider streaming, tool
-    execution, and attachments are deferred to AI runtime parity slices;
-    device-sync integration for sync crypto is deferred to device-sync runtime
-    parity slices; bounded account/timezone health status/checks, cache
+    template/account-template callbacks, holdings snapshot callbacks, and
+    domain-event planning/batch processing/worker helper now have TS runtime
+    parity, while provider-backed asset resolution, remaining quote sync outbox
+    follow-ups outside migrated alternative-asset and market-data quote paths,
+    device-sync push/pull runtime wiring, and portfolio recalculation side
+    effects are deferred to activities/import/device-sync runtime parity slices;
+    AI chat persistence, tag persistence, tool-result mutation, and local AI
+    chat sync_outbox callbacks now have TS runtime parity, while provider
+    streaming, tool execution, and attachments are deferred to AI runtime parity
+    slices; device-sync integration for sync crypto is deferred to device-sync
+    runtime parity slices; bounded account/timezone health status/checks, cache
     behavior, legacy-classification health issues, and classification migration
     health-fix dispatch now have TS runtime parity, while calculation-heavy
     health checks, market sync fix execution, and non-classification

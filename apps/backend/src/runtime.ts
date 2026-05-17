@@ -384,6 +384,14 @@ function createServicesFromDatabase(
       baseCurrency,
       eventBus,
       exchangeRateService,
+      queueSnapshotSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent({
+          entity: "holdings_snapshots",
+          entityId: event.snapshotId,
+          operation: event.operation,
+          payload: event.payload,
+        });
+      },
       symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
     }),
     marketDataProviderService: createMarketDataProviderService(

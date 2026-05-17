@@ -272,6 +272,10 @@ backend:
   profile callbacks, preserving Rust-shaped `import_template` and
   `activity_import_profile` payloads, system-template save filtering, stable
   link entity IDs, and unconditional template Delete emission.
+- Extend sync_outbox runtime wiring to holdings snapshot callbacks, preserving
+  Rust-shaped `snapshot` payloads for manual/imported/synthetic snapshot writes,
+  filtered snapshot Deletes, post-transaction dispatch, and Rust's source and
+  UUID sync filters.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.

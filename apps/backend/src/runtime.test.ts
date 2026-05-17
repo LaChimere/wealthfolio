@@ -1189,6 +1189,81 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime holdings snapshot sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      let db = openSqliteDatabase(runtime.dbPath);
+      try {
+        db.prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('account-1', 'Runtime Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+        ).run();
+      } finally {
+        db.close();
+      }
+
+      const { holdingsService } = runtime.options;
+      if (!holdingsService) {
+        throw new Error("Runtime holdings snapshot sync test requires holdings service");
+      }
+
+      await holdingsService.saveManualHoldings({
+        accountId: "account-1",
+        snapshotDate: "2026-04-02",
+        holdings: [
+          {
+            symbol: "SNAP",
+            quantity: "2",
+            averageCost: "5",
+            currency: "USD",
+            name: "Runtime Snapshot Asset",
+          },
+        ],
+        cashBalances: { USD: "25" },
+      });
+      await holdingsService.deleteSnapshot("account-1", "2026-04-02");
+
+      db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["snapshot", "create"],
+          ["snapshot", "create"],
+          ["snapshot", "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          account_id: "account-1",
+          snapshot_date: "2026-04-02",
+          source: "MANUAL_ENTRY",
+          net_contribution_base: "0",
+          cash_total_account_currency: "0",
+          cash_total_base_currency: "0",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "account-1",
+          snapshot_date: "2026-01-02",
+          source: "SYNTHETIC",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: rows[0]?.entity_id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime import template sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-template-sync-"));
     const runtime = createSqliteBackedBackendServices({
@@ -1576,7 +1651,10 @@ describe("TS backend runtime composition", () => {
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         const initialSyncOutbox = readRuntimeSyncOutbox(db);
-        expect(initialSyncOutbox).toEqual([
+        const initialGoalSyncRows = initialSyncOutbox.filter(
+          (row) => row.entity === "goal" || row.entity === "goals_allocation",
+        );
+        expect(initialGoalSyncRows).toEqual([
           expect.objectContaining({ entity: "goal", entity_id: goal.id, op: "create" }),
           expect.objectContaining({
             entity: "goals_allocation",
@@ -1589,7 +1667,7 @@ describe("TS backend runtime composition", () => {
             op: "create",
           }),
         ]);
-        expect(JSON.parse(String(initialSyncOutbox[0]?.payload))).toMatchObject({
+        expect(JSON.parse(String(initialGoalSyncRows[0]?.payload))).toMatchObject({
           id: goal.id,
           goal_type: "custom_save_up",
           target_amount: 1000,
@@ -1641,7 +1719,11 @@ describe("TS backend runtime composition", () => {
         });
         const postRefreshDb = openSqliteDatabase(runtime.dbPath);
         try {
-          expect(readRuntimeSyncOutbox(postRefreshDb)).toHaveLength(3);
+          expect(
+            readRuntimeSyncOutbox(postRefreshDb).filter(
+              (row) => row.entity === "goal" || row.entity === "goals_allocation",
+            ),
+          ).toHaveLength(3);
         } finally {
           postRefreshDb.close();
         }
