@@ -10,12 +10,14 @@ interface.
 ## TypeScript backend migration status
 
 The Rust `wealthfolio-ai` crate remains the reference implementation for full
-assistant behavior: tool calling, attachment handling, title generation, and
-provider-specific orchestration. The TypeScript/Bun backend now supports a
-bounded text-only streaming path for configured providers. It preserves the
-Rust-shaped NDJSON event contract (`system`, `textDelta`, `done`, `error`) and
-persists user/assistant messages, but it intentionally does not expose portfolio
-tools or attachments until those parity slices are migrated.
+assistant behavior: tool calling, multimodal image/PDF attachments, title
+generation, and provider-specific orchestration. The TypeScript/Bun backend now
+supports a bounded text streaming path for configured providers and can inject
+validated text/CSV attachment content into the provider prompt while persisting
+only attachment filename markers. It preserves the Rust-shaped NDJSON event
+contract (`system`, `textDelta`, `done`, `error`) and persists user/assistant
+messages, but it intentionally does not expose portfolio tools or multimodal
+attachments until those parity slices are migrated.
 
 ## Architecture Diagram
 

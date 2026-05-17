@@ -463,7 +463,67 @@ describe("TS AI chat domain", () => {
     }
   });
 
-  test("rejects missing API keys and attachments before persisting chat rows", async () => {
+  test("injects text attachments into provider prompts while persisting only markers", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        fetchBodies.push(JSON.parse(String(init?.body)));
+        return streamResponse([
+          'data: {"choices":[{"delta":{"content":"Reviewed"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Review the attachment",
+          attachments: [
+            {
+              name: "statement.csv",
+              contentType: "text/csv; charset=utf-8",
+              data: "symbol,amount\nAAPL,10",
+            },
+            {
+              name: "notes.txt",
+              contentType: "text/plain",
+              data: "Cash reserve is high.",
+            },
+          ],
+        }),
+      );
+
+      const messages = fetchBodies[0]?.messages as Array<{ role: string; content: string }>;
+      const userPrompt = messages[messages.length - 1]?.content ?? "";
+      expect(userPrompt).toContain("Text/CSV attachment content is included below");
+      expect(userPrompt).toContain("[Attached file: statement.csv]\nsymbol,amount\nAAPL,10");
+      expect(userPrompt).toContain("[Attached file: notes.txt]\nCash reserve is high.");
+
+      const threadId = String(events[0]?.threadId);
+      const persistedMessages = service.getMessages(threadId);
+      expect(persistedMessages).toMatchObject([
+        {
+          role: "user",
+          content: textContent("Review the attachment\n📎 statement.csv\n📎 notes.txt"),
+        },
+        { role: "assistant", content: textContent("Reviewed") },
+      ]);
+      expect(JSON.stringify(persistedMessages[0]?.content)).not.toContain("AAPL");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects missing API keys and unsupported attachments before persisting chat rows", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db, {
       aiProviderService: createProviderResolver({
@@ -482,11 +542,76 @@ describe("TS AI chat domain", () => {
       await expect(
         service.sendMessage({
           content: "Read this",
-          attachments: [{ name: "file.csv", contentType: "text/csv", data: "a,b" }],
+          attachments: [{ name: "scan.png", contentType: "image/png", data: "aGVsbG8=" }],
         }),
       ).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
+      });
+      expect(service.listThreads({ limit: 10 })).toMatchObject({ threads: [] });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("validates attachment metadata and limits before persisting chat rows", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+    });
+
+    try {
+      await expect(
+        service.sendMessage({
+          content: "Too many",
+          attachments: Array.from({ length: 11 }, (_value, index) => ({
+            name: `file-${index}.csv`,
+            contentType: "text/csv",
+            data: "a,b",
+          })),
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+      });
+      await expect(
+        service.sendMessage({
+          content: "Bad name",
+          attachments: [{ name: "bad\nname.csv", contentType: "text/csv", data: "a,b" }],
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+      });
+      await expect(
+        service.sendMessage({
+          content: "Bad content type",
+          attachments: [{ name: "scan.png", contentType: "image/png\nfake", data: "aGVsbG8=" }],
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+      });
+      await expect(
+        service.sendMessage({
+          content: "Oversized UTF-8 text",
+          attachments: [
+            {
+              name: "large.txt",
+              contentType: "text/plain",
+              data: "中".repeat(3_500_000),
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
       });
       expect(service.listThreads({ limit: 10 })).toMatchObject({ threads: [] });
     } finally {

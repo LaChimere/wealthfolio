@@ -214,13 +214,22 @@ interface AiChatStreamIds {
 const DEFAULT_THREAD_LIMIT = 20;
 const MAX_THREAD_LIMIT = 100;
 const MAX_HISTORY_CHARS = 120_000;
+const MAX_ATTACHMENTS_COUNT = 10;
+const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENTS_BYTES = 20 * 1024 * 1024;
+const MAX_ATTACHMENT_NAME_CHARS = 255;
+const MAX_ATTACHMENT_CONTENT_TYPE_CHARS = 255;
 const CHAT_CONFIG_SCHEMA_VERSION = 1;
 const PROMPT_TEMPLATE_ID = "wealthfolio-assistant-v1";
 const PROMPT_VERSION = "1.0.0";
+const ATTACHMENT_MARKER = "📎 ";
+const TEXT_ENCODER = new TextEncoder();
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const TEXT_ONLY_SYSTEM_PROMPT = [
   "You are Wealthfolio's AI assistant.",
   "The TypeScript backend runtime currently streams text responses only.",
-  "Portfolio tools, mutation tools, and file attachments are not available in this runtime yet.",
+  "Portfolio tools, mutation tools, and multimodal image/PDF attachments are not available in this runtime yet.",
+  "Text and CSV attachment contents may be included directly in the user prompt.",
   "Do not claim that you accessed account, holding, activity, goal, or performance data.",
   "If the user asks for private portfolio data, clearly say that data access is unavailable in the current runtime.",
 ].join("\n");
@@ -240,10 +249,15 @@ export function createAiChatService(
       }
 
       const request = parseSendMessageRequest(rawRequest);
-      if ((request.attachments?.length ?? 0) > 0) {
+      const attachments = request.attachments ?? [];
+      validateAttachments(attachments);
+      const unsupportedAttachment = attachments.find(
+        (attachment) => !isSupportedTextAttachment(attachment),
+      );
+      if (unsupportedAttachment) {
         throw aiChatError(
           "not_implemented",
-          "AI chat attachments are not yet available in the TS backend runtime",
+          `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not yet available in the TS backend runtime`,
           501,
         );
       }
@@ -445,6 +459,102 @@ function parseRequiredString(value: unknown, fieldName: string): string {
   return value;
 }
 
+function validateAttachments(attachments: AiChatAttachment[]): void {
+  if (attachments.length > MAX_ATTACHMENTS_COUNT) {
+    throw aiChatError(
+      "invalid_input",
+      `Too many attachments: ${attachments.length} (max ${MAX_ATTACHMENTS_COUNT})`,
+      400,
+    );
+  }
+
+  let totalSize = 0;
+  for (const [index, attachment] of attachments.entries()) {
+    validateAttachmentMetadata(attachment, index);
+    const effectiveSize = attachmentEffectiveSize(attachment);
+    if (effectiveSize > MAX_ATTACHMENT_SIZE_BYTES) {
+      throw aiChatError(
+        "invalid_input",
+        `Attachment '${attachment.name}' too large (max ${MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)} MB)`,
+        400,
+      );
+    }
+    totalSize += effectiveSize;
+  }
+
+  if (totalSize > MAX_TOTAL_ATTACHMENTS_BYTES) {
+    throw aiChatError(
+      "invalid_input",
+      `Total attachment size too large (max ${MAX_TOTAL_ATTACHMENTS_BYTES / (1024 * 1024)} MB)`,
+      400,
+    );
+  }
+}
+
+function validateAttachmentMetadata(attachment: AiChatAttachment, index: number): void {
+  if (!attachment.name.trim()) {
+    throw aiChatError("invalid_input", `attachments[${index}].name cannot be blank`, 400);
+  }
+  if (attachment.name.length > MAX_ATTACHMENT_NAME_CHARS) {
+    throw aiChatError(
+      "invalid_input",
+      `attachments[${index}].name is too long (max ${MAX_ATTACHMENT_NAME_CHARS} characters)`,
+      400,
+    );
+  }
+  if (CONTROL_CHARACTER_PATTERN.test(attachment.name)) {
+    throw aiChatError(
+      "invalid_input",
+      `attachments[${index}].name must not contain control characters`,
+      400,
+    );
+  }
+  if (attachment.contentType.length > MAX_ATTACHMENT_CONTENT_TYPE_CHARS) {
+    throw aiChatError(
+      "invalid_input",
+      `attachments[${index}].contentType is too long (max ${MAX_ATTACHMENT_CONTENT_TYPE_CHARS} characters)`,
+      400,
+    );
+  }
+  if (CONTROL_CHARACTER_PATTERN.test(attachment.contentType)) {
+    throw aiChatError(
+      "invalid_input",
+      `attachments[${index}].contentType must not contain control characters`,
+      400,
+    );
+  }
+}
+
+function attachmentEffectiveSize(attachment: AiChatAttachment): number {
+  if (isBinaryAttachment(attachment)) {
+    return Math.floor((attachment.data.length * 3) / 4);
+  }
+  return TEXT_ENCODER.encode(attachment.data).byteLength;
+}
+
+function isBinaryAttachment(attachment: AiChatAttachment): boolean {
+  const contentType = normalizeContentType(attachment.contentType);
+  return contentType.startsWith("image/") || contentType === "application/pdf";
+}
+
+function isSupportedTextAttachment(attachment: AiChatAttachment): boolean {
+  const contentType = normalizeContentType(attachment.contentType);
+  return (
+    contentType === "text/csv" ||
+    contentType === "application/csv" ||
+    contentType === "application/json" ||
+    contentType.startsWith("text/")
+  );
+}
+
+function normalizeContentType(contentType: string): string {
+  return contentType.toLowerCase().split(";")[0]?.trim() ?? "";
+}
+
+function safeContentTypeLabel(contentType: string): string {
+  return normalizeContentType(contentType).slice(0, 100) || "unknown";
+}
+
 function prepareSendMessage(
   db: Database,
   request: AiChatSendMessageRequest,
@@ -486,7 +596,7 @@ function prepareSendMessage(
     id: crypto.randomUUID(),
     threadId,
     role: "user",
-    content: textMessageContent(request.content),
+    content: textMessageContent(persistedUserMessageText(request)),
     createdAt: now,
   });
   queueMessageSyncEvent(options.queueMessageSyncEvent, userMessageRow, "Create");
@@ -500,8 +610,36 @@ function prepareSendMessage(
       runId: crypto.randomUUID(),
       messageId: crypto.randomUUID(),
     },
-    messages: buildProviderMessages(historyRows, request.content),
+    messages: buildProviderMessages(historyRows, providerPromptText(request)),
   };
+}
+
+function persistedUserMessageText(request: AiChatSendMessageRequest): string {
+  const attachmentMarkers = (request.attachments ?? []).map(
+    (attachment) => `${ATTACHMENT_MARKER}${attachment.name}`,
+  );
+  if (attachmentMarkers.length === 0) {
+    return request.content;
+  }
+  return [request.content, ...attachmentMarkers].filter((part) => part.length > 0).join("\n");
+}
+
+function providerPromptText(request: AiChatSendMessageRequest): string {
+  const attachments = request.attachments ?? [];
+  if (attachments.length === 0) {
+    return request.content;
+  }
+
+  const lines = [
+    "[INSTRUCTION: Text/CSV attachment content is included below. Use it directly; tools and file imports are unavailable in the TypeScript runtime.]",
+  ];
+  if (request.content.trim()) {
+    lines.push("", request.content);
+  }
+  for (const attachment of attachments) {
+    lines.push("", `[Attached file: ${attachment.name}]`, attachment.data);
+  }
+  return lines.join("\n");
 }
 
 function insertThreadRow(
