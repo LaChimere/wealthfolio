@@ -827,8 +827,16 @@ async function* streamChatResponse(
     return titlePromise;
   };
   try {
-    for await (const delta of streamProviderText(fetchImpl, providerConfig, prepared.messages)) {
-      for (const segment of thinkParser.process(delta)) {
+    for await (const providerSegment of streamProviderSegments(
+      fetchImpl,
+      providerConfig,
+      prepared.messages,
+    )) {
+      const segments =
+        providerSegment.type === "reasoning"
+          ? [providerSegment]
+          : thinkParser.process(providerSegment.content);
+      for (const segment of segments) {
         if (!segment.content) {
           continue;
         }
@@ -1306,35 +1314,35 @@ function truncateToTitle(text: string, maxChars: number): string {
   return `${title.trim()}...`;
 }
 
-async function* streamProviderText(
+async function* streamProviderSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
-): AsyncIterable<string> {
+): AsyncIterable<AssistantStreamSegment> {
   switch (providerConfig.providerId) {
     case "ollama":
-      yield* streamOllamaText(fetchImpl, providerConfig, messages);
+      yield* streamOllamaSegments(fetchImpl, providerConfig, messages);
       return;
     case "anthropic":
-      yield* streamAnthropicText(fetchImpl, providerConfig, messages);
+      yield* streamAnthropicSegments(fetchImpl, providerConfig, messages);
       return;
     case "google":
     case "gemini":
-      yield* streamGoogleText(fetchImpl, providerConfig, messages);
+      yield* streamGoogleSegments(fetchImpl, providerConfig, messages);
       return;
     case "openai":
     case "groq":
     case "openrouter":
     default:
-      yield* streamOpenAiCompatibleText(fetchImpl, providerConfig, messages);
+      yield* streamOpenAiCompatibleSegments(fetchImpl, providerConfig, messages);
   }
 }
 
-async function* streamOpenAiCompatibleText(
+async function* streamOpenAiCompatibleSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
-): AsyncIterable<string> {
+): AsyncIterable<AssistantStreamSegment> {
   const response = await fetchImpl(openAiChatUrl(providerConfig.baseUrl), {
     method: "POST",
     headers: {
@@ -1349,20 +1357,20 @@ async function* streamOpenAiCompatibleText(
     }),
   });
   await assertProviderResponseOk(response);
-  yield* parseSseDeltas(response, (payload) => {
+  yield* parseSseSegments(response, (payload) => {
     const choice = parseArrayField(payload.choices)[0];
     if (!isRecord(choice) || !isRecord(choice.delta)) {
       return [];
     }
-    return typeof choice.delta.content === "string" ? [choice.delta.content] : [];
+    return providerDeltaSegments(choice.delta);
   });
 }
 
-async function* streamOllamaText(
+async function* streamOllamaSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
-): AsyncIterable<string> {
+): AsyncIterable<AssistantStreamSegment> {
   const response = await fetchImpl(ollamaChatUrl(providerConfig.baseUrl), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1374,22 +1382,22 @@ async function* streamOllamaText(
     }),
   });
   await assertProviderResponseOk(response);
-  yield* parseNdjsonDeltas(response, (payload) => {
+  yield* parseNdjsonSegments(response, (payload) => {
     if (typeof payload.error === "string") {
       throw aiChatError("provider_error", payload.error, 502);
     }
-    if (isRecord(payload.message) && typeof payload.message.content === "string") {
-      return [payload.message.content];
+    if (isRecord(payload.message)) {
+      return providerDeltaSegments(payload.message);
     }
     return [];
   });
 }
 
-async function* streamAnthropicText(
+async function* streamAnthropicSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
-): AsyncIterable<string> {
+): AsyncIterable<AssistantStreamSegment> {
   const system = messages.find((message) => message.role === "system")?.content;
   const response = await fetchImpl(anthropicMessagesUrl(providerConfig.baseUrl), {
     method: "POST",
@@ -1409,7 +1417,7 @@ async function* streamAnthropicText(
     }),
   });
   await assertProviderResponseOk(response);
-  yield* parseSseDeltas(response, (payload) => {
+  yield* parseSseSegments(response, (payload) => {
     if (payload.type === "error" && isRecord(payload.error)) {
       throw aiChatError(
         "provider_error",
@@ -1417,22 +1425,25 @@ async function* streamAnthropicText(
         502,
       );
     }
-    if (
-      payload.type === "content_block_delta" &&
-      isRecord(payload.delta) &&
-      typeof payload.delta.text === "string"
-    ) {
-      return [payload.delta.text];
+    if (payload.type === "content_block_delta" && isRecord(payload.delta)) {
+      const segments: AssistantStreamSegment[] = [];
+      if (typeof payload.delta.thinking === "string") {
+        segments.push({ type: "reasoning", content: payload.delta.thinking });
+      }
+      if (typeof payload.delta.text === "string") {
+        segments.push({ type: "text", content: payload.delta.text });
+      }
+      return segments;
     }
     return [];
   });
 }
 
-async function* streamGoogleText(
+async function* streamGoogleSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
-): AsyncIterable<string> {
+): AsyncIterable<AssistantStreamSegment> {
   const system = messages.find((message) => message.role === "system")?.content;
   const response = await fetchImpl(googleGenerateContentUrl(providerConfig, true), {
     method: "POST",
@@ -1450,27 +1461,40 @@ async function* streamGoogleText(
     }),
   });
   await assertProviderResponseOk(response);
-  yield* parseSseDeltas(response, (payload) => {
+  yield* parseSseSegments(response, (payload) => {
     const candidates = parseArrayField(payload.candidates);
-    const deltas: string[] = [];
+    const segments: AssistantStreamSegment[] = [];
     for (const candidate of candidates) {
       if (!isRecord(candidate) || !isRecord(candidate.content)) {
         continue;
       }
       for (const part of parseArrayField(candidate.content.parts)) {
         if (isRecord(part) && typeof part.text === "string") {
-          deltas.push(part.text);
+          segments.push({ type: part.thought === true ? "reasoning" : "text", content: part.text });
         }
       }
     }
-    return deltas;
+    return segments;
   });
 }
 
-async function* parseSseDeltas(
+function providerDeltaSegments(delta: Record<string, unknown>): AssistantStreamSegment[] {
+  const segments: AssistantStreamSegment[] = [];
+  for (const key of ["reasoning_content", "reasoning", "thinking"] as const) {
+    if (typeof delta[key] === "string") {
+      segments.push({ type: "reasoning", content: delta[key] });
+    }
+  }
+  if (typeof delta.content === "string") {
+    segments.push({ type: "text", content: delta.content });
+  }
+  return segments;
+}
+
+async function* parseSseSegments(
   response: Response,
-  extract: (payload: Record<string, unknown>) => string[],
-): AsyncIterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): AsyncIterable<AssistantStreamSegment> {
   const reader = response.body?.getReader();
   if (!reader) {
     throw aiChatError("provider_error", "Provider response body is empty", 502);
@@ -1500,8 +1524,8 @@ async function* parseSseDeltas(
 
 function* parseSseBuffer(
   buffer: string,
-  extract: (payload: Record<string, unknown>) => string[],
-): Iterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): Iterable<AssistantStreamSegment> {
   const trimmed = buffer.trim();
   if (!trimmed) {
     return;
@@ -1513,8 +1537,8 @@ function* parseSseBuffer(
 
 function* parseSseFrame(
   frame: string,
-  extract: (payload: Record<string, unknown>) => string[],
-): Iterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): Iterable<AssistantStreamSegment> {
   const dataLines = frame
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
@@ -1541,10 +1565,10 @@ function* parseSseFrame(
   yield* extract(payload);
 }
 
-async function* parseNdjsonDeltas(
+async function* parseNdjsonSegments(
   response: Response,
-  extract: (payload: Record<string, unknown>) => string[],
-): AsyncIterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): AsyncIterable<AssistantStreamSegment> {
   const reader = response.body?.getReader();
   if (!reader) {
     throw aiChatError("provider_error", "Provider response body is empty", 502);
@@ -1574,8 +1598,8 @@ async function* parseNdjsonDeltas(
 
 function* parseNdjsonBuffer(
   buffer: string,
-  extract: (payload: Record<string, unknown>) => string[],
-): Iterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): Iterable<AssistantStreamSegment> {
   for (const line of buffer.split(/\r?\n/)) {
     yield* parseNdjsonLine(line, extract);
   }
@@ -1583,8 +1607,8 @@ function* parseNdjsonBuffer(
 
 function* parseNdjsonLine(
   line: string,
-  extract: (payload: Record<string, unknown>) => string[],
-): Iterable<string> {
+  extract: (payload: Record<string, unknown>) => AssistantStreamSegment[],
+): Iterable<AssistantStreamSegment> {
   const trimmed = line.trim();
   if (!trimmed) {
     return;

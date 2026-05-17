@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 143
+turns_used: 144
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T17:41:17+08:00"
+updated_at: "2026-05-17T17:50:23+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -923,6 +923,11 @@ updated_at: "2026-05-17T17:41:17+08:00"
   tags remains `textDelta`, and persisted assistant messages preserve ordered
   reasoning/text parts. Backend AI/provider type-check and focused
   AI/chat/provider/http/runtime tests passed.
+- Turn 144: Added provider-native TS AI reasoning parsing for OpenAI-compatible,
+  Anthropic, Ollama, and Gemini-style stream fields: native thinking/reasoning
+  deltas now emit `reasoningDelta`, visible content remains `textDelta`, and
+  assistant persistence preserves ordered reasoning/text parts. Backend
+  AI/provider type-check and focused AI/chat/provider/http/runtime tests passed.
 
 ## Deferred items
 
@@ -983,10 +988,10 @@ updated_at: "2026-05-17T17:41:17+08:00"
 - AI chat tool execution, richer provider orchestration, and multimodal
   image/PDF/binary attachment behavior remain active follow-ups. reason=AI
   provider catalog/settings/model listing, local thread/message/tag persistence,
-  sync_outbox callbacks for local AI chat mutations, text/reasoning streaming,
-  generated thread titles, and bounded text/CSV attachment prompt injection now
-  have TS runtime parity, while full chat execution belongs in dedicated AI
-  runtime slices.
+  sync_outbox callbacks for local AI chat mutations, native/fallback
+  text/reasoning streaming, generated thread titles, and bounded text/CSV
+  attachment prompt injection now have TS runtime parity, while full chat
+  execution belongs in dedicated AI runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can

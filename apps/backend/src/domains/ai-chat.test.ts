@@ -463,6 +463,176 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("streams provider-native reasoning deltas and persists ordered parts", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          'data: {"choices":[{"delta":{"reasoning_content":"check risk"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"Answer"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({ content: "Native reasoning" }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({ type: "reasoningDelta", delta: "check risk" });
+      expect(events[2]).toMatchObject({ type: "textDelta", delta: "Answer" });
+      expect(events[3]).toMatchObject({
+        type: "done",
+        message: {
+          content: {
+            parts: [
+              { type: "reasoning", content: "check risk" },
+              { type: "text", content: "Answer" },
+            ],
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("streams Anthropic thinking deltas as reasoning", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "anthropic",
+        modelId: "claude-test",
+        providerType: "api",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream !== true) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"consider"}}\n\n',
+          'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Done"}}\n\n',
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({ content: "Anthropic native" }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({ type: "reasoningDelta", delta: "consider" });
+      expect(events[2]).toMatchObject({ type: "textDelta", delta: "Done" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("streams Ollama thinking fields as reasoning", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llama3",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          '{"message":{"thinking":"consider local"},"done":false}\n',
+          '{"message":{"content":"Ready"},"done":false}\n',
+          '{"done":true}\n',
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Ollama native" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({
+        type: "reasoningDelta",
+        delta: "consider local",
+      });
+      expect(events[2]).toMatchObject({ type: "textDelta", delta: "Ready" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("streams Google thought parts as reasoning", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "google",
+        modelId: "gemini-test",
+        providerType: "api",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        apiKey: "secret-key",
+      }),
+      fetch: async (input) => {
+        const url = String(input);
+        if (!url.includes(":streamGenerateContent")) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          'data: {"candidates":[{"content":{"parts":[{"text":"reflect","thought":true},{"text":"Visible"}]}}]}\n\n',
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Google native" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({ type: "reasoningDelta", delta: "reflect" });
+      expect(events[2]).toMatchObject({ type: "textDelta", delta: "Visible" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("generates, persists, and emits refined thread titles", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
