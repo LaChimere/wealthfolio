@@ -122,12 +122,33 @@ describe("TS backend runtime composition", () => {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ itemType: "symbol", itemId: "SPY" }),
+          body: JSON.stringify({
+            itemType: "symbol",
+            itemId: "SPY",
+            startDate: "2026-01-01",
+            endDate: "2026-01-05",
+          }),
         },
       );
-      expect(symbolPerformanceHistoryResponse.status).toBe(501);
-      await expect(symbolPerformanceHistoryResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
+      expect(symbolPerformanceHistoryResponse.status).toBe(200);
+      await expect(symbolPerformanceHistoryResponse.json()).resolves.toEqual({
+        id: "SPY",
+        returns: [],
+        periodStartDate: null,
+        periodEndDate: null,
+        currency: "",
+        periodGain: 0,
+        periodReturn: 0,
+        cumulativeTwr: 0,
+        gainLossAmount: null,
+        annualizedTwr: 0,
+        simpleReturn: 0,
+        annualizedSimpleReturn: 0,
+        cumulativeMwr: 0,
+        annualizedMwr: 0,
+        volatility: 0,
+        maxDrawdown: 0,
+        isHoldingsMode: false,
       });
 
       const performanceSummaryResponse = await fetch(

@@ -144,17 +144,18 @@
     activity reads, Rust-compatible contribution rules, user-timezone year
     ranges, and FX conversion dates; current/history net-worth, income summary,
     simple account performance, account performance history/summary
-    calculations, holdings valuation reads, holdings snapshot metadata reads,
-    historical snapshot holdings reads, holdings import checks, live holdings
-    fan-out, holding detail/by-asset fan-out, allocation reads, snapshot
-    deletion, bounded manual/imported snapshot saves, snapshot FX pair
-    registration, and holdings snapshot mutation event production now have TS
-    runtime parity, while provider-backed symbol performance history is deferred
-    to portfolio/market-data parity slices; actual portfolio job execution and
-    inline valuation recalculation are deferred to holdings/portfolio parity
-    slices; add-on filesystem extraction, runtime loading, store HTTP, staging
-    I/O, and update behavior are deferred to add-on runtime parity slices;
-    market-data market sync and portfolio recalculation behavior are deferred to
+    calculations, local quote-backed symbol performance history, holdings
+    valuation reads, holdings snapshot metadata reads, historical snapshot
+    holdings reads, holdings import checks, live holdings fan-out, holding
+    detail/by-asset fan-out, allocation reads, snapshot deletion, bounded
+    manual/imported snapshot saves, snapshot FX pair registration, and holdings
+    snapshot mutation event production now have TS runtime parity, while
+    provider-backed symbol fetch/resolution is deferred to portfolio/market-data
+    parity slices; actual portfolio job execution and inline valuation
+    recalculation are deferred to holdings/portfolio parity slices; add-on
+    filesystem extraction, runtime loading, store HTTP, staging I/O, and update
+    behavior are deferred to add-on runtime parity slices; market-data market
+    sync and portfolio recalculation behavior are deferred to
     market-data/portfolio parity slices; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
@@ -1264,7 +1265,15 @@ contract:
   reads, empty history responses, insufficient-summary errors, negative-history
   validation, TWR/MWR compounding, holdings-mode null TWR/MWR fields and period
   returns, annualized/simple returns, volatility, max drawdown, symbol summary
-  empty responses, and explicit 501 gating for provider-backed symbol history.
+  empty responses, and local symbol-history provider fetch deferral.
+- `pr5-symbol-performance-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-metrics.test.ts --test-name-pattern "symbol performance|empty responses"`,
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "starts a TS server"`,
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes local quote-backed `symbol` performance history from SQLite
+  `quotes`, missing quote-day carry-forward, empty missing-symbol responses,
+  annualized returns, volatility, max drawdown, runtime HTTP wiring, and
+  explicit provider-backed fetch/resolution deferral.
 - `pr5-holdings-valuation-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/runtime.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1522,20 +1531,20 @@ contract:
   status/check slices, bounded health classification-fix runtime, bounded
   legacy-classification health issue runtime, current/history net-worth runtime,
   income summary runtime, simple account performance runtime, account
-  performance history/summary runtime, holdings valuation read runtime, holdings
-  snapshot metadata/runtime conversion/import-check reads, live holdings fan-out
-  runtime, holding detail/by-asset fan-out runtime, allocation read runtime,
-  snapshot deletion runtime, bounded manual snapshot save runtime, and bounded
-  snapshot import-write runtime plus snapshot FX pair registration,
-  provider-backed import-check lookup, holdings snapshot event production, and
-  activity mutation event production plus activity/import-run/activity-created
-  asset sync-event callback queuing, sync_outbox persistence for migrated
-  goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
-  taxonomy assignment, direct asset, alternative asset/UUID quote, market-data
-  quote, local AI chat, contribution-limit, account,
-  import-template/account-template, and broker sync profile callbacks, and
-  domain-event planning/batch-processing/worker helper implemented; broader
-  migration remains active.
+  performance history/summary runtime, local quote-backed symbol performance
+  runtime, holdings valuation read runtime, holdings snapshot metadata/runtime
+  conversion/import-check reads, live holdings fan-out runtime, holding
+  detail/by-asset fan-out runtime, allocation read runtime, snapshot deletion
+  runtime, bounded manual snapshot save runtime, and bounded snapshot
+  import-write runtime plus snapshot FX pair registration, provider-backed
+  import-check lookup, holdings snapshot event production, and activity mutation
+  event production plus activity/import-run/activity-created asset sync-event
+  callback queuing, sync_outbox persistence for migrated goal/activity callbacks
+  plus FX asset, custom provider, custom taxonomy, asset taxonomy assignment,
+  direct asset, alternative asset/UUID quote, market-data quote, local AI chat,
+  contribution-limit, account, import-template/account-template, and broker sync
+  profile callbacks, and domain-event planning/batch-processing/worker helper
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1549,9 +1558,9 @@ contract:
   quote-provider interactions, auto-classification, and portfolio recalculation
   side effects move with asset/market-data/portfolio parity slices; market-data
   market sync and quote-triggered recalculation side effects move with
-  market-data/portfolio parity slices; provider-backed symbol performance
-  history moves with market-data/provider parity slices; portfolio recalculation
-  side effects move with holdings/portfolio parity slices; add-on filesystem
+  market-data/portfolio parity slices; provider-backed symbol fetch/resolution
+  moves with market-data/provider parity slices; portfolio recalculation side
+  effects move with holdings/portfolio parity slices; add-on filesystem
   extraction, runtime loading, store HTTP, staging I/O, and update behavior move
   with add-on runtime parity slices; provider-backed asset resolution, remaining
   quote sync-outbox emission outside migrated alternative-asset and market-data

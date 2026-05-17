@@ -319,7 +319,7 @@ export function createPortfolioMetricsService(
       return calculateAccountsSimplePerformance(db, accountIds);
     },
     calculatePerformanceHistory(request) {
-      return calculatePerformanceHistory(db, request);
+      return calculatePerformanceHistory(db, request, options);
     },
     calculatePerformanceSummary(request) {
       return calculatePerformanceSummary(db, request);
@@ -753,14 +753,13 @@ function calculateAccountsSimplePerformance(
 function calculatePerformanceHistory(
   db: Database,
   request: PerformanceRequest,
+  options: PortfolioMetricsServiceOptions,
 ): PerformanceMetrics {
   switch (request.itemType) {
     case "account":
       return calculateAccountPerformance(db, request, true);
     case "symbol":
-      throw new PortfolioMetricsNotImplementedError(
-        "Symbol performance history is not available in the TS runtime yet",
-      );
+      return calculateSymbolPerformance(db, request, options);
     default:
       throw new Error("Invalid item type");
   }
@@ -778,6 +777,109 @@ function calculatePerformanceSummary(
     default:
       throw new Error("Invalid item type");
   }
+}
+
+function calculateSymbolPerformance(
+  db: Database,
+  request: PerformanceRequest,
+  options: PortfolioMetricsServiceOptions,
+): PerformanceMetrics {
+  const effectiveEndDate = request.endDate ?? todayInConfiguredTimezone(options);
+  const effectiveStartDate = request.startDate ?? addDays(effectiveEndDate, -365);
+  if (compareIsoDates(effectiveStartDate, effectiveEndDate) > 0) {
+    throw new Error(
+      `Effective start date ${effectiveStartDate} must be before effective end date ${effectiveEndDate}`,
+    );
+  }
+
+  const quoteHistory = readSymbolQuoteHistory(
+    db,
+    request.itemId,
+    effectiveStartDate,
+    effectiveEndDate,
+  );
+  if (quoteHistory.length === 0) {
+    return emptyPerformanceResponse(request.itemId);
+  }
+
+  const actualStartDate = quoteHistory[0]?.day;
+  const actualEndDate = quoteHistory.at(-1)?.day;
+  if (!actualStartDate || !actualEndDate) {
+    return emptyPerformanceResponse(request.itemId);
+  }
+
+  const quoteByDate = new Map(
+    quoteHistory.map((quote) => [quote.day, roundDecimal(new Decimal(quote.close))] as const),
+  );
+  let cursor = actualStartDate;
+  let previousPrice = new Decimal(0);
+  let foundStartPrice = false;
+  while (compareIsoDates(cursor, actualEndDate) <= 0) {
+    const price = quoteByDate.get(cursor);
+    if (price) {
+      previousPrice = price;
+      foundStartPrice = true;
+      break;
+    }
+    cursor = addDays(cursor, 1);
+  }
+  if (!foundStartPrice) {
+    return emptyPerformanceResponse(request.itemId);
+  }
+
+  const returns: ReturnData[] = [];
+  const dailyReturns: Decimal[] = [];
+  let cumulativeValue = new Decimal(1);
+  let lastKnownPrice = previousPrice;
+  cursor = actualStartDate;
+  while (compareIsoDates(cursor, actualEndDate) <= 0) {
+    const quotePrice = quoteByDate.get(cursor);
+    const currentPrice = quotePrice ?? lastKnownPrice;
+    if (quotePrice) {
+      lastKnownPrice = quotePrice;
+    }
+
+    const dailyReturn = previousPrice.isZero()
+      ? new Decimal(0)
+      : currentPrice.div(previousPrice).minus(1);
+    dailyReturns.push(dailyReturn);
+    cumulativeValue = cumulativeValue.mul(new Decimal(1).plus(dailyReturn));
+    returns.push({
+      date: cursor,
+      value: decimalToJsonNumber(cumulativeValue.minus(1)),
+    });
+
+    if (quotePrice) {
+      previousPrice = quotePrice;
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  if (returns.length === 0) {
+    return emptyPerformanceResponse(request.itemId);
+  }
+
+  const totalReturn = roundDecimal(new Decimal(returns.at(-1)?.value ?? 0));
+  const annualizedReturn = calculateAnnualizedReturn(actualStartDate, actualEndDate, totalReturn);
+  return {
+    id: request.itemId,
+    returns,
+    periodStartDate: actualStartDate,
+    periodEndDate: actualEndDate,
+    currency: quoteHistory[0]?.currency ?? "",
+    periodGain: 0,
+    periodReturn: decimalToJsonNumber(totalReturn),
+    cumulativeTwr: decimalToJsonNumber(totalReturn),
+    gainLossAmount: null,
+    annualizedTwr: decimalToJsonNumber(annualizedReturn),
+    simpleReturn: 0,
+    annualizedSimpleReturn: 0,
+    cumulativeMwr: 0,
+    annualizedMwr: 0,
+    volatility: decimalToJsonNumber(calculateVolatility(dailyReturns)),
+    maxDrawdown: decimalToJsonNumber(calculateMaxDrawdown(dailyReturns)),
+    isHoldingsMode: false,
+  };
 }
 
 function calculateAccountPerformance(
@@ -904,6 +1006,40 @@ function latestQuoteAsOf(
     )
     .get(assetId, date);
   return row ? reconcileQuoteCurrency(row, asset) : null;
+}
+
+function readSymbolQuoteHistory(
+  db: Database,
+  assetId: string,
+  startDate: string,
+  endDate: string,
+): QuoteRow[] {
+  return db
+    .query<QuoteRow, [string, string, string]>(
+      `
+        WITH ranked_quotes AS (
+          SELECT
+            asset_id,
+            day,
+            close,
+            currency,
+            timestamp,
+            ROW_NUMBER() OVER (
+              PARTITION BY day
+              ORDER BY timestamp DESC
+            ) AS rn
+          FROM quotes
+          WHERE asset_id = ?
+            AND day >= ?
+            AND day <= ?
+        )
+        SELECT asset_id, day, close, currency, timestamp
+        FROM ranked_quotes
+        WHERE rn = 1
+        ORDER BY day ASC
+      `,
+    )
+    .all(assetId, startDate, endDate);
 }
 
 function readTotalAccountValuations(

@@ -533,7 +533,7 @@ describe("TS portfolio metrics domain", () => {
     }
   });
 
-  test("preserves performance empty responses and deferred symbol history", () => {
+  test("calculates local quote-backed symbol performance history and empty responses", () => {
     const db = createPortfolioMetricsDb();
     const service = createPortfolioMetricsService(db, {
       baseCurrency: "USD",
@@ -562,12 +562,56 @@ describe("TS portfolio metrics domain", () => {
         maxDrawdown: 0,
         isHoldingsMode: false,
       });
-      expect(service.calculatePerformanceSummary?.({ itemType: "symbol", itemId: "SPY" })).toEqual(
-        service.calculatePerformanceHistory?.({ itemType: "account", itemId: "SPY" }),
-      );
+      expect(
+        service.calculatePerformanceHistory?.({
+          itemType: "symbol",
+          itemId: "SPY",
+          startDate: "2026-01-01",
+          endDate: "2026-01-05",
+        }),
+      ).toEqual(service.calculatePerformanceHistory?.({ itemType: "account", itemId: "SPY" }));
+
+      insertQuote(db, { assetId: "SPY", day: "2026-01-01", close: "100", currency: "USD" });
+      insertQuote(db, { assetId: "SPY", day: "2026-01-03", close: "110", currency: "USD" });
+      insertQuote(db, { assetId: "SPY", day: "2026-01-05", close: "121", currency: "USD" });
+      expect(
+        service.calculatePerformanceHistory?.({
+          itemType: "symbol",
+          itemId: "SPY",
+          startDate: "2026-01-01",
+          endDate: "2026-01-05",
+        }),
+      ).toMatchObject({
+        id: "SPY",
+        returns: [
+          { date: "2026-01-01", value: 0 },
+          { date: "2026-01-02", value: 0 },
+          { date: "2026-01-03", value: 0.1 },
+          { date: "2026-01-04", value: 0.1 },
+          { date: "2026-01-05", value: 0.21 },
+        ],
+        periodStartDate: "2026-01-01",
+        periodEndDate: "2026-01-05",
+        currency: "USD",
+        periodReturn: 0.21,
+        cumulativeTwr: 0.21,
+        gainLossAmount: null,
+        annualizedTwr: 0.21,
+        simpleReturn: 0,
+        annualizedSimpleReturn: 0,
+        cumulativeMwr: 0,
+        annualizedMwr: 0,
+        maxDrawdown: 0,
+        isHoldingsMode: false,
+      });
       expect(() =>
-        service.calculatePerformanceHistory?.({ itemType: "symbol", itemId: "SPY" }),
-      ).toThrow("Symbol performance history is not available");
+        service.calculatePerformanceHistory?.({
+          itemType: "symbol",
+          itemId: "SPY",
+          startDate: "2026-01-06",
+          endDate: "2026-01-05",
+        }),
+      ).toThrow("Effective start date 2026-01-06 must be before effective end date 2026-01-05");
     } finally {
       db.close();
     }

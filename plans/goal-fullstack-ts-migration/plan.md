@@ -151,8 +151,9 @@ backend:
 - Add bounded account performance history/summary runtime for
   `/api/v1/performance/history` and `/api/v1/performance/summary`, including
   account valuation history reads, TWR/MWR compounding, holdings-mode return
-  behavior, annualized/simple returns, volatility, max drawdown, and explicit
-  provider-backed symbol-history deferral.
+  behavior, annualized/simple returns, volatility, max drawdown, local
+  quote-backed symbol history, and explicit provider-backed symbol fetch
+  deferral.
 - Add bounded holdings valuation read runtime for `/api/v1/valuations/history`
   and `/api/v1/valuations/latest`, including active-account defaulting,
   request-order preservation, filtered history ranges, numeric valuation fields,
