@@ -820,6 +820,124 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires disabled device sync runtime behavior", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-device-sync-disabled-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const jsonHeaders = { "content-type": "application/json" };
+      const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+        new Request(`${server.baseUrl}${pathName}`, {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify(body),
+        });
+
+      for (const request of [
+        new Request(`${server.baseUrl}/api/v1/connect/device/sync-state`),
+        new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/engine-status`),
+        new Request(`${server.baseUrl}/api/v1/connect/device/pairing-source-status`),
+        new Request(`${server.baseUrl}/api/v1/connect/device/bootstrap-overwrite-check`),
+        jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/bootstrap-snapshot`, {
+          method: "POST",
+        }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/start-background`, {
+          method: "POST",
+        }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/stop-background`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/generate-snapshot`, {
+          method: "POST",
+        }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/cancel-snapshot`, { method: "POST" }),
+        jsonRequest("/api/v1/sync/device/register", {
+          displayName: "MacBook",
+          platform: "macos",
+          instanceId: "instance-1",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/device/current`),
+        new Request(`${server.baseUrl}/api/v1/sync/devices?scope=team`),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, {
+          method: "PATCH",
+          headers: jsonHeaders,
+          body: JSON.stringify({ displayName: "Renamed" }),
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, { method: "DELETE" }),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1/revoke`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/sync/keys/initialize`, { method: "POST" }),
+        jsonRequest("/api/v1/sync/keys/initialize/commit", {
+          keyVersion: 1,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/keys/rotate`, { method: "POST" }),
+        jsonRequest("/api/v1/sync/keys/rotate/commit", {
+          newKeyVersion: 2,
+          envelopes: [{ deviceId: "device-1", deviceKeyEnvelope: "envelope" }],
+          signature: "signature",
+        }),
+        jsonRequest("/api/v1/sync/team/reset", { reason: "test" }),
+        jsonRequest("/api/v1/sync/pairing", {
+          codeHash: "hash",
+          ephemeralPublicKey: "public-key",
+        }),
+        jsonRequest("/api/v1/sync/pairing/claim", {
+          code: "123456",
+          ephemeralPublicKey: "public-key",
+        }),
+        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: {},
+          signature: "signature",
+        }),
+        jsonRequest("/api/v1/sync/pairing/confirm-with-bootstrap", {
+          pairingId: "pairing-1",
+          allowOverwrite: false,
+        }),
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-1",
+          proof: "proof",
+        }),
+        jsonRequest("/api/v1/sync/pairing/flow/state", { flowId: "flow-1" }),
+        jsonRequest("/api/v1/sync/pairing/flow/approve-overwrite", { flowId: "flow-1" }),
+        jsonRequest("/api/v1/sync/pairing/flow/cancel", { flowId: "flow-1" }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/messages`),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/approve`, {
+          method: "POST",
+        }),
+        jsonRequest("/api/v1/sync/pairing/pairing-1/complete", {
+          encryptedKeyBundle: "bundle",
+          sasProof: {},
+          signature: "signature",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/cancel`, {
+          method: "POST",
+        }),
+        jsonRequest("/api/v1/sync/pairing/pairing-1/confirm", { proof: "proof" }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1`),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(501);
+      }
+    } finally {
+      server.stop();
+      runtime.close();
+    }
+  });
+
   test("persists runtime FX asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-sync-"));
     const runtime = createSqliteBackedBackendServices({

@@ -112,3 +112,102 @@ export interface DeviceSyncService {
   approvePairingOverwrite?(request: PairingFlowIdRequest): Promise<unknown> | unknown;
   cancelPairingFlow?(request: PairingFlowIdRequest): Promise<unknown> | unknown;
 }
+
+export class DeviceSyncNotImplementedError extends Error {
+  readonly status = 501;
+  readonly code = "not_implemented";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "DeviceSyncNotImplementedError";
+  }
+}
+
+const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
+
+export function createDisabledDeviceSyncService(): DeviceSyncService {
+  return {
+    async registerDevice() {
+      throw deviceSyncDisabled();
+    },
+    async getCurrentDevice() {
+      throw deviceSyncDisabled();
+    },
+    async getDevice() {
+      throw deviceSyncDisabled();
+    },
+    async listDevices() {
+      throw deviceSyncDisabled();
+    },
+    async updateDevice() {
+      throw deviceSyncDisabled();
+    },
+    async deleteDevice() {
+      throw deviceSyncDisabled();
+    },
+    async revokeDevice() {
+      throw deviceSyncDisabled();
+    },
+    async initializeTeamKeys() {
+      throw deviceSyncDisabled();
+    },
+    async commitInitializeTeamKeys() {
+      throw deviceSyncDisabled();
+    },
+    async rotateTeamKeys() {
+      throw deviceSyncDisabled();
+    },
+    async commitRotateTeamKeys() {
+      throw deviceSyncDisabled();
+    },
+    async resetTeamSync() {
+      throw deviceSyncDisabled();
+    },
+    async createPairing() {
+      throw deviceSyncDisabled();
+    },
+    async getPairing() {
+      throw deviceSyncDisabled();
+    },
+    async approvePairing() {
+      throw deviceSyncDisabled();
+    },
+    async completePairing() {
+      throw deviceSyncDisabled();
+    },
+    async cancelPairing() {
+      throw deviceSyncDisabled();
+    },
+    async claimPairing() {
+      throw deviceSyncDisabled();
+    },
+    async getPairingMessages() {
+      throw deviceSyncDisabled();
+    },
+    async confirmPairing() {
+      throw deviceSyncDisabled();
+    },
+    async completePairingWithTransfer() {
+      throw deviceSyncDisabled();
+    },
+    async confirmPairingWithBootstrap() {
+      throw deviceSyncDisabled();
+    },
+    async beginPairingConfirm() {
+      throw deviceSyncDisabled();
+    },
+    async getPairingFlowState() {
+      throw deviceSyncDisabled();
+    },
+    async approvePairingOverwrite() {
+      throw deviceSyncDisabled();
+    },
+    async cancelPairingFlow() {
+      throw deviceSyncDisabled();
+    },
+  };
+}
+
+function deviceSyncDisabled(): DeviceSyncNotImplementedError {
+  return new DeviceSyncNotImplementedError(DEVICE_SYNC_DISABLED_MESSAGE);
+}

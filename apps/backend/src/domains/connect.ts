@@ -64,6 +64,7 @@ export class ConnectNotImplementedError extends Error {
 
 const CLOUD_SYNC_DISABLED_MESSAGE = "Cloud sync features are disabled in this build.";
 const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this build.";
+const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
 const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not yet available in the TS backend runtime";
 
@@ -167,4 +168,55 @@ export interface ConnectDeviceSyncService {
   stopDeviceSyncBackgroundEngine(): Promise<unknown> | unknown;
   generateDeviceSnapshotNow(): Promise<unknown> | unknown;
   cancelDeviceSnapshotUpload(): Promise<unknown> | unknown;
+}
+
+export function createDisabledConnectDeviceSyncService(): ConnectDeviceSyncService {
+  return {
+    async getDeviceSyncState() {
+      throw deviceSyncDisabled();
+    },
+    async enableDeviceSync() {
+      throw deviceSyncDisabled();
+    },
+    async clearDeviceSyncData() {
+      throw deviceSyncDisabled();
+    },
+    async reinitializeDeviceSync() {
+      throw deviceSyncDisabled();
+    },
+    async getDeviceSyncEngineStatus() {
+      throw deviceSyncDisabled();
+    },
+    async getDeviceSyncPairingSourceStatus() {
+      throw deviceSyncDisabled();
+    },
+    async getDeviceSyncBootstrapOverwriteCheck() {
+      throw deviceSyncDisabled();
+    },
+    async reconcileDeviceSyncReadyState() {
+      throw deviceSyncDisabled();
+    },
+    async bootstrapDeviceSnapshot() {
+      throw deviceSyncDisabled();
+    },
+    async triggerDeviceSyncCycle() {
+      throw deviceSyncDisabled();
+    },
+    async startDeviceSyncBackgroundEngine() {
+      throw deviceSyncDisabled();
+    },
+    async stopDeviceSyncBackgroundEngine() {
+      throw deviceSyncDisabled();
+    },
+    async generateDeviceSnapshotNow() {
+      throw deviceSyncDisabled();
+    },
+    async cancelDeviceSnapshotUpload() {
+      throw deviceSyncDisabled();
+    },
+  };
+}
+
+function deviceSyncDisabled(): ConnectNotImplementedError {
+  return new ConnectNotImplementedError(DEVICE_SYNC_DISABLED_MESSAGE);
 }

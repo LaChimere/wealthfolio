@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 128
+turns_used: 129
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T13:30:59+08:00"
+updated_at: "2026-05-17T14:12:52+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -829,6 +829,11 @@ updated_at: "2026-05-17T13:30:59+08:00"
   builds, and broker sync profile routes are marked as an explicit TS migration
   gap pending activity profile persistence. Focused runtime tests and backend
   type-check passed.
+- Turn 129: Added disabled device-sync runtime wiring for the standalone TS
+  backend: `/connect/device/*`, device management, team-key/reset, and pairing
+  routes now return explicit feature-disabled 501 responses instead of un-wired
+  404s while real device-sync side effects remain deferred. Focused runtime
+  tests and backend type-check passed.
 
 ## Deferred items
 
@@ -980,24 +985,24 @@ updated_at: "2026-05-17T13:30:59+08:00"
   while real runtime behavior must move with dedicated Connect/device-sync
   parity slices.
 - Real device-sync token minting, E2EE enrollment, sync engine, snapshot/upload
-  runtime, repository resets, feature-flag errors, background workers, and
-  secret side effects remain active follow-ups. reason=this slice only adds the
-  guarded Connect device-sync HTTP seam, while runtime behavior must move with
-  dedicated Connect/device-sync parity slices.
+  runtime, repository resets, background workers, and secret side effects remain
+  active follow-ups. reason=the standalone TS backend now wires disabled
+  `/connect/device/*` feature-flag responses, while runtime behavior must move
+  with dedicated Connect/device-sync parity slices.
 - Real device-sync cloud clients, token lifecycle, device-id secret storage,
-  enrollment side effects, team-key operations, pairing flows, feature-flag
-  errors, and E2EE runtime remain active follow-ups. reason=this slice only adds
-  the guarded device-management HTTP seam, while runtime behavior must move with
-  dedicated device-sync parity slices.
+  enrollment side effects, team-key operations, pairing flows, and E2EE runtime
+  remain active follow-ups. reason=the standalone TS backend now wires disabled
+  device-management feature-flag responses, while runtime behavior must move
+  with dedicated device-sync parity slices.
 - Real device-sync team-key cloud calls, key material handling, device identity
-  lookup, reset side effects, pairing flows, feature-flag errors, and E2EE
-  runtime remain active follow-ups. reason=this slice only adds the guarded
-  team-key/reset HTTP seam, while runtime behavior must move with dedicated
+  lookup, reset side effects, pairing flows, and E2EE runtime remain active
+  follow-ups. reason=the standalone TS backend now wires disabled team-key/reset
+  feature-flag responses, while runtime behavior must move with dedicated
   device-sync parity slices.
 - Real device-sync pairing cloud calls, E2EE key exchange, freshness gate
-  persistence, bootstrap transfer, background engine startup, feature-flag
-  errors, and pairing-flow runtime remain active follow-ups. reason=this slice
-  only adds the guarded pairing HTTP seam, while runtime behavior must move with
+  persistence, bootstrap transfer, background engine startup, and pairing-flow
+  runtime remain active follow-ups. reason=the standalone TS backend now wires
+  disabled pairing feature-flag responses, while runtime behavior must move with
   dedicated device-sync parity slices.
 - Holdings snapshot reconciliation and actual portfolio recalculation/job
   execution remain active follow-ups. reason=holdings fan-out, valuation reads,

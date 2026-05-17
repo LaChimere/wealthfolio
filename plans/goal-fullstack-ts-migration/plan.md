@@ -290,6 +290,9 @@ backend:
 - Add disabled standalone Connect runtime wiring, preserving Rust feature-off
   behavior for cloud/connect action routes and local empty-list routes while
   marking broker sync profile persistence as a dedicated TS migration gap.
+- Add disabled standalone device-sync runtime wiring for `/connect/device/*`,
+  device management, team-key/reset, and pairing routes so feature-off runtime
+  behavior returns explicit 501s while real side effects remain deferred.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity

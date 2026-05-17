@@ -12,7 +12,10 @@ import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
-import { createDisabledConnectService } from "./domains/connect";
+import {
+  createDisabledConnectDeviceSyncService,
+  createDisabledConnectService,
+} from "./domains/connect";
 import {
   createContributionDepositCalculator,
   createContributionLimitRepository,
@@ -23,6 +26,7 @@ import {
   createCustomProviderRepository,
   createCustomProviderService,
 } from "./domains/custom-providers";
+import { createDisabledDeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
 import { createHealthRepository, createHealthService } from "./domains/health";
@@ -328,6 +332,7 @@ function createServicesFromDatabase(
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
       prepareDatabaseRestore,
     }),
+    connectDeviceSyncService: createDisabledConnectDeviceSyncService(),
     connectService: createDisabledConnectService(),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
@@ -364,6 +369,7 @@ function createServicesFromDatabase(
       },
     ),
     eventBus,
+    deviceSyncService: createDisabledDeviceSyncService(),
     exchangeRateService,
     goalService: createGoalService(
       createGoalRepository(db, {
