@@ -337,6 +337,7 @@ function createServicesFromDatabase(
       aiProviderService,
       tools: createPortfolioAiChatTools({
         accountService,
+        activityService,
         holdingsService,
         goalService,
         baseCurrency,

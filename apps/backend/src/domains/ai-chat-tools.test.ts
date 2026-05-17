@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createPortfolioAiChatTools } from "./ai-chat-tools";
 import type { Account } from "./accounts";
+import type { ActivityDetails, ActivitySearchRequest } from "./activities";
 import type { Goal } from "./goals";
 import type { DailyAccountValuation, Holding } from "./holdings";
 
@@ -473,6 +474,187 @@ describe("TS AI chat built-in tools", () => {
       },
     });
   });
+
+  test("exposes Rust-compatible search_activities output and filters", async () => {
+    let capturedRequest: ActivitySearchRequest | undefined;
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage" })],
+      },
+      activityService: {
+        searchActivities: (request) => {
+          capturedRequest = request;
+          return {
+            data: [
+              activity({
+                id: "activity-1",
+                accountId: "acct-1",
+                accountName: "Brokerage",
+                activityType: "BUY",
+                assetSymbol: "AAPL",
+                quantity: "2",
+                unitPrice: "10",
+                amount: "",
+                fee: "1.5",
+                fxRate: "1.35",
+              }),
+            ],
+            meta: { totalRowCount: 250 },
+          };
+        },
+      },
+    });
+
+    const searchActivities = tools.find((tool) => tool.name === "search_activities");
+    const result = await searchActivities?.execute({
+      accountId: "Brokerage",
+      activityType: "BUY",
+      symbol: "AAPL",
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
+      page: 2,
+      pageSize: 500,
+    });
+
+    expect(searchActivities).toMatchObject({
+      description: expect.stringContaining("investment activities"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          activityType: expect.objectContaining({
+            enum: expect.arrayContaining(["BUY", "SELL", "DIVIDEND"]),
+          }),
+          pageSize: expect.objectContaining({ default: 50 }),
+        }),
+        required: [],
+      },
+    });
+    expect(capturedRequest).toEqual({
+      page: 1,
+      pageSize: 200,
+      accountIds: ["acct-1"],
+      activityTypes: ["BUY"],
+      assetIdKeyword: "AAPL",
+      sort: { id: "date", desc: true },
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
+    });
+    expect(result).toEqual({
+      data: {
+        activities: [
+          {
+            id: "activity-1",
+            date: "2026-01-15T00:00:00",
+            activityType: "BUY",
+            symbol: "AAPL",
+            quantity: 2,
+            unitPrice: 10,
+            amount: 20,
+            fee: 1.5,
+            fxRate: 1.35,
+            currency: "USD",
+            accountId: "acct-1",
+            accountName: "Brokerage",
+          },
+        ],
+        count: 1,
+        totalRowCount: 250,
+        page: 2,
+        pageSize: 200,
+        totalPages: 2,
+        accountScope: "Brokerage",
+        totalAmount: 20,
+      },
+    });
+  });
+
+  test("defaults search_activities pagination and omits zero total amount", async () => {
+    let capturedRequest: ActivitySearchRequest | undefined;
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      activityService: {
+        searchActivities: (request) => {
+          capturedRequest = request;
+          return {
+            data: [
+              activity({
+                id: "activity-1",
+                assetSymbol: "",
+                quantity: null,
+                unitPrice: null,
+                amount: null,
+              }),
+            ],
+            meta: { totalRowCount: 1 },
+          };
+        },
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "search_activities")
+      ?.execute({
+        accountId: "TOTAL",
+        page: 0,
+        pageSize: 0,
+      });
+
+    expect(capturedRequest).toEqual({
+      page: 0,
+      pageSize: 1,
+      accountIds: undefined,
+      activityTypes: undefined,
+      assetIdKeyword: undefined,
+      sort: { id: "date", desc: true },
+      dateFrom: undefined,
+      dateTo: undefined,
+    });
+    expect(result).toEqual({
+      data: {
+        activities: [
+          {
+            id: "activity-1",
+            date: "2026-01-15T00:00:00",
+            activityType: "BUY",
+            symbol: null,
+            quantity: null,
+            unitPrice: null,
+            amount: null,
+            fee: null,
+            fxRate: null,
+            currency: "USD",
+            accountId: "acct-1",
+            accountName: "Brokerage",
+          },
+        ],
+        count: 1,
+        totalRowCount: 1,
+        page: 1,
+        pageSize: 1,
+        totalPages: 1,
+        accountScope: "all",
+      },
+    });
+  });
+
+  test("rejects invalid search_activities dates", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      activityService: {
+        searchActivities: () => {
+          throw new Error("should not search with invalid dates");
+        },
+      },
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "search_activities")?.execute({ dateFrom: "2026-13-01" }),
+    ).rejects.toThrow("Invalid dateFrom format: 2026-13-01");
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -607,6 +789,43 @@ function goal(overrides: Partial<Goal>): Goal {
     createdAt: "2026-05-17T00:00:00Z",
     updatedAt: "2026-05-17T00:00:00Z",
     summaryTargetAmount: null,
+    ...overrides,
+  };
+}
+
+function activity(overrides: Partial<ActivityDetails>): ActivityDetails {
+  return {
+    id: "activity-1",
+    accountId: "acct-1",
+    assetId: "asset-1",
+    activityType: "BUY",
+    subtype: null,
+    status: "FILLED",
+    date: "2026-01-15T00:00:00",
+    quantity: "1",
+    unitPrice: "10",
+    currency: "USD",
+    fee: null,
+    amount: "10",
+    needsReview: false,
+    comment: null,
+    fxRate: null,
+    createdAt: "2026-01-15T00:00:00Z",
+    updatedAt: "2026-01-15T00:00:00Z",
+    accountName: "Brokerage",
+    accountCurrency: "USD",
+    assetSymbol: "AAPL",
+    assetName: "Apple Inc.",
+    exchangeMic: "XNAS",
+    assetPricingMode: "MARKET",
+    instrumentType: "EQUITY",
+    sourceSystem: null,
+    sourceRecordId: null,
+    sourceGroupId: null,
+    idempotencyKey: null,
+    importRunId: null,
+    isUserModified: false,
+    metadata: null,
     ...overrides,
   };
 }

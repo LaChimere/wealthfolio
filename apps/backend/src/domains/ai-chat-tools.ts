@@ -1,4 +1,5 @@
 import type { AccountService } from "./accounts";
+import type { ActivityDetails, ActivityService } from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
 import type { DailyAccountValuation, Holding, HoldingsService } from "./holdings";
@@ -6,16 +7,20 @@ import type { DailyAccountValuation, Holding, HoldingsService } from "./holdings
 const MAX_ACCOUNTS = 50;
 const MAX_HOLDINGS = 100;
 const MAX_GOALS = 50;
+const DEFAULT_ACTIVITIES_PAGE_SIZE = 50;
+const MAX_ACTIVITIES_ROWS = 200;
 const ZERO_EPSILON = 1e-9;
 
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
   Partial<Pick<HoldingsService, "getLatestValuations">>;
+type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
 
 export interface PortfolioAiChatToolsOptions {
   accountService: Pick<AccountService, "getActiveAccounts"> &
     Partial<Pick<AccountService, "getAllAccounts">>;
   holdingsService?: PortfolioAiHoldingsService;
   goalService?: Pick<GoalService, "getGoals">;
+  activityService?: PortfolioAiActivityService;
   baseCurrency?: string | (() => string | undefined);
 }
 
@@ -46,6 +51,14 @@ export function createPortfolioAiChatTools(
   }
   if (options.goalService) {
     tools.push(createGetGoalsTool(options.goalService));
+  }
+  if (options.activityService?.searchActivities) {
+    tools.push(
+      createSearchActivitiesTool({
+        accountService: options.accountService,
+        activityService: { searchActivities: options.activityService.searchActivities },
+      }),
+    );
   }
   return tools;
 }
@@ -308,6 +321,107 @@ function createGetGoalsTool(goalService: Pick<GoalService, "getGoals">): AiChatT
   };
 }
 
+function createSearchActivitiesTool(options: {
+  accountService: Pick<AccountService, "getActiveAccounts">;
+  activityService: Pick<Required<ActivityService>, "searchActivities">;
+}): AiChatToolDefinition {
+  return {
+    name: "search_activities",
+    description:
+      "Search and get investment activities (transactions) such as buys, sells, dividends, deposits, and withdrawals. Supports filtering, date ranges, and pagination. Returns paginated results with totalPages so you can request more pages if needed.",
+    parameters: {
+      type: "object",
+      properties: {
+        accountId: {
+          type: "string",
+          description: "Filter by account ID (optional, all accounts if not provided)",
+        },
+        activityType: {
+          type: "string",
+          description: "Filter by activity type",
+          enum: [
+            "BUY",
+            "SELL",
+            "DIVIDEND",
+            "DEPOSIT",
+            "WITHDRAWAL",
+            "TRANSFER_IN",
+            "TRANSFER_OUT",
+            "INTEREST",
+            "FEE",
+            "SPLIT",
+            "TAX",
+          ],
+        },
+        symbol: {
+          type: "string",
+          description: "Filter by symbol or asset keyword",
+        },
+        dateFrom: {
+          type: "string",
+          description: "Start date filter in YYYY-MM-DD format (optional)",
+        },
+        dateTo: {
+          type: "string",
+          description: "End date filter in YYYY-MM-DD format (optional)",
+        },
+        page: {
+          type: "integer",
+          description: "Page number, 1-based (default: 1)",
+          default: 1,
+        },
+        pageSize: {
+          type: "integer",
+          description: "Number of results per page (default: 50, max: 200)",
+          default: 50,
+        },
+      },
+      required: [],
+    },
+    execute: async (rawArgs) => {
+      const args = parseActivitySearchArgs(rawArgs);
+      const page = Math.max(args.page ?? 1, 1);
+      const pageSize = clamp(args.pageSize ?? DEFAULT_ACTIVITIES_PAGE_SIZE, 1, MAX_ACTIVITIES_ROWS);
+      const accountId = normalizeOptionalFilter(args.accountId, { totalIsEmpty: true });
+      const accountIds = resolveActivityAccountIds(accountId, options.accountService);
+      const activityType = normalizeOptionalFilter(args.activityType);
+      const symbol = normalizeOptionalFilter(args.symbol);
+      const dateFrom = parseIsoDateFilter("dateFrom", args.dateFrom);
+      const dateTo = parseIsoDateFilter("dateTo", args.dateTo);
+
+      const response = await Promise.resolve(
+        options.activityService.searchActivities({
+          page: page - 1,
+          pageSize,
+          accountIds,
+          activityTypes: activityType ? [activityType] : undefined,
+          assetIdKeyword: symbol,
+          sort: { id: "date", desc: true },
+          dateFrom,
+          dateTo,
+        }),
+      );
+      const activities = response.data.map(activityToolDto);
+      const totalRowCount = response.meta.totalRowCount;
+      const totalPages = Math.ceil(totalRowCount / pageSize);
+      const totalAmount = activities.reduce((sum, activity) => sum + (activity.amount ?? 0), 0);
+
+      return {
+        data: {
+          activities,
+          count: activities.length,
+          totalRowCount,
+          page,
+          pageSize,
+          totalPages,
+          accountScope: accountId ?? "all",
+          ...(totalAmount > 0 ? { totalAmount } : {}),
+        },
+      };
+    },
+  };
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -315,6 +429,35 @@ function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string
   return {
     accountId: typeof args.accountId === "string" && args.accountId ? args.accountId : "TOTAL",
     viewMode: typeof args.viewMode === "string" && args.viewMode ? args.viewMode : "treemap",
+  };
+}
+
+function parseActivitySearchArgs(args: unknown): {
+  accountId?: string;
+  activityType?: string;
+  symbol?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+} {
+  if (!isRecord(args)) {
+    return {};
+  }
+  return {
+    accountId: typeof args.accountId === "string" ? args.accountId : undefined,
+    activityType: typeof args.activityType === "string" ? args.activityType : undefined,
+    symbol: typeof args.symbol === "string" ? args.symbol : undefined,
+    dateFrom: typeof args.dateFrom === "string" ? args.dateFrom : undefined,
+    dateTo: typeof args.dateTo === "string" ? args.dateTo : undefined,
+    page:
+      typeof args.page === "number" && Number.isFinite(args.page)
+        ? Math.trunc(args.page)
+        : undefined,
+    pageSize:
+      typeof args.pageSize === "number" && Number.isFinite(args.pageSize)
+        ? Math.trunc(args.pageSize)
+        : undefined,
   };
 }
 
@@ -356,6 +499,76 @@ function goalToolDto(goal: Goal) {
   };
 }
 
+function activityToolDto(activity: ActivityDetails) {
+  const quantity = parseOptionalNumber(activity.quantity);
+  const unitPrice = parseOptionalNumber(activity.unitPrice);
+  const amount =
+    parseOptionalNumber(activity.amount) ??
+    (quantity !== null && unitPrice !== null ? quantity * unitPrice : null);
+
+  return {
+    id: activity.id,
+    date: activity.date,
+    activityType: activity.activityType,
+    symbol: activity.assetSymbol === "" ? null : activity.assetSymbol,
+    quantity,
+    unitPrice,
+    amount,
+    fee: parseOptionalNumber(activity.fee),
+    fxRate: parseOptionalNumber(activity.fxRate),
+    currency: activity.currency,
+    accountId: activity.accountId,
+    accountName: activity.accountName,
+  };
+}
+
+function resolveActivityAccountIds(
+  accountId: string | undefined,
+  accountService: Pick<AccountService, "getActiveAccounts">,
+): string[] | undefined {
+  if (!accountId) {
+    return undefined;
+  }
+
+  const accounts = accountService.getActiveAccounts();
+  if (accounts.some((account) => account.id === accountId)) {
+    return [accountId];
+  }
+
+  const lowerAccountId = accountId.toLowerCase();
+  const matchedAccountIds = accounts
+    .filter((account) => account.name.toLowerCase() === lowerAccountId)
+    .map((account) => account.id);
+  return matchedAccountIds.length > 0 ? matchedAccountIds : [accountId];
+}
+
+function normalizeOptionalFilter(
+  value: string | undefined,
+  options: { totalIsEmpty?: boolean } = {},
+): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (options.totalIsEmpty && value.toLowerCase() === "total") {
+    return undefined;
+  }
+  return value;
+}
+
+function parseIsoDateFilter(name: string, value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`Invalid ${name} format: ${value}`);
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new Error(`Invalid ${name} format: ${value}`);
+  }
+  return value;
+}
+
 function holdingTypeLabel(value: Holding["holdingType"]): string {
   switch (value) {
     case "security":
@@ -376,6 +589,18 @@ function resolveBaseCurrency(
 
 function nonZero(value: number): boolean {
   return Math.abs(value) > ZERO_EPSILON;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parseOptionalNumber(value: string | null): number | null {
+  if (value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function failCashBalanceConversion(message: string): never {

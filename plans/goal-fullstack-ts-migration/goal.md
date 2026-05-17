@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 149
+turns_used: 150
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T18:51:22+08:00"
+updated_at: "2026-05-17T18:59:25+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -956,6 +956,12 @@ updated_at: "2026-05-17T18:51:22+08:00"
   returning persisted summary target/current/progress/deadline fields, achieved
   counts, and Rust-compatible 50-goal truncation metadata. Backend type-check
   and focused AI chat/tool/runtime/http tests passed.
+- Turn 150: Wired the Rust-shaped `search_activities` AI portfolio tool into the
+  TS runtime registry by sharing the runtime activity service with chat tools,
+  mapping one-based tool pagination to zero-based backend search, resolving
+  account names to ids, validating date filters, and returning Rust-compatible
+  activity DTOs/metadata. Backend type-check and focused AI
+  chat/tool/runtime/http tests passed.
 
 ## Deferred items
 
@@ -1019,9 +1025,10 @@ updated_at: "2026-05-17T18:51:22+08:00"
   sync_outbox callbacks for local AI chat mutations, native/fallback
   text/reasoning streaming, generated thread titles, OpenAI-compatible/Ollama
   injected tool-call execution, built-in `get_accounts`, `get_holdings`,
-  `get_cash_balances`, and `get_goals`, and bounded text/CSV attachment prompt
-  injection now have TS runtime parity, while the remaining built-in portfolio
-  tool wiring belongs in dedicated AI runtime slices.
+  `get_cash_balances`, `get_goals`, and `search_activities`, and bounded
+  text/CSV attachment prompt injection now have TS runtime parity, while the
+  remaining built-in portfolio tool wiring belongs in dedicated AI runtime
+  slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can
