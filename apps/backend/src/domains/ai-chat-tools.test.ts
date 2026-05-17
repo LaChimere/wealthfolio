@@ -4,7 +4,12 @@ import { createPortfolioAiChatTools } from "./ai-chat-tools";
 import type { Account } from "./accounts";
 import type { ActivityDetails, ActivitySearchRequest } from "./activities";
 import type { Goal } from "./goals";
-import type { DailyAccountValuation, Holding } from "./holdings";
+import type {
+  AllocationHoldings,
+  DailyAccountValuation,
+  Holding,
+  PortfolioAllocations,
+} from "./holdings";
 import type { IncomeSummary } from "./portfolio-metrics";
 
 describe("TS AI chat built-in tools", () => {
@@ -892,6 +897,324 @@ describe("TS AI chat built-in tools", () => {
     });
     expect(data.valuations).toHaveLength(400);
   });
+
+  test("exposes Rust-compatible get_asset_allocation output with default grouping", async () => {
+    let capturedAccountId: string | undefined;
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getPortfolioAllocations: (accountId) => {
+          capturedAccountId = accountId;
+          return portfolioAllocations({
+            assetClasses: taxonomyAllocation({
+              taxonomyId: "asset_class",
+              taxonomyName: "Asset Class",
+              categories: [
+                {
+                  categoryId: "EQUITY",
+                  categoryName: "Equity",
+                  color: "#2563eb",
+                  value: 750,
+                  percentage: 75,
+                },
+                {
+                  categoryId: "CASH",
+                  categoryName: "Cash",
+                  color: "#16a34a",
+                  value: 250,
+                  percentage: 25,
+                },
+              ],
+            }),
+          });
+        },
+        getHoldingsByAllocation: () => {
+          throw new Error("should not drill down without taxonomy and category ids");
+        },
+      },
+      baseCurrency: "CAD",
+    });
+
+    const getAssetAllocation = tools.find((tool) => tool.name === "get_asset_allocation");
+    const result = await getAssetAllocation?.execute({});
+
+    expect(getAssetAllocation).toMatchObject({
+      description: expect.stringContaining("asset allocation"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          accountId: expect.objectContaining({ default: "TOTAL" }),
+          groupBy: expect.objectContaining({
+            enum: ["class", "sector", "region", "risk", "security_type"],
+            default: "class",
+          }),
+          taxonomyId: expect.objectContaining({ type: "string" }),
+          categoryId: expect.objectContaining({ type: "string" }),
+        }),
+        required: [],
+      },
+    });
+    expect(capturedAccountId).toBe("TOTAL");
+    expect(result).toEqual({
+      data: {
+        allocations: [
+          {
+            categoryId: "EQUITY",
+            categoryName: "Equity",
+            value: 750,
+            percentage: 75,
+            color: "#2563eb",
+          },
+          {
+            categoryId: "CASH",
+            categoryName: "Cash",
+            value: 250,
+            percentage: 25,
+            color: "#16a34a",
+          },
+        ],
+        totalValue: 1000,
+        currency: "CAD",
+        groupBy: "class",
+        taxonomyId: "asset_class",
+        taxonomyName: "Asset Class",
+      },
+    });
+  });
+
+  test("selects requested get_asset_allocation taxonomy", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getPortfolioAllocations: (accountId) => {
+          expect(accountId).toBe("acct-1");
+          return portfolioAllocations({
+            sectors: taxonomyAllocation({
+              taxonomyId: "sector",
+              taxonomyName: "Sector",
+              categories: [
+                {
+                  categoryId: "TECHNOLOGY",
+                  categoryName: "Technology",
+                  color: "#7c3aed",
+                  value: 600,
+                  percentage: 60,
+                },
+              ],
+            }),
+          });
+        },
+        getHoldingsByAllocation: () => {
+          throw new Error("should not drill down without taxonomy and category ids");
+        },
+      },
+      baseCurrency: () => "USD",
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "get_asset_allocation")
+      ?.execute({
+        accountId: "acct-1",
+        groupBy: "sector",
+      });
+
+    expect(result).toEqual({
+      data: {
+        allocations: [
+          {
+            categoryId: "TECHNOLOGY",
+            categoryName: "Technology",
+            value: 600,
+            percentage: 60,
+            color: "#7c3aed",
+          },
+        ],
+        totalValue: 1000,
+        currency: "USD",
+        groupBy: "sector",
+        taxonomyId: "sector",
+        taxonomyName: "Sector",
+      },
+    });
+  });
+
+  test("maps remaining get_asset_allocation grouping variants", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getPortfolioAllocations: () =>
+          portfolioAllocations({
+            regions: taxonomyAllocation({
+              taxonomyId: "region",
+              taxonomyName: "Region",
+              categories: [
+                {
+                  categoryId: "NORTH_AMERICA",
+                  categoryName: "North America",
+                  color: "#2563eb",
+                  value: 400,
+                  percentage: 40,
+                },
+              ],
+            }),
+            riskCategory: taxonomyAllocation({
+              taxonomyId: "risk",
+              taxonomyName: "Risk",
+              categories: [
+                {
+                  categoryId: "HIGH",
+                  categoryName: "High",
+                  color: "#dc2626",
+                  value: 700,
+                  percentage: 70,
+                },
+              ],
+            }),
+            securityTypes: taxonomyAllocation({
+              taxonomyId: "security_type",
+              taxonomyName: "Security Type",
+              categories: [
+                {
+                  categoryId: "ETF",
+                  categoryName: "ETF",
+                  color: "#0891b2",
+                  value: 300,
+                  percentage: 30,
+                },
+              ],
+            }),
+          }),
+        getHoldingsByAllocation: () => {
+          throw new Error("should not drill down without taxonomy and category ids");
+        },
+      },
+    });
+    const getAssetAllocation = tools.find((tool) => tool.name === "get_asset_allocation");
+
+    await expect(getAssetAllocation?.execute({ groupBy: "region" })).resolves.toMatchObject({
+      data: {
+        allocations: [expect.objectContaining({ categoryId: "NORTH_AMERICA" })],
+        groupBy: "region",
+        taxonomyId: "region",
+        taxonomyName: "Region",
+      },
+    });
+    await expect(getAssetAllocation?.execute({ groupBy: "risk" })).resolves.toMatchObject({
+      data: {
+        allocations: [expect.objectContaining({ categoryId: "HIGH" })],
+        groupBy: "risk",
+        taxonomyId: "risk",
+        taxonomyName: "Risk",
+      },
+    });
+    await expect(getAssetAllocation?.execute({ groupBy: "security_type" })).resolves.toMatchObject({
+      data: {
+        allocations: [expect.objectContaining({ categoryId: "ETF" })],
+        groupBy: "security_type",
+        taxonomyId: "security_type",
+        taxonomyName: "Security Type",
+      },
+    });
+  });
+
+  test("fails get_asset_allocation for invalid grouping", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getPortfolioAllocations: () => portfolioAllocations({}),
+        getHoldingsByAllocation: () => {
+          throw new Error("should not drill down without taxonomy and category ids");
+        },
+      },
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "get_asset_allocation")?.execute({ groupBy: "issuer" }),
+    ).rejects.toThrow(
+      "Invalid groupBy value 'issuer'. Must be 'class', 'sector', 'region', 'risk', or 'security_type'.",
+    );
+  });
+
+  test("returns get_asset_allocation drill-down holdings", async () => {
+    const calls: Array<{ accountId: string; taxonomyId: string; categoryId: string }> = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getPortfolioAllocations: () => {
+          throw new Error("should not query allocation summary in drill-down mode");
+        },
+        getHoldingsByAllocation: (accountId, taxonomyId, categoryId) => {
+          calls.push({ accountId, taxonomyId, categoryId });
+          return allocationHoldings({
+            taxonomyId,
+            categoryId,
+            holdings: [
+              {
+                symbol: "AAPL",
+                name: "Apple Inc.",
+                holdingType: "security",
+                quantity: 2,
+                marketValue: 400,
+                currency: "USD",
+                weightInCategory: 0.8,
+              },
+              {
+                symbol: "MSFT",
+                name: null,
+                holdingType: "security",
+                quantity: 1,
+                marketValue: 100,
+                currency: "USD",
+                weightInCategory: 0.2,
+              },
+            ],
+          });
+        },
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "get_asset_allocation")
+      ?.execute({
+        accountId: "acct-1",
+        groupBy: "sector",
+        taxonomyId: "sector",
+        categoryId: "TECHNOLOGY",
+      });
+
+    expect(calls).toEqual([
+      { accountId: "acct-1", taxonomyId: "sector", categoryId: "TECHNOLOGY" },
+    ]);
+    expect(result).toEqual({
+      data: {
+        holdings: [
+          { symbol: "AAPL", name: "Apple Inc.", value: 400, weight: 0.8 },
+          { symbol: "MSFT", name: null, value: 100, weight: 0.2 },
+        ],
+        totalValue: 500,
+        currency: "USD",
+        groupBy: "sector",
+        taxonomyId: "sector",
+        taxonomyName: "Sector",
+        categoryName: "Technology",
+      },
+    });
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -1001,6 +1324,48 @@ function valuation(overrides: Partial<DailyAccountValuation>): DailyAccountValua
     costBasis: 0,
     netContribution: 0,
     calculatedAt: "2026-05-17T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function taxonomyAllocation(
+  overrides: Partial<PortfolioAllocations["assetClasses"]>,
+): PortfolioAllocations["assetClasses"] {
+  return {
+    taxonomyId: "asset_class",
+    taxonomyName: "Asset Class",
+    color: "#000000",
+    categories: [],
+    ...overrides,
+  };
+}
+
+function portfolioAllocations(overrides: Partial<PortfolioAllocations>): PortfolioAllocations {
+  return {
+    assetClasses: taxonomyAllocation({ taxonomyId: "asset_class", taxonomyName: "Asset Class" }),
+    sectors: taxonomyAllocation({ taxonomyId: "sector", taxonomyName: "Sector" }),
+    regions: taxonomyAllocation({ taxonomyId: "region", taxonomyName: "Region" }),
+    riskCategory: taxonomyAllocation({ taxonomyId: "risk", taxonomyName: "Risk" }),
+    securityTypes: taxonomyAllocation({
+      taxonomyId: "security_type",
+      taxonomyName: "Security Type",
+    }),
+    customGroups: [],
+    totalValue: 1000,
+    ...overrides,
+  };
+}
+
+function allocationHoldings(overrides: Partial<AllocationHoldings>): AllocationHoldings {
+  return {
+    taxonomyId: "sector",
+    taxonomyName: "Sector",
+    categoryId: "TECHNOLOGY",
+    categoryName: "Technology",
+    color: "#7c3aed",
+    holdings: [],
+    totalValue: 500,
+    currency: "USD",
     ...overrides,
   };
 }

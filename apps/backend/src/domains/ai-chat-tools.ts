@@ -2,7 +2,14 @@ import type { AccountService } from "./accounts";
 import type { ActivityDetails, ActivityService } from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
-import type { DailyAccountValuation, Holding, HoldingsService } from "./holdings";
+import type {
+  AllocationHoldings,
+  DailyAccountValuation,
+  Holding,
+  HoldingsService,
+  PortfolioAllocations,
+  TaxonomyAllocation,
+} from "./holdings";
 import type { IncomeSummary, PortfolioMetricsService } from "./portfolio-metrics";
 
 const MAX_ACCOUNTS = 50;
@@ -15,7 +22,15 @@ const MAX_ACTIVITIES_ROWS = 200;
 const ZERO_EPSILON = 1e-9;
 
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
-  Partial<Pick<HoldingsService, "getHistoricalValuations" | "getLatestValuations">>;
+  Partial<
+    Pick<
+      HoldingsService,
+      | "getHistoricalValuations"
+      | "getHoldingsByAllocation"
+      | "getLatestValuations"
+      | "getPortfolioAllocations"
+    >
+  >;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
 type PortfolioAiMetricsService = Pick<PortfolioMetricsService, "getIncomeSummary">;
 
@@ -63,6 +78,20 @@ export function createPortfolioAiChatTools(
           },
           baseCurrency: options.baseCurrency,
           now: options.now,
+        }),
+      );
+    }
+    if (
+      options.holdingsService.getPortfolioAllocations &&
+      options.holdingsService.getHoldingsByAllocation
+    ) {
+      tools.push(
+        createGetAssetAllocationTool({
+          holdingsService: {
+            getPortfolioAllocations: options.holdingsService.getPortfolioAllocations,
+            getHoldingsByAllocation: options.holdingsService.getHoldingsByAllocation,
+          },
+          baseCurrency: options.baseCurrency,
         }),
       );
     }
@@ -580,6 +609,99 @@ function createGetValuationHistoryTool(options: {
   };
 }
 
+function createGetAssetAllocationTool(options: {
+  holdingsService: Pick<
+    Required<HoldingsService>,
+    "getHoldingsByAllocation" | "getPortfolioAllocations"
+  >;
+  baseCurrency?: string | (() => string | undefined);
+}): AiChatToolDefinition {
+  return {
+    name: "get_asset_allocation",
+    description:
+      "Get portfolio asset allocation breakdown. Can group by asset class, sector, region, risk level, or security type. Supports drill-down to see holdings within a specific category.",
+    parameters: {
+      type: "object",
+      properties: {
+        accountId: {
+          type: "string",
+          description: "Account ID to get allocation for, or 'TOTAL' for all accounts",
+          default: "TOTAL",
+        },
+        groupBy: {
+          type: "string",
+          enum: ["class", "sector", "region", "risk", "security_type"],
+          description:
+            "Grouping: 'class' (Equity/Fixed Income/Cash), 'sector' (Technology/Healthcare/etc), 'region' (North America/Europe/etc), 'risk' (Low/Medium/High), 'security_type' (Stock/ETF/Bond)",
+          default: "class",
+        },
+        taxonomyId: {
+          type: "string",
+          description: "For drill-down: taxonomy ID (use value from previous allocation response)",
+        },
+        categoryId: {
+          type: "string",
+          description:
+            "For drill-down: category ID to show holdings for (use value from previous allocation response)",
+        },
+      },
+      required: [],
+    },
+    execute: async (rawArgs) => {
+      const args = parseAssetAllocationArgs(rawArgs);
+      const groupBy = args.groupBy.toLowerCase();
+
+      if (args.taxonomyId !== undefined && args.categoryId !== undefined) {
+        const result = (await Promise.resolve(
+          options.holdingsService.getHoldingsByAllocation(
+            args.accountId,
+            args.taxonomyId,
+            args.categoryId,
+          ),
+        )) as AllocationHoldings;
+        return {
+          data: {
+            holdings: result.holdings.map((holding) => ({
+              symbol: holding.symbol,
+              name: holding.name,
+              value: holding.marketValue,
+              weight: holding.weightInCategory,
+            })),
+            totalValue: result.totalValue,
+            currency: result.currency,
+            groupBy,
+            taxonomyId: result.taxonomyId,
+            taxonomyName: result.taxonomyName,
+            categoryName: result.categoryName,
+          },
+        };
+      }
+
+      const allocations = (await Promise.resolve(
+        options.holdingsService.getPortfolioAllocations(args.accountId),
+      )) as PortfolioAllocations;
+      const taxonomy = taxonomyForGroupBy(allocations, groupBy);
+
+      return {
+        data: {
+          allocations: taxonomy.categories.map((category) => ({
+            categoryId: category.categoryId,
+            categoryName: category.categoryName,
+            value: category.value,
+            percentage: category.percentage,
+            color: category.color,
+          })),
+          totalValue: allocations.totalValue,
+          currency: resolveBaseCurrency(options.baseCurrency),
+          groupBy,
+          taxonomyId: taxonomy.taxonomyId,
+          taxonomyName: taxonomy.taxonomyName,
+        },
+      };
+    },
+  };
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -640,6 +762,23 @@ function parseValuationHistoryArgs(args: unknown): {
     accountId: typeof args.accountId === "string" && args.accountId ? args.accountId : "TOTAL",
     startDate: typeof args.startDate === "string" ? args.startDate : undefined,
     endDate: typeof args.endDate === "string" ? args.endDate : undefined,
+  };
+}
+
+function parseAssetAllocationArgs(args: unknown): {
+  accountId: string;
+  groupBy: string;
+  taxonomyId?: string;
+  categoryId?: string;
+} {
+  if (!isRecord(args)) {
+    return { accountId: "TOTAL", groupBy: "class" };
+  }
+  return {
+    accountId: typeof args.accountId === "string" && args.accountId ? args.accountId : "TOTAL",
+    groupBy: typeof args.groupBy === "string" && args.groupBy ? args.groupBy : "class",
+    taxonomyId: typeof args.taxonomyId === "string" ? args.taxonomyId : undefined,
+    categoryId: typeof args.categoryId === "string" ? args.categoryId : undefined,
   };
 }
 
@@ -754,6 +893,28 @@ async function readAccountValuations(options: {
     netContribution: valuation.netContribution * valuation.fxRateToBase,
     currency: options.baseCurrency,
   }));
+}
+
+function taxonomyForGroupBy(
+  allocations: PortfolioAllocations,
+  groupBy: string,
+): TaxonomyAllocation {
+  switch (groupBy) {
+    case "class":
+      return allocations.assetClasses;
+    case "sector":
+      return allocations.sectors;
+    case "region":
+      return allocations.regions;
+    case "risk":
+      return allocations.riskCategory;
+    case "security_type":
+      return allocations.securityTypes;
+    default:
+      throw new Error(
+        `Invalid groupBy value '${groupBy}'. Must be 'class', 'sector', 'region', 'risk', or 'security_type'.`,
+      );
+  }
 }
 
 function resolveActivityAccountIds(
