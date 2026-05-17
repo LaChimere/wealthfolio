@@ -758,6 +758,68 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires disabled Connect runtime behavior", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const jsonHeaders = { "content-type": "application/json" };
+      for (const request of [
+        new Request(`${server.baseUrl}/api/v1/connect/session`, {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ refreshToken: "refresh-token" }),
+        }),
+        new Request(`${server.baseUrl}/api/v1/connect/session`, { method: "DELETE" }),
+        new Request(`${server.baseUrl}/api/v1/connect/session/status`),
+        new Request(`${server.baseUrl}/api/v1/connect/session/restore`),
+        new Request(`${server.baseUrl}/api/v1/connect/connections`),
+        new Request(`${server.baseUrl}/api/v1/connect/accounts`),
+        new Request(`${server.baseUrl}/api/v1/connect/sync/connections`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/plans`),
+        new Request(`${server.baseUrl}/api/v1/connect/plans/public`),
+        new Request(`${server.baseUrl}/api/v1/connect/user`),
+        new Request(
+          `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,
+        ),
+        new Request(`${server.baseUrl}/api/v1/connect/broker-sync-profile`, {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({ accountId: "acct-1", sourceSystem: "snaptrade", rules: [] }),
+        }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(501);
+      }
+
+      const syncResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync`, {
+        method: "POST",
+      });
+      expect(syncResponse.status).toBe(501);
+
+      for (const pathName of [
+        "/api/v1/connect/synced-accounts",
+        "/api/v1/connect/platforms",
+        "/api/v1/connect/sync-states",
+        "/api/v1/connect/import-runs?runType=broker&limit=10&offset=0",
+      ]) {
+        const response = await fetch(`${server.baseUrl}${pathName}`);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual([]);
+      }
+    } finally {
+      server.stop();
+      runtime.close();
+    }
+  });
+
   test("persists runtime FX asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-sync-"));
     const runtime = createSqliteBackedBackendServices({

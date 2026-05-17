@@ -287,6 +287,9 @@ backend:
   event bus, debounces event batches, supports explicit flush/dispose, and
   surfaces scheduled processing failures without wiring real runtime services
   yet.
+- Add disabled standalone Connect runtime wiring, preserving Rust feature-off
+  behavior for cloud/connect action routes and local empty-list routes while
+  marking broker sync profile persistence as a dedicated TS migration gap.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity

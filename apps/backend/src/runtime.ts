@@ -12,6 +12,7 @@ import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
+import { createDisabledConnectService } from "./domains/connect";
 import {
   createContributionDepositCalculator,
   createContributionLimitRepository,
@@ -327,6 +328,7 @@ function createServicesFromDatabase(
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
       prepareDatabaseRestore,
     }),
+    connectService: createDisabledConnectService(),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
         queueSyncEvent: (event) =>

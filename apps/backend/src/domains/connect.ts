@@ -52,6 +52,91 @@ export interface ConnectService {
   getUserInfo(): Promise<unknown> | unknown;
 }
 
+export class ConnectNotImplementedError extends Error {
+  readonly status = 501;
+  readonly code = "not_implemented";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ConnectNotImplementedError";
+  }
+}
+
+const CLOUD_SYNC_DISABLED_MESSAGE = "Cloud sync features are disabled in this build.";
+const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this build.";
+const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
+  "Broker sync profile persistence is not yet available in the TS backend runtime";
+
+export function createDisabledConnectService(): ConnectService {
+  return {
+    async storeSyncSession() {
+      throw cloudSyncDisabled();
+    },
+    async clearSyncSession() {
+      throw cloudSyncDisabled();
+    },
+    async getSyncSessionStatus() {
+      throw cloudSyncDisabled();
+    },
+    async restoreSyncSession() {
+      throw cloudSyncDisabled();
+    },
+    async listBrokerConnections() {
+      throw connectSyncDisabled();
+    },
+    async listBrokerAccounts() {
+      throw connectSyncDisabled();
+    },
+    syncBrokerData() {
+      return { status: "not_implemented" };
+    },
+    async syncBrokerConnections() {
+      throw connectSyncDisabled();
+    },
+    async syncBrokerAccounts() {
+      throw connectSyncDisabled();
+    },
+    async syncBrokerActivities() {
+      throw connectSyncDisabled();
+    },
+    getSyncedAccounts() {
+      return [];
+    },
+    getPlatforms() {
+      return [];
+    },
+    getBrokerSyncStates() {
+      return [];
+    },
+    getImportRuns() {
+      return [];
+    },
+    async getBrokerSyncProfile() {
+      throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
+    },
+    async saveBrokerSyncProfileRules() {
+      throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
+    },
+    async getSubscriptionPlans() {
+      throw cloudSyncDisabled();
+    },
+    async getSubscriptionPlansPublic() {
+      throw cloudSyncDisabled();
+    },
+    async getUserInfo() {
+      throw cloudSyncDisabled();
+    },
+  };
+}
+
+function cloudSyncDisabled(): ConnectNotImplementedError {
+  return new ConnectNotImplementedError(CLOUD_SYNC_DISABLED_MESSAGE);
+}
+
+function connectSyncDisabled(): ConnectNotImplementedError {
+  return new ConnectNotImplementedError(CONNECT_SYNC_DISABLED_MESSAGE);
+}
+
 export interface ConnectDeviceSyncService {
   getDeviceSyncState(): Promise<unknown> | unknown;
   /**

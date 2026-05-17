@@ -178,13 +178,15 @@
     health-fix dispatch now have TS runtime parity, while calculation-heavy
     health checks, market sync fix execution, and non-classification
     `/health/fix` dispatch are deferred to health/calculation parity slices;
-    real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-    local sync repositories, subscription entitlement checks, event production,
-    E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-    background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and secret side effects are deferred to
-    Connect/device-sync parity slices.
+    disabled Connect feature-flag responses and local empty-list routes now have
+    TS runtime parity, while real Connect token lifecycle, cloud HTTP clients,
+    broker sync orchestration, broker sync profile persistence, local sync
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
