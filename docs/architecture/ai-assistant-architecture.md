@@ -7,6 +7,16 @@ natural language queries. It uses LLM orchestration with tool calling to fetch
 and analyze financial data, presenting results through a streaming chat
 interface.
 
+## TypeScript backend migration status
+
+The Rust `wealthfolio-ai` crate remains the reference implementation for full
+assistant behavior: tool calling, attachment handling, title generation, and
+provider-specific orchestration. The TypeScript/Bun backend now supports a
+bounded text-only streaming path for configured providers. It preserves the
+Rust-shaped NDJSON event contract (`system`, `textDelta`, `done`, `error`) and
+persists user/assistant messages, but it intentionally does not expose portfolio
+tools or attachments until those parity slices are migrated.
+
 ## Architecture Diagram
 
 ```

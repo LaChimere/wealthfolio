@@ -2620,6 +2620,16 @@ describe("TS backend HTTP skeleton", () => {
         listedModels.push(providerId);
         return { models: [{ id: "gpt-4.1", name: "GPT-4.1" }], supportsListing: true };
       },
+      resolveChatProviderConfig() {
+        return {
+          providerId: "openai",
+          modelId: "gpt-4.1",
+          providerType: "api",
+          baseUrl: "https://api.openai.test",
+          apiKey: "secret-key",
+          capabilities: { tools: false, thinking: false, vision: false, streaming: true },
+        };
+      },
     };
     const handler = createBackendRequestHandler(config, { aiProviderService });
 

@@ -7,6 +7,7 @@ import {
   type AiThreadSyncEvent,
   type AiThreadTagSyncEvent,
 } from "./ai-chat";
+import type { ResolvedAiChatProviderConfig } from "./ai-providers";
 
 type SyncEvent =
   | { entity: "thread"; event: AiThreadSyncEvent }
@@ -308,6 +309,222 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("streams OpenAI-compatible text and persists user and assistant messages", async () => {
+    const db = createAiChatDb();
+    const syncEvents: SyncEvent[] = [];
+    const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (input, init) => {
+        fetchCalls.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+        });
+        return streamResponse([
+          'data: {"choices":[{"delta":{"content":"Hel',
+          'lo"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":" world"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+      queueThreadSyncEvent: (event) => syncEvents.push({ entity: "thread", event }),
+      queueMessageSyncEvent: (event) => syncEvents.push({ entity: "message", event }),
+      queueThreadTagSyncEvent: (event) => syncEvents.push({ entity: "tag", event }),
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Hello?" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "textDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[0]).toEqual({
+        type: "system",
+        threadId: expect.any(String),
+        runId: expect.any(String),
+        messageId: expect.any(String),
+      });
+      expect(events[3]).toMatchObject({
+        type: "done",
+        message: {
+          id: events[0]?.messageId,
+          threadId: events[0]?.threadId,
+          role: "assistant",
+          content: textContent("Hello world"),
+        },
+      });
+      expect(fetchCalls[0]).toMatchObject({
+        url: "https://api.openai.test/v1/chat/completions",
+        body: {
+          model: "gpt-test",
+          stream: true,
+          messages: [
+            expect.objectContaining({ role: "system" }),
+            { role: "user", content: "Hello?" },
+          ],
+        },
+      });
+
+      const threadId = String(events[0]?.threadId);
+      expect(service.getThread(threadId)).toMatchObject({
+        id: threadId,
+        title: "Hello?",
+        config: expect.objectContaining({
+          providerId: "openai",
+          modelId: "gpt-test",
+          toolsAllowlist: [],
+        }),
+      });
+      expect(service.getMessages(threadId)).toMatchObject([
+        { role: "user", content: textContent("Hello?") },
+        { role: "assistant", content: textContent("Hello world") },
+      ]);
+      expect(syncEvents.map((item) => [item.entity, item.event.operation])).toEqual([
+        ["thread", "Create"],
+        ["message", "Create"],
+        ["message", "Create"],
+        ["thread", "Update"],
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("streams Ollama text with parent-truncated history for existing threads", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llama3",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+      }),
+      fetch: async (_input, init) => {
+        fetchBodies.push(JSON.parse(String(init?.body)));
+        return streamResponse([
+          '{"message":{"content":"Answer"},"done":false}\n',
+          '{"done":true}\n',
+        ]);
+      },
+    });
+
+    try {
+      seedThread(db, { id: "thread-1", title: "Existing" });
+      seedMessage(db, {
+        id: "before-parent",
+        threadId: "thread-1",
+        role: "user",
+        content: textContent("Before parent"),
+      });
+      seedMessage(db, {
+        id: "parent-message",
+        threadId: "thread-1",
+        role: "assistant",
+        content: textContent("Parent answer"),
+      });
+      seedMessage(db, {
+        id: "after-parent",
+        threadId: "thread-1",
+        role: "user",
+        content: textContent("Should be truncated"),
+      });
+
+      const events = await collectEvents(
+        await service.sendMessage({
+          threadId: "thread-1",
+          parentMessageId: "parent-message",
+          content: "Continue",
+        }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual(["system", "textDelta", "done"]);
+      expect(fetchBodies[0]).toMatchObject({
+        model: "llama3",
+        stream: true,
+        messages: [
+          expect.objectContaining({ role: "system" }),
+          { role: "user", content: "Before parent" },
+          { role: "assistant", content: "Parent answer" },
+          { role: "user", content: "Continue" },
+        ],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects missing API keys and attachments before persisting chat rows", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+      }),
+    });
+
+    try {
+      await expect(service.sendMessage({ content: "Hello" })).rejects.toMatchObject({
+        code: "missing_api_key",
+        status: 400,
+      });
+      await expect(
+        service.sendMessage({
+          content: "Read this",
+          attachments: [{ name: "file.csv", contentType: "text/csv", data: "a,b" }],
+        }),
+      ).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      expect(service.listThreads({ limit: 10 })).toMatchObject({ threads: [] });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits stream errors for provider failures without assistant persistence", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async () => new Response("upstream unavailable", { status: 503 }),
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Hello" }));
+
+      expect(events).toEqual([
+        expect.objectContaining({ type: "system" }),
+        expect.objectContaining({
+          type: "error",
+          code: "provider_error",
+          message: expect.stringContaining("Provider returned error 503"),
+        }),
+      ]);
+      const threadId = String(events[0]?.threadId);
+      expect(service.getMessages(threadId)).toMatchObject([{ role: "user" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports streaming as a bounded deferred runtime", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
@@ -322,6 +539,54 @@ describe("TS AI chat domain", () => {
     }
   });
 });
+
+async function collectEvents(
+  iterable: AsyncIterable<unknown>,
+): Promise<Array<Record<string, unknown>>> {
+  const events: Array<Record<string, unknown>> = [];
+  for await (const event of iterable) {
+    events.push(event as Record<string, unknown>);
+  }
+  return events;
+}
+
+function createProviderResolver(
+  config: Partial<ResolvedAiChatProviderConfig> &
+    Pick<ResolvedAiChatProviderConfig, "providerId" | "modelId" | "providerType" | "baseUrl">,
+): { resolveChatProviderConfig(): ResolvedAiChatProviderConfig } {
+  return {
+    resolveChatProviderConfig() {
+      return {
+        capabilities: { tools: false, thinking: false, vision: false, streaming: true },
+        ...config,
+      };
+    },
+  };
+}
+
+function streamResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    }),
+  );
+}
+
+function textContent(content: string): {
+  schemaVersion: number;
+  parts: Array<{ type: string; content: string }>;
+} {
+  return {
+    schemaVersion: 1,
+    parts: [{ type: "text", content }],
+  };
+}
 
 function createAiChatDb(): Database {
   const db = new Database(":memory:");

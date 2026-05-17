@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import type { AiProviderService, ResolvedAiChatProviderConfig } from "./ai-providers";
+
 export const AI_CHAT_ERROR_STATUS_BY_CODE: Record<string, number> = {
   INVALID_INPUT: 400,
   MISSING_API_KEY: 400,
@@ -100,6 +102,8 @@ export interface AiChatService {
 }
 
 export interface AiChatServiceOptions {
+  aiProviderService?: Pick<AiProviderService, "resolveChatProviderConfig">;
+  fetch?: typeof fetch;
   queueThreadSyncEvent?: (event: AiThreadSyncEvent) => void;
   queueMessageSyncEvent?: (event: AiMessageSyncEvent) => void;
   queueThreadTagSyncEvent?: (event: AiThreadTagSyncEvent) => void;
@@ -173,20 +177,95 @@ interface AiThreadTagRow {
   created_at: string;
 }
 
+interface AiChatModelConfig {
+  provider?: string;
+  model?: string;
+  thinking?: boolean;
+}
+
+interface AiChatSendMessageRequest {
+  threadId?: string;
+  content: string;
+  config?: AiChatModelConfig;
+  providerId?: string;
+  modelId?: string;
+  allowedTools?: string[];
+  parentMessageId?: string;
+  attachments?: AiChatAttachment[];
+}
+
+interface AiChatAttachment {
+  name: string;
+  contentType: string;
+  data: string;
+}
+
+interface ProviderChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface AiChatStreamIds {
+  threadId: string;
+  runId: string;
+  messageId: string;
+}
+
 const DEFAULT_THREAD_LIMIT = 20;
 const MAX_THREAD_LIMIT = 100;
+const MAX_HISTORY_CHARS = 120_000;
+const CHAT_CONFIG_SCHEMA_VERSION = 1;
+const PROMPT_TEMPLATE_ID = "wealthfolio-assistant-v1";
+const PROMPT_VERSION = "1.0.0";
+const TEXT_ONLY_SYSTEM_PROMPT = [
+  "You are Wealthfolio's AI assistant.",
+  "The TypeScript backend runtime currently streams text responses only.",
+  "Portfolio tools, mutation tools, and file attachments are not available in this runtime yet.",
+  "Do not claim that you accessed account, holding, activity, goal, or performance data.",
+  "If the user asks for private portfolio data, clearly say that data access is unavailable in the current runtime.",
+].join("\n");
 
 export function createAiChatService(
   db: Database,
   options: AiChatServiceOptions = {},
 ): AiChatService {
   return {
-    async sendMessage() {
-      throw aiChatError(
-        "not_implemented",
-        "AI chat streaming is not yet available in the TS backend runtime",
-        501,
-      );
+    async sendMessage(rawRequest) {
+      if (!options.aiProviderService) {
+        throw aiChatError(
+          "not_implemented",
+          "AI chat streaming is not yet available in the TS backend runtime",
+          501,
+        );
+      }
+
+      const request = parseSendMessageRequest(rawRequest);
+      if ((request.attachments?.length ?? 0) > 0) {
+        throw aiChatError(
+          "not_implemented",
+          "AI chat attachments are not yet available in the TS backend runtime",
+          501,
+        );
+      }
+
+      const providerConfig = options.aiProviderService.resolveChatProviderConfig({
+        providerId: request.config?.provider ?? request.providerId,
+        modelId: request.config?.model ?? request.modelId,
+        thinking: request.config?.thinking,
+      });
+      if (providerConfig.providerType === "api" && !providerConfig.apiKey) {
+        throw aiChatError(
+          "missing_api_key",
+          `API key required for provider '${providerConfig.providerId}'`,
+          400,
+        );
+      }
+
+      const prepared = db.transaction(() =>
+        prepareSendMessage(db, request, providerConfig, options),
+      )();
+      const fetchImpl = options.fetch ?? fetch;
+      return streamChatResponse(fetchImpl, providerConfig, prepared, db, options);
     },
     listThreads(request) {
       return listThreads(db, request);
@@ -291,6 +370,726 @@ export function createAiChatService(
       return updateToolResult(db, request, options.queueMessageSyncEvent);
     },
   };
+}
+
+function parseSendMessageRequest(payload: Record<string, unknown>): AiChatSendMessageRequest {
+  const content =
+    typeof payload.content === "string"
+      ? payload.content
+      : typeof payload.message === "string"
+        ? payload.message
+        : "";
+  const attachments = parseAttachments(payload.attachments);
+  if (!content.trim() && attachments.length === 0) {
+    throw aiChatError("invalid_input", "AI chat message content is required", 400);
+  }
+
+  return {
+    content,
+    ...(typeof payload.threadId === "string" && payload.threadId.trim()
+      ? { threadId: payload.threadId }
+      : {}),
+    ...(typeof payload.providerId === "string" && payload.providerId.trim()
+      ? { providerId: payload.providerId }
+      : {}),
+    ...(typeof payload.modelId === "string" && payload.modelId.trim()
+      ? { modelId: payload.modelId }
+      : {}),
+    ...(typeof payload.parentMessageId === "string" && payload.parentMessageId.trim()
+      ? { parentMessageId: payload.parentMessageId }
+      : {}),
+    ...(Array.isArray(payload.allowedTools)
+      ? {
+          allowedTools: payload.allowedTools.filter(
+            (tool): tool is string => typeof tool === "string",
+          ),
+        }
+      : {}),
+    ...(isRecord(payload.config) ? { config: parseChatModelConfig(payload.config) } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
+  };
+}
+
+function parseChatModelConfig(value: Record<string, unknown>): AiChatModelConfig {
+  return {
+    ...(typeof value.provider === "string" && value.provider.trim()
+      ? { provider: value.provider }
+      : {}),
+    ...(typeof value.model === "string" && value.model.trim() ? { model: value.model } : {}),
+    ...(typeof value.thinking === "boolean" ? { thinking: value.thinking } : {}),
+  };
+}
+
+function parseAttachments(value: unknown): AiChatAttachment[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw aiChatError("invalid_input", "attachments must be an array", 400);
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw aiChatError("invalid_input", `attachments[${index}] must be an object`, 400);
+    }
+    const name = parseRequiredString(item.name, `attachments[${index}].name`);
+    const contentType = parseRequiredString(item.contentType, `attachments[${index}].contentType`);
+    const data = parseRequiredString(item.data, `attachments[${index}].data`);
+    return { name, contentType, data };
+  });
+}
+
+function parseRequiredString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw aiChatError("invalid_input", `${fieldName} is required`, 400);
+  }
+  return value;
+}
+
+function prepareSendMessage(
+  db: Database,
+  request: AiChatSendMessageRequest,
+  providerConfig: ResolvedAiChatProviderConfig,
+  options: AiChatServiceOptions,
+): {
+  ids: AiChatStreamIds;
+  messages: ProviderChatMessage[];
+} {
+  const now = timestampNow();
+  const isNewThread = !request.threadId;
+  const threadRow = request.threadId
+    ? readRequiredThreadRow(db, request.threadId)
+    : insertThreadRow(db, {
+        id: crypto.randomUUID(),
+        title: deriveInitialThreadTitle(request.content),
+        configSnapshot: JSON.stringify(chatConfigSnapshot(providerConfig)),
+        createdAt: now,
+        updatedAt: now,
+      });
+  if (isNewThread) {
+    queueThreadSyncEvent(options, threadRow, "Create");
+  }
+
+  const threadId = threadRow.id;
+  const previousRows = db
+    .query<AiMessageRow, [string]>(
+      `
+        SELECT id, thread_id, role, content_json, created_at
+        FROM ai_messages
+        WHERE thread_id = ?
+        ORDER BY created_at ASC
+      `,
+    )
+    .all(threadId);
+  const historyRows = truncateHistoryAtParent(previousRows, request.parentMessageId);
+
+  const userMessageRow = insertMessageRow(db, {
+    id: crypto.randomUUID(),
+    threadId,
+    role: "user",
+    content: textMessageContent(request.content),
+    createdAt: now,
+  });
+  queueMessageSyncEvent(options.queueMessageSyncEvent, userMessageRow, "Create");
+  if (!isNewThread) {
+    touchThread(db, options, threadId, now);
+  }
+
+  return {
+    ids: {
+      threadId,
+      runId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+    },
+    messages: buildProviderMessages(historyRows, request.content),
+  };
+}
+
+function insertThreadRow(
+  db: Database,
+  thread: {
+    id: string;
+    title: string | null;
+    configSnapshot: string;
+    createdAt: string;
+    updatedAt: string;
+  },
+): AiThreadRow {
+  db.prepare(
+    `
+      INSERT INTO ai_threads (id, title, config_snapshot, is_pinned, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  ).run(thread.id, thread.title, thread.configSnapshot, 0, thread.createdAt, thread.updatedAt);
+  return readRequiredThreadRow(db, thread.id);
+}
+
+function insertMessageRow(
+  db: Database,
+  message: {
+    id: string;
+    threadId: string;
+    role: string;
+    content: AiChatMessageContent;
+    createdAt: string;
+  },
+): AiMessageRow {
+  db.prepare(
+    `
+      INSERT INTO ai_messages (id, thread_id, role, content_json, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+  ).run(
+    message.id,
+    message.threadId,
+    message.role,
+    JSON.stringify(message.content),
+    message.createdAt,
+  );
+  return readRequiredMessageRow(db, message.id);
+}
+
+function touchThread(
+  db: Database,
+  options: AiChatServiceOptions,
+  threadId: string,
+  updatedAt: string,
+): void {
+  db.prepare("UPDATE ai_threads SET updated_at = ? WHERE id = ?").run(updatedAt, threadId);
+  const row = readRequiredThreadRow(db, threadId);
+  queueThreadSyncEvent(options, row, "Update");
+}
+
+function chatConfigSnapshot(providerConfig: ResolvedAiChatProviderConfig): Record<string, unknown> {
+  return {
+    schemaVersion: CHAT_CONFIG_SCHEMA_VERSION,
+    providerId: providerConfig.providerId,
+    modelId: providerConfig.modelId,
+    promptTemplateId: PROMPT_TEMPLATE_ID,
+    promptVersion: PROMPT_VERSION,
+    toolsAllowlist: [],
+  };
+}
+
+function deriveInitialThreadTitle(content: string): string | null {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.length > 50 ? trimmed.slice(0, 50) : trimmed;
+}
+
+function truncateHistoryAtParent(
+  rows: AiMessageRow[],
+  parentMessageId: string | undefined,
+): AiMessageRow[] {
+  if (!parentMessageId) {
+    return rows;
+  }
+  const parentIndex = rows.findIndex((row) => row.id === parentMessageId);
+  return parentIndex >= 0 ? rows.slice(0, parentIndex + 1) : rows;
+}
+
+function buildProviderMessages(
+  rows: AiMessageRow[],
+  currentContent: string,
+): ProviderChatMessage[] {
+  const history: ProviderChatMessage[] = [];
+  let remainingBudget = MAX_HISTORY_CHARS;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const message = messageFromRow(rows[index] as AiMessageRow);
+    if (message.role !== "user" && message.role !== "assistant") {
+      continue;
+    }
+    const content = textContentFromMessage(message);
+    if (!content) {
+      continue;
+    }
+    if (content.length > remainingBudget) {
+      break;
+    }
+    remainingBudget -= content.length;
+    history.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content,
+    });
+  }
+  history.reverse();
+  history.push({ role: "user", content: currentContent });
+  return [{ role: "system", content: TEXT_ONLY_SYSTEM_PROMPT }, ...history];
+}
+
+function textContentFromMessage(message: AiChatMessage): string {
+  return message.content.parts
+    .filter(
+      (part): part is AiChatMessagePart & { content: string } =>
+        part.type === "text" && typeof part.content === "string",
+    )
+    .map((part) => part.content)
+    .join("");
+}
+
+function textMessageContent(content: string): AiChatMessageContent {
+  return {
+    schemaVersion: 1,
+    parts: [{ type: "text", content }],
+  };
+}
+
+async function* streamChatResponse(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prepared: {
+    ids: AiChatStreamIds;
+    messages: ProviderChatMessage[];
+  },
+  db: Database,
+  options: AiChatServiceOptions,
+): AsyncIterable<unknown> {
+  yield {
+    type: "system",
+    threadId: prepared.ids.threadId,
+    runId: prepared.ids.runId,
+    messageId: prepared.ids.messageId,
+  };
+
+  let accumulatedText = "";
+  try {
+    for await (const delta of streamProviderText(fetchImpl, providerConfig, prepared.messages)) {
+      accumulatedText += delta;
+      yield {
+        type: "textDelta",
+        threadId: prepared.ids.threadId,
+        runId: prepared.ids.runId,
+        messageId: prepared.ids.messageId,
+        delta,
+      };
+    }
+  } catch (error) {
+    yield {
+      type: "error",
+      threadId: prepared.ids.threadId,
+      runId: prepared.ids.runId,
+      messageId: prepared.ids.messageId,
+      code: aiChatErrorCode(error, "provider_error"),
+      message: errorMessage(error),
+    };
+    return;
+  }
+
+  const assistantMessage = db.transaction(() => {
+    const createdAt = timestampNow();
+    const row = insertMessageRow(db, {
+      id: prepared.ids.messageId,
+      threadId: prepared.ids.threadId,
+      role: "assistant",
+      content: textMessageContent(accumulatedText),
+      createdAt,
+    });
+    queueMessageSyncEvent(options.queueMessageSyncEvent, row, "Create");
+    touchThread(db, options, prepared.ids.threadId, createdAt);
+    return messageFromRow(row);
+  })();
+
+  yield {
+    type: "done",
+    threadId: prepared.ids.threadId,
+    runId: prepared.ids.runId,
+    messageId: prepared.ids.messageId,
+    message: assistantMessage,
+  };
+}
+
+async function* streamProviderText(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  messages: ProviderChatMessage[],
+): AsyncIterable<string> {
+  switch (providerConfig.providerId) {
+    case "ollama":
+      yield* streamOllamaText(fetchImpl, providerConfig, messages);
+      return;
+    case "anthropic":
+      yield* streamAnthropicText(fetchImpl, providerConfig, messages);
+      return;
+    case "google":
+    case "gemini":
+      yield* streamGoogleText(fetchImpl, providerConfig, messages);
+      return;
+    case "openai":
+    case "groq":
+    case "openrouter":
+    default:
+      yield* streamOpenAiCompatibleText(fetchImpl, providerConfig, messages);
+  }
+}
+
+async function* streamOpenAiCompatibleText(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  messages: ProviderChatMessage[],
+): AsyncIterable<string> {
+  const response = await fetchImpl(openAiChatUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(providerConfig.apiKey ? { authorization: `Bearer ${providerConfig.apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      messages,
+      stream: true,
+      ...openAiTuningBody(providerConfig),
+    }),
+  });
+  await assertProviderResponseOk(response);
+  yield* parseSseDeltas(response, (payload) => {
+    const choice = parseArrayField(payload.choices)[0];
+    if (!isRecord(choice) || !isRecord(choice.delta)) {
+      return [];
+    }
+    return typeof choice.delta.content === "string" ? [choice.delta.content] : [];
+  });
+}
+
+async function* streamOllamaText(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  messages: ProviderChatMessage[],
+): AsyncIterable<string> {
+  const response = await fetchImpl(ollamaChatUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      messages,
+      stream: true,
+      options: ollamaOptions(providerConfig),
+    }),
+  });
+  await assertProviderResponseOk(response);
+  yield* parseNdjsonDeltas(response, (payload) => {
+    if (typeof payload.error === "string") {
+      throw aiChatError("provider_error", payload.error, 502);
+    }
+    if (isRecord(payload.message) && typeof payload.message.content === "string") {
+      return [payload.message.content];
+    }
+    return [];
+  });
+}
+
+async function* streamAnthropicText(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  messages: ProviderChatMessage[],
+): AsyncIterable<string> {
+  const system = messages.find((message) => message.role === "system")?.content;
+  const response = await fetchImpl(anthropicMessagesUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      ...(providerConfig.apiKey ? { "x-api-key": providerConfig.apiKey } : {}),
+    },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      max_tokens: providerMaxTokens(providerConfig),
+      stream: true,
+      ...(system ? { system } : {}),
+      messages: messages
+        .filter((message) => message.role !== "system")
+        .map((message) => ({ role: message.role, content: message.content })),
+    }),
+  });
+  await assertProviderResponseOk(response);
+  yield* parseSseDeltas(response, (payload) => {
+    if (payload.type === "error" && isRecord(payload.error)) {
+      throw aiChatError(
+        "provider_error",
+        typeof payload.error.message === "string" ? payload.error.message : "Anthropic error",
+        502,
+      );
+    }
+    if (
+      payload.type === "content_block_delta" &&
+      isRecord(payload.delta) &&
+      typeof payload.delta.text === "string"
+    ) {
+      return [payload.delta.text];
+    }
+    return [];
+  });
+}
+
+async function* streamGoogleText(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  messages: ProviderChatMessage[],
+): AsyncIterable<string> {
+  const system = messages.find((message) => message.role === "system")?.content;
+  const response = await fetchImpl(googleGenerateContentUrl(providerConfig), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      contents: messages
+        .filter((message) => message.role !== "system")
+        .map((message) => ({
+          role: message.role === "assistant" ? "model" : "user",
+          parts: [{ text: message.content }],
+        })),
+      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      generationConfig: googleGenerationConfig(providerConfig),
+      ...googleExtraOptions(providerConfig),
+    }),
+  });
+  await assertProviderResponseOk(response);
+  yield* parseSseDeltas(response, (payload) => {
+    const candidates = parseArrayField(payload.candidates);
+    const deltas: string[] = [];
+    for (const candidate of candidates) {
+      if (!isRecord(candidate) || !isRecord(candidate.content)) {
+        continue;
+      }
+      for (const part of parseArrayField(candidate.content.parts)) {
+        if (isRecord(part) && typeof part.text === "string") {
+          deltas.push(part.text);
+        }
+      }
+    }
+    return deltas;
+  });
+}
+
+async function* parseSseDeltas(
+  response: Response,
+  extract: (payload: Record<string, unknown>) => string[],
+): AsyncIterable<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw aiChatError("provider_error", "Provider response body is empty", 502);
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        yield* parseSseBuffer(buffer, extract);
+        return;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        yield* parseSseFrame(frame, extract);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function* parseSseBuffer(
+  buffer: string,
+  extract: (payload: Record<string, unknown>) => string[],
+): Iterable<string> {
+  const trimmed = buffer.trim();
+  if (!trimmed) {
+    return;
+  }
+  for (const frame of trimmed.split(/\r?\n\r?\n/)) {
+    yield* parseSseFrame(frame, extract);
+  }
+}
+
+function* parseSseFrame(
+  frame: string,
+  extract: (payload: Record<string, unknown>) => string[],
+): Iterable<string> {
+  const dataLines = frame
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart());
+  if (dataLines.length === 0) {
+    return;
+  }
+  const data = dataLines.join("\n").trim();
+  if (!data || data === "[DONE]") {
+    return;
+  }
+  const payload = JSON.parse(data) as unknown;
+  if (!isRecord(payload)) {
+    return;
+  }
+  if (isRecord(payload.error)) {
+    throw aiChatError(
+      "provider_error",
+      typeof payload.error.message === "string" ? payload.error.message : "Provider error",
+      502,
+    );
+  }
+  yield* extract(payload);
+}
+
+async function* parseNdjsonDeltas(
+  response: Response,
+  extract: (payload: Record<string, unknown>) => string[],
+): AsyncIterable<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw aiChatError("provider_error", "Provider response body is empty", 502);
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        yield* parseNdjsonBuffer(buffer, extract);
+        return;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        yield* parseNdjsonLine(line, extract);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function* parseNdjsonBuffer(
+  buffer: string,
+  extract: (payload: Record<string, unknown>) => string[],
+): Iterable<string> {
+  for (const line of buffer.split(/\r?\n/)) {
+    yield* parseNdjsonLine(line, extract);
+  }
+}
+
+function* parseNdjsonLine(
+  line: string,
+  extract: (payload: Record<string, unknown>) => string[],
+): Iterable<string> {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+  const payload = JSON.parse(trimmed) as unknown;
+  if (isRecord(payload)) {
+    yield* extract(payload);
+  }
+}
+
+async function assertProviderResponseOk(response: Response): Promise<void> {
+  if (response.ok) {
+    return;
+  }
+  const body = await response.text();
+  throw aiChatError(
+    "provider_error",
+    `Provider returned error ${response.status}${body ? `: ${body}` : ""}`,
+    502,
+  );
+}
+
+function openAiChatUrl(baseUrl: string): string {
+  const normalized = trimTrailingSlash(baseUrl);
+  return normalized.endsWith("/v1")
+    ? `${normalized}/chat/completions`
+    : `${normalized}/v1/chat/completions`;
+}
+
+function ollamaChatUrl(baseUrl: string): string {
+  const normalized = trimTrailingSlash(baseUrl).replace(/\/v1$/, "");
+  return `${normalized}/api/chat`;
+}
+
+function anthropicMessagesUrl(baseUrl: string): string {
+  const normalized = trimTrailingSlash(baseUrl);
+  return normalized.endsWith("/v1") ? `${normalized}/messages` : `${normalized}/v1/messages`;
+}
+
+function googleGenerateContentUrl(providerConfig: ResolvedAiChatProviderConfig): string {
+  const normalized = trimTrailingSlash(providerConfig.baseUrl);
+  const base = normalized.endsWith("/v1beta") ? normalized : `${normalized}/v1beta`;
+  const model = providerConfig.modelId.replace(/^models\//, "");
+  const url = new URL(`${base}/models/${encodeURIComponent(model)}:streamGenerateContent`);
+  url.searchParams.set("alt", "sse");
+  if (providerConfig.apiKey) {
+    url.searchParams.set("key", providerConfig.apiKey);
+  }
+  return url.toString();
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function openAiTuningBody(providerConfig: ResolvedAiChatProviderConfig): Record<string, unknown> {
+  return {
+    ...(providerConfig.tuning?.temperature !== undefined
+      ? { temperature: providerConfig.tuning.temperature }
+      : {}),
+    ...(providerConfig.tuning?.maxTokens !== undefined
+      ? { max_tokens: providerConfig.tuning.maxTokens }
+      : {}),
+    ...(isRecord(providerConfig.tuning?.extraOptions) ? providerConfig.tuning.extraOptions : {}),
+  };
+}
+
+function ollamaOptions(providerConfig: ResolvedAiChatProviderConfig): Record<string, unknown> {
+  return {
+    ...(isRecord(providerConfig.tuning?.extraOptions) ? providerConfig.tuning.extraOptions : {}),
+    ...(providerConfig.tuning?.temperature !== undefined
+      ? { temperature: providerConfig.tuning.temperature }
+      : {}),
+    ...(providerConfig.tuning?.maxTokens !== undefined
+      ? { num_predict: providerConfig.tuning.maxTokens }
+      : {}),
+  };
+}
+
+function googleGenerationConfig(
+  providerConfig: ResolvedAiChatProviderConfig,
+): Record<string, unknown> | undefined {
+  const config: Record<string, unknown> = {};
+  if (providerConfig.tuning?.temperature !== undefined) {
+    config.temperature = providerConfig.tuning.temperature;
+  }
+  if (providerConfig.tuning?.maxTokens !== undefined) {
+    config.maxOutputTokens = providerConfig.tuning.maxTokens;
+  }
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
+function googleExtraOptions(providerConfig: ResolvedAiChatProviderConfig): Record<string, unknown> {
+  return isRecord(providerConfig.tuning?.extraOptions) ? providerConfig.tuning.extraOptions : {};
+}
+
+function providerMaxTokens(providerConfig: ResolvedAiChatProviderConfig): number {
+  return providerConfig.capabilities.thinking && providerConfig.tuning?.maxTokensThinking
+    ? providerConfig.tuning.maxTokensThinking
+    : (providerConfig.tuning?.maxTokens ?? 4096);
+}
+
+function parseArrayField(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function aiChatErrorCode(error: unknown, fallback: string): string {
+  return isRecord(error) && typeof error.code === "string" ? error.code : fallback;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function listThreads(db: Database, request: AiChatListThreadsRequest): AiChatThreadPage {

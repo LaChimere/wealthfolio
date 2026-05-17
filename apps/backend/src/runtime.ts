@@ -229,6 +229,15 @@ function createServicesFromDatabase(
     env: runtimeOptions.env,
     secretKey: runtimeOptions.secretKey,
   });
+  const aiProviderService = secretService
+    ? createAiProviderService({
+        db,
+        secretService,
+        catalogJson:
+          runtimeOptions.aiProviderCatalogJson ??
+          readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
+      })
+    : undefined;
   const taxonomyService = createTaxonomyService(
     createTaxonomyRepository(db, {
       queueSyncEvent: (event) => {
@@ -297,16 +306,9 @@ function createServicesFromDatabase(
         });
       },
     }),
-    aiProviderService: secretService
-      ? createAiProviderService({
-          db,
-          secretService,
-          catalogJson:
-            runtimeOptions.aiProviderCatalogJson ??
-            readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
-        })
-      : undefined,
+    aiProviderService,
     aiChatService: createAiChatService(db, {
+      aiProviderService,
       queueThreadSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "ai_threads",

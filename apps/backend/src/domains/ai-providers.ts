@@ -143,11 +143,29 @@ export interface ListAiModelsResponse {
   supportsListing: boolean;
 }
 
+export interface AiChatProviderConfigRequest {
+  providerId?: string;
+  modelId?: string;
+  thinking?: boolean;
+}
+
+export interface ResolvedAiChatProviderConfig {
+  providerId: string;
+  modelId: string;
+  providerType: string;
+  baseUrl: string;
+  apiKey?: string;
+  capabilities: ModelCapabilities;
+  toolsAllowlist?: string[] | null;
+  tuning?: ProviderTuning;
+}
+
 export interface AiProviderService {
   getAiProviders(): Promise<AiProvidersResponse> | AiProvidersResponse;
   updateProviderSettings(request: AiProviderSettingsUpdate): Promise<void> | void;
   setDefaultProvider(request: SetDefaultAiProviderRequest): Promise<void> | void;
   listModels(providerId: string): Promise<ListAiModelsResponse> | ListAiModelsResponse;
+  resolveChatProviderConfig(request?: AiChatProviderConfigRequest): ResolvedAiChatProviderConfig;
 }
 
 export interface CreateAiProviderServiceOptions {
@@ -283,6 +301,52 @@ export function createAiProviderService(
         models: parseModelListResponse(providerId, await response.json()),
         supportsListing: true,
       };
+    },
+
+    resolveChatProviderConfig(request = {}) {
+      const userSettings = loadUserSettings(options.db, catalog);
+      const providerId = normalizeProviderId(
+        request.providerId ?? userSettings.defaultProvider ?? undefined,
+      );
+      assertKnownProvider(catalog, providerId);
+
+      const provider = catalog.providers[providerId];
+      const providerUserSettings = userSettings.providers[providerId] ?? {};
+      const requestedModel = request.modelId?.trim();
+      const modelId =
+        requestedModel && requestedModel.length > 0
+          ? requestedModel
+          : (providerUserSettings.selectedModel ?? provider.defaultModel);
+      const capabilities = modelCapabilitiesFor(provider, providerUserSettings, modelId);
+      if (request.thinking !== undefined) {
+        capabilities.thinking = request.thinking;
+      }
+      const sanitizedOverrides = providerUserSettings.tuningOverrides
+        ? sanitizeTuningOverrides(providerId, providerUserSettings.tuningOverrides)
+        : undefined;
+      const tuning = resolveProviderTuning(provider.tuning, sanitizedOverrides);
+      const toolsAllowlist = normalizeToolsAllowlist(
+        providerUserSettings.toolsAllowlist ?? undefined,
+      );
+
+      const resolved: ResolvedAiChatProviderConfig = {
+        providerId,
+        modelId,
+        providerType: provider.type,
+        baseUrl: providerBaseUrl(providerId, provider, userSettings),
+        capabilities,
+      };
+      const apiKey = getProviderApiKey(options.secretService, providerId);
+      if (apiKey !== undefined) {
+        resolved.apiKey = apiKey;
+      }
+      if (toolsAllowlist !== undefined) {
+        resolved.toolsAllowlist = toolsAllowlist;
+      }
+      if (tuning !== undefined) {
+        resolved.tuning = tuning;
+      }
+      return resolved;
     },
   };
 }
@@ -432,6 +496,45 @@ function mergeModels(catalogProvider: CatalogProvider, user: ProviderUserSetting
   }
 
   return models.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function modelCapabilitiesFor(
+  catalogProvider: CatalogProvider,
+  user: ProviderUserSettings,
+  modelId: string,
+): ModelCapabilities {
+  return (
+    mergeModels(catalogProvider, user).find((model) => model.id === modelId)?.capabilities ?? {
+      tools: false,
+      thinking: false,
+      vision: false,
+      streaming: true,
+    }
+  );
+}
+
+function normalizeProviderId(providerId: string | undefined): string {
+  const trimmed = providerId?.trim() ?? "";
+  if (trimmed.length === 0) {
+    throw providerConfigError(
+      "provider_not_configured",
+      "AI provider is not configured. Select a provider before starting a chat.",
+      400,
+    );
+  }
+  return trimmed;
+}
+
+function providerConfigError(
+  code: string,
+  message: string,
+  status: number,
+): Error & { code: string; error: string; status: number } {
+  const error = new Error(message) as Error & { code: string; error: string; status: number };
+  error.code = code;
+  error.error = message;
+  error.status = status;
+  return error;
 }
 
 function loadUserSettings(db: Database, catalog: AiProviderCatalog): StoredAiProviderSettings {

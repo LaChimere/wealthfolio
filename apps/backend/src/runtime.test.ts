@@ -408,9 +408,9 @@ describe("TS backend runtime composition", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: "hello" }),
       });
-      expect(aiStreamResponse.status).toBe(501);
+      expect(aiStreamResponse.status).toBe(400);
       await expect(aiStreamResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
+        code: "provider_not_configured",
       });
 
       const healthStatusResponse = await fetch(`${server.baseUrl}/api/v1/health/status`, {

@@ -134,7 +134,10 @@ backend:
   `/api/v1/ai/threads/{id}`, `/messages`, and `/api/v1/ai/tool-result`,
   including thread sort/search/cursor pagination, message reads, thread
   update/delete behavior, tool-result patch merging, thread tag add/remove/list
-  persistence, and an explicit 501 for still-deferred AI chat streaming.
+  persistence, bounded text-only provider streaming for configured providers,
+  Rust-shaped NDJSON stream events, user/assistant message persistence, and
+  explicit gates for unconfigured providers, attachments, tool execution, and
+  richer title generation.
 - Add bounded net-worth current/history runtime for `/api/v1/net-worth` and
   `/api/v1/net-worth/history`, including latest holdings snapshots, cash
   balances, standalone alternative assets/liabilities, minor-currency quote
@@ -332,28 +335,28 @@ backend:
 No production TS default, domain-level Rust/TS mixing in production, or Rust
 accounts/settings/limits/taxonomies/custom-provider/goals/exchange-rate/health/provider-settings/portfolio-job/event-stream
 provider sync beyond explicit deferred gates, actual portfolio job execution
-beyond explicit deferred gates, keyring storage, AI chat streaming/provider/tool
-execution runtime, quote-provider interactions, auto-classification side
-effects, portfolio metrics runtime beyond current/historical net-worth, income
-summary, simple account performance, account performance history/summary,
-valuation reads, snapshot metadata, historical snapshot holdings reads, holdings
-import checks, live holdings fan-out, holding detail/by-asset fan-out,
-allocation reads, snapshot deletion, bounded manual snapshot saves, bounded
-snapshot import writes, add-on security-scanning/full sandbox/query-cache
-hardening beyond local filesystem listing/toggles/runtime loading, manifest
-normalization, local ZIP extraction/install/staging install,
-store/update/download-staging, and frontend permission enforcement, broader
-market-data runtime beyond mapping/templates/duplicate lookups, read-only
-search, transfer link/unlink, single activity delete, and bounded
-existing-asset/cash/symbol-resolved and bounded symbol-created activity
-create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
-import validation, bounded import apply, activity mutation event production,
-activity/import/asset sync-event callback queuing, and domain-event
-planning/batch processing/worker helper, save-up preview calculations, local AI
-chat thread/message/tag persistence, bounded health account/timezone
-status/checks and legacy-classification issue generation,
-sync-crypto/device-sync integration, calculation-heavy health checks or
-non-classification `/health/fix` execution, holdings inline portfolio
+beyond explicit deferred gates, keyring storage, AI chat tool execution,
+attachments, and title-generation runtime, quote-provider interactions,
+auto-classification side effects, portfolio metrics runtime beyond
+current/historical net-worth, income summary, simple account performance,
+account performance history/summary, valuation reads, snapshot metadata,
+historical snapshot holdings reads, holdings import checks, live holdings
+fan-out, holding detail/by-asset fan-out, allocation reads, snapshot deletion,
+bounded manual snapshot saves, bounded snapshot import writes, add-on
+security-scanning/full sandbox/query-cache hardening beyond local filesystem
+listing/toggles/runtime loading, manifest normalization, local ZIP
+extraction/install/staging install, store/update/download-staging, and frontend
+permission enforcement, broader market-data runtime beyond
+mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
+single activity delete, and bounded existing-asset/cash/symbol-resolved and
+bounded symbol-created activity create/update/bulk persistence plus CSV
+parse/read-only asset preview/read-only import validation, bounded import apply,
+activity mutation event production, activity/import/asset sync-event callback
+queuing, and domain-event planning/batch processing/worker helper, save-up
+preview calculations, local AI chat thread/message/tag persistence, bounded
+health account/timezone status/checks and legacy-classification issue
+generation, sync-crypto/device-sync integration, calculation-heavy health checks
+or non-classification `/health/fix` execution, holdings inline portfolio
 recalculation/job execution, real Connect runtime implementation, real
 device-sync runtime implementation, or Rust runtime removal is in scope for this
 slice.

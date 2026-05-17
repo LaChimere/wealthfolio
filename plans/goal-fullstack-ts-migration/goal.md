@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 138
+turns_used: 139
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T16:18:35+08:00"
+updated_at: "2026-05-17T16:51:07+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -892,6 +892,14 @@ updated_at: "2026-05-17T16:18:35+08:00"
   compatible, and legacy/dev contexts without permission metadata stay
   unrestricted. Focused add-on frontend tests, frontend type-check, full
   `bun run check`, and focused code review passed.
+- Turn 139: Added bounded text-only AI chat provider streaming in the standalone
+  TS backend: provider config resolution is shared with AI provider settings,
+  configured OpenAI-compatible/Ollama/Anthropic/Google streams emit Rust-shaped
+  NDJSON events, user and assistant text messages persist with sync callbacks,
+  new threads store config snapshots, parent-message edits truncate history, and
+  unconfigured providers, missing API keys, attachments, and provider failures
+  surface explicit errors. Backend type-check and focused backend AI/chat/http/
+  runtime tests passed.
 
 ## Deferred items
 
@@ -949,11 +957,12 @@ updated_at: "2026-05-17T16:18:35+08:00"
 - Real keyring integration remains an active follow-up. reason=file-backed
   secret persistence now has TS runtime parity, while OS keyring support must
   move with a dedicated runtime/keyring parity slice.
-- AI chat provider execution, streaming, title generation, tool execution, and
-  attachment handling remain active follow-ups. reason=AI provider
-  catalog/settings/model listing, local thread/message/tag persistence, and
-  sync_outbox callbacks for local AI chat mutations now have TS runtime parity,
-  while chat execution belongs in dedicated AI runtime slices.
+- AI chat title generation, tool execution, attachments, richer provider
+  orchestration, and multimodal behavior remain active follow-ups. reason=AI
+  provider catalog/settings/model listing, local thread/message/tag persistence,
+  sync_outbox callbacks for local AI chat mutations, and text-only provider
+  streaming now have TS runtime parity, while full chat execution belongs in
+  dedicated AI runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can
@@ -1022,11 +1031,12 @@ updated_at: "2026-05-17T16:18:35+08:00"
   device-sync push/pull runtime wiring, and portfolio recalculation side effects
   remain active follow-ups for dedicated activities/import/device-sync/portfolio
   parity slices.
-- AI chat provider streaming, title generation, tool execution, attachment
-  handling, and outbox writes remain active follow-ups. reason=local
-  thread/message persistence, tool-result mutation, and tag persistence now have
-  TS runtime parity, while model/provider orchestration and sync side effects
-  must move with dedicated AI runtime parity slices.
+- AI chat title generation, tool execution, attachment handling, multimodal
+  provider behavior, and full tool-result side effects remain active follow-ups.
+  reason=local thread/message persistence, tool-result mutation, tag
+  persistence, sync callbacks, and text-only provider streaming now have TS
+  runtime parity, while richer orchestration must move with dedicated AI runtime
+  parity slices.
 - Device-sync integration for sync crypto remains an active follow-up.
   reason=this slice adds the local TS crypto primitives, while cloud/client key
   material side effects must move with dedicated device-sync runtime slices.
