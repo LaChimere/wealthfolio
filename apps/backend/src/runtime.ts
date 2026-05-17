@@ -9,6 +9,7 @@ import {
 } from "./domains/accounts";
 import { createLocalAddonService } from "./domains/addons";
 import { createAiChatService } from "./domains/ai-chat";
+import { createPortfolioAiChatTools } from "./domains/ai-chat-tools";
 import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
@@ -309,6 +310,7 @@ function createServicesFromDatabase(
     aiProviderService,
     aiChatService: createAiChatService(db, {
       aiProviderService,
+      tools: createPortfolioAiChatTools({ accountService }),
       queueThreadSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "ai_threads",
