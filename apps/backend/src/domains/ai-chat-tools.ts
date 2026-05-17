@@ -1,5 +1,11 @@
 import type { Account, AccountService } from "./accounts";
-import type { ActivityDetails, ActivityService } from "./activities";
+import {
+  ACTIVITY_IMPORT_CONTEXT_KIND,
+  type ActivityDetails,
+  type ActivityService,
+  type FieldMappingValue,
+  type ImportMappingData,
+} from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
 import type { HealthService, HealthStatus } from "./health";
@@ -26,7 +32,9 @@ const DEFAULT_VALUATIONS_DAYS = 365;
 const DEFAULT_ACTIVITIES_PAGE_SIZE = 50;
 const MAX_ACTIVITIES_ROWS = 200;
 const MAX_RECORD_ACTIVITIES_BATCH_SIZE = 100;
+const MAX_IMPORT_CSV_SAMPLE_ROWS = 10;
 const ZERO_EPSILON = 1e-9;
+const CSV_TEXT_ENCODER = new TextEncoder();
 const ACTIVITY_TYPES = [
   "BUY",
   "SELL",
@@ -47,6 +55,18 @@ const ACTIVITY_SUBTYPE_DRIP = "DRIP";
 const ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND = "DIVIDEND_IN_KIND";
 const ACTIVITY_SUBTYPE_STAKING_REWARD = "STAKING_REWARD";
 const ACTIVITY_SUBTYPE_BONUS = "BONUS";
+const IMPORT_FIELD_DATE = "date";
+const IMPORT_FIELD_ACTIVITY_TYPE = "activityType";
+const IMPORT_FIELD_SYMBOL = "symbol";
+const IMPORT_FIELD_QUANTITY = "quantity";
+const IMPORT_FIELD_UNIT_PRICE = "unitPrice";
+const IMPORT_FIELD_AMOUNT = "amount";
+const IMPORT_FIELD_FEE = "fee";
+const IMPORT_FIELD_CURRENCY = "currency";
+const IMPORT_FIELD_ACCOUNT = "account";
+const IMPORT_FIELD_COMMENT = "comment";
+const IMPORT_FIELD_FX_RATE = "fxRate";
+const IMPORT_FIELD_SUBTYPE = "subtype";
 
 type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -60,7 +80,9 @@ type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
       | "getPortfolioAllocations"
     >
   >;
-type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
+type PortfolioAiActivityService = Partial<
+  Pick<ActivityService, "getImportMapping" | "parseCsv" | "searchActivities">
+>;
 type PortfolioAiHealthService = Pick<HealthService, "getCachedHealthStatus">;
 type PortfolioAiMarketDataService = Pick<MarketDataService, "searchSymbol">;
 type PortfolioAiMetricsService = Partial<
@@ -154,6 +176,18 @@ export function createPortfolioAiChatTools(
       createSearchActivitiesTool({
         accountService: options.accountService,
         activityService: { searchActivities: options.activityService.searchActivities },
+      }),
+    );
+  }
+  if (options.activityService?.parseCsv) {
+    tools.push(
+      createImportCsvTool({
+        accountService: options.accountService,
+        activityService: {
+          parseCsv: options.activityService.parseCsv,
+          getImportMapping: options.activityService.getImportMapping,
+        },
+        baseCurrency: options.baseCurrency,
       }),
     );
   }
@@ -284,6 +318,38 @@ interface RecordActivityOutputData {
   availableAccounts: AccountOption[];
   resolvedAsset: ResolvedAsset | null;
   availableSubtypes: Array<{ value: string; label: string }>;
+}
+
+interface ImportCsvArgs {
+  csvContent: string;
+  accountId?: string;
+  fieldMappings?: Record<string, string>;
+  activityMappings?: Record<string, string[]>;
+  symbolMappings?: Record<string, string>;
+  accountMappings?: Record<string, string>;
+  delimiter?: string;
+  skipTopRows?: number;
+  skipBottomRows?: number;
+  dateFormat?: string;
+  decimalSeparator?: string;
+  thousandsSeparator?: string;
+  defaultCurrency?: string;
+}
+
+interface ImportCsvParseConfig extends Record<string, unknown> {
+  delimiter?: string;
+  skipTopRows?: number;
+  skipBottomRows?: number;
+  dateFormat?: string | null;
+  decimalSeparator?: string | null;
+  thousandsSeparator?: string | null;
+  defaultCurrency?: string | null;
+}
+
+interface ParsedImportCsv {
+  headers: string[];
+  rows: string[][];
+  rowCount?: number;
 }
 
 function createRecordActivityTool(options: {
@@ -533,6 +599,154 @@ function createRecordActivitiesTool(options: {
           },
           availableAccounts,
           resolvedAssets,
+        },
+      };
+    },
+  };
+}
+
+function createImportCsvTool(options: {
+  accountService: Pick<AccountService, "getActiveAccounts">;
+  activityService: Pick<Required<ActivityService>, "parseCsv"> &
+    Partial<Pick<Required<ActivityService>, "getImportMapping">>;
+  baseCurrency?: string | (() => string | undefined);
+}): AiChatToolDefinition {
+  return {
+    name: "import_csv",
+    description:
+      'REQUIRED for CSV file imports. When a user attaches a CSV file or provides CSV content, you MUST call this tool. Pass the complete CSV text to csvContent. The tool returns a mapping (column->field, value normalization, symbol translations, parse config); the app then parses/validates the file and shows the user an inline review grid in the chat. You do NOT need to parse or validate the data yourself.\n\nIMPORTANT: csvContent must contain the COMPLETE CSV text every time this tool is called. CSV data from previous tool calls is NOT retained. If the user wants to re-import or change settings, ask them to re-attach the CSV file - do not call this tool with empty or partial content.\n\nWhen CSV symbol values look like company NAMES rather than tickers, populate `symbolMappings` with name->ticker pairs using your knowledge of public companies. Examples: {"Cloudflare": "NET", "Apple Inc": "AAPL", "Tesla Inc.": "TSLA"}. For values you are unsure about, leave them out - the user will resolve them in the chat review step.\n\nFor `parseConfig` fields (delimiter, skipTopRows, skipBottomRows, dateFormat, decimalSeparator, thousandsSeparator, defaultCurrency): detect non-defaults from the sample rows. European brokers often use `;` delimiter, `,` decimal, `.` thousands, and DD/MM/YYYY dates. Many broker exports have a multi-line preamble before the real header row - pass skipTopRows to skip it. Totals/disclaimer lines at the end need skipBottomRows.',
+    parameters: {
+      type: "object",
+      properties: {
+        csvContent: {
+          type: "string",
+          description: "Raw CSV content to parse. Include the full CSV text including headers.",
+        },
+        accountId: {
+          type: ["string", "null"],
+          description:
+            "Account UUID to assign to all imported activities. If the user mentions an account by name (e.g. 'Joint', 'RRSP'), call get_accounts first to resolve the name to an ID. Pass null only if the user didn't specify an account.",
+        },
+        fieldMappings: {
+          type: ["object", "null"],
+          description:
+            "Maps field names to CSV header names. Keys: date, activityType, symbol, quantity, unitPrice, amount, fee, fxRate, subtype, currency, account, comment.",
+          additionalProperties: { type: "string" },
+        },
+        activityMappings: {
+          type: ["object", "null"],
+          description:
+            'Maps canonical activity types (BUY, SELL, DIVIDEND, INTEREST, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, SPLIT, FEE, TAX) to CSV values. Common English verbs (Buy/Bought/Purchase, Sell/Sold, Dividend/Div, etc.) are already covered by defaults - you only need to add non-English or broker-specific terms. E.g., {"BUY": ["Achat", "Kopen"], "DIVIDEND": ["Dividende"]}. Pass null if all CSV values are covered by defaults.',
+          additionalProperties: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+        symbolMappings: {
+          type: ["object", "null"],
+          description:
+            'Maps CSV symbol values (tickers OR company names) to canonical tickers. Use your knowledge of public companies to translate names: {"Cloudflare": "NET", "Apple Inc": "AAPL"}.',
+          additionalProperties: { type: "string" },
+        },
+        accountMappings: {
+          type: ["object", "null"],
+          description:
+            "Maps CSV account values to app account IDs. Pass null if using accountId or no mapping needed.",
+          additionalProperties: { type: "string" },
+        },
+        delimiter: {
+          type: ["string", "null"],
+          description: 'CSV delimiter: ",", ";", "\\t". Pass null for auto-detection.',
+        },
+        skipTopRows: {
+          type: ["integer", "null"],
+          description:
+            "Number of NON-HEADER rows to skip at the top (preamble/disclaimer lines BEFORE the column header row). Do NOT count the header row itself - only count text like account names, date ranges, disclaimers that appear before the row with column headers. Example: if rows 1-3 are preamble and row 4 is 'Date,Symbol,Qty,...', pass 3 (not 4). Pass null or 0 if the header is the first row.",
+        },
+        skipBottomRows: {
+          type: ["integer", "null"],
+          description:
+            "Number of rows to skip at the bottom (totals/disclaimer footer rows). Pass null or 0 if no rows to skip.",
+        },
+        dateFormat: {
+          type: ["string", "null"],
+          description:
+            'Date format hint using strftime: "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y". Pass null for auto-detection.',
+        },
+        decimalSeparator: {
+          type: ["string", "null"],
+          description: 'Decimal separator: ".", ",". Pass null for auto-detection.',
+        },
+        thousandsSeparator: {
+          type: ["string", "null"],
+          description: 'Thousands separator: ",", ".", " ", "none". Pass null for auto-detection.',
+        },
+        defaultCurrency: {
+          type: ["string", "null"],
+          description:
+            'Default currency when rows do not specify one (e.g., "EUR" for European broker statements).',
+        },
+      },
+      required: ["csvContent"],
+      additionalProperties: false,
+    },
+    execute: async (rawArgs) => {
+      const args = parseImportCsvArgs(rawArgs);
+      if (args.csvContent.trim() === "") {
+        throw new Error(
+          "No CSV content provided. The user needs to attach the CSV file again - file content from previous messages is not available in follow-up turns.",
+        );
+      }
+
+      const accounts = options.accountService.getActiveAccounts();
+      const availableAccounts = recordActivityAccountOptions(accounts);
+      const accountId = validImportAccountId(args.accountId, accounts);
+      const llmParseConfig = importCsvParseConfig(args, resolveBaseCurrency(options.baseCurrency));
+      let usedSavedProfile = false;
+      let mapping: ImportMappingData | undefined;
+
+      if (
+        accountId &&
+        !hasUsableImportCsvMappings(args) &&
+        options.activityService.getImportMapping
+      ) {
+        const savedMapping = await Promise.resolve(
+          options.activityService.getImportMapping(accountId, ACTIVITY_IMPORT_CONTEXT_KIND),
+        );
+        if (savedMapping) {
+          mapping = savedMapping;
+          usedSavedProfile = true;
+        }
+      }
+
+      const effectiveParseConfig = mapping?.parseConfig ?? llmParseConfig;
+      const parsed = parseImportCsvResult(
+        await Promise.resolve(
+          options.activityService.parseCsv({
+            content: CSV_TEXT_ENCODER.encode(args.csvContent),
+            config: effectiveParseConfig,
+          }),
+        ),
+      );
+      const appliedMapping = sanitizeImportMappingAccounts(
+        mapping ??
+          buildImportCsvMapping(args, accountId, parsed.headers, effectiveParseConfig, accounts),
+        accounts,
+      );
+
+      return {
+        data: {
+          appliedMapping,
+          parseConfig: effectiveParseConfig,
+          accountId,
+          detectedHeaders: parsed.headers,
+          sampleRows: parsed.rows.slice(0, MAX_IMPORT_CSV_SAMPLE_ROWS),
+          totalRows: parsed.rowCount ?? parsed.rows.length,
+          mappingConfidence: usedSavedProfile
+            ? "HIGH"
+            : estimateImportCsvMappingConfidence(appliedMapping),
+          availableAccounts,
+          usedSavedProfile,
         },
       };
     },
@@ -1299,6 +1513,311 @@ function dedupeResolvedAssets(assets: ResolvedAsset[]): ResolvedAsset[] {
   });
 }
 
+function parseImportCsvArgs(args: unknown): ImportCsvArgs {
+  if (!isRecord(args)) {
+    return { csvContent: "" };
+  }
+  return {
+    csvContent: readOptionalString(args.csvContent) ?? readOptionalString(args.csv_content) ?? "",
+    accountId: readOptionalString(args.accountId) ?? readOptionalString(args.account_id),
+    fieldMappings: readStringMap(args.fieldMappings ?? args.field_mappings),
+    activityMappings: readStringArrayMap(args.activityMappings ?? args.activity_mappings),
+    symbolMappings: readStringMap(args.symbolMappings ?? args.symbol_mappings),
+    accountMappings: readStringMap(args.accountMappings ?? args.account_mappings),
+    delimiter: readOptionalString(args.delimiter),
+    skipTopRows: readOptionalNonNegativeInteger(args.skipTopRows ?? args.skip_top_rows),
+    skipBottomRows: readOptionalNonNegativeInteger(args.skipBottomRows ?? args.skip_bottom_rows),
+    dateFormat: readOptionalString(args.dateFormat ?? args.date_format),
+    decimalSeparator: readOptionalString(args.decimalSeparator ?? args.decimal_separator),
+    thousandsSeparator: readOptionalString(args.thousandsSeparator ?? args.thousands_separator),
+    defaultCurrency: readOptionalString(args.defaultCurrency ?? args.default_currency),
+  };
+}
+
+function importCsvParseConfig(args: ImportCsvArgs, baseCurrency: string): ImportCsvParseConfig {
+  return {
+    delimiter: args.delimiter,
+    skipTopRows: args.skipTopRows,
+    skipBottomRows: args.skipBottomRows,
+    dateFormat: args.dateFormat ?? null,
+    decimalSeparator: args.decimalSeparator ?? null,
+    thousandsSeparator: args.thousandsSeparator ?? null,
+    defaultCurrency: args.defaultCurrency ?? baseCurrency,
+  };
+}
+
+function buildImportCsvMapping(
+  args: ImportCsvArgs,
+  accountId: string | null,
+  headers: string[],
+  parseConfig: ImportCsvParseConfig,
+  accounts: Account[],
+): ImportMappingData {
+  const fieldMappings =
+    args.fieldMappings && Object.keys(args.fieldMappings).length > 0
+      ? args.fieldMappings
+      : autoDetectImportCsvFieldMappings(headers);
+  return {
+    accountId: accountId ?? "",
+    contextKind: "CSV_ACTIVITY",
+    name: "",
+    fieldMappings,
+    activityMappings: mergeImportCsvActivityMappings(args.activityMappings),
+    symbolMappings: cleanStringMap(args.symbolMappings),
+    accountMappings: cleanImportCsvAccountMappings(args.accountMappings, accounts),
+    symbolMappingMeta: {},
+    parseConfig,
+  };
+}
+
+function parseImportCsvResult(value: unknown): ParsedImportCsv {
+  if (!isRecord(value)) {
+    throw new Error("CSV parse error: parseCsv returned an invalid response");
+  }
+  const headers = stringArray(value.headers);
+  const rows = stringMatrix(value.rows);
+  const rowCount =
+    typeof value.rowCount === "number" && Number.isFinite(value.rowCount)
+      ? value.rowCount
+      : undefined;
+  return { headers, rows, rowCount };
+}
+
+function validImportAccountId(value: string | undefined, accounts: Account[]): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return accounts.some((account) => account.id === trimmed) ? trimmed : null;
+}
+
+function sanitizeImportMappingAccounts(
+  mapping: ImportMappingData,
+  accounts: Account[],
+): ImportMappingData {
+  return {
+    ...mapping,
+    accountId: validImportAccountId(mapping.accountId, accounts) ?? "",
+    accountMappings: cleanImportCsvAccountMappings(mapping.accountMappings, accounts),
+  };
+}
+
+function cleanImportCsvAccountMappings(
+  mappings: Record<string, string> | undefined,
+  accounts: Account[],
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(cleanStringMap(mappings))
+      .map(([key, value]) => [key, validImportAccountId(value, accounts)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== null),
+  );
+}
+
+function hasUsableImportCsvMappings(args: ImportCsvArgs): boolean {
+  return (
+    hasUsableStringMap(args.fieldMappings) ||
+    hasUsableActivityMappings(args.activityMappings) ||
+    hasUsableStringMap(args.symbolMappings) ||
+    hasUsableStringMap(args.accountMappings)
+  );
+}
+
+function hasUsableStringMap(map: Record<string, string> | undefined): boolean {
+  return Object.values(map ?? {}).some((value) => value.trim() !== "");
+}
+
+function hasUsableActivityMappings(map: Record<string, string[]> | undefined): boolean {
+  return Object.values(map ?? {}).some((values) => values.some((value) => value.trim() !== ""));
+}
+
+function autoDetectImportCsvFieldMappings(headers: string[]): Record<string, FieldMappingValue> {
+  const mappings: Record<string, FieldMappingValue> = {};
+  const usedHeaders = new Set<string>();
+  const fieldPatterns: Array<[string, string[]]> = [
+    [
+      IMPORT_FIELD_DATE,
+      [
+        "date",
+        "trade date",
+        "activity date",
+        "transaction date",
+        "settlement date",
+        "trade_date",
+        "activity_date",
+        "transaction_date",
+        "time",
+        "datetime",
+      ],
+    ],
+    [
+      IMPORT_FIELD_ACTIVITY_TYPE,
+      [
+        "type",
+        "activity type",
+        "transaction type",
+        "action",
+        "activity",
+        "activity_type",
+        "transaction_type",
+        "trans type",
+        "operation",
+      ],
+    ],
+    [
+      IMPORT_FIELD_SYMBOL,
+      [
+        "symbol",
+        "ticker",
+        "stock",
+        "security",
+        "asset",
+        "instrument",
+        "ticker symbol",
+        "stock symbol",
+        "isin",
+        "cusip",
+      ],
+    ],
+    [
+      IMPORT_FIELD_QUANTITY,
+      ["quantity", "qty", "shares", "units", "no of shares", "number of shares", "volume"],
+    ],
+    [
+      IMPORT_FIELD_UNIT_PRICE,
+      [
+        "price",
+        "unit price",
+        "share price",
+        "cost per share",
+        "avg price",
+        "unit_price",
+        "share_price",
+        "execution price",
+        "trade price",
+      ],
+    ],
+    [
+      IMPORT_FIELD_AMOUNT,
+      [
+        "total",
+        "amount",
+        "value",
+        "net amount",
+        "gross amount",
+        "market value",
+        "total amount",
+        "total value",
+        "proceeds",
+        "cost",
+        "net value",
+      ],
+    ],
+    [IMPORT_FIELD_CURRENCY, ["currency", "ccy", "currency code", "curr", "trade currency"]],
+    [
+      IMPORT_FIELD_FEE,
+      [
+        "fee",
+        "fees",
+        "commission",
+        "commissions",
+        "trading fee",
+        "transaction fee",
+        "brokerage",
+        "charges",
+      ],
+    ],
+    [
+      IMPORT_FIELD_ACCOUNT,
+      ["account", "account id", "account name", "portfolio", "account number"],
+    ],
+    [
+      IMPORT_FIELD_COMMENT,
+      ["comment", "comments", "note", "notes", "description", "memo", "remarks"],
+    ],
+    [
+      IMPORT_FIELD_FX_RATE,
+      [
+        "fx rate",
+        "fxrate",
+        "fx_rate",
+        "exchange rate",
+        "exchangerate",
+        "exchange_rate",
+        "forex rate",
+        "conversion rate",
+      ],
+    ],
+    [IMPORT_FIELD_SUBTYPE, ["subtype", "sub type", "sub_type", "variation", "subcategory"]],
+  ];
+
+  for (const [field, patterns] of fieldPatterns) {
+    const matchedHeader = headers.find((header) => {
+      if (usedHeaders.has(header)) {
+        return false;
+      }
+      const lowerHeader = header.toLowerCase();
+      return patterns.some((pattern) => lowerHeader === pattern || lowerHeader.includes(pattern));
+    });
+    if (matchedHeader) {
+      mappings[field] = matchedHeader;
+      usedHeaders.add(matchedHeader);
+    }
+  }
+  return mappings;
+}
+
+function defaultImportCsvActivityMappings(): Record<string, string[]> {
+  return {
+    BUY: ["BUY", "BOUGHT", "PURCHASE", "B", "LONG", "MARKET BUY", "LIMIT BUY"],
+    SELL: ["SELL", "SOLD", "S", "SHORT", "MARKET SELL", "LIMIT SELL"],
+    DIVIDEND: ["DIVIDEND", "DIV", "CASH DIVIDEND", "QUALIFIED DIVIDEND"],
+    INTEREST: ["INTEREST", "INT", "INTEREST EARNED", "CASH INTEREST"],
+    DEPOSIT: ["DEPOSIT", "DEP", "CASH DEPOSIT", "WIRE IN", "ACH IN", "FUNDING", "WIRE TRANSFER IN"],
+    WITHDRAWAL: ["WITHDRAWAL", "WITHDRAW", "CASH WITHDRAWAL", "WIRE OUT", "ACH OUT"],
+    TRANSFER_IN: ["TRANSFER IN", "TRANSFER_IN", "JOURNAL IN", "ACAT IN"],
+    TRANSFER_OUT: ["TRANSFER OUT", "TRANSFER_OUT", "JOURNAL OUT", "ACAT OUT"],
+    SPLIT: ["SPLIT", "STOCK SPLIT", "FORWARD SPLIT", "REVERSE SPLIT"],
+    FEE: ["FEE", "FEES", "SERVICE FEE", "MANAGEMENT FEE"],
+    TAX: ["TAX", "TAXES", "WITHHOLDING", "TAX WITHHELD"],
+  };
+}
+
+function mergeImportCsvActivityMappings(
+  llmMappings: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  const merged = defaultImportCsvActivityMappings();
+  for (const [canonical, values] of Object.entries(llmMappings ?? {})) {
+    const entry = (merged[canonical] ??= []);
+    for (const value of values) {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        continue;
+      }
+      if (!entry.some((existing) => existing.toUpperCase() === trimmed.toUpperCase())) {
+        entry.push(trimmed);
+      }
+    }
+  }
+  return merged;
+}
+
+function estimateImportCsvMappingConfidence(mapping: ImportMappingData): "HIGH" | "MEDIUM" | "LOW" {
+  const has = (field: string) => Object.hasOwn(mapping.fieldMappings, field);
+  const count = [
+    has(IMPORT_FIELD_DATE),
+    has(IMPORT_FIELD_ACTIVITY_TYPE),
+    has(IMPORT_FIELD_SYMBOL),
+    has(IMPORT_FIELD_QUANTITY) || has(IMPORT_FIELD_AMOUNT) || has(IMPORT_FIELD_UNIT_PRICE),
+  ].filter(Boolean).length;
+  return count === 4 ? "HIGH" : count >= 2 ? "MEDIUM" : "LOW";
+}
+
+function cleanStringMap(map: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(map ?? {}).filter((entry): entry is [string, string] => entry[1].trim() !== ""),
+  );
+}
+
 function resolveRecordActivityAccount(
   accountHint: string | undefined,
   accounts: Account[],
@@ -1928,6 +2447,45 @@ function readOptionalString(value: unknown): string | undefined {
 
 function readOptionalFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readOptionalNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readStringMap(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+function readStringArrayMap(value: unknown): Record<string, string[]> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]))
+      .map(([key, values]) => [
+        key,
+        values.filter((item): item is string => typeof item === "string"),
+      ]),
+  );
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function stringMatrix(value: unknown): string[][] {
+  return Array.isArray(value) ? value.map(stringArray) : [];
 }
 
 function currentUtcDateString(now: (() => Date) | undefined): string {

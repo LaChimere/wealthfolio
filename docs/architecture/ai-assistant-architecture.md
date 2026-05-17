@@ -18,13 +18,13 @@ OpenAI-compatible/Ollama injected tool-call execution, the built-in
 `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
 `search_activities`, `get_performance`, `get_income`, `get_valuation_history`,
 `get_asset_allocation`, `get_health_status`, `record_activity`, and
-`record_activities` tools, and validated text/CSV attachment content injected
-into the provider prompt while persisting only attachment filename markers. It
-preserves the Rust-shaped NDJSON event contract (`system`, `textDelta`,
-`reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`, `done`,
-`error`) and persists user/assistant messages, but it intentionally does not
-wire the remaining portfolio tool registry, Anthropic/Gemini tool protocols, or
-multimodal attachments until those parity slices are migrated.
+`record_activities`, and `import_csv` tools, and validated text/CSV attachment
+content injected into the provider prompt while persisting only attachment
+filename markers. It preserves the Rust-shaped NDJSON event contract (`system`,
+`textDelta`, `reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`,
+`done`, `error`) and persists user/assistant messages, but it intentionally does
+not wire Anthropic/Gemini tool protocols or multimodal attachments until those
+parity slices are migrated.
 
 ## Architecture Diagram
 

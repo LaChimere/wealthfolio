@@ -1377,6 +1377,7 @@ describe("TS AI chat domain", () => {
       const messages = fetchBodies[0]?.messages as Array<{ role: string; content: string }>;
       const userPrompt = messages[messages.length - 1]?.content ?? "";
       expect(userPrompt).toContain("Text/CSV attachment content is included below");
+      expect(userPrompt).toContain("For CSV imports, call import_csv when that tool is available");
       expect(userPrompt).toContain("[Attached file: statement.csv]\nsymbol,amount\nAAPL,10");
       expect(userPrompt).toContain("[Attached file: notes.txt]\nCash reserve is high.");
 

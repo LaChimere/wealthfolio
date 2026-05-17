@@ -575,6 +575,290 @@ describe("TS AI chat built-in tools", () => {
     });
   });
 
+  test("returns Rust-compatible import_csv mapping inference output", async () => {
+    const seenCsv: string[] = [];
+    const seenConfigs: Record<string, unknown>[] = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage", currency: "CAD" })],
+      },
+      activityService: {
+        parseCsv: (request) => {
+          seenCsv.push(new TextDecoder().decode(request.content));
+          seenConfigs.push(request.config);
+          return {
+            headers: ["Date", "Symbol", "Quantity", "Price", "Type", "Total"],
+            rows: [
+              ["2026-01-17", "AAPL", "2", "100", "Buy", "200"],
+              ["2026-01-18", "MSFT", "1", "50", "Sell", "50"],
+            ],
+            rowCount: 2,
+          };
+        },
+      },
+      baseCurrency: "CAD",
+    });
+
+    const importCsv = tools.find((tool) => tool.name === "import_csv");
+    expect(importCsv).toMatchObject({
+      description: expect.stringContaining("REQUIRED for CSV file imports"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          csvContent: expect.objectContaining({ type: "string" }),
+          accountId: expect.objectContaining({ type: ["string", "null"] }),
+          fieldMappings: expect.objectContaining({ type: ["object", "null"] }),
+        }),
+        required: ["csvContent"],
+        additionalProperties: false,
+      },
+    });
+
+    const result = await importCsv?.execute({
+      csvContent: "Date,Symbol,Quantity,Price,Type,Total\n2026-01-17,AAPL,2,100,Buy,200",
+    });
+
+    expect(seenCsv).toEqual([
+      "Date,Symbol,Quantity,Price,Type,Total\n2026-01-17,AAPL,2,100,Buy,200",
+    ]);
+    expect(seenConfigs).toEqual([
+      {
+        delimiter: undefined,
+        skipTopRows: undefined,
+        skipBottomRows: undefined,
+        dateFormat: null,
+        decimalSeparator: null,
+        thousandsSeparator: null,
+        defaultCurrency: "CAD",
+      },
+    ]);
+    expect(result).toMatchObject({
+      data: {
+        appliedMapping: {
+          accountId: "",
+          contextKind: "CSV_ACTIVITY",
+          name: "",
+          fieldMappings: {
+            date: "Date",
+            symbol: "Symbol",
+            quantity: "Quantity",
+            unitPrice: "Price",
+            amount: "Total",
+            activityType: "Type",
+          },
+          activityMappings: {
+            BUY: expect.arrayContaining(["BUY", "BOUGHT", "PURCHASE"]),
+            SELL: expect.arrayContaining(["SELL", "SOLD"]),
+          },
+          symbolMappings: {},
+          accountMappings: {},
+          symbolMappingMeta: {},
+          parseConfig: {
+            defaultCurrency: "CAD",
+          },
+        },
+        parseConfig: {
+          defaultCurrency: "CAD",
+        },
+        accountId: null,
+        detectedHeaders: ["Date", "Symbol", "Quantity", "Price", "Type", "Total"],
+        sampleRows: [
+          ["2026-01-17", "AAPL", "2", "100", "Buy", "200"],
+          ["2026-01-18", "MSFT", "1", "50", "Sell", "50"],
+        ],
+        totalRows: 2,
+        mappingConfidence: "HIGH",
+        availableAccounts: [{ id: "acct-1", name: "Brokerage", currency: "CAD" }],
+        usedSavedProfile: false,
+      },
+    });
+  });
+
+  test("merges import_csv LLM mappings and sanitizes account mappings", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage" })],
+      },
+      activityService: {
+        parseCsv: () => ({
+          headers: ["Trade Date", "Transaction", "Security"],
+          rows: [["17/01/2026", "Achat", "Apple Inc"]],
+          rowCount: 1,
+        }),
+      },
+      baseCurrency: "USD",
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "import_csv")
+      ?.execute({
+        csvContent: "Trade Date;Transaction;Security\n17/01/2026;Achat;Apple Inc",
+        accountId: "acct-1",
+        fieldMappings: {
+          date: "Trade Date",
+          activityType: "Transaction",
+          symbol: "Security",
+        },
+        activityMappings: { BUY: ["Achat", "BUY", ""] },
+        symbolMappings: { "Apple Inc": "AAPL", Unknown: "" },
+        accountMappings: { Main: "acct-1", Other: "missing", Empty: "" },
+        delimiter: ";",
+        dateFormat: "%d/%m/%Y",
+        decimalSeparator: ",",
+        thousandsSeparator: ".",
+        defaultCurrency: "EUR",
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        appliedMapping: {
+          accountId: "acct-1",
+          fieldMappings: {
+            date: "Trade Date",
+            activityType: "Transaction",
+            symbol: "Security",
+          },
+          activityMappings: {
+            BUY: expect.arrayContaining(["BUY", "PURCHASE", "Achat"]),
+          },
+          symbolMappings: { "Apple Inc": "AAPL" },
+          accountMappings: { Main: "acct-1" },
+          parseConfig: {
+            delimiter: ";",
+            dateFormat: "%d/%m/%Y",
+            decimalSeparator: ",",
+            thousandsSeparator: ".",
+            defaultCurrency: "EUR",
+          },
+        },
+        accountId: "acct-1",
+        mappingConfidence: "MEDIUM",
+      },
+    });
+  });
+
+  test("uses saved import_csv profile when no LLM mappings are provided", async () => {
+    const calls: string[][] = [];
+    const savedMapping = {
+      accountId: "acct-1",
+      contextKind: "CSV_ACTIVITY",
+      name: "Saved profile",
+      fieldMappings: { date: "Trade Date", activityType: "Action", amount: "Net Amount" },
+      activityMappings: { DIVIDEND: ["Distribution"] },
+      symbolMappings: { "Apple Inc": "AAPL" },
+      accountMappings: { Main: "acct-1", Unknown: "missing" },
+      symbolMappingMeta: {},
+      parseConfig: { delimiter: ";", defaultCurrency: "EUR" },
+    };
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage" })],
+      },
+      activityService: {
+        getImportMapping: (accountId, contextKind) => {
+          calls.push([accountId, contextKind]);
+          return savedMapping;
+        },
+        parseCsv: (request) => {
+          expect(request.config).toEqual({ delimiter: ";", defaultCurrency: "EUR" });
+          return {
+            headers: ["Trade Date", "Action", "Net Amount"],
+            rows: [["2026-01-17", "Distribution", "12.34"]],
+            rowCount: 1,
+          };
+        },
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "import_csv")
+      ?.execute({
+        csvContent: "Trade Date;Action;Net Amount\n2026-01-17;Distribution;12.34",
+        accountId: "acct-1",
+      });
+
+    expect(calls).toEqual([["acct-1", "ACTIVITY"]]);
+    expect(result).toMatchObject({
+      data: {
+        appliedMapping: {
+          name: "Saved profile",
+          accountMappings: { Main: "acct-1" },
+        },
+        parseConfig: { delimiter: ";", defaultCurrency: "EUR" },
+        accountId: "acct-1",
+        mappingConfidence: "HIGH",
+        usedSavedProfile: true,
+      },
+    });
+  });
+
+  test("falls back to inferred import_csv mapping when no saved profile is returned", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage" })],
+      },
+      activityService: {
+        getImportMapping: async () => undefined as never,
+        parseCsv: (request) => {
+          expect(request.config).toEqual({
+            delimiter: undefined,
+            skipTopRows: undefined,
+            skipBottomRows: undefined,
+            dateFormat: null,
+            decimalSeparator: null,
+            thousandsSeparator: null,
+            defaultCurrency: "USD",
+          });
+          return {
+            headers: ["Date", "Type", "Symbol", "Amount"],
+            rows: [["2026-01-17", "Buy", "AAPL", "12.34"]],
+            rowCount: 1,
+          };
+        },
+      },
+      baseCurrency: "USD",
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "import_csv")
+      ?.execute({
+        csvContent: "Date,Type,Symbol,Amount\n2026-01-17,Buy,AAPL,12.34",
+        accountId: "acct-1",
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        appliedMapping: {
+          fieldMappings: {
+            date: "Date",
+            activityType: "Type",
+            symbol: "Symbol",
+            amount: "Amount",
+          },
+        },
+        usedSavedProfile: false,
+        mappingConfidence: "HIGH",
+      },
+    });
+  });
+
+  test("rejects empty import_csv content with reattach guidance", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      activityService: {
+        parseCsv: () => {
+          throw new Error("empty CSV should fail before parsing");
+        },
+      },
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "import_csv")?.execute({ csvContent: "  " }),
+    ).rejects.toThrow("No CSV content provided. The user needs to attach the CSV file again");
+  });
+
   test("exposes Rust-compatible get_holdings output", async () => {
     const tools = createPortfolioAiChatTools({
       accountService: {

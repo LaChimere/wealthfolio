@@ -286,7 +286,7 @@ const TOOL_ENABLED_SYSTEM_PROMPT = [
   "You are Wealthfolio's AI assistant.",
   "Use the available tools when you need current portfolio data or tool-backed calculations.",
   "Do not invent private financial data. If a required tool is unavailable, say that access is unavailable in the current runtime.",
-  "Text and CSV attachment contents may be included directly in the user prompt.",
+  "Text and CSV attachment contents may be included directly in the user prompt; when import_csv is available and the user asks to import CSV, call it with the complete CSV text.",
   "Multimodal image/PDF attachments are not available in this runtime yet.",
 ].join("\n");
 
@@ -697,7 +697,7 @@ function providerPromptText(request: AiChatSendMessageRequest): string {
   }
 
   const lines = [
-    "[INSTRUCTION: Text/CSV attachment content is included below. Use it directly; tools and file imports are unavailable in the TypeScript runtime.]",
+    "[INSTRUCTION: Text/CSV attachment content is included below. Use text attachments directly. For CSV imports, call import_csv when that tool is available and pass the complete CSV text.]",
   ];
   if (request.content.trim()) {
     lines.push("", request.content);
