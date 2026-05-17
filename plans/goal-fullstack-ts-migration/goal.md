@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 155
+turns_used: 156
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T22:23:26+08:00"
+updated_at: "2026-05-17T22:40:48+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -989,6 +989,13 @@ updated_at: "2026-05-17T22:23:26+08:00"
   before a health check has run, and mapping cached issue
   severity/category/details output. Backend type-check and focused AI
   chat/health/runtime/http tests passed.
+- Turn 156: Wired the Rust-shaped `record_activity` AI tool into the TS runtime
+  registry as a no-side-effect draft builder: account resolution/auto-selection,
+  activity validation, amount computation, subtype options, timezone-aware tool
+  guidance, market symbol resolution with account-currency preference, and
+  custom asset prompts are covered. Backend type-check, focused AI
+  chat/tool/runtime/http tests, full `bun run check`, and focused code review
+  passed.
 
 ## Deferred items
 

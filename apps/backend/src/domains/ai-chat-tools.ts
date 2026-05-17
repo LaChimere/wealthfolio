@@ -1,4 +1,4 @@
-import type { AccountService } from "./accounts";
+import type { Account, AccountService } from "./accounts";
 import type { ActivityDetails, ActivityService } from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
@@ -11,6 +11,7 @@ import type {
   PortfolioAllocations,
   TaxonomyAllocation,
 } from "./holdings";
+import type { MarketDataService, SymbolSearchResult } from "./market-data";
 import type {
   IncomeSummary,
   PerformanceMetrics,
@@ -25,6 +26,28 @@ const DEFAULT_VALUATIONS_DAYS = 365;
 const DEFAULT_ACTIVITIES_PAGE_SIZE = 50;
 const MAX_ACTIVITIES_ROWS = 200;
 const ZERO_EPSILON = 1e-9;
+const ACTIVITY_TYPES = [
+  "BUY",
+  "SELL",
+  "SPLIT",
+  "DIVIDEND",
+  "INTEREST",
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+  "FEE",
+  "TAX",
+  "CREDIT",
+  "ADJUSTMENT",
+  "UNKNOWN",
+] as const;
+const ACTIVITY_SUBTYPE_DRIP = "DRIP";
+const ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND = "DIVIDEND_IN_KIND";
+const ACTIVITY_SUBTYPE_STAKING_REWARD = "STAKING_REWARD";
+const ACTIVITY_SUBTYPE_BONUS = "BONUS";
+
+type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
   Partial<
@@ -38,6 +61,7 @@ type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
   >;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
 type PortfolioAiHealthService = Pick<HealthService, "getCachedHealthStatus">;
+type PortfolioAiMarketDataService = Pick<MarketDataService, "searchSymbol">;
 type PortfolioAiMetricsService = Partial<
   Pick<PortfolioMetricsService, "calculatePerformanceHistory" | "getIncomeSummary">
 >;
@@ -49,15 +73,26 @@ export interface PortfolioAiChatToolsOptions {
   goalService?: Pick<GoalService, "getGoals">;
   healthService?: PortfolioAiHealthService;
   activityService?: PortfolioAiActivityService;
+  marketDataService?: PortfolioAiMarketDataService;
   portfolioMetricsService?: PortfolioAiMetricsService;
   baseCurrency?: string | (() => string | undefined);
   now?: () => Date;
+  timezone?: string | (() => string | undefined);
 }
 
 export function createPortfolioAiChatTools(
   options: PortfolioAiChatToolsOptions,
 ): AiChatToolDefinition[] {
-  const tools = [createGetAccountsTool(options.accountService)];
+  const tools = [
+    createGetAccountsTool(options.accountService),
+    createRecordActivityTool({
+      accountService: options.accountService,
+      marketDataService: options.marketDataService,
+      baseCurrency: options.baseCurrency,
+      now: options.now,
+      timezone: options.timezone,
+    }),
+  ];
   if (options.holdingsService) {
     tools.push(
       createGetHoldingsTool({
@@ -181,6 +216,186 @@ function createGetAccountsTool(
                 originalCount: accounts.length,
               }
             : {}),
+        },
+      };
+    },
+  };
+}
+
+interface RecordActivityArgs {
+  activityType: string;
+  symbol?: string;
+  activityDate: string;
+  quantity?: number;
+  unitPrice?: number;
+  amount?: number;
+  fee?: number;
+  account?: string;
+  subtype?: string;
+  notes?: string;
+}
+
+interface ActivityDraft {
+  activityType: string;
+  activityDate: string;
+  symbol: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  amount: number | null;
+  fee: number | null;
+  currency: string;
+  accountId: string | null;
+  accountName: string | null;
+  subtype: string | null;
+  notes: string | null;
+  priceSource: string;
+  pricingMode: string;
+  isCustomAsset: boolean;
+  assetKind: string | null;
+}
+
+interface ResolvedAsset {
+  assetId: string;
+  symbol: string;
+  name: string;
+  currency: string;
+  exchange: string | null;
+  exchangeMic: string | null;
+  instrumentType: string | null;
+}
+
+function createRecordActivityTool(options: {
+  accountService: Pick<AccountService, "getActiveAccounts">;
+  marketDataService?: PortfolioAiMarketDataService;
+  baseCurrency?: string | (() => string | undefined);
+  now?: () => Date;
+  timezone?: string | (() => string | undefined);
+}): AiChatToolDefinition {
+  const dateContext = recordActivityDateContext(options.now, options.timezone);
+  return {
+    name: "record_activity",
+    description: `Record investment transactions from natural language. Creates a draft preview for user confirmation. Supports all activity types: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX, CREDIT, ADJUSTMENT. User timezone is ${dateContext.timezone}; current date there is ${dateContext.currentDate} (${dateContext.currentWeekday}). Resolve all relative date phrases yourself before calling this tool. If the user has multiple accounts and did not specify which account to use, ask which account before calling this tool.`,
+    parameters: {
+      type: "object",
+      properties: {
+        activityType: {
+          type: "string",
+          description:
+            "Activity type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX, CREDIT, ADJUSTMENT",
+          enum: [
+            "BUY",
+            "SELL",
+            "DIVIDEND",
+            "DEPOSIT",
+            "WITHDRAWAL",
+            "TRANSFER_IN",
+            "TRANSFER_OUT",
+            "INTEREST",
+            "FEE",
+            "SPLIT",
+            "TAX",
+            "CREDIT",
+            "ADJUSTMENT",
+            "UNKNOWN",
+          ],
+        },
+        symbol: {
+          type: "string",
+          description:
+            "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD",
+        },
+        activityDate: {
+          type: "string",
+          description: `Concrete ISO 8601 date only, e.g. '2026-01-17'. Do not pass relative phrases like 'yesterday', 'today', 'last Friday', or 'next Monday'. Resolve them relative to current local date ${dateContext.currentDate} (${dateContext.currentWeekday}) in timezone ${dateContext.timezone} before calling this tool.`,
+        },
+        quantity: {
+          type: "number",
+          description:
+            "Number of shares or units. Required for BUY/SELL/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD",
+        },
+        unitPrice: {
+          type: "number",
+          description:
+            "Price or fair market value per unit. Required for BUY/SELL unless amount is provided; for DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either unitPrice or amount",
+        },
+        amount: {
+          type: "number",
+          description:
+            "Total cash amount or taxable income amount. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either amount or unitPrice",
+        },
+        fee: {
+          type: "number",
+          description: "Transaction fee (optional)",
+        },
+        account: {
+          type: "string",
+          description:
+            "Account name or ID. Required before calling this tool when the user has multiple accounts. If the user did not specify an account, ask which account first instead of calling this tool with an empty account.",
+        },
+        subtype: {
+          type: "string",
+          description:
+            "Activity subtype for semantic variations: DRIP (dividend reinvested), DIVIDEND_IN_KIND (dividend paid as additional units of the same asset), STAKING_REWARD (staking income received as more units of the same asset), BONUS (promotional credit)",
+        },
+        notes: {
+          type: "string",
+          description: "Optional notes for the transaction",
+        },
+      },
+      required: ["activityType", "activityDate"],
+    },
+    execute: async (rawArgs) => {
+      const args = parseRecordActivityArgs(rawArgs);
+      const accounts = options.accountService.getActiveAccounts();
+      const availableAccounts = accounts.map((account) => ({
+        id: account.id,
+        name: account.name,
+        currency: account.currency,
+      }));
+      const [accountId, accountName] = resolveRecordActivityAccount(args.account, accounts);
+      const accountCurrency =
+        accountId !== undefined
+          ? (accounts.find((account) => account.id === accountId)?.currency ??
+            resolveBaseCurrency(options.baseCurrency))
+          : resolveBaseCurrency(options.baseCurrency);
+      const activityType = normalizeActivityType(args.activityType);
+      const resolved = await resolveRecordActivityAsset({
+        symbol: args.symbol,
+        currency: accountCurrency,
+        marketDataService: options.marketDataService,
+      });
+      const amount = computeRecordActivityAmount(args);
+      const draftCurrency = resolved.resolvedAsset?.currency ?? accountCurrency;
+      const draft: ActivityDraft = {
+        activityType,
+        activityDate: args.activityDate,
+        symbol: args.symbol ?? null,
+        assetId: resolved.assetId ?? null,
+        assetName: resolved.assetName ?? null,
+        quantity: args.quantity ?? null,
+        unitPrice: args.unitPrice ?? null,
+        amount,
+        fee: args.fee ?? null,
+        currency: draftCurrency,
+        accountId: accountId ?? null,
+        accountName: accountName ?? null,
+        subtype: args.subtype ?? null,
+        notes: args.notes ?? null,
+        priceSource: args.unitPrice !== undefined ? "user" : "none",
+        pricingMode: "MARKET",
+        isCustomAsset: resolved.isCustomAsset,
+        assetKind: null,
+      };
+
+      return {
+        data: {
+          draft,
+          validation: validateRecordActivityDraft(draft),
+          availableAccounts,
+          resolvedAsset: resolved.resolvedAsset ?? null,
+          availableSubtypes: subtypesForActivityType(activityType),
         },
       };
     },
@@ -820,6 +1035,297 @@ function createGetAssetAllocationTool(options: {
   };
 }
 
+function parseRecordActivityArgs(args: unknown): RecordActivityArgs {
+  if (!isRecord(args)) {
+    return { activityType: "", activityDate: "" };
+  }
+  return {
+    activityType: readOptionalString(args.activityType) ?? "",
+    symbol: readOptionalString(args.symbol),
+    activityDate: readOptionalString(args.activityDate) ?? "",
+    quantity: readOptionalFiniteNumber(args.quantity),
+    unitPrice: readOptionalFiniteNumber(args.unitPrice),
+    amount: readOptionalFiniteNumber(args.amount),
+    fee: readOptionalFiniteNumber(args.fee),
+    account: readOptionalString(args.account),
+    subtype: readOptionalString(args.subtype),
+    notes: readOptionalString(args.notes),
+  };
+}
+
+function resolveRecordActivityAccount(
+  accountHint: string | undefined,
+  accounts: Account[],
+): [string | undefined, string | undefined] {
+  const hint = accountHint?.trim();
+  if (!hint) {
+    return accounts.length === 1 ? [accounts[0].id, accounts[0].name] : [undefined, undefined];
+  }
+
+  const exactIdMatch = accounts.find((account) => account.id === hint);
+  if (exactIdMatch) {
+    return [exactIdMatch.id, exactIdMatch.name];
+  }
+
+  const lowerHint = hint.toLowerCase();
+  const exactNameMatch = accounts.find((account) => account.name.toLowerCase() === lowerHint);
+  if (exactNameMatch) {
+    return [exactNameMatch.id, exactNameMatch.name];
+  }
+
+  const partialNameMatches = accounts.filter((account) =>
+    account.name.toLowerCase().includes(lowerHint),
+  );
+  return partialNameMatches.length === 1
+    ? [partialNameMatches[0].id, partialNameMatches[0].name]
+    : [undefined, undefined];
+}
+
+async function resolveRecordActivityAsset(options: {
+  symbol: string | undefined;
+  currency: string;
+  marketDataService?: PortfolioAiMarketDataService;
+}): Promise<{
+  resolvedAsset?: ResolvedAsset;
+  assetId?: string;
+  assetName?: string;
+  isCustomAsset: boolean;
+}> {
+  if (!options.symbol) {
+    return { isCustomAsset: false };
+  }
+
+  const results = await Promise.resolve(
+    options.marketDataService?.searchSymbol?.(options.symbol) ?? [],
+  );
+  const result = firstRecordActivitySymbolResult(results as SymbolSearchResult[], options.currency);
+  if (!result) {
+    return {
+      assetName: options.symbol,
+      isCustomAsset: true,
+    };
+  }
+
+  const asset: ResolvedAsset = {
+    assetId: result.existingAssetId ?? `${result.symbol}:${result.exchangeMic ?? "UNKNOWN"}`,
+    symbol: result.symbol,
+    name: result.longName,
+    currency: result.currency ?? options.currency,
+    exchange: result.exchangeName ?? null,
+    exchangeMic: result.exchangeMic ?? null,
+    instrumentType: result.quoteType.trim() === "" ? null : result.quoteType,
+  };
+
+  return {
+    resolvedAsset: asset,
+    assetId: asset.assetId,
+    assetName: asset.name,
+    isCustomAsset: false,
+  };
+}
+
+function firstRecordActivitySymbolResult(
+  results: SymbolSearchResult[],
+  accountCurrency: string,
+): SymbolSearchResult | undefined {
+  const normalizedCurrency = accountCurrency.toUpperCase();
+  return [...results].sort((left, right) => {
+    if (left.isExisting !== right.isExisting) {
+      return left.isExisting ? -1 : 1;
+    }
+    const leftCurrencyMatch = left.currency?.toUpperCase() === normalizedCurrency ? 1 : 0;
+    const rightCurrencyMatch = right.currency?.toUpperCase() === normalizedCurrency ? 1 : 0;
+    if (leftCurrencyMatch !== rightCurrencyMatch) {
+      return rightCurrencyMatch - leftCurrencyMatch;
+    }
+    return right.score - left.score;
+  })[0];
+}
+
+function normalizeActivityType(activityType: string): ActivityType {
+  const upper = activityType.toUpperCase();
+  return isSupportedActivityType(upper) ? upper : "UNKNOWN";
+}
+
+function isSupportedActivityType(activityType: string): activityType is ActivityType {
+  return ACTIVITY_TYPES.includes(activityType as ActivityType);
+}
+
+function computeRecordActivityAmount(
+  args: Pick<RecordActivityArgs, "amount" | "fee" | "quantity" | "unitPrice">,
+): number | null {
+  if (args.amount !== undefined) {
+    return args.amount;
+  }
+  if (args.quantity === undefined || args.unitPrice === undefined) {
+    return null;
+  }
+  return args.quantity * args.unitPrice + (args.fee ?? 0);
+}
+
+function validateRecordActivityDraft(draft: ActivityDraft) {
+  const missingFields: string[] = [];
+  const errors: Array<{ field: string; message: string }> = [];
+  const activityType = draft.activityType.toUpperCase();
+  const subtype = draft.subtype?.toUpperCase();
+  const isDividendAssetIncome =
+    activityType === "DIVIDEND" &&
+    (subtype === ACTIVITY_SUBTYPE_DRIP || subtype === ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND);
+  const isStakingReward =
+    activityType === "INTEREST" && subtype === ACTIVITY_SUBTYPE_STAKING_REWARD;
+
+  if (draft.accountId === null) {
+    missingFields.push("account_id");
+  }
+
+  switch (activityType) {
+    case "BUY":
+    case "SELL":
+      if (draft.symbol === null && draft.assetId === null) {
+        missingFields.push("symbol");
+      }
+      if (draft.quantity === null) {
+        missingFields.push("quantity");
+      }
+      if (draft.unitPrice === null && draft.amount === null) {
+        missingFields.push("unit_price");
+      }
+      break;
+    case "DEPOSIT":
+    case "WITHDRAWAL":
+    case "TAX":
+    case "FEE":
+    case "CREDIT":
+      if (draft.amount === null) {
+        missingFields.push("amount");
+      }
+      break;
+    case "DIVIDEND":
+      if (draft.symbol === null && draft.assetId === null) {
+        missingFields.push("symbol");
+      }
+      if (isDividendAssetIncome && draft.quantity === null) {
+        missingFields.push("quantity");
+      }
+      if (isDividendAssetIncome && draft.amount === null && draft.unitPrice === null) {
+        missingFields.push("unit_price");
+      }
+      if (!isDividendAssetIncome && draft.amount === null) {
+        missingFields.push("amount");
+      }
+      break;
+    case "INTEREST":
+      if (isStakingReward) {
+        if (draft.symbol === null && draft.assetId === null) {
+          missingFields.push("symbol");
+        }
+        if (draft.quantity === null) {
+          missingFields.push("quantity");
+        }
+        if (draft.amount === null && draft.unitPrice === null) {
+          missingFields.push("unit_price");
+        }
+      } else if (draft.amount === null) {
+        missingFields.push("amount");
+      }
+      break;
+    case "SPLIT":
+      if (draft.symbol === null && draft.assetId === null) {
+        missingFields.push("symbol");
+      }
+      if (draft.quantity === null) {
+        missingFields.push("quantity");
+      }
+      break;
+    case "TRANSFER_IN":
+    case "TRANSFER_OUT":
+      if (draft.amount === null && draft.symbol === null) {
+        missingFields.push("amount");
+      }
+      break;
+  }
+
+  if (!isRecordActivityDate(draft.activityDate)) {
+    errors.push({
+      field: "activity_date",
+      message: "Invalid date format. Expected YYYY-MM-DD or ISO 8601",
+    });
+  }
+
+  if (draft.isCustomAsset && draft.assetKind === null) {
+    missingFields.push("asset_kind");
+  }
+
+  return {
+    isValid: missingFields.length === 0 && errors.length === 0,
+    missingFields,
+    errors,
+  };
+}
+
+function subtypesForActivityType(activityType: string): Array<{ value: string; label: string }> {
+  switch (activityType.toUpperCase()) {
+    case "DIVIDEND":
+      return [
+        { value: ACTIVITY_SUBTYPE_DRIP, label: "Dividend Reinvested (DRIP)" },
+        { value: ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND, label: "Dividend in Kind" },
+      ];
+    case "INTEREST":
+      return [{ value: ACTIVITY_SUBTYPE_STAKING_REWARD, label: "Staking Reward" }];
+    case "CREDIT":
+      return [{ value: ACTIVITY_SUBTYPE_BONUS, label: "Bonus" }];
+    default:
+      return [];
+  }
+}
+
+function isRecordActivityDate(value: string): boolean {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    return false;
+  }
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime());
+}
+
+function recordActivityDateContext(
+  now: (() => Date) | undefined,
+  timezoneInput: string | (() => string | undefined) | undefined,
+): { currentDate: string; currentWeekday: string; timezone: string } {
+  const timezone = resolveTimezone(timezoneInput);
+  const date = now?.() ?? new Date();
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "long",
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  return {
+    currentDate: `${parts.year}-${parts.month}-${parts.day}`,
+    currentWeekday: parts.weekday,
+    timezone,
+  };
+}
+
+function resolveTimezone(timezoneInput: string | (() => string | undefined) | undefined): string {
+  const timezone = typeof timezoneInput === "function" ? timezoneInput() : (timezoneInput ?? "UTC");
+  const candidate = (timezone ?? "UTC").trim() || "UTC";
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: candidate }).format();
+    return candidate;
+  } catch {
+    return "UTC";
+  }
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -1168,6 +1674,14 @@ function parseOptionalNumber(value: string | null): number | null {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readOptionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function currentUtcDateString(now: (() => Date) | undefined): string {

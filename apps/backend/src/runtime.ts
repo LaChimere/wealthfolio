@@ -351,8 +351,10 @@ function createServicesFromDatabase(
         holdingsService,
         goalService,
         healthService,
+        marketDataService,
         portfolioMetricsService,
         baseCurrency,
+        timezone: () => settingsService.getSettings().timezone,
       }),
       queueThreadSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({

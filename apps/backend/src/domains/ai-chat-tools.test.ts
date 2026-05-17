@@ -11,6 +11,7 @@ import type {
   Holding,
   PortfolioAllocations,
 } from "./holdings";
+import type { SymbolSearchResult } from "./market-data";
 import type { IncomeSummary, PerformanceMetrics, PerformanceRequest } from "./portfolio-metrics";
 
 describe("TS AI chat built-in tools", () => {
@@ -78,6 +79,314 @@ describe("TS AI chat built-in tools", () => {
         count: 50,
         truncated: true,
         originalCount: 55,
+      },
+    });
+  });
+
+  test("returns Rust-compatible record_activity buy draft without side effects", async () => {
+    const symbolQueries: string[] = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [
+          account({ id: "acct-1", name: "Brokerage", currency: "USD" }),
+          account({ id: "acct-2", name: "Retirement", currency: "CAD" }),
+        ],
+      },
+      marketDataService: {
+        searchSymbol: (query) => {
+          symbolQueries.push(query);
+          return [
+            symbolSearchResult({
+              symbol: "AAPL",
+              longName: "Apple Inc.",
+              currency: "USD",
+              existingAssetId: "asset-aapl",
+              exchangeName: "NASDAQ",
+              exchangeMic: "XNAS",
+              quoteType: "EQUITY",
+            }),
+          ];
+        },
+      },
+      now: () => new Date("2026-01-18T04:00:00.000Z"),
+      timezone: "America/New_York",
+    });
+
+    const recordActivity = tools.find((tool) => tool.name === "record_activity");
+    expect(recordActivity).toMatchObject({
+      description: expect.stringContaining("current date there is 2026-01-17 (Saturday)"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          activityType: expect.objectContaining({
+            enum: expect.arrayContaining(["BUY", "SELL", "UNKNOWN"]),
+          }),
+          activityDate: expect.objectContaining({
+            description: expect.stringContaining("Resolve them relative to current local date"),
+          }),
+          account: expect.objectContaining({ type: "string" }),
+        }),
+        required: ["activityType", "activityDate"],
+      },
+    });
+
+    const result = await recordActivity?.execute({
+      activityType: "buy",
+      symbol: "AAPL",
+      activityDate: "2026-01-17",
+      quantity: 20,
+      unitPrice: 240,
+      fee: 1,
+      account: "Brokerage",
+      notes: "AI draft",
+    });
+
+    expect(symbolQueries).toEqual(["AAPL"]);
+    expect(result).toEqual({
+      data: {
+        draft: {
+          activityType: "BUY",
+          activityDate: "2026-01-17",
+          symbol: "AAPL",
+          assetId: "asset-aapl",
+          assetName: "Apple Inc.",
+          quantity: 20,
+          unitPrice: 240,
+          amount: 4801,
+          fee: 1,
+          currency: "USD",
+          accountId: "acct-1",
+          accountName: "Brokerage",
+          subtype: null,
+          notes: "AI draft",
+          priceSource: "user",
+          pricingMode: "MARKET",
+          isCustomAsset: false,
+          assetKind: null,
+        },
+        validation: { isValid: true, missingFields: [], errors: [] },
+        availableAccounts: [
+          { id: "acct-1", name: "Brokerage", currency: "USD" },
+          { id: "acct-2", name: "Retirement", currency: "CAD" },
+        ],
+        resolvedAsset: {
+          assetId: "asset-aapl",
+          symbol: "AAPL",
+          name: "Apple Inc.",
+          currency: "USD",
+          exchange: "NASDAQ",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+        },
+        availableSubtypes: [],
+      },
+    });
+  });
+
+  test("auto-selects the only account for record_activity cash flow drafts", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Solo", currency: "CAD" })],
+      },
+      baseCurrency: "USD",
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "DEPOSIT",
+        activityDate: "2026-01-17",
+        amount: 5000,
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          activityType: "DEPOSIT",
+          amount: 5000,
+          currency: "CAD",
+          accountId: "acct-1",
+          accountName: "Solo",
+          isCustomAsset: false,
+        },
+        validation: { isValid: true, missingFields: [], errors: [] },
+      },
+    });
+  });
+
+  test("prefers account-currency symbol matches for record_activity assets", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "CAD Account", currency: "CAD" })],
+      },
+      marketDataService: {
+        searchSymbol: () => [
+          symbolSearchResult({
+            symbol: "SHOP",
+            longName: "Shopify Inc.",
+            currency: "USD",
+            exchangeName: "NYSE",
+            exchangeMic: "XNYS",
+            score: 100,
+          }),
+          symbolSearchResult({
+            symbol: "SHOP.TO",
+            longName: "Shopify Inc.",
+            currency: "CAD",
+            exchangeName: "Toronto Stock Exchange",
+            exchangeMic: "XTSE",
+            score: 80,
+          }),
+        ],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "BUY",
+        activityDate: "2026-01-17",
+        symbol: "SHOP",
+        quantity: 1,
+        unitPrice: 100,
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          assetId: "SHOP.TO:XTSE",
+          assetName: "Shopify Inc.",
+          currency: "CAD",
+        },
+        resolvedAsset: {
+          symbol: "SHOP.TO",
+          currency: "CAD",
+          exchangeMic: "XTSE",
+        },
+      },
+    });
+  });
+
+  test("returns record_activity account and custom asset validation prompts", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [
+          account({ id: "acct-1", name: "Brokerage" }),
+          account({ id: "acct-2", name: "Retirement" }),
+        ],
+      },
+      marketDataService: {
+        searchSymbol: () => [],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "BUY",
+        activityDate: "2026-01-17",
+        symbol: "PRIVATE_FUND",
+        quantity: 1,
+        amount: 1000,
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          assetName: "PRIVATE_FUND",
+          isCustomAsset: true,
+          accountId: null,
+        },
+        validation: {
+          isValid: false,
+          missingFields: ["account_id", "asset_kind"],
+          errors: [],
+        },
+        resolvedAsset: null,
+      },
+    });
+  });
+
+  test("normalizes invalid record_activity type and validates dates", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Solo" })],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "bonus_payment",
+        activityDate: "tomorrow",
+        amount: 25,
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          activityType: "UNKNOWN",
+          accountId: "acct-1",
+        },
+        validation: {
+          isValid: false,
+          missingFields: [],
+          errors: [
+            {
+              field: "activity_date",
+              message: "Invalid date format. Expected YYYY-MM-DD or ISO 8601",
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  test("returns record_activity subtype options and subtype-specific requirements", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Solo" })],
+      },
+      marketDataService: {
+        searchSymbol: () => [
+          symbolSearchResult({
+            symbol: "VTI",
+            longName: "Vanguard Total Stock Market ETF",
+            currency: "USD",
+            quoteType: "ETF",
+          }),
+        ],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "DIVIDEND",
+        activityDate: "2026-01-17",
+        symbol: "VTI",
+        quantity: 2,
+        subtype: "DRIP",
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          activityType: "DIVIDEND",
+          subtype: "DRIP",
+          quantity: 2,
+          amount: null,
+          unitPrice: null,
+        },
+        validation: {
+          isValid: false,
+          missingFields: ["unit_price"],
+          errors: [],
+        },
+        availableSubtypes: [
+          { value: "DRIP", label: "Dividend Reinvested (DRIP)" },
+          { value: "DIVIDEND_IN_KIND", label: "Dividend in Kind" },
+        ],
       },
     });
   });
@@ -1677,6 +1986,27 @@ function activity(overrides: Partial<ActivityDetails>): ActivityDetails {
     importRunId: null,
     isUserModified: false,
     metadata: null,
+    ...overrides,
+  };
+}
+
+function symbolSearchResult(overrides: Partial<SymbolSearchResult>): SymbolSearchResult {
+  return {
+    symbol: "AAPL",
+    shortName: "Apple",
+    longName: "Apple Inc.",
+    exchange: "NMS",
+    exchangeMic: "XNAS",
+    exchangeName: "NASDAQ",
+    quoteType: "EQUITY",
+    typeDisplay: "Equity",
+    currency: "USD",
+    currencySource: null,
+    dataSource: "YAHOO",
+    isExisting: false,
+    existingAssetId: null,
+    index: "quotes",
+    score: 1,
     ...overrides,
   };
 }
