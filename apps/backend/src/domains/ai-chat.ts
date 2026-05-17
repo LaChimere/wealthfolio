@@ -794,6 +794,13 @@ function textMessageContent(content: string): AiChatMessageContent {
   };
 }
 
+function assistantMessageContent(parts: AiChatMessagePart[]): AiChatMessageContent {
+  return {
+    schemaVersion: 1,
+    parts: parts.length > 0 ? parts : [{ type: "text", content: "" }],
+  };
+}
+
 async function* streamChatResponse(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
@@ -812,7 +819,8 @@ async function* streamChatResponse(
     messageId: prepared.ids.messageId,
   };
 
-  let accumulatedText = "";
+  const assistantParts: AiChatMessagePart[] = [];
+  const thinkParser = new ThinkTagParser();
   let titlePromise: Promise<string> | null = null;
   const ensureTitleGenerationStarted = (): Promise<string> => {
     titlePromise ??= generateThreadTitle(fetchImpl, providerConfig, prepared.title.userMessage);
@@ -820,15 +828,14 @@ async function* streamChatResponse(
   };
   try {
     for await (const delta of streamProviderText(fetchImpl, providerConfig, prepared.messages)) {
-      accumulatedText += delta;
-      yield {
-        type: "textDelta",
-        threadId: prepared.ids.threadId,
-        runId: prepared.ids.runId,
-        messageId: prepared.ids.messageId,
-        delta,
-      };
-      ensureTitleGenerationStarted();
+      for (const segment of thinkParser.process(delta)) {
+        if (!segment.content) {
+          continue;
+        }
+        appendAssistantPart(assistantParts, segment.type, segment.content);
+        yield streamDeltaEvent(prepared.ids, segment);
+        ensureTitleGenerationStarted();
+      }
     }
   } catch (error) {
     await Promise.resolve(titlePromise).catch(() => null);
@@ -841,6 +848,15 @@ async function* streamChatResponse(
       message: errorMessage(error),
     };
     return;
+  }
+
+  for (const segment of thinkParser.flush()) {
+    if (!segment.content) {
+      continue;
+    }
+    appendAssistantPart(assistantParts, segment.type, segment.content);
+    yield streamDeltaEvent(prepared.ids, segment);
+    ensureTitleGenerationStarted();
   }
 
   ensureTitleGenerationStarted();
@@ -862,7 +878,7 @@ async function* streamChatResponse(
       id: prepared.ids.messageId,
       threadId: prepared.ids.threadId,
       role: "assistant",
-      content: textMessageContent(accumulatedText),
+      content: assistantMessageContent(assistantParts),
       createdAt,
     });
     queueMessageSyncEvent(options.queueMessageSyncEvent, row, "Create");
@@ -877,6 +893,105 @@ async function* streamChatResponse(
     messageId: prepared.ids.messageId,
     message: assistantMessage,
   };
+}
+
+interface AssistantStreamSegment {
+  type: "text" | "reasoning";
+  content: string;
+}
+
+function streamDeltaEvent(
+  ids: AiChatStreamIds,
+  segment: AssistantStreamSegment,
+): Record<string, unknown> {
+  return {
+    type: segment.type === "reasoning" ? "reasoningDelta" : "textDelta",
+    threadId: ids.threadId,
+    runId: ids.runId,
+    messageId: ids.messageId,
+    delta: segment.content,
+  };
+}
+
+function appendAssistantPart(
+  parts: AiChatMessagePart[],
+  type: "text" | "reasoning",
+  content: string,
+): void {
+  if (!content) {
+    return;
+  }
+  const previous = parts[parts.length - 1];
+  if (previous?.type === type && typeof previous.content === "string") {
+    previous.content += content;
+    return;
+  }
+  parts.push({ type, content });
+}
+
+class ThinkTagParser {
+  private buffer = "";
+  private inThinkBlock = false;
+
+  process(delta: string): AssistantStreamSegment[] {
+    if (!this.inThinkBlock && !delta.includes("<") && this.buffer.length === 0) {
+      return [{ type: "text", content: delta }];
+    }
+
+    this.buffer += delta;
+    const segments: AssistantStreamSegment[] = [];
+
+    while (true) {
+      if (this.inThinkBlock) {
+        const endIndex = this.buffer.indexOf("</think>");
+        if (endIndex >= 0) {
+          if (endIndex > 0) {
+            segments.push({ type: "reasoning", content: this.buffer.slice(0, endIndex) });
+          }
+          this.buffer = this.buffer.slice(endIndex + "</think>".length);
+          this.inThinkBlock = false;
+        } else if (
+          this.buffer.length > "</think>".length &&
+          !this.buffer.endsWith("<") &&
+          !this.buffer.endsWith("</")
+        ) {
+          const safeLength = this.buffer.length - "</think>".length;
+          segments.push({ type: "reasoning", content: this.buffer.slice(0, safeLength) });
+          this.buffer = this.buffer.slice(safeLength);
+          break;
+        } else {
+          break;
+        }
+      } else {
+        const startIndex = this.buffer.indexOf("<think>");
+        if (startIndex >= 0) {
+          if (startIndex > 0) {
+            segments.push({ type: "text", content: this.buffer.slice(0, startIndex) });
+          }
+          this.buffer = this.buffer.slice(startIndex + "<think>".length);
+          this.inThinkBlock = true;
+        } else if (this.buffer.length > "<think>".length && !this.buffer.endsWith("<")) {
+          const safeLength = this.buffer.length - "<think>".length;
+          segments.push({ type: "text", content: this.buffer.slice(0, safeLength) });
+          this.buffer = this.buffer.slice(safeLength);
+          break;
+        } else {
+          break;
+        }
+      }
+    }
+
+    return segments;
+  }
+
+  flush(): AssistantStreamSegment[] {
+    if (!this.buffer) {
+      return [];
+    }
+    const content = this.buffer;
+    this.buffer = "";
+    return [{ type: this.inThinkBlock ? "reasoning" : "text", content }];
+  }
 }
 
 function persistGeneratedThreadTitle(

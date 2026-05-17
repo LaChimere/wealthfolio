@@ -12,13 +12,14 @@ interface.
 The Rust `wealthfolio-ai` crate remains the reference implementation for full
 assistant behavior: tool calling, multimodal image/PDF attachments, and richer
 provider-specific orchestration. The TypeScript/Bun backend now supports a
-bounded text streaming path for configured providers, generated/refined thread
-titles, and validated text/CSV attachment content injected into the provider
-prompt while persisting only attachment filename markers. It preserves the
-Rust-shaped NDJSON event contract (`system`, `textDelta`, `threadTitleUpdated`,
-`done`, `error`) and persists user/assistant messages, but it intentionally does
-not expose portfolio tools or multimodal attachments until those parity slices
-are migrated.
+bounded text streaming path for configured providers, `<think>` fallback
+reasoning deltas, generated/refined thread titles, and validated text/CSV
+attachment content injected into the provider prompt while persisting only
+attachment filename markers. It preserves the Rust-shaped NDJSON event contract
+(`system`, `textDelta`, `reasoningDelta`, `threadTitleUpdated`, `done`, `error`)
+and persists user/assistant messages, but it intentionally does not expose
+portfolio tools or multimodal attachments until those parity slices are
+migrated.
 
 ## Architecture Diagram
 

@@ -399,6 +399,70 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("parses streamed think tags into reasoning deltas and persisted parts", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          'data: {"choices":[{"delta":{"content":"<think>risk"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":" math</think>Answer"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Think" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({ type: "reasoningDelta", delta: "risk math" });
+      expect(events[2]).toMatchObject({ type: "textDelta", delta: "Answer" });
+      expect(events[3]).toMatchObject({
+        type: "done",
+        message: {
+          content: {
+            schemaVersion: 1,
+            parts: [
+              { type: "reasoning", content: "risk math" },
+              { type: "text", content: "Answer" },
+            ],
+          },
+        },
+      });
+      const threadId = String(events[0]?.threadId);
+      expect(service.getMessages(threadId)).toMatchObject([
+        { role: "user", content: textContent("Think") },
+        {
+          role: "assistant",
+          content: {
+            parts: [
+              { type: "reasoning", content: "risk math" },
+              { type: "text", content: "Answer" },
+            ],
+          },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("generates, persists, and emits refined thread titles", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
