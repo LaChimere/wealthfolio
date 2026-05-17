@@ -104,9 +104,23 @@ export interface AiChatService {
 export interface AiChatServiceOptions {
   aiProviderService?: Pick<AiProviderService, "resolveChatProviderConfig">;
   fetch?: typeof fetch;
+  tools?: AiChatToolDefinition[];
   queueThreadSyncEvent?: (event: AiThreadSyncEvent) => void;
   queueMessageSyncEvent?: (event: AiMessageSyncEvent) => void;
   queueThreadTagSyncEvent?: (event: AiThreadTagSyncEvent) => void;
+}
+
+export interface AiChatToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute(args: unknown): Promise<AiChatToolExecutionResult> | AiChatToolExecutionResult;
+  redactArguments?: (args: unknown) => unknown;
+}
+
+export interface AiChatToolExecutionResult {
+  data: unknown;
+  meta?: Record<string, unknown>;
 }
 
 export type AiChatSyncOperation = "Create" | "Update" | "Delete";
@@ -201,8 +215,24 @@ interface AiChatAttachment {
 }
 
 interface ProviderChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  toolCallId?: string;
+  toolCalls?: ProviderToolCall[];
+}
+
+interface ProviderToolCall {
+  id: string;
+  name: string;
+  arguments: unknown;
+}
+
+interface EffectiveAiChatTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute(args: unknown): Promise<AiChatToolExecutionResult> | AiChatToolExecutionResult;
+  redactArguments: (args: unknown) => unknown;
 }
 
 interface AiChatStreamIds {
@@ -241,6 +271,7 @@ const TITLE_FALLBACK_MAX_CHARS = 50;
 const TITLE_PROMPT_MAX_CHARS = 200;
 const TITLE_MAX_CHARS = 100;
 const TITLE_MAX_TOKENS = 20;
+const MAX_TOOL_ROUNDS = 4;
 const TEXT_ENCODER = new TextEncoder();
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const TEXT_ONLY_SYSTEM_PROMPT = [
@@ -250,6 +281,13 @@ const TEXT_ONLY_SYSTEM_PROMPT = [
   "Text and CSV attachment contents may be included directly in the user prompt.",
   "Do not claim that you accessed account, holding, activity, goal, or performance data.",
   "If the user asks for private portfolio data, clearly say that data access is unavailable in the current runtime.",
+].join("\n");
+const TOOL_ENABLED_SYSTEM_PROMPT = [
+  "You are Wealthfolio's AI assistant.",
+  "Use the available tools when you need current portfolio data or tool-backed calculations.",
+  "Do not invent private financial data. If a required tool is unavailable, say that access is unavailable in the current runtime.",
+  "Text and CSV attachment contents may be included directly in the user prompt.",
+  "Multimodal image/PDF attachments are not available in this runtime yet.",
 ].join("\n");
 
 export function createAiChatService(
@@ -582,15 +620,17 @@ function prepareSendMessage(
   ids: AiChatStreamIds;
   messages: ProviderChatMessage[];
   title: AiChatTitleContext;
+  tools: EffectiveAiChatTool[];
 } {
   const now = timestampNow();
   const isNewThread = !request.threadId;
+  const tools = resolveEffectiveTools(providerConfig, request, options.tools ?? []);
   const threadRow = request.threadId
     ? readRequiredThreadRow(db, request.threadId)
     : insertThreadRow(db, {
         id: crypto.randomUUID(),
         title: deriveInitialThreadTitle(request.content),
-        configSnapshot: JSON.stringify(chatConfigSnapshot(providerConfig)),
+        configSnapshot: JSON.stringify(chatConfigSnapshot(providerConfig, tools)),
         createdAt: now,
         updatedAt: now,
       });
@@ -629,13 +669,14 @@ function prepareSendMessage(
       runId: crypto.randomUUID(),
       messageId: crypto.randomUUID(),
     },
-    messages: buildProviderMessages(historyRows, providerPromptText(request)),
+    messages: buildProviderMessages(historyRows, providerPromptText(request), tools),
     title: {
       currentTitle: threadRow.title,
       initialTitle: isNewThread ? threadRow.title : null,
       isNewThread,
       userMessage: request.content,
     },
+    tools,
   };
 }
 
@@ -722,15 +763,62 @@ function touchThread(
   queueThreadSyncEvent(options, row, "Update");
 }
 
-function chatConfigSnapshot(providerConfig: ResolvedAiChatProviderConfig): Record<string, unknown> {
+function chatConfigSnapshot(
+  providerConfig: ResolvedAiChatProviderConfig,
+  tools: EffectiveAiChatTool[],
+): Record<string, unknown> {
   return {
     schemaVersion: CHAT_CONFIG_SCHEMA_VERSION,
     providerId: providerConfig.providerId,
     modelId: providerConfig.modelId,
     promptTemplateId: PROMPT_TEMPLATE_ID,
     promptVersion: PROMPT_VERSION,
-    toolsAllowlist: [],
+    toolsAllowlist: tools.map((tool) => tool.name),
   };
+}
+
+function resolveEffectiveTools(
+  providerConfig: ResolvedAiChatProviderConfig,
+  request: AiChatSendMessageRequest,
+  tools: AiChatToolDefinition[],
+): EffectiveAiChatTool[] {
+  if (
+    !providerConfig.capabilities.tools ||
+    !providerSupportsToolOrchestration(providerConfig.providerId) ||
+    tools.length === 0
+  ) {
+    return [];
+  }
+
+  const providerAllowlist =
+    providerConfig.toolsAllowlist === null || providerConfig.toolsAllowlist === undefined
+      ? null
+      : new Set(providerConfig.toolsAllowlist);
+  const requestAllowlist =
+    request.allowedTools === undefined ? null : new Set(request.allowedTools);
+
+  return tools
+    .filter((tool) => providerAllowlist === null || providerAllowlist.has(tool.name))
+    .filter((tool) => requestAllowlist === null || requestAllowlist.has(tool.name))
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      execute: tool.execute,
+      redactArguments: tool.redactArguments ?? ((args) => redactToolArguments(tool.name, args)),
+    }));
+}
+
+function providerSupportsToolOrchestration(providerId: string): boolean {
+  return ["openai", "groq", "openrouter", "ollama"].includes(providerId);
+}
+
+function systemPromptForTools(tools: EffectiveAiChatTool[]): string {
+  if (tools.length === 0) {
+    return TEXT_ONLY_SYSTEM_PROMPT;
+  }
+  const toolNames = tools.map((tool) => tool.name).join(", ");
+  return `${TOOL_ENABLED_SYSTEM_PROMPT}\n\nAvailable tools: ${toolNames}.`;
 }
 
 function deriveInitialThreadTitle(content: string): string | null {
@@ -751,6 +839,7 @@ function truncateHistoryAtParent(
 function buildProviderMessages(
   rows: AiMessageRow[],
   currentContent: string,
+  tools: EffectiveAiChatTool[],
 ): ProviderChatMessage[] {
   const history: ProviderChatMessage[] = [];
   let remainingBudget = MAX_HISTORY_CHARS;
@@ -774,7 +863,7 @@ function buildProviderMessages(
   }
   history.reverse();
   history.push({ role: "user", content: currentContent });
-  return [{ role: "system", content: TEXT_ONLY_SYSTEM_PROMPT }, ...history];
+  return [{ role: "system", content: systemPromptForTools(tools) }, ...history];
 }
 
 function textContentFromMessage(message: AiChatMessage): string {
@@ -808,6 +897,7 @@ async function* streamChatResponse(
     ids: AiChatStreamIds;
     messages: ProviderChatMessage[];
     title: AiChatTitleContext;
+    tools: EffectiveAiChatTool[];
   },
   db: Database,
   options: AiChatServiceOptions,
@@ -821,28 +911,75 @@ async function* streamChatResponse(
 
   const assistantParts: AiChatMessagePart[] = [];
   const thinkParser = new ThinkTagParser();
+  const providerMessages = [...prepared.messages];
   let titlePromise: Promise<string> | null = null;
   const ensureTitleGenerationStarted = (): Promise<string> => {
     titlePromise ??= generateThreadTitle(fetchImpl, providerConfig, prepared.title.userMessage);
     return titlePromise;
   };
   try {
-    for await (const providerSegment of streamProviderSegments(
-      fetchImpl,
-      providerConfig,
-      prepared.messages,
-    )) {
-      const segments =
-        providerSegment.type === "reasoning"
-          ? [providerSegment]
-          : thinkParser.process(providerSegment.content);
-      for (const segment of segments) {
+    let toolRounds = 0;
+    while (true) {
+      const toolCalls: ProviderToolCall[] = [];
+      for await (const providerSegment of streamProviderSegments(
+        fetchImpl,
+        providerConfig,
+        providerMessages,
+        prepared.tools,
+      )) {
+        if (providerSegment.type === "toolCall") {
+          toolCalls.push(providerSegment.toolCall);
+          continue;
+        }
+        const segments =
+          providerSegment.type === "reasoning"
+            ? [providerSegment]
+            : thinkParser.process(providerSegment.content);
+        for (const segment of segments) {
+          if (!segment.content) {
+            continue;
+          }
+          appendAssistantPart(assistantParts, segment.type, segment.content);
+          yield streamDeltaEvent(prepared.ids, segment);
+          ensureTitleGenerationStarted();
+        }
+      }
+
+      for (const segment of thinkParser.flush()) {
         if (!segment.content) {
           continue;
         }
         appendAssistantPart(assistantParts, segment.type, segment.content);
         yield streamDeltaEvent(prepared.ids, segment);
         ensureTitleGenerationStarted();
+      }
+
+      if (toolCalls.length === 0) {
+        break;
+      }
+      if (toolRounds >= MAX_TOOL_ROUNDS) {
+        throw aiChatError(
+          "tool_execution_failed",
+          `AI chat exceeded maximum tool rounds (${MAX_TOOL_ROUNDS})`,
+          500,
+        );
+      }
+      toolRounds += 1;
+
+      providerMessages.push(assistantToolCallsMessage(toolCalls));
+      for (const toolCall of toolCalls) {
+        const persistedArguments = redactToolCallArguments(prepared.tools, toolCall);
+        appendAssistantToolCallPart(assistantParts, toolCall, persistedArguments);
+        yield streamToolCallEvent(prepared.ids, toolCall);
+        ensureTitleGenerationStarted();
+      }
+
+      for (const toolCall of toolCalls) {
+        const result = await executeToolCall(prepared.tools, toolCall);
+        appendAssistantToolResultPart(assistantParts, result);
+        yield streamToolResultEvent(prepared.ids, result);
+        ensureTitleGenerationStarted();
+        providerMessages.push(providerToolResultMessage(result));
       }
     }
   } catch (error) {
@@ -856,15 +993,6 @@ async function* streamChatResponse(
       message: errorMessage(error),
     };
     return;
-  }
-
-  for (const segment of thinkParser.flush()) {
-    if (!segment.content) {
-      continue;
-    }
-    appendAssistantPart(assistantParts, segment.type, segment.content);
-    yield streamDeltaEvent(prepared.ids, segment);
-    ensureTitleGenerationStarted();
   }
 
   ensureTitleGenerationStarted();
@@ -903,14 +1031,29 @@ async function* streamChatResponse(
   };
 }
 
-interface AssistantStreamSegment {
+interface AssistantTextStreamSegment {
   type: "text" | "reasoning";
   content: string;
 }
 
+type AssistantStreamSegment =
+  | AssistantTextStreamSegment
+  | {
+      type: "toolCall";
+      toolCall: ProviderToolCall;
+    };
+
+interface ProviderToolResult {
+  toolCallId: string;
+  success: boolean;
+  data: unknown;
+  meta: Record<string, unknown>;
+  error?: string;
+}
+
 function streamDeltaEvent(
   ids: AiChatStreamIds,
-  segment: AssistantStreamSegment,
+  segment: AssistantTextStreamSegment,
 ): Record<string, unknown> {
   return {
     type: segment.type === "reasoning" ? "reasoningDelta" : "textDelta",
@@ -918,6 +1061,32 @@ function streamDeltaEvent(
     runId: ids.runId,
     messageId: ids.messageId,
     delta: segment.content,
+  };
+}
+
+function streamToolCallEvent(
+  ids: AiChatStreamIds,
+  toolCall: ProviderToolCall,
+): Record<string, unknown> {
+  return {
+    type: "toolCall",
+    threadId: ids.threadId,
+    runId: ids.runId,
+    messageId: ids.messageId,
+    toolCall,
+  };
+}
+
+function streamToolResultEvent(
+  ids: AiChatStreamIds,
+  result: ProviderToolResult,
+): Record<string, unknown> {
+  return {
+    type: "toolResult",
+    threadId: ids.threadId,
+    runId: ids.runId,
+    messageId: ids.messageId,
+    result,
   };
 }
 
@@ -937,69 +1106,179 @@ function appendAssistantPart(
   parts.push({ type, content });
 }
 
+function appendAssistantToolCallPart(
+  parts: AiChatMessagePart[],
+  toolCall: ProviderToolCall,
+  argumentsForPersistence: unknown,
+): void {
+  parts.push({
+    type: "toolCall",
+    toolCallId: toolCall.id,
+    name: toolCall.name,
+    arguments: argumentsForPersistence,
+  });
+}
+
+function appendAssistantToolResultPart(
+  parts: AiChatMessagePart[],
+  result: ProviderToolResult,
+): void {
+  parts.push({
+    type: "toolResult",
+    toolCallId: result.toolCallId,
+    success: result.success,
+    data: result.data,
+    meta: result.meta,
+    ...(result.error ? { error: result.error } : {}),
+  });
+}
+
+function assistantToolCallsMessage(toolCalls: ProviderToolCall[]): ProviderChatMessage {
+  return { role: "assistant", content: "", toolCalls };
+}
+
+function providerToolResultMessage(result: ProviderToolResult): ProviderChatMessage {
+  const content = result.success ? result.data : { error: result.error ?? "Tool execution failed" };
+  return {
+    role: "tool",
+    toolCallId: result.toolCallId,
+    content: JSON.stringify(content),
+  };
+}
+
+async function executeToolCall(
+  tools: EffectiveAiChatTool[],
+  toolCall: ProviderToolCall,
+): Promise<ProviderToolResult> {
+  const tool = tools.find((candidate) => candidate.name === toolCall.name);
+  if (!tool) {
+    return {
+      toolCallId: toolCall.id,
+      success: false,
+      data: null,
+      meta: {},
+      error: `Tool '${toolCall.name}' is not available`,
+    };
+  }
+  try {
+    const output = await tool.execute(toolCall.arguments);
+    return {
+      toolCallId: toolCall.id,
+      success: true,
+      data: output.data,
+      meta: output.meta ?? {},
+    };
+  } catch (error) {
+    return {
+      toolCallId: toolCall.id,
+      success: false,
+      data: null,
+      meta: {},
+      error: errorMessage(error),
+    };
+  }
+}
+
+function redactToolCallArguments(
+  tools: EffectiveAiChatTool[],
+  toolCall: ProviderToolCall,
+): unknown {
+  const tool = tools.find((candidate) => candidate.name === toolCall.name);
+  return tool
+    ? tool.redactArguments(toolCall.arguments)
+    : redactToolArguments(toolCall.name, toolCall.arguments);
+}
+
+function redactToolArguments(toolName: string, args: unknown): unknown {
+  if (toolName !== "import_csv" || !isRecord(args)) {
+    return args;
+  }
+  const redacted = { ...args };
+  if ("csvContent" in redacted) {
+    redacted.csvContent = "<redacted>";
+  }
+  if ("csv_content" in redacted) {
+    redacted.csv_content = "<redacted>";
+  }
+  return redacted;
+}
+
 class ThinkTagParser {
   private buffer = "";
   private inThinkBlock = false;
 
-  process(delta: string): AssistantStreamSegment[] {
+  process(delta: string): AssistantTextStreamSegment[] {
     if (!this.inThinkBlock && !delta.includes("<") && this.buffer.length === 0) {
       return [{ type: "text", content: delta }];
     }
 
     this.buffer += delta;
-    const segments: AssistantStreamSegment[] = [];
+    const segments: AssistantTextStreamSegment[] = [];
 
     while (true) {
       if (this.inThinkBlock) {
-        const endIndex = this.buffer.indexOf("</think>");
-        if (endIndex >= 0) {
-          if (endIndex > 0) {
-            segments.push({ type: "reasoning", content: this.buffer.slice(0, endIndex) });
+        const closeIndex = this.buffer.indexOf("</think>");
+        if (closeIndex === -1) {
+          const keepLength = Math.max(
+            partialTagPrefixLength(this.buffer, "</think>"),
+            Math.min("</think>".length - 1, this.buffer.length),
+          );
+          const emitLength = this.buffer.length - keepLength;
+          if (emitLength > 0) {
+            segments.push({ type: "reasoning", content: this.buffer.slice(0, emitLength) });
+            this.buffer = this.buffer.slice(emitLength);
           }
-          this.buffer = this.buffer.slice(endIndex + "</think>".length);
-          this.inThinkBlock = false;
-        } else if (
-          this.buffer.length > "</think>".length &&
-          !this.buffer.endsWith("<") &&
-          !this.buffer.endsWith("</")
-        ) {
-          const safeLength = this.buffer.length - "</think>".length;
-          segments.push({ type: "reasoning", content: this.buffer.slice(0, safeLength) });
-          this.buffer = this.buffer.slice(safeLength);
-          break;
-        } else {
           break;
         }
-      } else {
-        const startIndex = this.buffer.indexOf("<think>");
-        if (startIndex >= 0) {
-          if (startIndex > 0) {
-            segments.push({ type: "text", content: this.buffer.slice(0, startIndex) });
-          }
-          this.buffer = this.buffer.slice(startIndex + "<think>".length);
-          this.inThinkBlock = true;
-        } else if (this.buffer.length > "<think>".length && !this.buffer.endsWith("<")) {
-          const safeLength = this.buffer.length - "<think>".length;
-          segments.push({ type: "text", content: this.buffer.slice(0, safeLength) });
-          this.buffer = this.buffer.slice(safeLength);
-          break;
-        } else {
-          break;
+        if (closeIndex > 0) {
+          segments.push({ type: "reasoning", content: this.buffer.slice(0, closeIndex) });
         }
+        this.buffer = this.buffer.slice(closeIndex + "</think>".length);
+        this.inThinkBlock = false;
+        continue;
       }
+
+      const openIndex = this.buffer.indexOf("<think>");
+      if (openIndex === -1) {
+        const keepLength = partialTagPrefixLength(this.buffer, "<think>");
+        const emitLength = this.buffer.length - keepLength;
+        if (emitLength > 0) {
+          segments.push({ type: "text", content: this.buffer.slice(0, emitLength) });
+          this.buffer = this.buffer.slice(emitLength);
+        }
+        break;
+      }
+
+      if (openIndex > 0) {
+        segments.push({ type: "text", content: this.buffer.slice(0, openIndex) });
+      }
+      this.buffer = this.buffer.slice(openIndex + "<think>".length);
+      this.inThinkBlock = true;
     }
 
     return segments;
   }
 
-  flush(): AssistantStreamSegment[] {
+  flush(): AssistantTextStreamSegment[] {
     if (!this.buffer) {
       return [];
     }
+    const type = this.inThinkBlock ? "reasoning" : "text";
     const content = this.buffer;
     this.buffer = "";
-    return [{ type: this.inThinkBlock ? "reasoning" : "text", content }];
+    this.inThinkBlock = false;
+    return [{ type, content }];
   }
+}
+
+function partialTagPrefixLength(value: string, tag: string): number {
+  const maxLength = Math.min(tag.length - 1, value.length);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (value.endsWith(tag.slice(0, length))) {
+      return length;
+    }
+  }
+  return 0;
 }
 
 function persistGeneratedThreadTitle(
@@ -1318,10 +1597,11 @@ async function* streamProviderSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
+  tools: EffectiveAiChatTool[],
 ): AsyncIterable<AssistantStreamSegment> {
   switch (providerConfig.providerId) {
     case "ollama":
-      yield* streamOllamaSegments(fetchImpl, providerConfig, messages);
+      yield* streamOllamaSegments(fetchImpl, providerConfig, messages, tools);
       return;
     case "anthropic":
       yield* streamAnthropicSegments(fetchImpl, providerConfig, messages);
@@ -1334,7 +1614,7 @@ async function* streamProviderSegments(
     case "groq":
     case "openrouter":
     default:
-      yield* streamOpenAiCompatibleSegments(fetchImpl, providerConfig, messages);
+      yield* streamOpenAiCompatibleSegments(fetchImpl, providerConfig, messages, tools);
   }
 }
 
@@ -1342,7 +1622,9 @@ async function* streamOpenAiCompatibleSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
+  tools: EffectiveAiChatTool[],
 ): AsyncIterable<AssistantStreamSegment> {
+  const toolCalls = new Map<number, ToolCallAccumulator>();
   const response = await fetchImpl(openAiChatUrl(providerConfig.baseUrl), {
     method: "POST",
     headers: {
@@ -1351,8 +1633,9 @@ async function* streamOpenAiCompatibleSegments(
     },
     body: JSON.stringify({
       model: providerConfig.modelId,
-      messages,
+      messages: openAiMessages(messages),
       stream: true,
+      ...(tools.length > 0 ? { tools: openAiToolSpecs(tools), tool_choice: "auto" } : {}),
       ...openAiTuningBody(providerConfig),
     }),
   });
@@ -1362,22 +1645,26 @@ async function* streamOpenAiCompatibleSegments(
     if (!isRecord(choice) || !isRecord(choice.delta)) {
       return [];
     }
+    collectOpenAiToolCallDeltas(choice.delta, toolCalls);
     return providerDeltaSegments(choice.delta);
   });
+  yield* completedToolCallSegments(toolCalls);
 }
 
 async function* streamOllamaSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
+  tools: EffectiveAiChatTool[],
 ): AsyncIterable<AssistantStreamSegment> {
   const response = await fetchImpl(ollamaChatUrl(providerConfig.baseUrl), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model: providerConfig.modelId,
-      messages,
+      messages: ollamaMessages(messages),
       stream: true,
+      ...(tools.length > 0 ? { tools: ollamaToolSpecs(tools) } : {}),
       options: ollamaOptions(providerConfig),
     }),
   });
@@ -1387,7 +1674,10 @@ async function* streamOllamaSegments(
       throw aiChatError("provider_error", payload.error, 502);
     }
     if (isRecord(payload.message)) {
-      return providerDeltaSegments(payload.message);
+      return [
+        ...providerDeltaSegments(payload.message),
+        ...ollamaToolCallSegments(payload.message),
+      ];
     }
     return [];
   });
@@ -1476,6 +1766,160 @@ async function* streamGoogleSegments(
     }
     return segments;
   });
+}
+
+interface ToolCallAccumulator {
+  id?: string;
+  name?: string;
+  arguments: string;
+}
+
+function openAiMessages(messages: ProviderChatMessage[]): Record<string, unknown>[] {
+  return messages.map((message) => {
+    if (message.role === "tool") {
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        content: message.content,
+      };
+    }
+    const serialized: Record<string, unknown> = {
+      role: message.role,
+      content: message.toolCalls && message.toolCalls.length > 0 ? null : message.content,
+    };
+    if (message.toolCalls && message.toolCalls.length > 0) {
+      serialized.tool_calls = message.toolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        type: "function",
+        function: {
+          name: toolCall.name,
+          arguments: JSON.stringify(toolCall.arguments),
+        },
+      }));
+    }
+    return serialized;
+  });
+}
+
+function openAiToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+function ollamaMessages(messages: ProviderChatMessage[]): Record<string, unknown>[] {
+  return messages.map((message) => {
+    if (message.role === "tool") {
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        content: message.content,
+      };
+    }
+    const serialized: Record<string, unknown> = {
+      role: message.role,
+      content: message.content,
+    };
+    if (message.toolCalls && message.toolCalls.length > 0) {
+      serialized.tool_calls = message.toolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        function: {
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+        },
+      }));
+    }
+    return serialized;
+  });
+}
+
+function ollamaToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+function collectOpenAiToolCallDeltas(
+  delta: Record<string, unknown>,
+  toolCalls: Map<number, ToolCallAccumulator>,
+): void {
+  for (const item of parseArrayField(delta.tool_calls)) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const index = typeof item.index === "number" ? item.index : toolCalls.size;
+    const existing = toolCalls.get(index) ?? { arguments: "" };
+    if (typeof item.id === "string") {
+      existing.id = item.id;
+    }
+    if (isRecord(item.function)) {
+      if (typeof item.function.name === "string") {
+        existing.name = item.function.name;
+      }
+      if (typeof item.function.arguments === "string") {
+        existing.arguments += item.function.arguments;
+      }
+    }
+    toolCalls.set(index, existing);
+  }
+}
+
+function* completedToolCallSegments(
+  toolCalls: Map<number, ToolCallAccumulator>,
+): Iterable<AssistantStreamSegment> {
+  for (const [index, toolCall] of [...toolCalls.entries()].sort((a, b) => a[0] - b[0])) {
+    if (!toolCall.name) {
+      continue;
+    }
+    yield {
+      type: "toolCall",
+      toolCall: {
+        id: toolCall.id ?? `tool-call-${index}-${crypto.randomUUID()}`,
+        name: toolCall.name,
+        arguments: parseToolArguments(toolCall.arguments),
+      },
+    };
+  }
+}
+
+function ollamaToolCallSegments(message: Record<string, unknown>): AssistantStreamSegment[] {
+  return parseArrayField(message.tool_calls)
+    .map((item, index): AssistantStreamSegment | null => {
+      if (!isRecord(item) || !isRecord(item.function) || typeof item.function.name !== "string") {
+        return null;
+      }
+      return {
+        type: "toolCall",
+        toolCall: {
+          id: typeof item.id === "string" ? item.id : `tool-call-${index}-${crypto.randomUUID()}`,
+          name: item.function.name,
+          arguments:
+            typeof item.function.arguments === "string"
+              ? parseToolArguments(item.function.arguments)
+              : (item.function.arguments ?? {}),
+        },
+      };
+    })
+    .filter((segment): segment is AssistantStreamSegment => segment !== null);
+}
+
+function parseToolArguments(argumentsText: string): unknown {
+  const trimmed = argumentsText.trim();
+  if (!trimmed) {
+    return {};
+  }
+  const parsed = JSON.parse(trimmed) as unknown;
+  return parsed === null ? {} : parsed;
 }
 
 function providerDeltaSegments(delta: Record<string, unknown>): AssistantStreamSegment[] {

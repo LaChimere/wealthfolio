@@ -463,6 +463,59 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("preserves text before partial streamed think tags", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-test",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "hello<th" } }] }),
+          sseData({ choices: [{ delta: { content: "ink>risk</think>Done" } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Think split" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "textDelta",
+        "reasoningDelta",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]).toMatchObject({ type: "textDelta", delta: "hello" });
+      expect(events[2]).toMatchObject({ type: "reasoningDelta", delta: "risk" });
+      expect(events[3]).toMatchObject({ type: "textDelta", delta: "Done" });
+      expect(events[4]).toMatchObject({
+        type: "done",
+        message: {
+          content: {
+            parts: [
+              { type: "text", content: "hello" },
+              { type: "reasoning", content: "risk" },
+              { type: "text", content: "Done" },
+            ],
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("streams provider-native reasoning deltas and persists ordered parts", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db, {
@@ -628,6 +681,433 @@ describe("TS AI chat domain", () => {
       ]);
       expect(events[1]).toMatchObject({ type: "reasoningDelta", delta: "reflect" });
       expect(events[2]).toMatchObject({ type: "textDelta", delta: "Visible" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes OpenAI-compatible tool calls, streams results, and persists ordered parts", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const executed: Array<{ name: string; args: unknown }> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-tools",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+        capabilities: { tools: true, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: { type: "object", properties: { active: { type: "boolean" } } },
+          execute: (args) => {
+            executed.push({ name: "get_accounts", args });
+            return { data: { accounts: [{ id: "acct-1", name: "Brokerage" }] } };
+          },
+        },
+        {
+          name: "import_csv",
+          description: "Infer CSV import mapping",
+          parameters: { type: "object", properties: { csvContent: { type: "string" } } },
+          execute: (args) => {
+            executed.push({ name: "import_csv", args });
+            return { data: { mappingConfidence: "HIGH" }, meta: { rows: 1 } };
+          },
+        },
+      ],
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        if (fetchBodies.length === 1) {
+          return streamResponse([
+            sseData({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-accounts",
+                        type: "function",
+                        function: {
+                          name: "get_accounts",
+                          arguments: '{"active":true}',
+                        },
+                      },
+                      {
+                        index: 1,
+                        id: "call-import",
+                        type: "function",
+                        function: {
+                          name: "import_csv",
+                          arguments: '{"csvContent":"Date',
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            sseData({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 1,
+                        function: {
+                          arguments: ',Symbol\\n2025-01-01,AAPL","accountId":"acct-1"}',
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            }),
+            "data: [DONE]\n\n",
+          ]);
+        }
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "Mapped the import." } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Import this CSV",
+          allowedTools: ["get_accounts", "import_csv"],
+        }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolCall",
+        "toolResult",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]?.toolCall).toMatchObject({
+        id: "call-accounts",
+        name: "get_accounts",
+        arguments: { active: true },
+      });
+      expect(events[2]?.toolCall).toMatchObject({
+        id: "call-import",
+        name: "import_csv",
+        arguments: {
+          csvContent: "Date,Symbol\n2025-01-01,AAPL",
+          accountId: "acct-1",
+        },
+      });
+      expect(events[4]?.result).toMatchObject({
+        toolCallId: "call-import",
+        success: true,
+        data: { mappingConfidence: "HIGH" },
+        meta: { rows: 1 },
+      });
+      expect(executed).toEqual([
+        { name: "get_accounts", args: { active: true } },
+        {
+          name: "import_csv",
+          args: { csvContent: "Date,Symbol\n2025-01-01,AAPL", accountId: "acct-1" },
+        },
+      ]);
+
+      const firstRequest = fetchBodies[0];
+      expect(firstRequest?.tools).toHaveLength(2);
+      expect(firstRequest?.messages).toEqual([
+        expect.objectContaining({
+          role: "system",
+          content: expect.stringContaining("Available tools: get_accounts, import_csv"),
+        }),
+        { role: "user", content: "Import this CSV" },
+      ]);
+      const followUpMessages = fetchBodies[1]?.messages as Array<Record<string, unknown>>;
+      expect(followUpMessages).toEqual([
+        expect.objectContaining({ role: "system" }),
+        { role: "user", content: "Import this CSV" },
+        expect.objectContaining({
+          role: "assistant",
+          tool_calls: [
+            expect.objectContaining({ id: "call-accounts" }),
+            expect.objectContaining({ id: "call-import" }),
+          ],
+        }),
+        {
+          role: "tool",
+          tool_call_id: "call-accounts",
+          content: '{"accounts":[{"id":"acct-1","name":"Brokerage"}]}',
+        },
+        { role: "tool", tool_call_id: "call-import", content: '{"mappingConfidence":"HIGH"}' },
+      ]);
+
+      expect(events[6]).toMatchObject({
+        type: "done",
+        message: {
+          content: {
+            parts: [
+              {
+                type: "toolCall",
+                toolCallId: "call-accounts",
+                name: "get_accounts",
+                arguments: { active: true },
+              },
+              {
+                type: "toolCall",
+                toolCallId: "call-import",
+                name: "import_csv",
+                arguments: { csvContent: "<redacted>", accountId: "acct-1" },
+              },
+              {
+                type: "toolResult",
+                toolCallId: "call-accounts",
+                success: true,
+                data: { accounts: [{ id: "acct-1", name: "Brokerage" }] },
+              },
+              {
+                type: "toolResult",
+                toolCallId: "call-import",
+                success: true,
+                data: { mappingConfidence: "HIGH" },
+                meta: { rows: 1 },
+              },
+              { type: "text", content: "Mapped the import." },
+            ],
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("streams failed tool execution results and continues the provider round-trip", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-tools",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+        capabilities: { tools: true, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: { type: "object", properties: {} },
+          execute: () => {
+            throw new Error("account service unavailable");
+          },
+        },
+      ],
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        if (fetchBodies.length === 1) {
+          return streamResponse([
+            sseData({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-failing",
+                        type: "function",
+                        function: { name: "get_accounts", arguments: "{}" },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            }),
+            "data: [DONE]\n\n",
+          ]);
+        }
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "I could not access accounts." } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Show accounts" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[2]?.result).toMatchObject({
+        toolCallId: "call-failing",
+        success: false,
+        data: null,
+        error: "account service unavailable",
+      });
+      const followUpMessages = fetchBodies[1]?.messages as Array<Record<string, unknown>>;
+      expect(followUpMessages.at(-1)).toEqual({
+        role: "tool",
+        tool_call_id: "call-failing",
+        content: '{"error":"account service unavailable"}',
+      });
+      expect(events[4]).toMatchObject({
+        type: "done",
+        message: {
+          content: {
+            parts: [
+              { type: "toolCall", toolCallId: "call-failing" },
+              {
+                type: "toolResult",
+                toolCallId: "call-failing",
+                success: false,
+                error: "account service unavailable",
+              },
+              { type: "text", content: "I could not access accounts." },
+            ],
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("omits tool schemas when the model lacks tool capability", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-text",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: { type: "object", properties: {} },
+          execute: () => ({ data: {} }),
+        },
+      ],
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "No tools exposed." } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Show accounts" }));
+
+      expect(events.map((event) => event.type)).toEqual(["system", "textDelta", "done"]);
+      expect(fetchBodies[0]).not.toHaveProperty("tools");
+      expect(fetchBodies[0]?.messages).toEqual([
+        expect.objectContaining({
+          role: "system",
+          content: expect.stringContaining("tools, mutation tools"),
+        }),
+        { role: "user", content: "Show accounts" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes Ollama tool calls with the injected tool registry", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llama3",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+        capabilities: { tools: true, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: { type: "object", properties: {} },
+          execute: () => ({ data: { accounts: [] } }),
+        },
+      ],
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        if (fetchBodies.length === 1) {
+          return streamResponse([
+            '{"message":{"tool_calls":[{"id":"ollama-call","function":{"name":"get_accounts","arguments":{}}}]},"done":false}\n',
+            '{"done":true}\n',
+          ]);
+        }
+        return streamResponse([
+          '{"message":{"content":"No accounts found."},"done":false}\n',
+          '{"done":true}\n',
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Show accounts" }));
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(fetchBodies[0]?.tools).toHaveLength(1);
+      expect(fetchBodies[1]?.messages).toEqual([
+        expect.objectContaining({ role: "system" }),
+        { role: "user", content: "Show accounts" },
+        expect.objectContaining({
+          role: "assistant",
+          tool_calls: [
+            expect.objectContaining({
+              id: "ollama-call",
+              function: expect.objectContaining({ name: "get_accounts" }),
+            }),
+          ],
+        }),
+        { role: "tool", tool_call_id: "ollama-call", content: '{"accounts":[]}' },
+      ]);
     } finally {
       db.close();
     }
@@ -1093,6 +1573,10 @@ function streamResponse(chunks: string[]): Response {
       },
     }),
   );
+}
+
+function sseData(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
 function erroringStreamResponse(chunks: string[]): Response {
