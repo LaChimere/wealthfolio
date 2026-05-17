@@ -249,7 +249,11 @@ export {
   type SnapshotInfo,
   type SymbolCheckResult,
 } from "./domains/holdings";
-export type { MarketDataService, ResolveSymbolQuoteRequest } from "./domains/market-data";
+export {
+  MarketDataNotImplementedError,
+  type MarketDataService,
+  type ResolveSymbolQuoteRequest,
+} from "./domains/market-data";
 export {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
@@ -267,6 +271,8 @@ export {
   DEFAULT_HISTORY_DAYS,
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
+  createDeferredPortfolioJobService,
+  PortfolioJobNotImplementedError,
   type MarketSyncMode,
   type PortfolioJobConfig,
   type PortfolioJobService,

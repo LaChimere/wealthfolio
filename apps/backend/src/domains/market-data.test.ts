@@ -84,6 +84,26 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("reports market sync execution as an explicit deferred runtime", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
+
+    try {
+      await expect(service.syncHistoryQuotes?.()).rejects.toMatchObject({
+        status: 501,
+        code: "not_implemented",
+      });
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: null }),
+      ).rejects.toMatchObject({
+        status: 501,
+        code: "not_implemented",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns latest quote snapshots with source priority and market dates", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, {

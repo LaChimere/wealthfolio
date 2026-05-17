@@ -26,6 +26,27 @@ export interface PortfolioJobService {
 
 export const DEFAULT_HISTORY_DAYS = 1_825;
 
+export class PortfolioJobNotImplementedError extends Error {
+  readonly status = 501;
+  readonly code = "not_implemented";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PortfolioJobNotImplementedError";
+  }
+}
+
+const PORTFOLIO_JOB_DEFERRED_MESSAGE =
+  "Portfolio job execution is not yet available in the TS backend runtime.";
+
+export function createDeferredPortfolioJobService(): PortfolioJobService {
+  return {
+    async enqueuePortfolioJob() {
+      throw new PortfolioJobNotImplementedError(PORTFOLIO_JOB_DEFERRED_MESSAGE);
+    },
+  };
+}
+
 export function buildPortfolioUpdateConfig(body: PortfolioRequestBody = {}): PortfolioJobConfig {
   const marketSyncMode =
     body.marketSyncMode && body.marketSyncMode.type !== "none"

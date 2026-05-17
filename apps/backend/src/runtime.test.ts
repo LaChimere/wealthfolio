@@ -452,6 +452,27 @@ describe("TS backend runtime composition", () => {
       });
       expect(healthDeferredFixResponse.status).toBe(404);
 
+      const portfolioUpdateResponse = await fetch(`${server.baseUrl}/api/v1/portfolio/update`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountIds: ["missing"] }),
+      });
+      expect(portfolioUpdateResponse.status).toBe(501);
+      await expect(portfolioUpdateResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+
+      const portfolioRecalculateResponse = await fetch(
+        `${server.baseUrl}/api/v1/portfolio/recalculate`,
+        {
+          method: "POST",
+        },
+      );
+      expect(portfolioRecalculateResponse.status).toBe(501);
+      await expect(portfolioRecalculateResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+
       const runtimeAddonDir = path.join(appDataDir, "addons", "runtime-addon");
       mkdirSync(runtimeAddonDir, { recursive: true });
       writeFileSync(
@@ -750,6 +771,23 @@ describe("TS backend runtime composition", () => {
           dataSource: "MANUAL",
         }),
       ]);
+      const marketHistorySyncResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/sync/history`,
+        { method: "POST" },
+      );
+      expect(marketHistorySyncResponse.status).toBe(501);
+      await expect(marketHistorySyncResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+      const marketSyncResponse = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refetchAll: false }),
+      });
+      expect(marketSyncResponse.status).toBe(501);
+      await expect(marketSyncResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
       const deleteQuoteResponse = await fetch(
         `${server.baseUrl}/api/v1/market-data/quotes/id/${encodeURIComponent(manualQuoteId)}`,
         { method: "DELETE" },

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 133
+turns_used: 134
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T15:07:27+08:00"
+updated_at: "2026-05-17T15:14:36+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -860,6 +860,13 @@ updated_at: "2026-05-17T15:07:27+08:00"
   `appDataDir/addons` while zip extraction/install, store HTTP/update, full
   manifest/security validation, and sandbox host behavior remain deferred.
   Focused add-on/runtime tests and backend type-check passed.
+- Turn 134: Wired explicit deferred runtime gates for standalone portfolio job
+  execution and market-data sync execution: `/api/v1/portfolio/update`,
+  `/api/v1/portfolio/recalculate`, `/api/v1/market-data/sync/history`, and
+  `/api/v1/market-data/sync` now return 501 `not_implemented` instead of
+  un-wired 404s while the real background runner, market sync, and recalculation
+  side effects remain deferred. Focused portfolio/market-data/runtime tests and
+  backend type-check passed.
 
 ## Deferred items
 
@@ -1036,8 +1043,9 @@ updated_at: "2026-05-17T15:07:27+08:00"
   allocation reads, manual/imported snapshot deletion, bounded manual snapshot
   saves, bounded snapshot import writes, snapshot FX pair registration,
   provider-backed import-check symbol lookup, and snapshot mutation event
-  production now have TS runtime parity, while remaining recalculation behavior
-  must move with dedicated holdings/portfolio parity slices.
+  production now have TS runtime parity, and standalone portfolio trigger routes
+  now return explicit deferred 501s, while remaining recalculation behavior must
+  move with dedicated holdings/portfolio parity slices.
 - Add-on zip extraction/install, full manifest/security validation, sandbox host
   hardening, store HTTP requests, staging install, and update behavior remain
   active follow-ups. reason=the standalone TS backend now supports local
@@ -1048,7 +1056,8 @@ updated_at: "2026-05-17T15:07:27+08:00"
 - Market-data market sync execution and portfolio recalculation side effects
   remain active follow-ups. reason=exchange metadata, local quote
   persistence/import, Yahoo dividends/search/resolve have TS runtime coverage,
-  while sync and recalculation behavior must move with dedicated market-data and
+  and standalone market-sync routes now return explicit deferred 501s, while
+  sync and recalculation behavior must move with dedicated market-data and
   portfolio parity slices.
 
 ## Blockers

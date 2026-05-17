@@ -37,6 +37,7 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
+import { createDeferredPortfolioJobService } from "./domains/portfolio-jobs";
 import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
 import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
@@ -410,6 +411,7 @@ function createServicesFromDatabase(
       createMarketDataProviderRepository(db),
     ),
     marketDataService,
+    portfolioJobService: createDeferredPortfolioJobService(),
     portfolioMetricsService: createPortfolioMetricsService(db, {
       baseCurrency,
       exchangeRateService,

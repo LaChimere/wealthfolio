@@ -127,6 +127,19 @@ export interface MarketDataServiceOptions {
   queueQuoteSyncEvent?: (event: QuoteSyncEvent) => void;
 }
 
+export class MarketDataNotImplementedError extends Error {
+  readonly status = 501;
+  readonly code = "not_implemented";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "MarketDataNotImplementedError";
+  }
+}
+
+const MARKET_DATA_SYNC_DEFERRED_MESSAGE =
+  "Market data sync execution is not yet available in the TS backend runtime.";
+
 interface QuoteRow {
   id: string;
   asset_id: string;
@@ -345,7 +358,19 @@ export function createMarketDataService(
     importQuotesCsv(quotes, overwriteExisting) {
       return importQuoteRows(db, quotes, overwriteExisting, options.queueQuoteSyncEvent);
     },
+
+    async syncHistoryQuotes() {
+      throw marketDataSyncDeferred();
+    },
+
+    async syncMarketData() {
+      throw marketDataSyncDeferred();
+    },
   };
+}
+
+function marketDataSyncDeferred(): MarketDataNotImplementedError {
+  return new MarketDataNotImplementedError(MARKET_DATA_SYNC_DEFERRED_MESSAGE);
 }
 
 export function parseExchangeList(json: string): ExchangeInfo[] {
