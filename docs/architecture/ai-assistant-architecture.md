@@ -16,14 +16,14 @@ supports a bounded text streaming path for configured providers, provider-native
 and `<think>` fallback reasoning deltas, generated/refined thread titles,
 OpenAI-compatible/Ollama injected tool-call execution, the built-in
 `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-`search_activities`, and `get_income` portfolio tools, and validated text/CSV
-attachment content injected into the provider prompt while persisting only
-attachment filename markers. It preserves the Rust-shaped NDJSON event contract
-(`system`, `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`,
-`threadTitleUpdated`, `done`, `error`) and persists user/assistant messages, but
-it intentionally does not wire the remaining portfolio tool registry,
-Anthropic/Gemini tool protocols, or multimodal attachments until those parity
-slices are migrated.
+`search_activities`, `get_income`, and `get_valuation_history` portfolio tools,
+and validated text/CSV attachment content injected into the provider prompt
+while persisting only attachment filename markers. It preserves the Rust-shaped
+NDJSON event contract (`system`, `textDelta`, `reasoningDelta`, `toolCall`,
+`toolResult`, `threadTitleUpdated`, `done`, `error`) and persists user/assistant
+messages, but it intentionally does not wire the remaining portfolio tool
+registry, Anthropic/Gemini tool protocols, or multimodal attachments until those
+parity slices are migrated.
 
 ## Architecture Diagram
 

@@ -135,25 +135,26 @@
     text/reasoning AI chat provider streaming, generated thread titles,
     OpenAI-compatible/Ollama injected tool-call execution, built-in
     `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-    `search_activities`, and `get_income`, and text/CSV attachment prompt
-    injection are wired into standalone runtime while remaining built-in
-    portfolio tool wiring, Anthropic/Gemini tool protocols, and multimodal
-    image/PDF/binary attachments are deferred to AI runtime parity slices;
-    alternative asset persistence, manual valuation quotes, liability
-    link/unlink metadata behavior, and holdings reads now have TS runtime
-    parity, while portfolio job enqueue and recalculation side effects are
-    deferred to portfolio parity slices; asset read/create/profile/quote-mode
-    and delete behavior now have TS runtime parity, while quote-provider
-    interactions, auto-classification, and portfolio recalculation side effects
-    are deferred to asset/market-data/portfolio parity slices; app utility
-    database restore now has TS runtime parity with restart-required readiness
-    after file restore; contribution-limit deposit calculation now has TS
-    runtime parity with SQLite activity reads, Rust-compatible contribution
-    rules, user-timezone year ranges, and FX conversion dates; current/history
-    net-worth, income summary, simple account performance, account performance
-    history/summary calculations, local quote-backed symbol performance history
-    with local asset/display/instrument-symbol resolution, holdings valuation
-    reads, holdings snapshot metadata reads, historical snapshot holdings reads,
+    `search_activities`, `get_income`, and `get_valuation_history`, and text/CSV
+    attachment prompt injection are wired into standalone runtime while
+    remaining built-in portfolio tool wiring, Anthropic/Gemini tool protocols,
+    and multimodal image/PDF/binary attachments are deferred to AI runtime
+    parity slices; alternative asset persistence, manual valuation quotes,
+    liability link/unlink metadata behavior, and holdings reads now have TS
+    runtime parity, while portfolio job enqueue and recalculation side effects
+    are deferred to portfolio parity slices; asset
+    read/create/profile/quote-mode and delete behavior now have TS runtime
+    parity, while quote-provider interactions, auto-classification, and
+    portfolio recalculation side effects are deferred to
+    asset/market-data/portfolio parity slices; app utility database restore now
+    has TS runtime parity with restart-required readiness after file restore;
+    contribution-limit deposit calculation now has TS runtime parity with SQLite
+    activity reads, Rust-compatible contribution rules, user-timezone year
+    ranges, and FX conversion dates; current/history net-worth, income summary,
+    simple account performance, account performance history/summary
+    calculations, local quote-backed symbol performance history with local
+    asset/display/instrument-symbol resolution, holdings valuation reads,
+    holdings snapshot metadata reads, historical snapshot holdings reads,
     holdings import checks, live holdings fan-out, holding detail/by-asset
     fan-out, allocation reads, snapshot deletion, bounded manual/imported
     snapshot saves, snapshot FX pair registration, and holdings snapshot
@@ -189,12 +190,12 @@
     text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama injected tool-call execution, built-in
     `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-    `search_activities`, and `get_income`, and text/CSV attachment prompt
-    injection now have TS runtime parity, while remaining built-in portfolio
-    tool wiring, Anthropic/Gemini tool protocols, and multimodal
-    image/PDF/binary attachments are deferred to AI runtime parity slices;
-    device-sync integration for sync crypto is deferred to device-sync runtime
-    parity slices; bounded account/timezone health status/checks, cache
+    `search_activities`, `get_income`, and `get_valuation_history`, and text/CSV
+    attachment prompt injection now have TS runtime parity, while remaining
+    built-in portfolio tool wiring, Anthropic/Gemini tool protocols, and
+    multimodal image/PDF/binary attachments are deferred to AI runtime parity
+    slices; device-sync integration for sync crypto is deferred to device-sync
+    runtime parity slices; bounded account/timezone health status/checks, cache
     behavior, legacy-classification health issues, and classification migration
     health-fix dispatch now have TS runtime parity, while calculation-heavy
     health checks, market sync fix execution, and non-classification
@@ -1247,6 +1248,14 @@ contract:
   definition, default/uppercase period selection, missing-period errors,
   optional YoY growth omission, income type/month breakdown mapping, sorted
   positive top-asset selection, and existing runtime route behavior.
+- `pr5-ai-chat-get-valuation-history-tool`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test --run src/domains/ai-chat-tools.test.ts src/domains/ai-chat.test.ts src/runtime.test.ts src/http.test.ts`.
+  Coverage includes the runtime-registered Rust-compatible
+  `get_valuation_history` tool definition, explicit and default date ranges,
+  TOTAL active-account aggregation, single-account valuation mapping, FX-to-base
+  conversion, date sorting, 400-point truncation metadata, and existing runtime
+  route behavior.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1719,9 +1728,10 @@ contract:
   manifest-permission enforcement, AI chat native/fallback text/reasoning
   streaming plus generated thread titles, OpenAI-compatible/Ollama injected
   tool-call execution, built-in `get_accounts`/`get_holdings`/
-  `get_cash_balances`/`get_goals`/`search_activities`/`get_income`, and text/CSV
-  attachment prompt injection, and explicit portfolio and market-sync deferred
-  runtime gates implemented; broader migration remains active.
+  `get_cash_balances`/`get_goals`/`search_activities`/`get_income`/
+  `get_valuation_history`, and text/CSV attachment prompt injection, and
+  explicit portfolio and market-sync deferred runtime gates implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the

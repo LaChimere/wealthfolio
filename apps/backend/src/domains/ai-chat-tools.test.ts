@@ -765,6 +765,133 @@ describe("TS AI chat built-in tools", () => {
       tools.find((tool) => tool.name === "get_income")?.execute({ period: "LAST_YEAR" }),
     ).rejects.toThrow("Period 'LAST_YEAR' not found in income data");
   });
+
+  test("exposes Rust-compatible aggregate get_valuation_history output", async () => {
+    const calls: Array<{ accountId: string; startDate?: string; endDate?: string }> = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [
+          account({ id: "acct-1", name: "Brokerage" }),
+          account({ id: "acct-2", name: "Retirement" }),
+        ],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getHistoricalValuations: (accountId, startDate, endDate) => {
+          calls.push({ accountId, startDate, endDate });
+          return accountId === "acct-1"
+            ? [
+                valuation({
+                  accountId,
+                  valuationDate: "2026-01-02",
+                  totalValue: 100,
+                  netContribution: 40,
+                  fxRateToBase: 1.5,
+                }),
+              ]
+            : [
+                valuation({
+                  accountId,
+                  valuationDate: "2026-01-02",
+                  totalValue: 200,
+                  netContribution: 80,
+                  fxRateToBase: 2,
+                }),
+                valuation({
+                  accountId,
+                  valuationDate: "2026-01-01",
+                  totalValue: 50,
+                  netContribution: 20,
+                  fxRateToBase: 2,
+                }),
+              ];
+        },
+      },
+      baseCurrency: "CAD",
+    });
+
+    const getValuationHistory = tools.find((tool) => tool.name === "get_valuation_history");
+    const result = await getValuationHistory?.execute({
+      accountId: "TOTAL",
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+    });
+
+    expect(getValuationHistory).toMatchObject({
+      description: expect.stringContaining("historical portfolio valuations"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          accountId: expect.objectContaining({ default: "TOTAL" }),
+        }),
+        required: [],
+      },
+    });
+    expect(calls).toEqual([
+      { accountId: "acct-1", startDate: "2026-01-01", endDate: "2026-01-31" },
+      { accountId: "acct-2", startDate: "2026-01-01", endDate: "2026-01-31" },
+    ]);
+    expect(result).toEqual({
+      data: {
+        valuations: [
+          { date: "2026-01-01", totalValue: 100, netContribution: 40, currency: "CAD" },
+          { date: "2026-01-02", totalValue: 550, netContribution: 220, currency: "CAD" },
+        ],
+        accountScope: "TOTAL",
+        currency: "CAD",
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+      },
+    });
+  });
+
+  test("defaults get_valuation_history dates and truncates at Rust-compatible limit", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getHoldings: () => [],
+        getHistoricalValuations: (accountId, startDate, endDate) => {
+          expect(accountId).toBe("acct-1");
+          expect(startDate).toBe("2025-01-15");
+          expect(endDate).toBe("2026-01-15");
+          return Array.from({ length: 405 }, (_, index) =>
+            valuation({
+              accountId,
+              valuationDate: `2025-01-${String((index % 28) + 1).padStart(2, "0")}`,
+              totalValue: index,
+              netContribution: index / 2,
+              fxRateToBase: 2,
+            }),
+          );
+        },
+      },
+      baseCurrency: "USD",
+      now: () => new Date("2026-01-15T12:00:00.000Z"),
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "get_valuation_history")
+      ?.execute({
+        accountId: "acct-1",
+        startDate: "not-a-date",
+        endDate: "also-invalid",
+      });
+    const data = result?.data as { valuations: unknown[] };
+
+    expect(result).toMatchObject({
+      data: {
+        accountScope: "acct-1",
+        currency: "USD",
+        startDate: "2025-01-15",
+        endDate: "2026-01-15",
+        truncated: true,
+        originalCount: 405,
+      },
+    });
+    expect(data.valuations).toHaveLength(400);
+  });
 });
 
 function account(overrides: Partial<Account>): Account {

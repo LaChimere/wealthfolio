@@ -8,12 +8,14 @@ import type { IncomeSummary, PortfolioMetricsService } from "./portfolio-metrics
 const MAX_ACCOUNTS = 50;
 const MAX_HOLDINGS = 100;
 const MAX_GOALS = 50;
+const MAX_VALUATIONS_POINTS = 400;
+const DEFAULT_VALUATIONS_DAYS = 365;
 const DEFAULT_ACTIVITIES_PAGE_SIZE = 50;
 const MAX_ACTIVITIES_ROWS = 200;
 const ZERO_EPSILON = 1e-9;
 
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
-  Partial<Pick<HoldingsService, "getLatestValuations">>;
+  Partial<Pick<HoldingsService, "getHistoricalValuations" | "getLatestValuations">>;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
 type PortfolioAiMetricsService = Pick<PortfolioMetricsService, "getIncomeSummary">;
 
@@ -25,6 +27,7 @@ export interface PortfolioAiChatToolsOptions {
   activityService?: PortfolioAiActivityService;
   portfolioMetricsService?: PortfolioAiMetricsService;
   baseCurrency?: string | (() => string | undefined);
+  now?: () => Date;
 }
 
 export function createPortfolioAiChatTools(
@@ -48,6 +51,18 @@ export function createPortfolioAiChatTools(
             getLatestValuations: options.holdingsService.getLatestValuations,
           },
           baseCurrency: options.baseCurrency,
+        }),
+      );
+    }
+    if (options.holdingsService.getHistoricalValuations) {
+      tools.push(
+        createGetValuationHistoryTool({
+          accountService: options.accountService,
+          holdingsService: {
+            getHistoricalValuations: options.holdingsService.getHistoricalValuations,
+          },
+          baseCurrency: options.baseCurrency,
+          now: options.now,
         }),
       );
     }
@@ -489,6 +504,82 @@ function createGetIncomeTool(
   };
 }
 
+function createGetValuationHistoryTool(options: {
+  accountService: Pick<AccountService, "getActiveAccounts">;
+  holdingsService: Pick<Required<HoldingsService>, "getHistoricalValuations">;
+  baseCurrency?: string | (() => string | undefined);
+  now?: () => Date;
+}): AiChatToolDefinition {
+  return {
+    name: "get_valuation_history",
+    description:
+      "Get historical portfolio valuations over time. Returns daily valuation points with total value and net contributions. Use account_id='TOTAL' for aggregate valuations across all accounts. Useful for analyzing portfolio growth, performance trends, and comparing value vs contributions.",
+    parameters: {
+      type: "object",
+      properties: {
+        accountId: {
+          type: "string",
+          description: "Account ID to get valuations for, or 'TOTAL' for all accounts aggregated",
+          default: "TOTAL",
+        },
+        startDate: {
+          type: "string",
+          description: "Start date in YYYY-MM-DD format. Defaults to 365 days ago.",
+        },
+        endDate: {
+          type: "string",
+          description: "End date in YYYY-MM-DD format. Defaults to today.",
+        },
+      },
+      required: [],
+    },
+    execute: async (rawArgs) => {
+      const args = parseValuationHistoryArgs(rawArgs);
+      const baseCurrency = resolveBaseCurrency(options.baseCurrency);
+      const endDate = parseOptionalIsoDate(args.endDate) ?? currentUtcDateString(options.now);
+      const startDate =
+        parseOptionalIsoDate(args.startDate) ?? addUtcDays(endDate, -DEFAULT_VALUATIONS_DAYS);
+
+      const valuationRows =
+        args.accountId === "TOTAL"
+          ? await aggregateValuations({
+              accountIds: options.accountService.getActiveAccounts().map((account) => account.id),
+              getHistoricalValuations: options.holdingsService.getHistoricalValuations,
+              startDate,
+              endDate,
+              baseCurrency,
+            })
+          : await readAccountValuations({
+              accountId: args.accountId,
+              getHistoricalValuations: options.holdingsService.getHistoricalValuations,
+              startDate,
+              endDate,
+              baseCurrency,
+            });
+
+      const originalCount = valuationRows.length;
+      const valuations = valuationRows.slice(0, MAX_VALUATIONS_POINTS);
+      const truncated = originalCount > valuations.length;
+
+      return {
+        data: {
+          valuations,
+          accountScope: args.accountId,
+          currency: baseCurrency,
+          startDate,
+          endDate,
+          ...(truncated
+            ? {
+                truncated: true,
+                originalCount,
+              }
+            : {}),
+        },
+      };
+    },
+  };
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -534,6 +625,21 @@ function parseIncomeArgs(args: unknown): { period?: string } {
   }
   return {
     period: typeof args.period === "string" ? args.period : undefined,
+  };
+}
+
+function parseValuationHistoryArgs(args: unknown): {
+  accountId: string;
+  startDate?: string;
+  endDate?: string;
+} {
+  if (!isRecord(args)) {
+    return { accountId: "TOTAL" };
+  }
+  return {
+    accountId: typeof args.accountId === "string" && args.accountId ? args.accountId : "TOTAL",
+    startDate: typeof args.startDate === "string" ? args.startDate : undefined,
+    endDate: typeof args.endDate === "string" ? args.endDate : undefined,
   };
 }
 
@@ -598,6 +704,58 @@ function activityToolDto(activity: ActivityDetails) {
   };
 }
 
+async function aggregateValuations(options: {
+  accountIds: string[];
+  getHistoricalValuations: Required<HoldingsService>["getHistoricalValuations"];
+  startDate: string;
+  endDate: string;
+  baseCurrency: string;
+}) {
+  const byDate = new Map<string, { totalValue: number; netContribution: number }>();
+
+  for (const accountId of options.accountIds) {
+    const valuations = (await Promise.resolve(
+      options.getHistoricalValuations(accountId, options.startDate, options.endDate),
+    )) as DailyAccountValuation[];
+    for (const valuation of valuations) {
+      const entry = byDate.get(valuation.valuationDate) ?? {
+        totalValue: 0,
+        netContribution: 0,
+      };
+      entry.totalValue += valuation.totalValue * valuation.fxRateToBase;
+      entry.netContribution += valuation.netContribution * valuation.fxRateToBase;
+      byDate.set(valuation.valuationDate, entry);
+    }
+  }
+
+  return [...byDate.entries()]
+    .map(([date, value]) => ({
+      date,
+      totalValue: value.totalValue,
+      netContribution: value.netContribution,
+      currency: options.baseCurrency,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function readAccountValuations(options: {
+  accountId: string;
+  getHistoricalValuations: Required<HoldingsService>["getHistoricalValuations"];
+  startDate: string;
+  endDate: string;
+  baseCurrency: string;
+}) {
+  const valuations = (await Promise.resolve(
+    options.getHistoricalValuations(options.accountId, options.startDate, options.endDate),
+  )) as DailyAccountValuation[];
+  return valuations.map((valuation) => ({
+    date: valuation.valuationDate,
+    totalValue: valuation.totalValue * valuation.fxRateToBase,
+    netContribution: valuation.netContribution * valuation.fxRateToBase,
+    currency: options.baseCurrency,
+  }));
+}
+
 function resolveActivityAccountIds(
   accountId: string | undefined,
   accountService: Pick<AccountService, "getActiveAccounts">,
@@ -645,6 +803,16 @@ function parseIsoDateFilter(name: string, value: string | undefined): string | u
   return value;
 }
 
+function parseOptionalIsoDate(value: string | undefined): string | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return undefined;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value
+    ? undefined
+    : value;
+}
+
 function holdingTypeLabel(value: Holding["holdingType"]): string {
   switch (value) {
     case "security":
@@ -677,6 +845,16 @@ function parseOptionalNumber(value: string | null): number | null {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function currentUtcDateString(now: (() => Date) | undefined): string {
+  return (now?.() ?? new Date()).toISOString().slice(0, 10);
+}
+
+function addUtcDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
 }
 
 function failCashBalanceConversion(message: string): never {
