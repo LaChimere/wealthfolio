@@ -162,15 +162,15 @@
     asset taxonomy assignment callbacks, direct asset Create/Update/Delete
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
     update/delete/import callbacks, and local AI chat thread/message/tag
-    callbacks, contribution-limit callbacks, and domain-event planning/batch
-    processing/worker helper now have TS runtime parity, while provider-backed
-    asset resolution, remaining quote sync outbox follow-ups outside migrated
-    alternative-asset and market-data quote paths, device-sync push/pull runtime
-    wiring, and portfolio recalculation side effects are deferred to
-    activities/import/device-sync runtime parity slices; AI chat persistence,
-    tag persistence, tool-result mutation, and local AI chat sync_outbox
-    callbacks now have TS runtime parity, while provider streaming, tool
-    execution, and attachments are deferred to AI runtime parity slices;
+    callbacks, contribution-limit callbacks, account callbacks, and domain-event
+    planning/batch processing/worker helper now have TS runtime parity, while
+    provider-backed asset resolution, remaining quote sync outbox follow-ups
+    outside migrated alternative-asset and market-data quote paths, device-sync
+    push/pull runtime wiring, and portfolio recalculation side effects are
+    deferred to activities/import/device-sync runtime parity slices; AI chat
+    persistence, tag persistence, tool-result mutation, and local AI chat
+    sync_outbox callbacks now have TS runtime parity, while provider streaming,
+    tool execution, and attachments are deferred to AI runtime parity slices;
     device-sync integration for sync crypto is deferred to device-sync runtime
     parity slices; bounded account/timezone health status/checks, cache
     behavior, legacy-classification health issues, and classification migration
@@ -1451,6 +1451,14 @@ contract:
   Rust-shaped payload fields, missing-delete sync no-op behavior, and runtime
   `contribution_limit` sync_outbox rows. Backend type-check and full repository
   check passed; focused code review found no significant issues.
+- `pr5-account-sync-outbox-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/accounts.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "account sync|TS accounts domain"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes account Create/Update/Delete callbacks, Rust-shaped payload
+  fields with boolean values, preserved broker-managed fields on update,
+  missing-delete sync no-op behavior, and runtime `account` sync_outbox rows.
+  Full repository check passed; focused code review found no significant issues
+  after verifying callbacks are dispatched only after successful transactions.
 
 ## Result
 
@@ -1503,9 +1511,9 @@ contract:
   asset sync-event callback queuing, sync_outbox persistence for migrated
   goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
   taxonomy assignment, direct asset, alternative asset/UUID quote, market-data
-  quote, local AI chat, and contribution-limit callbacks, and domain-event
-  planning/batch-processing/worker helper implemented; broader migration remains
-  active.
+  quote, local AI chat, contribution-limit, and account callbacks, and
+  domain-event planning/batch-processing/worker helper implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the

@@ -1104,6 +1104,91 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime account sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { accountService } = runtime.options;
+      const created = await accountService.createAccount({
+        name: "Brokerage",
+        accountType: "SECURITIES",
+        group: "Investing",
+        currency: "CAD",
+        isDefault: true,
+        isActive: true,
+        trackingMode: "TRANSACTIONS",
+        accountNumber: "123",
+        meta: '{"source":"broker"}',
+        provider: "SNAPTRADE",
+        providerAccountId: "provider-account-1",
+      });
+      await accountService.updateAccount({
+        id: created.id,
+        name: "Brokerage Updated",
+        accountType: "CASH",
+        group: null,
+        isDefault: false,
+        isActive: false,
+        isArchived: true,
+        trackingMode: "HOLDINGS",
+      });
+      await accountService.deleteAccount(created.id);
+      await accountService.deleteAccount("missing-account");
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
+          ["account", created.id, "create"],
+          ["account", created.id, "update"],
+          ["account", created.id, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.id,
+          name: "Brokerage",
+          account_type: "SECURITIES",
+          group: "Investing",
+          currency: "CAD",
+          is_default: true,
+          is_active: true,
+          platform_id: null,
+          account_number: "123",
+          meta: '{"source":"broker"}',
+          provider: "SNAPTRADE",
+          provider_account_id: "provider-account-1",
+          is_archived: false,
+          tracking_mode: "TRANSACTIONS",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: created.id,
+          name: "Brokerage Updated",
+          account_type: "CASH",
+          group: null,
+          currency: "CAD",
+          is_default: false,
+          is_active: false,
+          platform_id: null,
+          account_number: "123",
+          meta: '{"source":"broker"}',
+          provider: "SNAPTRADE",
+          provider_account_id: "provider-account-1",
+          is_archived: true,
+          tracking_mode: "HOLDINGS",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime contribution-limit sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-limit-sync-"));
     const runtime = createSqliteBackedBackendServices({

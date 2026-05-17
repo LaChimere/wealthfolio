@@ -75,6 +75,37 @@ export interface AccountRepository {
   list(filters?: AccountListFilters): Account[];
 }
 
+export interface AccountRepositoryOptions {
+  queueSyncEvent?: (event: AccountSyncEvent) => void;
+}
+
+export type AccountSyncOperation = "Create" | "Update" | "Delete";
+
+export interface AccountSyncEvent {
+  accountId: string;
+  operation: AccountSyncOperation;
+  payload: AccountRowPayload | { id: string };
+}
+
+export interface AccountRowPayload {
+  id: string;
+  name: string;
+  accountType: string;
+  group: string | null;
+  currency: string;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  platformId: string | null;
+  accountNumber: string | null;
+  meta: string | null;
+  provider: string | null;
+  providerAccountId: string | null;
+  isArchived: boolean;
+  trackingMode: string;
+}
+
 export interface AccountService {
   createAccount(newAccount: NewAccount): Promise<Account>;
   updateAccount(accountUpdate: AccountUpdate): Promise<Account>;
@@ -120,12 +151,16 @@ interface AccountRow {
 export const ACCOUNTS_CHANGED_EVENT = "accounts_changed";
 export const TRACKING_MODE_CHANGED_EVENT = "tracking_mode_changed";
 
-export function createAccountRepository(db: Database): AccountRepository {
+export function createAccountRepository(
+  db: Database,
+  options: AccountRepositoryOptions = {},
+): AccountRepository {
   return {
     create(newAccount) {
       validateNewAccount(newAccount);
       const id = crypto.randomUUID();
       let created: Account | undefined;
+      let syncEvent: AccountSyncEvent | undefined;
       db.transaction(() => {
         db.prepare(
           `
@@ -152,8 +187,11 @@ export function createAccountRepository(db: Database): AccountRepository {
           boolToInt(newAccount.isArchived ?? false),
           newAccount.trackingMode ?? "NOT_SET",
         );
-        created = readAccountById(db, id);
+        const row = readAccountRowById(db, id);
+        created = accountFromRow(row);
+        syncEvent = accountSyncEvent(row, "Create");
       })();
+      queueAccountSyncEvent(options, syncEvent);
       if (!created) {
         throw new Error(`Record not found: account ${id}`);
       }
@@ -167,6 +205,7 @@ export function createAccountRepository(db: Database): AccountRepository {
       }
       let previousAccount: Account | undefined;
       let updated: Account | undefined;
+      let syncEvent: AccountSyncEvent | undefined;
 
       db.transaction(() => {
         const existing = readAccountById(db, accountId);
@@ -212,16 +251,28 @@ export function createAccountRepository(db: Database): AccountRepository {
           trackingMode,
           accountId,
         );
-        updated = readAccountById(db, accountId);
+        const row = readAccountRowById(db, accountId);
+        updated = accountFromRow(row);
+        syncEvent = accountSyncEvent(row, "Update");
       })();
+      queueAccountSyncEvent(options, syncEvent);
       if (!previousAccount || !updated) {
         throw new Error(`Record not found: account ${accountId}`);
       }
       return { previousAccount, account: updated };
     },
     delete(accountId) {
-      const result = db.prepare("DELETE FROM accounts WHERE id = ?").run(accountId);
-      return result.changes;
+      let deleted = 0;
+      let syncEvent: AccountSyncEvent | undefined;
+      db.transaction(() => {
+        const result = db.prepare("DELETE FROM accounts WHERE id = ?").run(accountId);
+        deleted = result.changes;
+        if (deleted > 0) {
+          syncEvent = accountSyncDeleteEvent(accountId);
+        }
+      })();
+      queueAccountSyncEvent(options, syncEvent);
+      return deleted;
     },
     getById(accountId) {
       return readAccountById(db, accountId);
@@ -351,6 +402,10 @@ function listAccounts(db: Database, filters: AccountListFilters): Account[] {
 }
 
 function readAccountById(db: Database, accountId: string | undefined): Account {
+  return accountFromRow(readAccountRowById(db, accountId));
+}
+
+function readAccountRowById(db: Database, accountId: string | undefined): AccountRow {
   if (!accountId) {
     throw new Error("Account ID is required");
   }
@@ -366,7 +421,56 @@ function readAccountById(db: Database, accountId: string | undefined): Account {
   if (!row) {
     throw new Error(`Record not found: account ${accountId}`);
   }
-  return accountFromRow(row);
+  return row;
+}
+
+function queueAccountSyncEvent(
+  options: AccountRepositoryOptions,
+  event: AccountSyncEvent | undefined,
+): void {
+  if (event) {
+    options.queueSyncEvent?.(event);
+  }
+}
+
+function accountSyncEvent(
+  row: AccountRow,
+  operation: Exclude<AccountSyncOperation, "Delete">,
+): AccountSyncEvent {
+  return {
+    accountId: row.id,
+    operation,
+    payload: accountRowPayload(row),
+  };
+}
+
+function accountSyncDeleteEvent(accountId: string): AccountSyncEvent {
+  return {
+    accountId,
+    operation: "Delete",
+    payload: { id: accountId },
+  };
+}
+
+function accountRowPayload(row: AccountRow): AccountRowPayload {
+  return {
+    id: row.id,
+    name: row.name,
+    accountType: row.account_type,
+    group: row.group,
+    currency: row.currency,
+    isDefault: Boolean(row.is_default),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    platformId: row.platform_id,
+    accountNumber: row.account_number,
+    meta: row.meta,
+    provider: row.provider,
+    providerAccountId: row.provider_account_id,
+    isArchived: Boolean(row.is_archived),
+    trackingMode: row.tracking_mode,
+  };
 }
 
 function accountSelectColumns(): string {

@@ -5,6 +5,7 @@ import { createEventBus } from "../events";
 import {
   ACCOUNTS_CHANGED_EVENT,
   TRACKING_MODE_CHANGED_EVENT,
+  type AccountSyncEvent,
   type NewAccount,
   createAccountRepository,
   createAccountService,
@@ -261,6 +262,92 @@ describe("TS accounts domain", () => {
           },
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues account sync callbacks for create, update, and existing deletes", async () => {
+    const db = createAccountsDb();
+    const syncEvents: AccountSyncEvent[] = [];
+    const service = createAccountService(
+      createAccountRepository(db, {
+        queueSyncEvent: (event) => syncEvents.push(event),
+      }),
+    );
+
+    try {
+      const created = await service.createAccount({
+        ...newAccount({
+          name: "Synced",
+          group: "Investing",
+          currency: "CAD",
+          isDefault: true,
+          trackingMode: "TRANSACTIONS",
+        }),
+        platformId: "platform-1",
+        accountNumber: "123",
+        meta: '{"source":"broker"}',
+        provider: "SNAPTRADE",
+        providerAccountId: "provider-account-1",
+      });
+      await service.updateAccount({
+        id: created.id,
+        name: "Synced Updated",
+        accountType: "CASH",
+        group: null,
+        isDefault: false,
+        isActive: false,
+        isArchived: true,
+        trackingMode: "HOLDINGS",
+        platformId: "ignored-platform",
+        accountNumber: "ignored-number",
+        meta: '{"source":"form"}',
+        provider: "MANUAL",
+        providerAccountId: "ignored-provider-account",
+      });
+      await service.deleteAccount(created.id);
+      await service.deleteAccount("missing-account");
+
+      expect(syncEvents).toHaveLength(3);
+      expect(syncEvents.map((event) => [event.operation, event.accountId])).toEqual([
+        ["Create", created.id],
+        ["Update", created.id],
+        ["Delete", created.id],
+      ]);
+      expect(syncEvents[0]?.payload).toMatchObject({
+        id: created.id,
+        name: "Synced",
+        accountType: "SECURITIES",
+        group: "Investing",
+        currency: "CAD",
+        isDefault: true,
+        isActive: true,
+        platformId: "platform-1",
+        accountNumber: "123",
+        meta: '{"source":"broker"}',
+        provider: "SNAPTRADE",
+        providerAccountId: "provider-account-1",
+        isArchived: false,
+        trackingMode: "TRANSACTIONS",
+      });
+      expect(syncEvents[1]?.payload).toMatchObject({
+        id: created.id,
+        name: "Synced Updated",
+        accountType: "CASH",
+        group: null,
+        currency: "CAD",
+        isDefault: false,
+        isActive: false,
+        platformId: "platform-1",
+        accountNumber: "123",
+        meta: '{"source":"broker"}',
+        provider: "SNAPTRADE",
+        providerAccountId: "provider-account-1",
+        isArchived: true,
+        trackingMode: "HOLDINGS",
+      });
+      expect(syncEvents[2]?.payload).toEqual({ id: created.id });
     } finally {
       db.close();
     }

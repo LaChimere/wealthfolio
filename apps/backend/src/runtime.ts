@@ -5,6 +5,7 @@ import {
   createAccountRepository,
   createAccountService,
   type AccountService,
+  type AccountSyncEvent,
 } from "./domains/accounts";
 import { createAiChatService } from "./domains/ai-chat";
 import { createAlternativeAssetService } from "./domains/alternative-assets";
@@ -179,7 +180,14 @@ function createServicesFromDatabase(
   const settingsService = createSettingsService(db);
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const syncOutboxQueue = createSyncOutboxQueue(db);
-  const accountService = createRuntimeAccountService(db, eventBus, baseCurrency);
+  const accountService = createRuntimeAccountService(db, eventBus, baseCurrency, (event) => {
+    syncOutboxQueue.queueSyncEvent({
+      entity: "accounts",
+      entityId: event.accountId,
+      operation: event.operation,
+      payload: event.payload,
+    });
+  });
   const exchangeRateService = createExchangeRateService(
     createExchangeRateRepository(db, {
       queueAssetSyncEvent: (event) => {
@@ -481,8 +489,9 @@ function createRuntimeAccountService(
   db: InitializedSqliteDatabase["db"],
   eventBus: BackendEventBus,
   baseCurrency: () => string | undefined,
+  queueSyncEvent?: (event: AccountSyncEvent) => void,
 ): AccountService {
-  return createAccountService(createAccountRepository(db), {
+  return createAccountService(createAccountRepository(db, { queueSyncEvent }), {
     baseCurrency,
     eventBus,
   });
