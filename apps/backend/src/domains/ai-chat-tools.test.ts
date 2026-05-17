@@ -4,6 +4,7 @@ import { createPortfolioAiChatTools } from "./ai-chat-tools";
 import type { Account } from "./accounts";
 import type { ActivityDetails, ActivitySearchRequest } from "./activities";
 import type { Goal } from "./goals";
+import type { HealthStatus } from "./health";
 import type {
   AllocationHoldings,
   DailyAccountValuation,
@@ -477,6 +478,105 @@ describe("TS AI chat built-in tools", () => {
         totalTarget: 5000,
         truncated: true,
         originalCount: 55,
+      },
+    });
+  });
+
+  test("returns Rust-compatible get_health_status not-computed payload", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      healthService: {
+        getCachedHealthStatus: () => null,
+      },
+    });
+
+    const getHealthStatus = tools.find((tool) => tool.name === "get_health_status");
+    const result = await getHealthStatus?.execute({});
+
+    expect(getHealthStatus).toMatchObject({
+      description: expect.stringContaining("cached portfolio health status"),
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    });
+    expect(result).toEqual({
+      data: {
+        overallSeverity: "NOT_COMPUTED",
+        issues: [],
+        isStale: false,
+        note: "No health check has run yet in this session. Ask the user to open the Health Center to run a check.",
+      },
+    });
+  });
+
+  test("maps Rust-compatible get_health_status cached issues", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      healthService: {
+        getCachedHealthStatus: () =>
+          healthStatus({
+            overallSeverity: "WARNING",
+            isStale: true,
+            issues: [
+              {
+                id: "price_stale:AAPL",
+                severity: "WARNING",
+                category: "PRICE_STALENESS",
+                title: "Outdated prices",
+                message: "AAPL has stale price data.",
+                affectedCount: 1,
+                affectedMvPct: 0.05,
+                details: "Last updated 10 days ago.",
+                dataHash: "abc123",
+                timestamp: "2026-05-17T00:00:00.000Z",
+              },
+              {
+                id: "timezone_missing",
+                severity: "INFO",
+                category: "SETTINGS_CONFIGURATION",
+                title: "Timezone not configured",
+                message: "Set a timezone.",
+                affectedCount: 0,
+                dataHash: "def456",
+                timestamp: "2026-05-17T00:00:00.000Z",
+              },
+            ],
+          }),
+      },
+    });
+
+    const result = await tools.find((tool) => tool.name === "get_health_status")?.execute({});
+
+    expect(result).toEqual({
+      data: {
+        overallSeverity: "WARNING",
+        issues: [
+          {
+            id: "price_stale:AAPL",
+            severity: "WARNING",
+            category: "PRICE_STALENESS",
+            title: "Outdated prices",
+            message: "AAPL has stale price data.",
+            affectedCount: 1,
+            affectedMvPct: 0.05,
+            details: "Last updated 10 days ago.",
+          },
+          {
+            id: "timezone_missing",
+            severity: "INFO",
+            category: "SETTINGS_CONFIGURATION",
+            title: "Timezone not configured",
+            message: "Set a timezone.",
+            affectedCount: 0,
+          },
+        ],
+        isStale: true,
       },
     });
   });
@@ -1504,6 +1604,17 @@ function allocationHoldings(overrides: Partial<AllocationHoldings>): AllocationH
     holdings: [],
     totalValue: 500,
     currency: "USD",
+    ...overrides,
+  };
+}
+
+function healthStatus(overrides: Partial<HealthStatus>): HealthStatus {
+  return {
+    overallSeverity: "INFO",
+    issueCounts: {},
+    issues: [],
+    checkedAt: "2026-05-17T00:00:00.000Z",
+    isStale: false,
     ...overrides,
   };
 }

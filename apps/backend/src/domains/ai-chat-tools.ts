@@ -2,6 +2,7 @@ import type { AccountService } from "./accounts";
 import type { ActivityDetails, ActivityService } from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
+import type { HealthService, HealthStatus } from "./health";
 import type {
   AllocationHoldings,
   DailyAccountValuation,
@@ -36,6 +37,7 @@ type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
     >
   >;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
+type PortfolioAiHealthService = Pick<HealthService, "getCachedHealthStatus">;
 type PortfolioAiMetricsService = Partial<
   Pick<PortfolioMetricsService, "calculatePerformanceHistory" | "getIncomeSummary">
 >;
@@ -45,6 +47,7 @@ export interface PortfolioAiChatToolsOptions {
     Partial<Pick<AccountService, "getAllAccounts">>;
   holdingsService?: PortfolioAiHoldingsService;
   goalService?: Pick<GoalService, "getGoals">;
+  healthService?: PortfolioAiHealthService;
   activityService?: PortfolioAiActivityService;
   portfolioMetricsService?: PortfolioAiMetricsService;
   baseCurrency?: string | (() => string | undefined);
@@ -126,6 +129,13 @@ export function createPortfolioAiChatTools(
     tools.push(
       createGetIncomeTool({
         getIncomeSummary: options.portfolioMetricsService.getIncomeSummary,
+      }),
+    );
+  }
+  if (options.healthService?.getCachedHealthStatus) {
+    tools.push(
+      createGetHealthStatusTool({
+        getCachedHealthStatus: options.healthService.getCachedHealthStatus,
       }),
     );
   }
@@ -385,6 +395,38 @@ function createGetGoalsTool(goalService: Pick<GoalService, "getGoals">): AiChatT
               }
             : {}),
         },
+      };
+    },
+  };
+}
+
+function createGetHealthStatusTool(
+  healthService: Pick<Required<HealthService>, "getCachedHealthStatus">,
+): AiChatToolDefinition {
+  return {
+    name: "get_health_status",
+    description:
+      "Read the cached portfolio health status produced by the Health Center. `overallSeverity` is one of INFO | WARNING | ERROR | CRITICAL, or NOT_COMPUTED when no check has run yet in this session (in that case `issues` is empty and `note` tells the user how to populate it). Each issue has `severity` (same scale), `category` (PRICE_STALENESS | FX_INTEGRITY | CLASSIFICATION | DATA_CONSISTENCY | ACCOUNT_CONFIGURATION | SETTINGS_CONFIGURATION), `title`, `message`, `affectedCount`, optional `affectedMvPct` (share of portfolio market value impacted, as a fraction 0.0-1.0), and optional `details`. `isStale` is true when the cache is older than 5 minutes. Use this to diagnose data problems (missing prices, stale FX rates, negative balances, unclassified assets) and guide the user to fixes in the Health Center.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+    execute: () => {
+      const status = healthService.getCachedHealthStatus();
+      if (!status) {
+        return {
+          data: {
+            overallSeverity: "NOT_COMPUTED",
+            issues: [],
+            isStale: false,
+            note: "No health check has run yet in this session. Ask the user to open the Health Center to run a check.",
+          },
+        };
+      }
+
+      return {
+        data: healthStatusToolDto(status),
       };
     },
   };
@@ -903,6 +945,23 @@ function goalToolDto(goal: Goal) {
     progressPercent: (goal.summaryProgress ?? 0) * 100,
     deadline: goal.targetDate,
     isAchieved: goal.statusLifecycle === "achieved",
+  };
+}
+
+function healthStatusToolDto(status: HealthStatus) {
+  return {
+    overallSeverity: status.overallSeverity,
+    issues: status.issues.map((issue) => ({
+      id: issue.id,
+      severity: issue.severity,
+      category: issue.category,
+      title: issue.title,
+      message: issue.message,
+      affectedCount: issue.affectedCount,
+      ...(issue.affectedMvPct !== undefined ? { affectedMvPct: issue.affectedMvPct } : {}),
+      ...(issue.details !== undefined ? { details: issue.details } : {}),
+    })),
+    isStale: status.isStale,
   };
 }
 

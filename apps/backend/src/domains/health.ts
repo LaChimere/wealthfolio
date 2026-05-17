@@ -93,6 +93,7 @@ export interface HealthService {
   getDismissedIds(): Promise<string[]>;
   getConfig(): Promise<HealthConfig>;
   updateConfig(config: HealthConfig): Promise<void>;
+  getCachedHealthStatus?(clientTimezone?: string): HealthStatus | null;
   getHealthStatus?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
   runHealthChecks?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
   executeFix?(action: HealthFixAction): Promise<void> | void;
@@ -199,6 +200,14 @@ export function createHealthService(
       validateHealthConfig(nextConfig);
       config = { ...nextConfig };
       clearCache();
+    },
+    getCachedHealthStatus(clientTimezone) {
+      const cached = cachedStatuses.get(clientTimezone?.trim() ?? "");
+      if (!cached) {
+        return null;
+      }
+      const stale = now().getTime() - cached.cachedAt.getTime() > cacheTtlMs;
+      return cloneStatus(cached.status, stale);
     },
     async getHealthStatus(clientTimezone) {
       const cacheKey = clientTimezone?.trim() ?? "";

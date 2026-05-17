@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 154
+turns_used: 155
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T22:12:20+08:00"
+updated_at: "2026-05-17T22:23:26+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -983,6 +983,12 @@ updated_at: "2026-05-17T22:12:20+08:00"
   mapping YTD/1M/3M/6M/1Y/ALL periods to calculation date ranges, preserving
   account/TOTAL requests, base-currency fallback, and optional metric omission.
   Backend type-check and focused AI chat/tool/runtime/http tests passed.
+- Turn 155: Wired the Rust-shaped `get_health_status` AI tool into the TS
+  runtime registry by adding cached-status access to the health service, sharing
+  the runtime health service with chat tools, preserving NOT_COMPUTED behavior
+  before a health check has run, and mapping cached issue
+  severity/category/details output. Backend type-check and focused AI
+  chat/health/runtime/http tests passed.
 
 ## Deferred items
 
@@ -1047,10 +1053,10 @@ updated_at: "2026-05-17T22:12:20+08:00"
   text/reasoning streaming, generated thread titles, OpenAI-compatible/Ollama
   injected tool-call execution, built-in `get_accounts`, `get_holdings`,
   `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
-  `get_income`, `get_valuation_history`, and `get_asset_allocation`, and bounded
-  text/CSV attachment prompt injection now have TS runtime parity, while the
-  remaining built-in portfolio tool wiring belongs in dedicated AI runtime
-  slices.
+  `get_income`, `get_valuation_history`, `get_asset_allocation`, and
+  `get_health_status`, and bounded text/CSV attachment prompt injection now have
+  TS runtime parity, while the remaining built-in portfolio tool wiring belongs
+  in dedicated AI runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can

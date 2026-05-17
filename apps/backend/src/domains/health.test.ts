@@ -60,6 +60,44 @@ describe("TS health domain", () => {
     }
   });
 
+  test("reads cached health status without running checks", async () => {
+    const db = createHealthDb();
+    let nowMs = Date.parse("2026-05-14T12:00:00.000Z");
+    let settingsReads = 0;
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date(nowMs),
+    });
+
+    try {
+      expect(service.getCachedHealthStatus?.()).toBeNull();
+      expect(settingsReads).toBe(0);
+
+      await service.runHealthChecks?.();
+      const cached = service.getCachedHealthStatus?.();
+      expect(cached).toMatchObject({
+        overallSeverity: "INFO",
+        isStale: false,
+      });
+      expect(settingsReads).toBe(1);
+
+      nowMs += 6 * 60 * 1000;
+      const stale = service.getCachedHealthStatus?.();
+      expect(stale).toMatchObject({
+        overallSeverity: "INFO",
+        isStale: true,
+      });
+      expect(settingsReads).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("runs bounded account and timezone health checks with severity rollup", async () => {
     const db = createHealthDb();
     const accounts = [

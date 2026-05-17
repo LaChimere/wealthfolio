@@ -297,6 +297,11 @@ function createServicesFromDatabase(
     exchangeRateService,
     timezone: () => settingsService.getSettings().timezone,
   });
+  const healthService = createHealthService(createHealthRepository(db), undefined, {
+    accountProvider: accountService,
+    classificationMigrationProvider: taxonomyService,
+    settingsProvider: settingsService,
+  });
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -345,6 +350,7 @@ function createServicesFromDatabase(
         activityService,
         holdingsService,
         goalService,
+        healthService,
         portfolioMetricsService,
         baseCurrency,
       }),
@@ -423,11 +429,7 @@ function createServicesFromDatabase(
     exchangeRateService,
     goalService,
     goalValuationProvider: createGoalValuationProvider(db, accountService),
-    healthService: createHealthService(createHealthRepository(db), undefined, {
-      accountProvider: accountService,
-      classificationMigrationProvider: taxonomyService,
-      settingsProvider: settingsService,
-    }),
+    healthService,
     holdingsService,
     marketDataProviderService: createMarketDataProviderService(
       createMarketDataProviderRepository(db),
