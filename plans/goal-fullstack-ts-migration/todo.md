@@ -178,10 +178,10 @@
     health-fix dispatch now have TS runtime parity, while calculation-heavy
     health checks, market sync fix execution, and non-classification
     `/health/fix` dispatch are deferred to health/calculation parity slices;
-    disabled Connect feature-flag responses, local empty-list routes, and
-    disabled device-sync route responses now have TS runtime parity, while real
-    Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-    broker sync profile persistence, local sync repositories, subscription
+    disabled Connect feature-flag responses, local empty-list routes, local
+    broker sync profile persistence, and disabled device-sync route responses
+    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, local sync repositories, subscription
     entitlement checks, event production, E2EE enrollment, sync engine,
     snapshot/upload runtime, background workers, device-sync cloud clients,
     token lifecycle, team-key operations, key material handling, pairing flows,
@@ -1471,6 +1471,15 @@ contract:
   events, unconditional template Delete emission, and runtime
   `import_template`/`activity_import_profile` sync_outbox rows. Full repository
   check passed; focused code review found no significant issues.
+- `pr5-broker-sync-profile-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "broker sync profiles|broker sync profile rules"`,
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "disabled Connect runtime behavior|broker sync profile callbacks"`,
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible account/broker/system/default profile
+  precedence, account and broker-scope patch-merge saves, account profile links,
+  disabled cloud Connect behavior, and runtime
+  `import_template`/`activity_import_profile` sync_outbox rows for broker
+  profile saves.
 
 ## Result
 
@@ -1523,10 +1532,10 @@ contract:
   asset sync-event callback queuing, sync_outbox persistence for migrated
   goal/activity callbacks plus FX asset, custom provider, custom taxonomy, asset
   taxonomy assignment, direct asset, alternative asset/UUID quote, market-data
-  quote, local AI chat, contribution-limit, account, and
-  import-template/account-template callbacks, and domain-event
-  planning/batch-processing/worker helper implemented; broader migration remains
-  active.
+  quote, local AI chat, contribution-limit, account,
+  import-template/account-template, and broker sync profile callbacks, and
+  domain-event planning/batch-processing/worker helper implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the

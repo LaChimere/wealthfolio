@@ -47,6 +47,27 @@ export interface ImportTemplateData extends ImportMappingConfig {
   kind: TemplateKind;
 }
 
+export type BrokerProfileScope = "ACCOUNT" | "BROKER";
+
+export interface BrokerSyncProfileData {
+  id: string;
+  name: string;
+  scope: ImportTemplateScope;
+  sourceSystem: string;
+  activityMappings: Record<string, string[]>;
+  symbolMappings: Record<string, string>;
+  symbolMappingMeta: Record<string, SymbolMappingMeta>;
+}
+
+export interface SaveBrokerSyncProfileRulesRequest {
+  accountId: string;
+  sourceSystem: string;
+  scope: BrokerProfileScope;
+  activityRulePatches: Record<string, string[]>;
+  securityRulePatches: Record<string, string>;
+  securityRuleMetaPatches: Record<string, SymbolMappingMeta>;
+}
+
 export interface ActivitySearchRequest {
   page: number;
   pageSize: number;
@@ -288,6 +309,13 @@ export interface ActivityService {
     template: Record<string, unknown>,
   ): Promise<ImportTemplateData> | ImportTemplateData;
   deleteImportTemplate?(id: string): Promise<void> | void;
+  getBrokerSyncProfile?(
+    accountId: string,
+    sourceSystem: string,
+  ): Promise<BrokerSyncProfileData> | BrokerSyncProfileData;
+  saveBrokerSyncProfileRules?(
+    request: Record<string, unknown>,
+  ): Promise<BrokerSyncProfileData> | BrokerSyncProfileData;
   linkAccountTemplate?(
     accountId: string,
     templateId: string,
@@ -1115,6 +1143,103 @@ export function createActivityService(
         syncEvent = importTemplateDeleteSyncEvent(id);
       })();
       queueActivitySyncEvents(options, syncEvent ? [syncEvent] : []);
+    },
+
+    getBrokerSyncProfile(accountId, sourceSystem) {
+      return getBrokerSyncProfileData(db, accountId, sourceSystem);
+    },
+
+    saveBrokerSyncProfileRules(input) {
+      const request = normalizeSaveBrokerSyncProfileRulesRequest(input);
+      const templateId =
+        request.scope === "ACCOUNT"
+          ? `broker_${request.sourceSystem.toLowerCase()}_${request.accountId}`
+          : `broker_${request.sourceSystem.toLowerCase()}`;
+      const existingTemplate = readImportTemplateRow(db, templateId);
+      const baseline =
+        existingTemplate?.kind === "BROKER_ACTIVITY"
+          ? brokerProfileDataFromRowOrDefault(existingTemplate)
+          : getBrokerSyncProfileData(
+              db,
+              request.scope === "ACCOUNT" ? request.accountId : "",
+              request.sourceSystem,
+            );
+      const activityMappings = { ...baseline.activityMappings };
+      for (const [key, values] of Object.entries(request.activityRulePatches)) {
+        activityMappings[key] = values;
+      }
+      const symbolMappings = { ...baseline.symbolMappings };
+      for (const [key, value] of Object.entries(request.securityRulePatches)) {
+        symbolMappings[key] = value;
+      }
+      const symbolMappingMeta = { ...baseline.symbolMappingMeta };
+      for (const [key, value] of Object.entries(request.securityRuleMetaPatches)) {
+        symbolMappingMeta[key] = value;
+      }
+      const profile: BrokerSyncProfileData = {
+        id: templateId,
+        name: `${request.sourceSystem} Profile`,
+        scope: "USER",
+        sourceSystem: request.sourceSystem,
+        activityMappings,
+        symbolMappings,
+        symbolMappingMeta,
+      };
+      const config = serializeBrokerProfileConfig(profile);
+      const syncEvents: ActivitySyncEvent[] = [];
+      const now = sqliteNow();
+
+      db.transaction(() => {
+        db.query(
+          `
+            INSERT INTO import_templates (
+              id, name, scope, kind, source_system, config_version, config, created_at, updated_at
+            )
+            VALUES (?, ?, 'USER', 'BROKER_ACTIVITY', ?, 1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              scope = excluded.scope,
+              kind = excluded.kind,
+              source_system = excluded.source_system,
+              config_version = excluded.config_version,
+              config = excluded.config,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+          `,
+        ).run(templateId, profile.name, request.sourceSystem, config, now, now);
+        const templateEvent = importTemplateSyncEvent(readImportTemplateRowOrThrow(db, templateId));
+        if (templateEvent) {
+          syncEvents.push(templateEvent);
+        }
+
+        if (request.scope === "ACCOUNT") {
+          const existingLink = readBrokerImportAccountTemplateLink(
+            db,
+            request.accountId,
+            request.sourceSystem,
+          );
+          upsertImportAccountTemplateLink(db, {
+            id: existingLink?.id ?? crypto.randomUUID(),
+            account_id: request.accountId,
+            context_kind: "BROKER_ACTIVITY",
+            source_system: request.sourceSystem,
+            template_id: templateId,
+            created_at: now,
+            updated_at: now,
+          });
+          syncEvents.push(
+            importAccountTemplateSyncEvent(
+              readBrokerImportAccountTemplateLinkOrThrow(
+                db,
+                request.accountId,
+                request.sourceSystem,
+              ),
+            ),
+          );
+        }
+      })();
+      queueActivitySyncEvents(options, syncEvents);
+      return profile;
     },
 
     linkAccountTemplate(accountId, templateId, contextKind) {
@@ -3950,6 +4075,28 @@ function normalizeImportTemplateInput(input: Record<string, unknown>): ImportTem
   };
 }
 
+function normalizeSaveBrokerSyncProfileRulesRequest(
+  input: Record<string, unknown>,
+): SaveBrokerSyncProfileRulesRequest {
+  return {
+    accountId: requiredString(input.accountId, "accountId"),
+    sourceSystem: requiredString(input.sourceSystem, "sourceSystem"),
+    scope: normalizeBrokerProfileScope(input.scope),
+    activityRulePatches:
+      input.activityRulePatches === undefined
+        ? {}
+        : parseStringArrayRecord(input.activityRulePatches, "activityRulePatches"),
+    securityRulePatches:
+      input.securityRulePatches === undefined
+        ? {}
+        : parseStringRecord(input.securityRulePatches, "securityRulePatches"),
+    securityRuleMetaPatches:
+      input.securityRuleMetaPatches === undefined
+        ? {}
+        : parseSymbolMappingMetaRecord(input.securityRuleMetaPatches, "securityRuleMetaPatches"),
+  };
+}
+
 function readImportTemplateRow(db: Database, id: string): ImportTemplateRow | null {
   return db
     .query<ImportTemplateRow, [string]>("SELECT * FROM import_templates WHERE id = ?")
@@ -3962,6 +4109,71 @@ function readImportTemplateRowOrThrow(db: Database, id: string): ImportTemplateR
     throw new Error(`Record not found: import template ${id}`);
   }
   return row;
+}
+
+function getBrokerSyncProfileData(
+  db: Database,
+  accountId: string,
+  sourceSystem: string,
+): BrokerSyncProfileData {
+  const accountTemplate = db
+    .query<ImportTemplateRow, [string, string]>(
+      `
+        SELECT templates.*
+        FROM import_account_templates links
+        INNER JOIN import_templates templates ON templates.id = links.template_id
+        WHERE links.account_id = ?
+          AND links.context_kind = 'BROKER_ACTIVITY'
+          AND links.source_system = ?
+          AND templates.scope = 'USER'
+        LIMIT 1
+      `,
+    )
+    .get(accountId, sourceSystem);
+  if (accountTemplate) {
+    return brokerProfileDataFromRow(accountTemplate);
+  }
+
+  const brokerTemplate = db
+    .query<ImportTemplateRow, [string, string]>(
+      `
+        SELECT *
+        FROM import_templates templates
+        WHERE templates.kind = 'BROKER_ACTIVITY'
+          AND templates.source_system = ?
+          AND templates.scope = 'USER'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM import_account_templates links
+            WHERE links.context_kind = 'BROKER_ACTIVITY'
+              AND links.source_system = ?
+              AND links.template_id = templates.id
+          )
+        LIMIT 1
+      `,
+    )
+    .get(sourceSystem, sourceSystem);
+  if (brokerTemplate) {
+    return brokerProfileDataFromRow(brokerTemplate);
+  }
+
+  const systemTemplate = db
+    .query<ImportTemplateRow, [string]>(
+      `
+        SELECT *
+        FROM import_templates
+        WHERE kind = 'BROKER_ACTIVITY'
+          AND source_system = ?
+          AND scope = 'SYSTEM'
+        LIMIT 1
+      `,
+    )
+    .get(sourceSystem);
+  if (systemTemplate) {
+    return brokerProfileDataFromRow(systemTemplate);
+  }
+
+  return defaultBrokerSyncProfileData(sourceSystem);
 }
 
 function readImportAccountTemplateLink(
@@ -3980,6 +4192,24 @@ function readImportAccountTemplateLink(
     .get(accountId, contextKind);
 }
 
+function readBrokerImportAccountTemplateLink(
+  db: Database,
+  accountId: string,
+  sourceSystem: string,
+): ImportAccountTemplateRow | null {
+  return db
+    .query<ImportAccountTemplateRow, [string, string]>(
+      `
+        SELECT *
+        FROM import_account_templates
+        WHERE account_id = ?
+          AND context_kind = 'BROKER_ACTIVITY'
+          AND source_system = ?
+      `,
+    )
+    .get(accountId, sourceSystem);
+}
+
 function readImportAccountTemplateLinkOrThrow(
   db: Database,
   accountId: string,
@@ -3988,6 +4218,18 @@ function readImportAccountTemplateLinkOrThrow(
   const row = readImportAccountTemplateLink(db, accountId, contextKind);
   if (!row) {
     throw new Error(`Record not found: import account template ${accountId}/${contextKind}`);
+  }
+  return row;
+}
+
+function readBrokerImportAccountTemplateLinkOrThrow(
+  db: Database,
+  accountId: string,
+  sourceSystem: string,
+): ImportAccountTemplateRow {
+  const row = readBrokerImportAccountTemplateLink(db, accountId, sourceSystem);
+  if (!row) {
+    throw new Error(`Record not found: import account template ${accountId}/BROKER_ACTIVITY`);
   }
   return row;
 }
@@ -4039,6 +4281,25 @@ function templateDataFromRow(row: ImportTemplateRow): ImportTemplateData {
   };
 }
 
+function brokerProfileDataFromRow(row: ImportTemplateRow): BrokerSyncProfileData {
+  const config = parseStoredBrokerProfileConfig(row.config, "broker profile data");
+  return {
+    id: row.id,
+    name: row.name,
+    scope: row.scope === "SYSTEM" ? "SYSTEM" : "USER",
+    sourceSystem: row.source_system,
+    ...config,
+  };
+}
+
+function brokerProfileDataFromRowOrDefault(row: ImportTemplateRow): BrokerSyncProfileData {
+  try {
+    return brokerProfileDataFromRow(row);
+  } catch {
+    return defaultBrokerSyncProfileData("");
+  }
+}
+
 function defaultImportMappingData(): ImportMappingData {
   return {
     ...defaultImportConfig(),
@@ -4056,6 +4317,18 @@ function defaultImportTemplateData(): ImportTemplateData {
     name: "",
     scope: "USER",
     kind: "CSV_ACTIVITY",
+  };
+}
+
+function defaultBrokerSyncProfileData(sourceSystem: string): BrokerSyncProfileData {
+  return {
+    id: "",
+    name: "",
+    scope: "USER",
+    sourceSystem,
+    activityMappings: {},
+    symbolMappings: {},
+    symbolMappingMeta: {},
   };
 }
 
@@ -4097,6 +4370,21 @@ function parseStoredImportConfig(configJson: string, context: string): ImportMap
   }
 }
 
+function parseStoredBrokerProfileConfig(
+  configJson: string,
+  context: string,
+): Pick<BrokerSyncProfileData, "activityMappings" | "symbolMappings" | "symbolMappingMeta"> {
+  try {
+    const parsed = JSON.parse(configJson) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error("config must be an object");
+    }
+    return brokerProfileConfigFromRecord(parsed);
+  } catch (error) {
+    throw new Error(`Failed to parse ${context}: ${errorMessage(error)}`);
+  }
+}
+
 function importConfigFromRecord(record: Record<string, unknown>): ImportMappingConfig {
   const defaults = defaultImportConfig();
   return {
@@ -4127,6 +4415,25 @@ function importConfigFromRecord(record: Record<string, unknown>): ImportMappingC
   };
 }
 
+function brokerProfileConfigFromRecord(
+  record: Record<string, unknown>,
+): Pick<BrokerSyncProfileData, "activityMappings" | "symbolMappings" | "symbolMappingMeta"> {
+  return {
+    activityMappings:
+      record.activityMappings === undefined
+        ? {}
+        : parseStringArrayRecord(record.activityMappings, "activityMappings"),
+    symbolMappings:
+      record.symbolMappings === undefined
+        ? {}
+        : parseStringRecord(record.symbolMappings, "symbolMappings"),
+    symbolMappingMeta:
+      record.symbolMappingMeta === undefined
+        ? {}
+        : parseSymbolMappingMetaRecord(record.symbolMappingMeta, "symbolMappingMeta"),
+  };
+}
+
 function serializeImportConfig(config: ImportMappingConfig): string {
   const payload: Record<string, unknown> = {
     fieldMappings: config.fieldMappings,
@@ -4139,6 +4446,17 @@ function serializeImportConfig(config: ImportMappingConfig): string {
   }
   if (config.parseConfig !== undefined) {
     payload.parseConfig = config.parseConfig;
+  }
+  return JSON.stringify(payload);
+}
+
+function serializeBrokerProfileConfig(profile: BrokerSyncProfileData): string {
+  const payload: Record<string, unknown> = {
+    activityMappings: profile.activityMappings,
+    symbolMappings: profile.symbolMappings,
+  };
+  if (Object.keys(profile.symbolMappingMeta).length > 0) {
+    payload.symbolMappingMeta = profile.symbolMappingMeta;
   }
   return JSON.stringify(payload);
 }
@@ -4216,6 +4534,13 @@ function normalizeTemplateKind(value: unknown): TemplateKind {
     return "CSV_ACTIVITY";
   }
   throw new Error("Invalid input: kind must be CSV_ACTIVITY, CSV_HOLDINGS, or BROKER_ACTIVITY");
+}
+
+function normalizeBrokerProfileScope(value: unknown): BrokerProfileScope {
+  if (value === "ACCOUNT" || value === "BROKER") {
+    return value;
+  }
+  throw new Error("Invalid input: scope must be ACCOUNT or BROKER");
 }
 
 function normalizeCreateSubtype(value: unknown): string | null {

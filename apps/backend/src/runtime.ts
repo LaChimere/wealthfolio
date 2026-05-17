@@ -14,7 +14,7 @@ import { createAppUtilityService } from "./domains/app-utilities";
 import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
 import {
   createDisabledConnectDeviceSyncService,
-  createDisabledConnectService,
+  createLocalConnectService,
 } from "./domains/connect";
 import {
   createContributionDepositCalculator,
@@ -248,15 +248,17 @@ function createServicesFromDatabase(
     }),
   );
 
+  const activityService = createActivityService(db, {
+    eventBus,
+    ensureFxPairs: (pairs) => exchangeRateService.ensureFxPairs(pairs),
+    queueSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent(event);
+    },
+  });
+
   const options: BackendRequestHandlerOptions = {
     accountService,
-    activityService: createActivityService(db, {
-      eventBus,
-      ensureFxPairs: (pairs) => exchangeRateService.ensureFxPairs(pairs),
-      queueSyncEvent: (event) => {
-        syncOutboxQueue.queueSyncEvent(event);
-      },
-    }),
+    activityService,
     alternativeAssetService: createAlternativeAssetService(db, {
       eventBus,
       queueAssetSyncEvent: (event) => {
@@ -333,7 +335,7 @@ function createServicesFromDatabase(
       prepareDatabaseRestore,
     }),
     connectDeviceSyncService: createDisabledConnectDeviceSyncService(),
-    connectService: createDisabledConnectService(),
+    connectService: createLocalConnectService(activityService),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
         queueSyncEvent: (event) =>

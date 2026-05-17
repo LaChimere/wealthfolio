@@ -2476,6 +2476,167 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("reads broker sync profiles with Rust-compatible precedence and defaults", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertBrokerTemplate(db, {
+        id: "system_snaptrade",
+        name: "SnapTrade System",
+        scope: "SYSTEM",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["System Buy"] },
+        symbolMappings: { AAPL: "AAPL.US" },
+      });
+      insertBrokerTemplate(db, {
+        id: "broker_snaptrade",
+        name: "SnapTrade Broker",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["Broker Buy"] },
+        symbolMappings: { MSFT: "MSFT.US" },
+      });
+      insertBrokerTemplate(db, {
+        id: "broker_snaptrade_account-1",
+        name: "SnapTrade Account",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { SELL: ["Account Sell"] },
+        symbolMappings: { TSLA: "TSLA.US" },
+      });
+      upsertBrokerLink(db, "account-1", "broker_snaptrade_account-1", "snaptrade");
+
+      expect(await service.getBrokerSyncProfile?.("account-1", "snaptrade")).toEqual({
+        id: "broker_snaptrade_account-1",
+        name: "SnapTrade Account",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { SELL: ["Account Sell"] },
+        symbolMappings: { TSLA: "TSLA.US" },
+        symbolMappingMeta: {},
+      });
+      expect(await service.getBrokerSyncProfile?.("account-2", "snaptrade")).toEqual({
+        id: "broker_snaptrade",
+        name: "SnapTrade Broker",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["Broker Buy"] },
+        symbolMappings: { MSFT: "MSFT.US" },
+        symbolMappingMeta: {},
+      });
+
+      db.query("DELETE FROM import_templates WHERE id = 'broker_snaptrade'").run();
+      expect(await service.getBrokerSyncProfile?.("account-2", "snaptrade")).toEqual({
+        id: "system_snaptrade",
+        name: "SnapTrade System",
+        scope: "SYSTEM",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["System Buy"] },
+        symbolMappings: { AAPL: "AAPL.US" },
+        symbolMappingMeta: {},
+      });
+      expect(await service.getBrokerSyncProfile?.("account-2", "ibkr")).toEqual({
+        id: "",
+        name: "",
+        scope: "USER",
+        sourceSystem: "ibkr",
+        activityMappings: {},
+        symbolMappings: {},
+        symbolMappingMeta: {},
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("saves broker sync profile rules and queues template/link callbacks", async () => {
+    const db = createActivitiesDb();
+    const syncEvents: ActivitySyncEvent[] = [];
+    const service = createActivityService(db, {
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      insertBrokerTemplate(db, {
+        id: "system_snaptrade",
+        name: "SnapTrade System",
+        scope: "SYSTEM",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["System Buy"] },
+        symbolMappings: { AAPL: "AAPL.US" },
+        symbolMappingMeta: { AAPL: { exchangeMic: "XNAS", quoteCcy: "USD" } },
+      });
+
+      const accountProfile = await service.saveBrokerSyncProfileRules?.({
+        accountId: "account-1",
+        sourceSystem: "snaptrade",
+        scope: "ACCOUNT",
+        activityRulePatches: { SELL: ["Account Sell"] },
+        securityRulePatches: { MSFT: "MSFT.US" },
+        securityRuleMetaPatches: { MSFT: { exchangeMic: "XNAS", symbolName: "Microsoft" } },
+      });
+      expect(accountProfile).toEqual({
+        id: "broker_snaptrade_account-1",
+        name: "snaptrade Profile",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["System Buy"], SELL: ["Account Sell"] },
+        symbolMappings: { AAPL: "AAPL.US", MSFT: "MSFT.US" },
+        symbolMappingMeta: {
+          AAPL: { exchangeMic: "XNAS", quoteCcy: "USD" },
+          MSFT: { exchangeMic: "XNAS", symbolName: "Microsoft" },
+        },
+      });
+      expect(readBrokerLinkedTemplateId(db, "account-1", "snaptrade")).toBe(
+        "broker_snaptrade_account-1",
+      );
+
+      const brokerProfile = await service.saveBrokerSyncProfileRules?.({
+        accountId: "account-1",
+        sourceSystem: "snaptrade",
+        scope: "BROKER",
+        activityRulePatches: { DIVIDEND: ["Broker Dividend"] },
+        securityRulePatches: {},
+        securityRuleMetaPatches: {},
+      });
+      expect(brokerProfile?.activityMappings).toEqual({
+        BUY: ["System Buy"],
+        DIVIDEND: ["Broker Dividend"],
+      });
+      expect(brokerProfile?.activityMappings).not.toHaveProperty("SELL");
+
+      expect(syncEvents.map((event) => [event.entity, event.operation, event.entityId])).toEqual([
+        ["import_templates", "Update", "broker_snaptrade_account-1"],
+        ["import_account_templates", "Update", expect.any(String)],
+        ["import_templates", "Update", "broker_snaptrade"],
+      ]);
+      expect(syncEvents[0]?.payload).toMatchObject({
+        id: "broker_snaptrade_account-1",
+        scope: "USER",
+        kind: "BROKER_ACTIVITY",
+        source_system: "snaptrade",
+      });
+      expect(syncEvents[1]?.payload).toMatchObject({
+        account_id: "account-1",
+        context_kind: "BROKER_ACTIVITY",
+        source_system: "snaptrade",
+        template_id: "broker_snaptrade_account-1",
+      });
+      expect(syncEvents[2]?.payload).toMatchObject({
+        id: "broker_snaptrade",
+        scope: "USER",
+        kind: "BROKER_ACTIVITY",
+        source_system: "snaptrade",
+      });
+      expect(JSON.parse(readTemplateConfig(db, "broker_snaptrade"))).toMatchObject({
+        activityMappings: { BUY: ["System Buy"], DIVIDEND: ["Broker Dividend"] },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks existing duplicate idempotency keys with empty input and chunked lookups", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -2672,20 +2833,21 @@ function assetsCreatedEvent(assetIds: string[]): BackendEvent {
 
 function insertTemplate(
   db: Database,
-  template: { id: string; name: string; scope: string; kind: string },
+  template: { id: string; name: string; scope: string; kind: string; sourceSystem?: string },
 ): void {
   db.query(
     `
       INSERT INTO import_templates (
         id, name, scope, kind, source_system, config_version, config, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, '', 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `,
   ).run(
     template.id,
     template.name,
     template.scope,
     template.kind,
+    template.sourceSystem ?? "",
     JSON.stringify({
       fieldMappings: { date: "Date" },
       activityMappings: { BUY: ["Buy"] },
@@ -2695,6 +2857,57 @@ function insertTemplate(
       parseConfig: { delimiter: "," },
     }),
   );
+}
+
+function insertBrokerTemplate(
+  db: Database,
+  template: {
+    id: string;
+    name: string;
+    scope: string;
+    sourceSystem: string;
+    activityMappings?: Record<string, string[]>;
+    symbolMappings?: Record<string, string>;
+    symbolMappingMeta?: Record<string, Record<string, unknown>>;
+  },
+): void {
+  db.query(
+    `
+      INSERT INTO import_templates (
+        id, name, scope, kind, source_system, config_version, config, created_at, updated_at
+      )
+      VALUES (?, ?, ?, 'BROKER_ACTIVITY', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `,
+  ).run(
+    template.id,
+    template.name,
+    template.scope,
+    template.sourceSystem,
+    JSON.stringify({
+      activityMappings: template.activityMappings ?? {},
+      symbolMappings: template.symbolMappings ?? {},
+      symbolMappingMeta: template.symbolMappingMeta ?? {},
+    }),
+  );
+}
+
+function upsertBrokerLink(
+  db: Database,
+  accountId: string,
+  templateId: string,
+  sourceSystem: string,
+): void {
+  db.query(
+    `
+      INSERT INTO import_account_templates (
+        id, account_id, context_kind, source_system, template_id, created_at, updated_at
+      )
+      VALUES (?, ?, 'BROKER_ACTIVITY', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(account_id, context_kind, source_system) DO UPDATE SET
+        template_id = excluded.template_id,
+        updated_at = excluded.updated_at
+    `,
+  ).run(`link_${accountId}_${sourceSystem}`, accountId, sourceSystem, templateId);
 }
 
 interface AccountFixture {
@@ -2911,6 +3124,25 @@ function readLinkId(db: Database, accountId: string, contextKind: string): strin
 
 function readLinkedTemplateId(db: Database, accountId: string, contextKind: string): string | null {
   return readLinkValue(db, accountId, contextKind, "template_id");
+}
+
+function readBrokerLinkedTemplateId(
+  db: Database,
+  accountId: string,
+  sourceSystem: string,
+): string | null {
+  const row = db
+    .query<{ template_id: string }, [string, string]>(
+      `
+        SELECT template_id
+        FROM import_account_templates
+        WHERE account_id = ?
+          AND context_kind = 'BROKER_ACTIVITY'
+          AND source_system = ?
+      `,
+    )
+    .get(accountId, sourceSystem);
+  return row?.template_id ?? null;
 }
 
 function readLinkValue(

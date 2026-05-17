@@ -786,14 +786,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/plans`),
         new Request(`${server.baseUrl}/api/v1/connect/plans/public`),
         new Request(`${server.baseUrl}/api/v1/connect/user`),
-        new Request(
-          `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,
-        ),
-        new Request(`${server.baseUrl}/api/v1/connect/broker-sync-profile`, {
-          method: "POST",
-          headers: jsonHeaders,
-          body: JSON.stringify({ accountId: "acct-1", sourceSystem: "snaptrade", rules: [] }),
-        }),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
@@ -814,6 +806,46 @@ describe("TS backend runtime composition", () => {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual([]);
       }
+
+      const defaultProfileResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,
+      );
+      expect(defaultProfileResponse.status).toBe(200);
+      await expect(defaultProfileResponse.json()).resolves.toEqual({
+        id: "",
+        name: "",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: {},
+        symbolMappings: {},
+        symbolMappingMeta: {},
+      });
+
+      const saveProfileResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/broker-sync-profile`,
+        {
+          method: "POST",
+          headers: jsonHeaders,
+          body: JSON.stringify({
+            accountId: "acct-1",
+            sourceSystem: "snaptrade",
+            scope: "ACCOUNT",
+            activityRulePatches: { BUY: ["Buy"] },
+            securityRulePatches: { AAPL: "AAPL.US" },
+            securityRuleMetaPatches: { AAPL: { exchangeMic: "XNAS" } },
+          }),
+        },
+      );
+      expect(saveProfileResponse.status).toBe(200);
+      await expect(saveProfileResponse.json()).resolves.toMatchObject({
+        id: "broker_snaptrade_acct-1",
+        name: "snaptrade Profile",
+        scope: "USER",
+        sourceSystem: "snaptrade",
+        activityMappings: { BUY: ["Buy"] },
+        symbolMappings: { AAPL: "AAPL.US" },
+        symbolMappingMeta: { AAPL: { exchangeMic: "XNAS" } },
+      });
     } finally {
       server.stop();
       runtime.close();
@@ -1526,6 +1558,59 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
+      runtime.close();
+    }
+  });
+
+  test("persists runtime broker sync profile callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-broker-profile-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/connect/broker-sync-profile`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          accountId: "account-1",
+          sourceSystem: "snaptrade",
+          scope: "ACCOUNT",
+          activityRulePatches: { BUY: ["Buy"] },
+          securityRulePatches: { AAPL: "AAPL.US" },
+          securityRuleMetaPatches: { AAPL: { exchangeMic: "XNAS" } },
+        }),
+      });
+      expect(response.status).toBe(200);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.op, row.entity_id])).toEqual([
+          ["import_template", "update", "broker_snaptrade_account-1"],
+          ["activity_import_profile", "update", expect.any(String)],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "broker_snaptrade_account-1",
+          name: "snaptrade Profile",
+          scope: "USER",
+          kind: "BROKER_ACTIVITY",
+          source_system: "snaptrade",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "account-1",
+          context_kind: "BROKER_ACTIVITY",
+          source_system: "snaptrade",
+          template_id: "broker_snaptrade_account-1",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
       runtime.close();
     }
   });

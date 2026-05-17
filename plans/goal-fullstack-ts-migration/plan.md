@@ -288,8 +288,11 @@ backend:
   surfaces scheduled processing failures without wiring real runtime services
   yet.
 - Add disabled standalone Connect runtime wiring, preserving Rust feature-off
-  behavior for cloud/connect action routes and local empty-list routes while
-  marking broker sync profile persistence as a dedicated TS migration gap.
+  behavior for cloud/connect action routes and local empty-list routes.
+- Add local broker sync profile runtime persistence through the migrated
+  activity import-template store, preserving Rust account/broker/system/default
+  precedence, patch-merge saves, account links, and sync_outbox callbacks while
+  cloud Connect remains disabled.
 - Add disabled standalone device-sync runtime wiring for `/connect/device/*`,
   device management, team-key/reset, and pairing routes so feature-off runtime
   behavior returns explicit 501s while real side effects remain deferred.

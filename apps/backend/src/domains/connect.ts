@@ -1,3 +1,5 @@
+import type { ActivityService } from "./activities";
+
 export interface ConnectImportRunsRequest {
   runType?: string;
   limit: number;
@@ -126,6 +128,25 @@ export function createDisabledConnectService(): ConnectService {
     },
     async getUserInfo() {
       throw cloudSyncDisabled();
+    },
+  };
+}
+
+export function createLocalConnectService(activityService: ActivityService): ConnectService {
+  const disabledService = createDisabledConnectService();
+  return {
+    ...disabledService,
+    async getBrokerSyncProfile(accountId, sourceSystem) {
+      if (!activityService.getBrokerSyncProfile) {
+        throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
+      }
+      return await activityService.getBrokerSyncProfile(accountId, sourceSystem);
+    },
+    async saveBrokerSyncProfileRules(request) {
+      if (!activityService.saveBrokerSyncProfileRules) {
+        throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
+      }
+      return await activityService.saveBrokerSyncProfileRules(request);
     },
   };
 }

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 129
+turns_used: 130
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T14:12:52+08:00"
+updated_at: "2026-05-17T14:32:26+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -834,6 +834,13 @@ updated_at: "2026-05-17T14:12:52+08:00"
   routes now return explicit feature-disabled 501 responses instead of un-wired
   404s while real device-sync side effects remain deferred. Focused runtime
   tests and backend type-check passed.
+- Turn 130: Added local broker sync profile persistence behind the standalone TS
+  Connect runtime: profile reads now follow Rust account/broker/system/default
+  precedence, profile rule saves merge patches into `BROKER_ACTIVITY`
+  import-template rows, account-scoped saves upsert broker profile links, and
+  runtime writes queue import-template/profile sync_outbox rows while cloud
+  Connect remains disabled. Focused activities/runtime tests and backend
+  type-check passed.
 
 ## Deferred items
 
@@ -978,12 +985,12 @@ updated_at: "2026-05-17T14:12:52+08:00"
   parity, while calculation-heavy health runtime behavior must move with
   dedicated health/calculation parity slices.
 - Real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  local sync repositories, broker sync profile persistence, subscription
-  entitlement checks, event production, and device-sync enrollment/engine
-  behavior remain active follow-ups. reason=the standalone TS backend now wires
-  disabled Connect feature-flag behavior and empty local Connect list routes,
-  while real runtime behavior must move with dedicated Connect/device-sync
-  parity slices.
+  local sync repositories, subscription entitlement checks, event production,
+  and device-sync enrollment/engine behavior remain active follow-ups.
+  reason=the standalone TS backend now wires disabled Connect feature-flag
+  behavior, empty local Connect list routes, and local broker sync profile
+  persistence, while real runtime behavior must move with dedicated
+  Connect/device-sync parity slices.
 - Real device-sync token minting, E2EE enrollment, sync engine, snapshot/upload
   runtime, repository resets, background workers, and secret side effects remain
   active follow-ups. reason=the standalone TS backend now wires disabled
