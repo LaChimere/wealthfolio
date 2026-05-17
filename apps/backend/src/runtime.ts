@@ -292,6 +292,11 @@ function createServicesFromDatabase(
       baseCurrency,
     },
   );
+  const portfolioMetricsService = createPortfolioMetricsService(db, {
+    baseCurrency,
+    exchangeRateService,
+    timezone: () => settingsService.getSettings().timezone,
+  });
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -340,6 +345,7 @@ function createServicesFromDatabase(
         activityService,
         holdingsService,
         goalService,
+        portfolioMetricsService,
         baseCurrency,
       }),
       queueThreadSyncEvent: (event) => {
@@ -428,11 +434,7 @@ function createServicesFromDatabase(
     ),
     marketDataService,
     portfolioJobService: createDeferredPortfolioJobService(),
-    portfolioMetricsService: createPortfolioMetricsService(db, {
-      baseCurrency,
-      exchangeRateService,
-      timezone: () => settingsService.getSettings().timezone,
-    }),
+    portfolioMetricsService,
     restartRequired: () => restartRequired,
     secretService,
     settingsService,

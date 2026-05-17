@@ -5,6 +5,7 @@ import type { Account } from "./accounts";
 import type { ActivityDetails, ActivitySearchRequest } from "./activities";
 import type { Goal } from "./goals";
 import type { DailyAccountValuation, Holding } from "./holdings";
+import type { IncomeSummary } from "./portfolio-metrics";
 
 describe("TS AI chat built-in tools", () => {
   test("exposes Rust-compatible get_accounts output", async () => {
@@ -655,6 +656,115 @@ describe("TS AI chat built-in tools", () => {
       tools.find((tool) => tool.name === "search_activities")?.execute({ dateFrom: "2026-13-01" }),
     ).rejects.toThrow("Invalid dateFrom format: 2026-13-01");
   });
+
+  test("exposes Rust-compatible get_income output", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      portfolioMetricsService: {
+        getIncomeSummary: (accountId) => {
+          expect(accountId).toBeUndefined();
+          return [
+            incomeSummary({
+              period: "YTD",
+              totalIncome: 150,
+              monthlyAverage: 50,
+              yoyGrowth: 12.5,
+              byType: { DIVIDEND: 120, INTEREST: 30 },
+              byMonth: { "2026-01": 100, "2026-02": 50 },
+              byAsset: {
+                apple: {
+                  assetId: "asset-1",
+                  kind: "SECURITY",
+                  symbol: "AAPL",
+                  name: "Apple",
+                  income: 90,
+                },
+                cash: { assetId: "asset-2", kind: "CASH", symbol: "USD", name: "Cash", income: 0 },
+                bond: {
+                  assetId: "asset-3",
+                  kind: "SECURITY",
+                  symbol: "BND",
+                  name: "Bond",
+                  income: 60,
+                },
+              },
+            }),
+          ];
+        },
+      },
+    });
+
+    const getIncome = tools.find((tool) => tool.name === "get_income");
+    const result = await getIncome?.execute({ period: "ytd" });
+
+    expect(getIncome).toMatchObject({
+      description: expect.stringContaining("income summary"),
+      parameters: {
+        type: "object",
+        properties: {
+          period: expect.objectContaining({ enum: ["YTD", "LAST_YEAR", "TOTAL"] }),
+        },
+        required: [],
+      },
+    });
+    expect(result).toEqual({
+      data: {
+        totalIncome: 150,
+        currency: "USD",
+        monthlyAverage: 50,
+        yoyGrowth: 12.5,
+        byType: { DIVIDEND: 120, INTEREST: 30 },
+        topAssets: [
+          { symbol: "AAPL", name: "Apple", income: 90 },
+          { symbol: "BND", name: "Bond", income: 60 },
+        ],
+        byMonth: { "2026-01": 100, "2026-02": 50 },
+        period: "YTD",
+      },
+    });
+  });
+
+  test("defaults get_income to YTD and omits null yoy growth", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      portfolioMetricsService: {
+        getIncomeSummary: () => [incomeSummary({ period: "YTD", yoyGrowth: null })],
+      },
+    });
+
+    const result = await tools.find((tool) => tool.name === "get_income")?.execute({});
+
+    expect(result).toEqual({
+      data: {
+        totalIncome: 0,
+        currency: "USD",
+        monthlyAverage: 0,
+        byType: {},
+        topAssets: [],
+        byMonth: {},
+        period: "YTD",
+      },
+    });
+  });
+
+  test("fails get_income for missing periods", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      portfolioMetricsService: {
+        getIncomeSummary: () => [incomeSummary({ period: "YTD" })],
+      },
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "get_income")?.execute({ period: "LAST_YEAR" }),
+    ).rejects.toThrow("Period 'LAST_YEAR' not found in income data");
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -826,6 +936,22 @@ function activity(overrides: Partial<ActivityDetails>): ActivityDetails {
     importRunId: null,
     isUserModified: false,
     metadata: null,
+    ...overrides,
+  };
+}
+
+function incomeSummary(overrides: Partial<IncomeSummary>): IncomeSummary {
+  return {
+    period: "YTD",
+    byMonth: {},
+    byType: {},
+    byAsset: {},
+    byCurrency: {},
+    byAccount: {},
+    totalIncome: 0,
+    currency: "USD",
+    monthlyAverage: 0,
+    yoyGrowth: null,
     ...overrides,
   };
 }

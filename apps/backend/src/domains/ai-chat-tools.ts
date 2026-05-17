@@ -3,6 +3,7 @@ import type { ActivityDetails, ActivityService } from "./activities";
 import type { AiChatToolDefinition } from "./ai-chat";
 import type { Goal, GoalService } from "./goals";
 import type { DailyAccountValuation, Holding, HoldingsService } from "./holdings";
+import type { IncomeSummary, PortfolioMetricsService } from "./portfolio-metrics";
 
 const MAX_ACCOUNTS = 50;
 const MAX_HOLDINGS = 100;
@@ -14,6 +15,7 @@ const ZERO_EPSILON = 1e-9;
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
   Partial<Pick<HoldingsService, "getLatestValuations">>;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
+type PortfolioAiMetricsService = Pick<PortfolioMetricsService, "getIncomeSummary">;
 
 export interface PortfolioAiChatToolsOptions {
   accountService: Pick<AccountService, "getActiveAccounts"> &
@@ -21,6 +23,7 @@ export interface PortfolioAiChatToolsOptions {
   holdingsService?: PortfolioAiHoldingsService;
   goalService?: Pick<GoalService, "getGoals">;
   activityService?: PortfolioAiActivityService;
+  portfolioMetricsService?: PortfolioAiMetricsService;
   baseCurrency?: string | (() => string | undefined);
 }
 
@@ -57,6 +60,13 @@ export function createPortfolioAiChatTools(
       createSearchActivitiesTool({
         accountService: options.accountService,
         activityService: { searchActivities: options.activityService.searchActivities },
+      }),
+    );
+  }
+  if (options.portfolioMetricsService?.getIncomeSummary) {
+    tools.push(
+      createGetIncomeTool({
+        getIncomeSummary: options.portfolioMetricsService.getIncomeSummary,
       }),
     );
   }
@@ -422,6 +432,63 @@ function createSearchActivitiesTool(options: {
   };
 }
 
+function createGetIncomeTool(
+  portfolioMetricsService: Pick<Required<PortfolioMetricsService>, "getIncomeSummary">,
+): AiChatToolDefinition {
+  return {
+    name: "get_income",
+    description:
+      "Fetch income summary including dividends, interest, and other income. Returns total income, monthly average, year-over-year growth, breakdown by type, and top income-generating assets.",
+    parameters: {
+      type: "object",
+      properties: {
+        period: {
+          type: "string",
+          enum: ["YTD", "LAST_YEAR", "TOTAL"],
+          description:
+            "Time period for income summary: YTD (year to date), LAST_YEAR, or TOTAL (all time). Defaults to YTD.",
+        },
+      },
+      required: [],
+    },
+    execute: async (rawArgs) => {
+      const args = parseIncomeArgs(rawArgs);
+      const period = (args.period ?? "YTD").toUpperCase();
+      const summaries = (await Promise.resolve(
+        portfolioMetricsService.getIncomeSummary(undefined),
+      )) as IncomeSummary[];
+      const summary = summaries.find((candidate) => candidate.period === period);
+
+      if (!summary) {
+        throw new Error(`Period '${args.period ?? "YTD"}' not found in income data`);
+      }
+
+      const topAssets = Object.values(summary.byAsset)
+        .filter((asset) => asset.income > 0)
+        .sort((a, b) => b.income - a.income)
+        .slice(0, 10)
+        .map((asset) => ({
+          symbol: asset.symbol,
+          name: asset.name,
+          income: asset.income,
+        }));
+
+      return {
+        data: {
+          totalIncome: summary.totalIncome,
+          currency: summary.currency,
+          monthlyAverage: summary.monthlyAverage,
+          ...(summary.yoyGrowth !== null ? { yoyGrowth: summary.yoyGrowth } : {}),
+          byType: summary.byType,
+          topAssets,
+          byMonth: summary.byMonth,
+          period: summary.period,
+        },
+      };
+    },
+  };
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -458,6 +525,15 @@ function parseActivitySearchArgs(args: unknown): {
       typeof args.pageSize === "number" && Number.isFinite(args.pageSize)
         ? Math.trunc(args.pageSize)
         : undefined,
+  };
+}
+
+function parseIncomeArgs(args: unknown): { period?: string } {
+  if (!isRecord(args)) {
+    return {};
+  }
+  return {
+    period: typeof args.period === "string" ? args.period : undefined,
   };
 }
 
