@@ -1036,7 +1036,7 @@ describe("TS AI chat domain", () => {
       expect(fetchBodies[0]?.messages).toEqual([
         expect.objectContaining({
           role: "system",
-          content: expect.stringContaining("tools, mutation tools"),
+          content: expect.stringContaining("Portfolio tools and mutation tools are not available"),
         }),
         { role: "user", content: "Show accounts" },
       ]);
@@ -1680,6 +1680,135 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("sends Anthropic image and PDF attachments as native media blocks", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "anthropic",
+        modelId: "claude-vision",
+        providerType: "api",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream !== true) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        return streamResponse([
+          sseData({
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "Extracted the statement." },
+          }),
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Extract transactions",
+          attachments: [
+            {
+              name: "scan.jpg",
+              contentType: "image/jpg",
+              data: "data:image/jpg;base64,aGVsbG8=",
+            },
+            { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+          ],
+        }),
+      );
+
+      const userMessage = (fetchBodies[0]?.messages as Array<Record<string, unknown>>)[0];
+      expect(userMessage?.content).toEqual([
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/jpeg",
+            data: "aGVsbG8=",
+          },
+        },
+        {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: "JVBERi0=",
+          },
+        },
+        {
+          type: "text",
+          text: expect.stringContaining("Image/PDF attachment content is included"),
+        },
+      ]);
+      expect(String(JSON.stringify(userMessage?.content))).not.toContain("data:image/jpg");
+
+      const threadId = String(events[0]?.threadId);
+      const persistedMessages = service.getMessages(threadId);
+      expect(persistedMessages[0]).toMatchObject({
+        role: "user",
+        content: textContent("Extract transactions\n📎 scan.jpg\n📎 statement.pdf"),
+      });
+      expect(JSON.stringify(persistedMessages[0]?.content)).not.toContain("aGVsbG8=");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("sends Google image and PDF attachments as inline data parts", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "google",
+        modelId: "gemini-vision",
+        providerType: "api",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (!url.includes(":streamGenerateContent")) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(JSON.parse(String(init?.body)));
+        return streamResponse([
+          sseData({
+            candidates: [{ content: { parts: [{ text: "Reviewed the attachments." }] } }],
+          }),
+        ]);
+      },
+    });
+
+    try {
+      await collectEvents(
+        await service.sendMessage({
+          content: "Review statement",
+          attachments: [
+            { name: "scan.png", contentType: "image/png", data: "data:image/png;base64,aGVs" },
+            { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+          ],
+        }),
+      );
+
+      const parts = ((
+        fetchBodies[0]?.contents as Array<{ parts: Array<Record<string, unknown>> }>
+      )[0]?.parts ?? []) as Array<Record<string, unknown>>;
+      expect(parts).toEqual([
+        { inlineData: { mimeType: "image/png", data: "aGVs" } },
+        { inlineData: { mimeType: "application/pdf", data: "JVBERi0=" } },
+        { text: expect.stringContaining("Review statement") },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects missing API keys and unsupported attachments before persisting chat rows", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db, {
@@ -1708,6 +1837,49 @@ describe("TS AI chat domain", () => {
       expect(service.listThreads({ limit: 10 })).toMatchObject({ threads: [] });
     } finally {
       db.close();
+    }
+  });
+
+  test("rejects multimodal attachments for unsupported providers and media types", async () => {
+    const visionDisabledDb = createAiChatDb();
+    const visionDisabledService = createAiChatService(visionDisabledDb, {
+      aiProviderService: createProviderResolver({
+        providerId: "anthropic",
+        modelId: "claude-text",
+        providerType: "api",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: false, streaming: true },
+      }),
+    });
+    const unsupportedTypeDb = createAiChatDb();
+    const unsupportedTypeService = createAiChatService(unsupportedTypeDb, {
+      aiProviderService: createProviderResolver({
+        providerId: "anthropic",
+        modelId: "claude-vision",
+        providerType: "api",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+    });
+
+    try {
+      await expect(
+        visionDisabledService.sendMessage({
+          content: "Read this",
+          attachments: [{ name: "scan.png", contentType: "image/png", data: "aGVsbG8=" }],
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      await expect(
+        unsupportedTypeService.sendMessage({
+          content: "Read this",
+          attachments: [{ name: "scan.svg", contentType: "image/svg+xml", data: "aGVsbG8=" }],
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+    } finally {
+      visionDisabledDb.close();
+      unsupportedTypeDb.close();
     }
   });
 

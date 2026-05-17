@@ -137,10 +137,11 @@
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
     `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
-    `record_activity`, `record_activities`, and `import_csv`, and text/CSV
-    attachment prompt injection are wired into standalone runtime while
-    multimodal image/PDF/binary attachments are deferred to AI runtime parity
-    slices; alternative asset persistence, manual valuation quotes, liability
+    `record_activity`, `record_activities`, and `import_csv`, text/CSV
+    attachment prompt injection, and Anthropic/Gemini image/PDF native media
+    payloads are wired into standalone runtime while OpenAI-compatible/Ollama
+    multimodal attachment payloads are deferred to AI runtime parity slices;
+    alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, and holdings reads now have TS runtime
     parity, while portfolio job enqueue and recalculation side effects are
     deferred to portfolio parity slices; asset read/create/profile/quote-mode
@@ -192,9 +193,10 @@
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
     `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
-    `record_activity`, `record_activities`, and `import_csv`, and text/CSV
-    attachment prompt injection now have TS runtime parity, while multimodal
-    image/PDF/binary attachments are deferred to AI runtime parity slices;
+    `record_activity`, `record_activities`, and `import_csv`, text/CSV
+    attachment prompt injection, and Anthropic/Gemini image/PDF native media
+    payloads now have TS runtime parity, while OpenAI-compatible/Ollama
+    multimodal attachment payloads are deferred to AI runtime parity slices;
     device-sync integration for sync crypto is deferred to device-sync runtime
     parity slices; bounded account/timezone health status/checks, cache
     behavior, legacy-classification health issues, and classification migration
@@ -1315,6 +1317,15 @@ contract:
   `tool_result` user blocks, Anthropic tool errors with `is_error`, Gemini
   function declarations, function-call/function-response turns, and suppression
   of synthetic Gemini response ids after rubber-duck plan review.
+- `pr5-ai-chat-multimodal-attachments`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test --run src/domains/ai-chat.test.ts src/runtime.test.ts src/http.test.ts`.
+  Coverage includes Anthropic image/PDF content blocks, Gemini inlineData parts,
+  provider vision gating, strict image/PDF media-type allowlists, `image/jpg` to
+  `image/jpeg` normalization, data URL base64-prefix stripping, binary payload
+  exclusion from prompt text and persisted message content, and unsupported
+  provider/media rejection before chat rows are created after rubber-duck plan
+  review.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1790,9 +1801,10 @@ contract:
   built-in `get_accounts`/`get_holdings`/
   `get_cash_balances`/`get_goals`/`search_activities`/`get_performance`/
   `get_income`/`get_valuation_history`/`get_asset_allocation`/
-  `get_health_status`/`record_activity`/`record_activities`/`import_csv`, and
-  text/CSV attachment prompt injection, and explicit portfolio and market-sync
-  deferred runtime gates implemented; broader migration remains active.
+  `get_health_status`/`record_activity`/`record_activities`/`import_csv`,
+  text/CSV attachment prompt injection, Anthropic/Gemini image/PDF native media
+  payloads, and explicit portfolio and market-sync deferred runtime gates
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1801,13 +1813,13 @@ contract:
   after the current explicit runtime 501 gates; actual portfolio job execution
   moves with portfolio/calculation slices after the current explicit runtime 501
   gates; OS keyring integration moves with a dedicated runtime parity slice; AI
-  chat multimodal image/PDF/binary attachment handling and richer provider/tool
-  orchestration move with AI runtime parity slices; alternative asset portfolio
-  job enqueue and recalculation side effects move with portfolio parity slices;
-  asset quote-provider interactions, auto-classification, and portfolio
-  recalculation side effects move with asset/market-data/portfolio parity
-  slices; market-data market sync and quote-triggered recalculation side effects
-  move with market-data/portfolio parity slices; provider-backed symbol
+  chat OpenAI-compatible/Ollama multimodal attachment handling and richer
+  provider/tool orchestration move with AI runtime parity slices; alternative
+  asset portfolio job enqueue and recalculation side effects move with portfolio
+  parity slices; asset quote-provider interactions, auto-classification, and
+  portfolio recalculation side effects move with asset/market-data/portfolio
+  parity slices; market-data market sync and quote-triggered recalculation side
+  effects move with market-data/portfolio parity slices; provider-backed symbol
   fetch/resolution moves with market-data/provider parity slices; portfolio
   recalculation side effects move with holdings/portfolio parity slices; add-on
   security scanning, full sandbox isolation, and query-cache hardening move with

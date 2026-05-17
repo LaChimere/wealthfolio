@@ -217,6 +217,7 @@ interface AiChatAttachment {
 interface ProviderChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  attachments?: AiChatAttachment[];
   toolCallId?: string;
   toolName?: string;
   toolResultData?: unknown;
@@ -282,8 +283,8 @@ const GOOGLE_SYNTHETIC_TOOL_CALL_PREFIX = "google-tool-call-";
 const TEXT_ONLY_SYSTEM_PROMPT = [
   "You are Wealthfolio's AI assistant.",
   "The TypeScript backend runtime currently streams text responses only.",
-  "Portfolio tools, mutation tools, and multimodal image/PDF attachments are not available in this runtime yet.",
-  "Text and CSV attachment contents may be included directly in the user prompt.",
+  "Portfolio tools and mutation tools are not available with the current model.",
+  "Text and CSV attachment contents may be included directly in the user prompt. Image/PDF attachments are available only with supported multimodal providers.",
   "Do not claim that you accessed account, holding, activity, goal, or performance data.",
   "If the user asks for private portfolio data, clearly say that data access is unavailable in the current runtime.",
 ].join("\n");
@@ -292,7 +293,7 @@ const TOOL_ENABLED_SYSTEM_PROMPT = [
   "Use the available tools when you need current portfolio data or tool-backed calculations.",
   "Do not invent private financial data. If a required tool is unavailable, say that access is unavailable in the current runtime.",
   "Text and CSV attachment contents may be included directly in the user prompt; when import_csv is available and the user asks to import CSV, call it with the complete CSV text.",
-  "Multimodal image/PDF attachments are not available in this runtime yet.",
+  "When image/PDF attachments are provided by a supported multimodal provider, examine them for financial transaction data and use record_activities when appropriate.",
 ].join("\n");
 
 export function createAiChatService(
@@ -312,22 +313,22 @@ export function createAiChatService(
       const request = parseSendMessageRequest(rawRequest);
       const attachments = request.attachments ?? [];
       validateAttachments(attachments);
-      const unsupportedAttachment = attachments.find(
-        (attachment) => !isSupportedTextAttachment(attachment),
-      );
-      if (unsupportedAttachment) {
-        throw aiChatError(
-          "not_implemented",
-          `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not yet available in the TS backend runtime`,
-          501,
-        );
-      }
 
       const providerConfig = options.aiProviderService.resolveChatProviderConfig({
         providerId: request.config?.provider ?? request.providerId,
         modelId: request.config?.model ?? request.modelId,
         thinking: request.config?.thinking,
       });
+      const unsupportedAttachment = attachments.find(
+        (attachment) => !isSupportedAttachmentForProvider(attachment, providerConfig),
+      );
+      if (unsupportedAttachment) {
+        throw aiChatError(
+          "not_implemented",
+          `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}' in the TS backend runtime`,
+          501,
+        );
+      }
       if (providerConfig.providerType === "api" && !providerConfig.apiKey) {
         throw aiChatError(
           "missing_api_key",
@@ -598,6 +599,23 @@ function isBinaryAttachment(attachment: AiChatAttachment): boolean {
   return contentType.startsWith("image/") || contentType === "application/pdf";
 }
 
+function isSupportedAttachmentForProvider(
+  attachment: AiChatAttachment,
+  providerConfig: ResolvedAiChatProviderConfig,
+): boolean {
+  if (isSupportedTextAttachment(attachment)) {
+    return true;
+  }
+  if (!isBinaryAttachment(attachment)) {
+    return false;
+  }
+  return (
+    providerConfig.capabilities.vision &&
+    providerSupportsMultimodalAttachments(providerConfig.providerId) &&
+    multimodalAttachmentMediaType(attachment, providerConfig.providerId) !== null
+  );
+}
+
 function isSupportedTextAttachment(attachment: AiChatAttachment): boolean {
   const contentType = normalizeContentType(attachment.contentType);
   return (
@@ -606,6 +624,40 @@ function isSupportedTextAttachment(attachment: AiChatAttachment): boolean {
     contentType === "application/json" ||
     contentType.startsWith("text/")
   );
+}
+
+function providerSupportsMultimodalAttachments(providerId: string): boolean {
+  return ["anthropic", "google", "gemini"].includes(providerId);
+}
+
+function multimodalAttachmentMediaType(
+  attachment: AiChatAttachment,
+  providerId: string,
+): string | null {
+  const contentType = normalizeContentType(attachment.contentType);
+  if (contentType === "application/pdf") {
+    return "application/pdf";
+  }
+  const normalized =
+    contentType === "image/jpg"
+      ? "image/jpeg"
+      : contentType.startsWith("image/")
+        ? contentType
+        : "";
+  const allowed =
+    providerId === "anthropic"
+      ? new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+      : new Set(["image/png", "image/jpeg", "image/webp"]);
+  return allowed.has(normalized) ? normalized : null;
+}
+
+function base64AttachmentData(attachment: AiChatAttachment, mediaType: string): string {
+  const dataUrlPrefix = `data:${mediaType};base64,`;
+  if (attachment.data.startsWith(dataUrlPrefix)) {
+    return attachment.data.slice(dataUrlPrefix.length);
+  }
+  const dataUrlMatch = /^data:[^;,]+;base64,(.*)$/iu.exec(attachment.data);
+  return dataUrlMatch?.[1] ?? attachment.data;
 }
 
 function normalizeContentType(contentType: string): string {
@@ -674,7 +726,12 @@ function prepareSendMessage(
       runId: crypto.randomUUID(),
       messageId: crypto.randomUUID(),
     },
-    messages: buildProviderMessages(historyRows, providerPromptText(request), tools),
+    messages: buildProviderMessages(
+      historyRows,
+      providerPromptText(request),
+      tools,
+      request.attachments ?? [],
+    ),
     title: {
       currentTitle: threadRow.title,
       initialTitle: isNewThread ? threadRow.title : null,
@@ -701,14 +758,35 @@ function providerPromptText(request: AiChatSendMessageRequest): string {
     return request.content;
   }
 
-  const lines = [
-    "[INSTRUCTION: Text/CSV attachment content is included below. Use text attachments directly. For CSV imports, call import_csv when that tool is available and pass the complete CSV text.]",
-  ];
+  const hasTextAttachments = attachments.some(isSupportedTextAttachment);
+  const hasBinaryAttachments = attachments.some(isBinaryAttachment);
+  const instructions: string[] = [];
+  if (hasTextAttachments) {
+    instructions.push(
+      "Text/CSV attachment content is included below. Use text attachments directly. For CSV imports, call import_csv when that tool is available and pass the complete CSV text.",
+    );
+  }
+  if (hasBinaryAttachments) {
+    instructions.push(
+      "Image/PDF attachment content is included as native media parts. Examine image/PDF files for financial transaction data and use record_activities to create drafts for extracted transactions when appropriate.",
+    );
+  }
+
+  const lines = [`[INSTRUCTION: ${instructions.join(" ")}]`];
   if (request.content.trim()) {
     lines.push("", request.content);
   }
   for (const attachment of attachments) {
-    lines.push("", `[Attached file: ${attachment.name}]`, attachment.data);
+    if (isSupportedTextAttachment(attachment)) {
+      lines.push("", `[Attached file: ${attachment.name}]`, attachment.data);
+      continue;
+    }
+    if (isBinaryAttachment(attachment)) {
+      lines.push(
+        "",
+        `[Attached native media file: ${attachment.name} (${safeContentTypeLabel(attachment.contentType)})]`,
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -847,6 +925,7 @@ function buildProviderMessages(
   rows: AiMessageRow[],
   currentContent: string,
   tools: EffectiveAiChatTool[],
+  attachments: AiChatAttachment[] = [],
 ): ProviderChatMessage[] {
   const history: ProviderChatMessage[] = [];
   let remainingBudget = MAX_HISTORY_CHARS;
@@ -869,7 +948,7 @@ function buildProviderMessages(
     });
   }
   history.reverse();
-  history.push({ role: "user", content: currentContent });
+  history.push({ role: "user", content: currentContent, attachments });
   return [{ role: "system", content: systemPromptForTools(tools) }, ...history];
 }
 
@@ -1827,14 +1906,15 @@ function anthropicMessages(messages: ProviderChatMessage[]): Record<string, unkn
 }
 
 function anthropicContent(message: ProviderChatMessage): string | Record<string, unknown>[] {
-  if (!message.toolCalls || message.toolCalls.length === 0) {
+  const attachmentBlocks = anthropicAttachmentBlocks(message.attachments ?? []);
+  if ((!message.toolCalls || message.toolCalls.length === 0) && attachmentBlocks.length === 0) {
     return message.content;
   }
-  const blocks: Record<string, unknown>[] = [];
+  const blocks: Record<string, unknown>[] = [...attachmentBlocks];
   if (message.content.trim()) {
     blocks.push({ type: "text", text: message.content });
   }
-  for (const toolCall of message.toolCalls) {
+  for (const toolCall of message.toolCalls ?? []) {
     blocks.push({
       type: "tool_use",
       id: toolCall.id,
@@ -1843,6 +1923,36 @@ function anthropicContent(message: ProviderChatMessage): string | Record<string,
     });
   }
   return blocks;
+}
+
+function anthropicAttachmentBlocks(attachments: AiChatAttachment[]): Record<string, unknown>[] {
+  return attachments
+    .filter(isBinaryAttachment)
+    .map((attachment): Record<string, unknown> | null => {
+      const mediaType = multimodalAttachmentMediaType(attachment, "anthropic");
+      if (!mediaType) {
+        return null;
+      }
+      if (mediaType === "application/pdf") {
+        return {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: mediaType,
+            data: base64AttachmentData(attachment, mediaType),
+          },
+        };
+      }
+      return {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mediaType,
+          data: base64AttachmentData(attachment, mediaType),
+        },
+      };
+    })
+    .filter((block): block is Record<string, unknown> => block !== null);
 }
 
 function anthropicToolResultBlock(message: ProviderChatMessage): Record<string, unknown> {
@@ -1936,7 +2046,7 @@ function googleContents(messages: ProviderChatMessage[]): Record<string, unknown
 }
 
 function googleMessageParts(message: ProviderChatMessage): Record<string, unknown>[] {
-  const parts: Record<string, unknown>[] = [];
+  const parts: Record<string, unknown>[] = googleAttachmentParts(message.attachments ?? []);
   if (message.content.trim()) {
     parts.push({ text: message.content });
   }
@@ -1952,6 +2062,24 @@ function googleMessageParts(message: ProviderChatMessage): Record<string, unknow
     parts.push({ functionCall });
   }
   return parts.length > 0 ? parts : [{ text: message.content }];
+}
+
+function googleAttachmentParts(attachments: AiChatAttachment[]): Record<string, unknown>[] {
+  return attachments
+    .filter(isBinaryAttachment)
+    .map((attachment): Record<string, unknown> | null => {
+      const mediaType = multimodalAttachmentMediaType(attachment, "google");
+      if (!mediaType) {
+        return null;
+      }
+      return {
+        inlineData: {
+          mimeType: mediaType,
+          data: base64AttachmentData(attachment, mediaType),
+        },
+      };
+    })
+    .filter((part): part is Record<string, unknown> => part !== null);
 }
 
 function googleFunctionResponsePart(message: ProviderChatMessage): Record<string, unknown> {
