@@ -391,6 +391,190 @@ describe("TS AI chat built-in tools", () => {
     });
   });
 
+  test("returns Rust-compatible record_activities batch drafts", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Main Broker", currency: "USD" })],
+      },
+    });
+
+    const recordActivities = tools.find((tool) => tool.name === "record_activities");
+    expect(recordActivities).toMatchObject({
+      description: expect.stringContaining("Record multiple investment transactions"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          activities: expect.objectContaining({
+            type: "array",
+            items: expect.objectContaining({
+              required: ["activityType", "activityDate"],
+            }),
+          }),
+        }),
+        required: ["activities"],
+      },
+    });
+
+    const result = await recordActivities?.execute({
+      activities: [
+        { activityType: "DEPOSIT", activityDate: "2026-01-17", amount: 1000 },
+        { activityType: "WITHDRAWAL", activityDate: "2026-01-18", amount: 500 },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      data: {
+        drafts: [
+          {
+            rowIndex: 0,
+            draft: { activityType: "DEPOSIT", accountId: "acct-1", amount: 1000 },
+            validation: { isValid: true, missingFields: [], errors: [] },
+            errors: [],
+          },
+          {
+            rowIndex: 1,
+            draft: { activityType: "WITHDRAWAL", accountId: "acct-1", amount: 500 },
+            validation: { isValid: true, missingFields: [], errors: [] },
+            errors: [],
+          },
+        ],
+        validation: { totalRows: 2, validRows: 2, errorRows: 0 },
+        availableAccounts: [{ id: "acct-1", name: "Main Broker", currency: "USD" }],
+        resolvedAssets: [],
+      },
+    });
+  });
+
+  test("returns record_activities row errors and validation summary", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Main Broker" })],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activities")
+      ?.execute({
+        activities: [
+          { activityType: "DEPOSIT", activityDate: "2026-01-17", amount: 1000 },
+          { activityType: "DEPOSIT", activityDate: "2026-01-17" },
+          { activityType: "SELL", activityDate: "2026-01-17", symbol: "AAPL", quantity: 2 },
+        ],
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        validation: { totalRows: 3, validRows: 1, errorRows: 2 },
+        drafts: [
+          expect.objectContaining({ rowIndex: 0, errors: [] }),
+          expect.objectContaining({
+            rowIndex: 1,
+            validation: expect.objectContaining({ missingFields: ["amount"] }),
+            errors: ["Missing required field: amount"],
+          }),
+          expect.objectContaining({
+            rowIndex: 2,
+            validation: expect.objectContaining({ missingFields: ["unit_price", "asset_kind"] }),
+            errors: ["Missing required field: unit_price", "Missing required field: asset_kind"],
+          }),
+        ],
+      },
+    });
+  });
+
+  test("deduplicates resolved assets across record_activities rows", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Main Broker" })],
+      },
+      marketDataService: {
+        searchSymbol: () => [
+          symbolSearchResult({
+            symbol: "AAPL",
+            longName: "Apple Inc.",
+            existingAssetId: "asset-aapl",
+          }),
+        ],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activities")
+      ?.execute({
+        activities: [
+          {
+            activityType: "BUY",
+            activityDate: "2026-01-17",
+            symbol: "AAPL",
+            quantity: 1,
+            unitPrice: 100,
+          },
+          {
+            activityType: "SELL",
+            activityDate: "2026-01-18",
+            symbol: "AAPL",
+            quantity: 1,
+            unitPrice: 110,
+          },
+        ],
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        validation: { totalRows: 2, validRows: 2, errorRows: 0 },
+        resolvedAssets: [
+          {
+            assetId: "asset-aapl",
+            symbol: "AAPL",
+            name: "Apple Inc.",
+          },
+        ],
+      },
+    });
+    expect((result?.data as { resolvedAssets: unknown[] }).resolvedAssets).toHaveLength(1);
+  });
+
+  test("limits record_activities batch size", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Main Broker" })],
+      },
+    });
+
+    await expect(
+      tools
+        .find((tool) => tool.name === "record_activities")
+        ?.execute({
+          activities: Array.from({ length: 101 }, () => ({
+            activityType: "DEPOSIT",
+            activityDate: "2026-01-17",
+            amount: 1,
+          })),
+        }),
+    ).rejects.toThrow("Batch limited to 100 activities, got 101");
+  });
+
+  test("keeps record_activities empty batches Rust-compatible", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => {
+          throw new Error("empty batch should not fetch accounts");
+        },
+      },
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "record_activities")?.execute({ activities: [] }),
+    ).resolves.toEqual({
+      data: {
+        drafts: [],
+        validation: { totalRows: 0, validRows: 0, errorRows: 0 },
+        availableAccounts: [],
+        resolvedAssets: [],
+      },
+    });
+  });
+
   test("exposes Rust-compatible get_holdings output", async () => {
     const tools = createPortfolioAiChatTools({
       accountService: {

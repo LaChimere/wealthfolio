@@ -25,6 +25,7 @@ const MAX_VALUATIONS_POINTS = 400;
 const DEFAULT_VALUATIONS_DAYS = 365;
 const DEFAULT_ACTIVITIES_PAGE_SIZE = 50;
 const MAX_ACTIVITIES_ROWS = 200;
+const MAX_RECORD_ACTIVITIES_BATCH_SIZE = 100;
 const ZERO_EPSILON = 1e-9;
 const ACTIVITY_TYPES = [
   "BUY",
@@ -91,6 +92,11 @@ export function createPortfolioAiChatTools(
       baseCurrency: options.baseCurrency,
       now: options.now,
       timezone: options.timezone,
+    }),
+    createRecordActivitiesTool({
+      accountService: options.accountService,
+      marketDataService: options.marketDataService,
+      baseCurrency: options.baseCurrency,
     }),
   ];
   if (options.holdingsService) {
@@ -235,6 +241,12 @@ interface RecordActivityArgs {
   notes?: string;
 }
 
+interface AccountOption {
+  id: string;
+  name: string;
+  currency: string;
+}
+
 interface ActivityDraft {
   activityType: string;
   activityDate: string;
@@ -264,6 +276,14 @@ interface ResolvedAsset {
   exchange: string | null;
   exchangeMic: string | null;
   instrumentType: string | null;
+}
+
+interface RecordActivityOutputData {
+  draft: ActivityDraft;
+  validation: ReturnType<typeof validateRecordActivityDraft>;
+  availableAccounts: AccountOption[];
+  resolvedAsset: ResolvedAsset | null;
+  availableSubtypes: Array<{ value: string; label: string }>;
 }
 
 function createRecordActivityTool(options: {
@@ -349,53 +369,170 @@ function createRecordActivityTool(options: {
     execute: async (rawArgs) => {
       const args = parseRecordActivityArgs(rawArgs);
       const accounts = options.accountService.getActiveAccounts();
-      const availableAccounts = accounts.map((account) => ({
-        id: account.id,
-        name: account.name,
-        currency: account.currency,
-      }));
-      const [accountId, accountName] = resolveRecordActivityAccount(args.account, accounts);
-      const accountCurrency =
-        accountId !== undefined
-          ? (accounts.find((account) => account.id === accountId)?.currency ??
-            resolveBaseCurrency(options.baseCurrency))
-          : resolveBaseCurrency(options.baseCurrency);
-      const activityType = normalizeActivityType(args.activityType);
-      const resolved = await resolveRecordActivityAsset({
-        symbol: args.symbol,
-        currency: accountCurrency,
-        marketDataService: options.marketDataService,
-      });
-      const amount = computeRecordActivityAmount(args);
-      const draftCurrency = resolved.resolvedAsset?.currency ?? accountCurrency;
-      const draft: ActivityDraft = {
-        activityType,
-        activityDate: args.activityDate,
-        symbol: args.symbol ?? null,
-        assetId: resolved.assetId ?? null,
-        assetName: resolved.assetName ?? null,
-        quantity: args.quantity ?? null,
-        unitPrice: args.unitPrice ?? null,
-        amount,
-        fee: args.fee ?? null,
-        currency: draftCurrency,
-        accountId: accountId ?? null,
-        accountName: accountName ?? null,
-        subtype: args.subtype ?? null,
-        notes: args.notes ?? null,
-        priceSource: args.unitPrice !== undefined ? "user" : "none",
-        pricingMode: "MARKET",
-        isCustomAsset: resolved.isCustomAsset,
-        assetKind: null,
+
+      return {
+        data: await buildRecordActivityOutput(args, accounts, options),
       };
+    },
+  };
+}
+
+function createRecordActivitiesTool(options: {
+  accountService: Pick<AccountService, "getActiveAccounts">;
+  marketDataService?: PortfolioAiMarketDataService;
+  baseCurrency?: string | (() => string | undefined);
+}): AiChatToolDefinition {
+  return {
+    name: "record_activities",
+    description:
+      "Record multiple investment transactions from natural language. Returns a read-only batch draft preview for single confirmation. If the user has multiple accounts and did not specify which account to use, ask which account before calling this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        activities: {
+          type: "array",
+          description: "List of activities to record together",
+          items: {
+            type: "object",
+            properties: {
+              activityType: {
+                type: "string",
+                description:
+                  "Activity type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX, CREDIT, ADJUSTMENT",
+                enum: [
+                  "BUY",
+                  "SELL",
+                  "DIVIDEND",
+                  "DEPOSIT",
+                  "WITHDRAWAL",
+                  "TRANSFER_IN",
+                  "TRANSFER_OUT",
+                  "INTEREST",
+                  "FEE",
+                  "SPLIT",
+                  "TAX",
+                  "CREDIT",
+                  "ADJUSTMENT",
+                  "UNKNOWN",
+                ],
+              },
+              symbol: {
+                type: "string",
+                description:
+                  "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD",
+              },
+              activityDate: {
+                type: "string",
+                description:
+                  "ISO 8601 date (e.g., '2026-01-17'). Parse relative dates to ISO format",
+              },
+              quantity: {
+                type: "number",
+                description:
+                  "Number of shares or units. Required for BUY/SELL/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD",
+              },
+              unitPrice: {
+                type: "number",
+                description:
+                  "Price or fair market value per unit. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either unitPrice or amount",
+              },
+              amount: {
+                type: "number",
+                description:
+                  "Total cash amount or taxable income amount. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either amount or unitPrice",
+              },
+              fee: {
+                type: "number",
+                description: "Transaction fee (optional)",
+              },
+              account: {
+                type: "string",
+                description:
+                  "Account name or ID. Required before calling this tool when the user has multiple accounts. If the user did not specify an account for a row, ask which account first instead of calling this tool with an empty account.",
+              },
+              subtype: {
+                type: "string",
+                description:
+                  "Activity subtype: DRIP, DIVIDEND_IN_KIND (additional units of the same asset), STAKING_REWARD (staking income received as more units of the same asset), BONUS",
+              },
+              notes: {
+                type: "string",
+                description: "Optional notes",
+              },
+            },
+            required: ["activityType", "activityDate"],
+          },
+        },
+      },
+      required: ["activities"],
+    },
+    execute: async (rawArgs) => {
+      const activities = parseRecordActivitiesArgs(rawArgs);
+      if (activities.length === 0) {
+        return {
+          data: {
+            drafts: [],
+            validation: { totalRows: 0, validRows: 0, errorRows: 0 },
+            availableAccounts: [],
+            resolvedAssets: [],
+          },
+        };
+      }
+      if (activities.length > MAX_RECORD_ACTIVITIES_BATCH_SIZE) {
+        throw new Error(
+          `Batch limited to ${MAX_RECORD_ACTIVITIES_BATCH_SIZE} activities, got ${activities.length}`,
+        );
+      }
+
+      const accounts = options.accountService.getActiveAccounts();
+      const availableAccounts = recordActivityAccountOptions(accounts);
+      const drafts = [];
+      for (const [rowIndex, activity] of activities.entries()) {
+        try {
+          const output = await buildRecordActivityOutput(activity, accounts, options);
+          const errors = recordActivityRowErrors(output.validation);
+          drafts.push({
+            rowIndex,
+            draft: output.draft,
+            validation: output.validation,
+            errors,
+            resolvedAsset: output.resolvedAsset,
+            availableSubtypes: output.availableSubtypes,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          drafts.push({
+            rowIndex,
+            draft: fallbackRecordActivityDraft(resolveBaseCurrency(options.baseCurrency)),
+            validation: {
+              isValid: false,
+              missingFields: [],
+              errors: [{ field: "row", message }],
+            },
+            errors: [message],
+            resolvedAsset: null,
+            availableSubtypes: [],
+          });
+        }
+      }
+
+      const validRows = drafts.filter((draft) => draft.validation.isValid).length;
+      const resolvedAssets = dedupeResolvedAssets(
+        drafts
+          .map((draft) => draft.resolvedAsset)
+          .filter((asset): asset is ResolvedAsset => asset !== null),
+      );
 
       return {
         data: {
-          draft,
-          validation: validateRecordActivityDraft(draft),
+          drafts,
+          validation: {
+            totalRows: drafts.length,
+            validRows,
+            errorRows: drafts.length - validRows,
+          },
           availableAccounts,
-          resolvedAsset: resolved.resolvedAsset ?? null,
-          availableSubtypes: subtypesForActivityType(activityType),
+          resolvedAssets,
         },
       };
     },
@@ -1035,6 +1172,67 @@ function createGetAssetAllocationTool(options: {
   };
 }
 
+async function buildRecordActivityOutput(
+  args: RecordActivityArgs,
+  accounts: Account[],
+  options: {
+    marketDataService?: PortfolioAiMarketDataService;
+    baseCurrency?: string | (() => string | undefined);
+  },
+): Promise<RecordActivityOutputData> {
+  const availableAccounts = recordActivityAccountOptions(accounts);
+  const [accountId, accountName] = resolveRecordActivityAccount(args.account, accounts);
+  const accountCurrency =
+    accountId !== undefined
+      ? (accounts.find((account) => account.id === accountId)?.currency ??
+        resolveBaseCurrency(options.baseCurrency))
+      : resolveBaseCurrency(options.baseCurrency);
+  const activityType = normalizeActivityType(args.activityType);
+  const resolved = await resolveRecordActivityAsset({
+    symbol: args.symbol,
+    currency: accountCurrency,
+    marketDataService: options.marketDataService,
+  });
+  const amount = computeRecordActivityAmount(args);
+  const draftCurrency = resolved.resolvedAsset?.currency ?? accountCurrency;
+  const draft: ActivityDraft = {
+    activityType,
+    activityDate: args.activityDate,
+    symbol: args.symbol ?? null,
+    assetId: resolved.assetId ?? null,
+    assetName: resolved.assetName ?? null,
+    quantity: args.quantity ?? null,
+    unitPrice: args.unitPrice ?? null,
+    amount,
+    fee: args.fee ?? null,
+    currency: draftCurrency,
+    accountId: accountId ?? null,
+    accountName: accountName ?? null,
+    subtype: args.subtype ?? null,
+    notes: args.notes ?? null,
+    priceSource: args.unitPrice !== undefined ? "user" : "none",
+    pricingMode: "MARKET",
+    isCustomAsset: resolved.isCustomAsset,
+    assetKind: null,
+  };
+
+  return {
+    draft,
+    validation: validateRecordActivityDraft(draft),
+    availableAccounts,
+    resolvedAsset: resolved.resolvedAsset ?? null,
+    availableSubtypes: subtypesForActivityType(activityType),
+  };
+}
+
+function recordActivityAccountOptions(accounts: Account[]): AccountOption[] {
+  return accounts.map((account) => ({
+    id: account.id,
+    name: account.name,
+    currency: account.currency,
+  }));
+}
+
 function parseRecordActivityArgs(args: unknown): RecordActivityArgs {
   if (!isRecord(args)) {
     return { activityType: "", activityDate: "" };
@@ -1051,6 +1249,54 @@ function parseRecordActivityArgs(args: unknown): RecordActivityArgs {
     subtype: readOptionalString(args.subtype),
     notes: readOptionalString(args.notes),
   };
+}
+
+function parseRecordActivitiesArgs(args: unknown): RecordActivityArgs[] {
+  if (!isRecord(args) || !Array.isArray(args.activities)) {
+    return [];
+  }
+  return args.activities.map(parseRecordActivityArgs);
+}
+
+function recordActivityRowErrors(validation: RecordActivityOutputData["validation"]): string[] {
+  return [
+    ...validation.missingFields.map((field) => `Missing required field: ${field}`),
+    ...validation.errors.map((error) => `${error.field}: ${error.message}`),
+  ];
+}
+
+function fallbackRecordActivityDraft(baseCurrency: string): ActivityDraft {
+  return {
+    activityType: "UNKNOWN",
+    activityDate: "",
+    symbol: null,
+    assetId: null,
+    assetName: null,
+    quantity: null,
+    unitPrice: null,
+    amount: null,
+    fee: null,
+    currency: baseCurrency,
+    accountId: null,
+    accountName: null,
+    subtype: null,
+    notes: null,
+    priceSource: "none",
+    pricingMode: "MARKET",
+    isCustomAsset: false,
+    assetKind: null,
+  };
+}
+
+function dedupeResolvedAssets(assets: ResolvedAsset[]): ResolvedAsset[] {
+  const seenAssetIds = new Set<string>();
+  return assets.filter((asset) => {
+    if (seenAssetIds.has(asset.assetId)) {
+      return false;
+    }
+    seenAssetIds.add(asset.assetId);
+    return true;
+  });
 }
 
 function resolveRecordActivityAccount(
@@ -1097,7 +1343,7 @@ async function resolveRecordActivityAsset(options: {
 
   const results = await Promise.resolve(
     options.marketDataService?.searchSymbol?.(options.symbol) ?? [],
-  );
+  ).catch(() => []);
   const result = firstRecordActivitySymbolResult(results as SymbolSearchResult[], options.currency);
   if (!result) {
     return {
