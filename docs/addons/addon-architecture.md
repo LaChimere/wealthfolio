@@ -101,7 +101,7 @@ const accounts = await ctx.api.accounts.getAll();
 // Detected: accounts.getAll
 ```
 
-The Rust backend scans for patterns like:
+The backend scans for patterns like:
 
 - `ctx.api.accounts.getAll(`
 - `api.accounts.getAll(`

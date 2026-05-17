@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, test } from "bun:test";
+import { strToU8, zipSync } from "fflate";
 
 import { createLocalAddonService } from "./addons";
 
@@ -177,6 +178,175 @@ describe("TS addon domain", () => {
     expect("source" in metadata).toBe(false);
   });
 
+  test("extracts addon ZIPs with manifest normalization and permission detection", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+    const zipData = addonZip({
+      "pkg/manifest.json": JSON.stringify({
+        id: "zip-addon",
+        name: "Zip Addon",
+        version: "1.0.0",
+        main: "addon.js",
+        permissions: [
+          {
+            category: "portfolio",
+            purpose: "Read holdings",
+            functions: ["getHoldings"],
+          },
+        ],
+      }),
+      "pkg/dist/addon.js": "ctx.api.portfolio.getHoldings(); ctx.api.market.sync();",
+    });
+
+    const extracted = (await service.extractAddonZip({ zipData })) as TestExtractedAddon;
+
+    expect(extracted.metadata).toEqual(
+      normalizedManifest({
+        id: "zip-addon",
+        name: "Zip Addon",
+        version: "1.0.0",
+        main: "addon.js",
+        permissions: [
+          {
+            category: "portfolio",
+            purpose: "Read holdings",
+            functions: [
+              {
+                name: "getHoldings",
+                isDeclared: true,
+                isDetected: true,
+                detectedAt: expect.any(String) as string,
+              },
+            ],
+          },
+          {
+            category: "market-data",
+            purpose: "Access to quotes and market data",
+            functions: [
+              {
+                name: "sync",
+                isDeclared: false,
+                isDetected: true,
+                detectedAt: expect.any(String) as string,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(extracted.files).toEqual([
+      expect.objectContaining({ name: "pkg/manifest.json", isMain: false }),
+      expect.objectContaining({ name: "pkg/dist/addon.js", isMain: true }),
+    ]);
+  });
+
+  test("installs addon ZIPs and staged addon ZIP files locally", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+    const zipData = addonZip({
+      "manifest.json": JSON.stringify({
+        id: "installed-addon",
+        name: "Installed Addon",
+        version: "1.0.0",
+        main: "main.js",
+      }),
+      "main.js": "export default {};",
+    });
+
+    const installed = (await service.installAddonZip({
+      zipData,
+      enableAfterInstall: false,
+    })) as TestAddonManifest & { installedAt: string; source: string };
+    expect(installed).toMatchObject({
+      id: "installed-addon",
+      enabled: false,
+      source: "local",
+      installedAt: expect.any(String),
+    });
+    expect(
+      readFileSync(path.join(appDataDir, "addons", "installed-addon", "main.js"), "utf8"),
+    ).toBe("export default {};");
+    await expect(service.loadAddonForRuntime("installed-addon")).rejects.toThrow(
+      "Addon is disabled",
+    );
+    await service.toggleAddon("installed-addon", true);
+    await expect(service.loadAddonForRuntime("installed-addon")).resolves.toMatchObject({
+      metadata: expect.objectContaining({ id: "installed-addon" }),
+      files: [expect.objectContaining({ name: "main.js", isMain: true })],
+    });
+
+    const stagedZip = addonZip({
+      "manifest.json": JSON.stringify({
+        id: "staged-addon",
+        name: "Staged Addon",
+        version: "1.0.0",
+        main: "main.js",
+      }),
+      "main.js": "export const staged = true;",
+    });
+    const stagingDir = path.join(appDataDir, "addons", "staging");
+    mkdirSync(stagingDir, { recursive: true });
+    const stagedZipPath = path.join(stagingDir, "staged-addon.zip");
+    writeFileSync(stagedZipPath, stagedZip);
+
+    await expect(
+      service.installAddonFromStaging({ addonId: "staged-addon", enableAfterInstall: true }),
+    ).resolves.toMatchObject({
+      id: "staged-addon",
+      enabled: true,
+      source: "local",
+    });
+    expect(existsSync(stagedZipPath)).toBe(false);
+    await expect(service.loadAddonForRuntime("staged-addon")).resolves.toMatchObject({
+      files: [expect.objectContaining({ name: "main.js", isMain: true })],
+    });
+  });
+
+  test("rejects unsafe and invalid addon ZIP archives", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+
+    await expect(
+      service.extractAddonZip({
+        zipData: addonZip({
+          "../evil.js": "export default {};",
+          "manifest.json": JSON.stringify({
+            id: "unsafe",
+            name: "Unsafe",
+            version: "1.0.0",
+            main: "evil.js",
+          }),
+        }),
+      }),
+    ).rejects.toThrow("parent traversal");
+    await expect(
+      service.extractAddonZip({
+        zipData: addonZip({
+          "manifest.json": JSON.stringify({
+            id: "missing-main",
+            name: "Missing Main",
+            version: "1.0.0",
+            main: "missing.js",
+          }),
+          "main.js": "export default {};",
+        }),
+      }),
+    ).rejects.toThrow("Main addon file 'missing.js' not found");
+    await expect(
+      service.extractAddonZip({
+        zipData: addonZip({
+          "manifest.json": JSON.stringify({
+            id: "binary",
+            name: "Binary",
+            version: "1.0.0",
+            main: "main.js",
+          }),
+          "main.js": new Uint8Array([0xff]),
+        }),
+      }),
+    ).rejects.toThrow("Failed to read file main.js");
+  });
+
   test("rejects empty required manifest fields before runtime loading", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
     writeAddon(appDataDir, "empty-main", {
@@ -321,7 +491,7 @@ describe("TS addon domain", () => {
     await expect(service.uninstallAddon("../escape")).rejects.toThrow("Unsafe addon id");
     await expect(
       service.installAddonZip({ zipData: new Uint8Array([1]), enableAfterInstall: true }),
-    ).rejects.toMatchObject({ status: 501, code: "not_implemented" });
+    ).rejects.toThrow("Failed to read ZIP");
     await expect(service.fetchStoreListings()).rejects.toMatchObject({
       status: 501,
       code: "not_implemented",
@@ -349,6 +519,17 @@ function writeAddon(
     writeFileSync(filePath, content);
   }
   return addonDir;
+}
+
+function addonZip(files: Record<string, string | Uint8Array>): Uint8Array {
+  return zipSync(
+    Object.fromEntries(
+      Object.entries(files).map(([name, content]) => [
+        name,
+        typeof content === "string" ? strToU8(content) : content,
+      ]),
+    ),
+  );
 }
 
 function normalizedManifest(

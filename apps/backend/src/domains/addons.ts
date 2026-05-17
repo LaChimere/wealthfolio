@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { unzipSync } from "fflate";
+
 export interface AddonZipInstallRequest {
   zipData: Uint8Array;
   enableAfterInstall: boolean;
@@ -59,6 +61,10 @@ interface AddonManifestRecord extends Record<string, unknown> {
   minWealthfolioVersion: string | null;
   keywords: string[] | null;
   icon: string | null;
+  installedAt?: string;
+  updatedAt?: string;
+  source?: string;
+  size?: number;
 }
 
 interface AddonPermissionRecord {
@@ -101,10 +107,83 @@ export class AddonNotImplementedError extends Error {
   }
 }
 
-const ADDON_ARCHIVE_DISABLED_MESSAGE =
-  "Addon archive extraction and installation are not yet available in the TS backend runtime.";
 const ADDON_STORE_DISABLED_MESSAGE =
   "Addon store HTTP and update operations are not yet available in the TS backend runtime.";
+const MAX_ADDON_ZIP_ENTRIES = 10_000;
+const MAX_ADDON_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+const PERMISSION_PATTERNS = [
+  [
+    "portfolio",
+    [
+      "getHoldings",
+      "getHolding",
+      "update",
+      "recalculate",
+      "getIncomeSummary",
+      "getHistoricalValuations",
+      "getLatestValuations",
+    ],
+    "Access to portfolio holdings, valuations, and performance",
+  ],
+  [
+    "activities",
+    [
+      "getAll",
+      "search",
+      "create",
+      "update",
+      "saveMany",
+      "import",
+      "checkImport",
+      "getImportMapping",
+      "saveImportMapping",
+    ],
+    "Access to transaction history and activity management",
+  ],
+  ["accounts", ["getAll", "create"], "Access to account information and management"],
+  [
+    "market-data",
+    [
+      "searchTicker",
+      "syncHistory",
+      "sync",
+      "getProviders",
+      "getProfile",
+      "updateProfile",
+      "updateDataSource",
+    ],
+    "Access to quotes and market data",
+  ],
+  ["quotes", ["update", "getHistory"], "Access to quote management"],
+  [
+    "performance",
+    ["calculateHistory", "calculateSummary", "calculateAccountsSimple"],
+    "Access to performance calculations",
+  ],
+  [
+    "financial-planning",
+    ["getAll", "create", "update", "updateAllocations", "getAllocations", "calculateDeposits"],
+    "Access to goals and contribution limits",
+  ],
+  ["currency", ["getAll", "update", "add"], "Access to exchange rates and currency data"],
+  ["settings", ["get", "update", "backupDatabase"], "Access to application settings"],
+  ["files", ["openCsvDialog", "openSaveDialog"], "Access to file dialogs"],
+  [
+    "events",
+    [
+      "onDropHover",
+      "onDrop",
+      "onDropCancelled",
+      "onUpdateStart",
+      "onUpdateComplete",
+      "onUpdateError",
+      "onSyncStart",
+      "onSyncComplete",
+    ],
+    "Access to application events",
+  ],
+  ["ui", ["sidebar.addItem", "router.add", "onDisable"], "User interface and navigation"],
+] as const;
 
 export function createLocalAddonService(options: LocalAddonServiceOptions): AddonService {
   const appDataDir = path.resolve(options.appDataDir);
@@ -114,8 +193,8 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
       return listInstalledAddons(appDataDir);
     },
 
-    async installAddonZip() {
-      throw archiveDisabled();
+    async installAddonZip(request) {
+      return installAddonZip(appDataDir, request);
     },
 
     async toggleAddon(addonId, enabled) {
@@ -153,8 +232,8 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
       return enabled;
     },
 
-    async extractAddonZip() {
-      throw archiveDisabled();
+    async extractAddonZip(request) {
+      return extractAddonZip(request.zipData);
     },
 
     async fetchStoreListings() {
@@ -181,8 +260,14 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
       throw storeDisabled();
     },
 
-    async installAddonFromStaging() {
-      throw archiveDisabled();
+    async installAddonFromStaging(request) {
+      const zipPath = getStagingZipPath(appDataDir, request.addonId);
+      const manifest = installAddonZip(appDataDir, {
+        zipData: readFileSync(zipPath),
+        enableAfterInstall: request.enableAfterInstall,
+      });
+      rmSync(zipPath, { force: true });
+      return manifest;
     },
 
     async clearAddonStaging(addonId) {
@@ -235,6 +320,79 @@ function loadAddonForRuntime(appDataDir: string, addonId: string): ExtractedAddo
   return { metadata: manifest, files };
 }
 
+function installAddonZip(appDataDir: string, request: AddonZipInstallRequest): AddonManifestRecord {
+  const extracted = extractAddonZip(request.zipData);
+  const addonDir = getAddonPath(appDataDir, extracted.metadata.id);
+
+  if (existsSync(addonDir)) {
+    rmSync(addonDir, { recursive: true, force: false });
+  }
+  mkdirSync(addonDir, { recursive: true });
+
+  for (const file of extracted.files) {
+    writeAddonArchiveFile(addonDir, file);
+  }
+
+  const installed = installManifest(extracted.metadata, request.enableAfterInstall);
+  writeManifest(addonDir, installed);
+  return installed;
+}
+
+function extractAddonZip(zipData: Uint8Array): ExtractedAddonRecord {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(zipData);
+  } catch (error) {
+    throw new Error(`Failed to read ZIP: ${errorMessage(error)}`);
+  }
+
+  const entryList = Object.entries(entries);
+  if (entryList.length > MAX_ADDON_ZIP_ENTRIES) {
+    throw new Error(`Addon ZIP contains too many entries: ${entryList.length}`);
+  }
+
+  let totalBytes = 0;
+  let manifestContent: string | null = null;
+  const files: AddonFileRecord[] = [];
+
+  for (const [fileName, contentBytes] of entryList) {
+    if (fileName.endsWith("/")) {
+      continue;
+    }
+    validateAddonArchivePath(fileName);
+    totalBytes += contentBytes.byteLength;
+    if (totalBytes > MAX_ADDON_UNCOMPRESSED_BYTES) {
+      throw new Error("Addon ZIP uncompressed size exceeds the supported limit");
+    }
+
+    const content = decodeAddonArchiveText(fileName, contentBytes);
+    if (fileName === "manifest.json" || fileName.endsWith("/manifest.json")) {
+      manifestContent = content;
+    }
+    files.push({ name: fileName, content, isMain: false });
+  }
+
+  if (manifestContent === null) {
+    throw new Error("ZIP addon must contain a manifest.json file with addon metadata");
+  }
+
+  const metadata = parseAddonManifest(JSON.parse(manifestContent));
+  const main = manifestMain(metadata);
+  for (const file of files) {
+    file.isMain = file.name === main || file.name.endsWith(main);
+  }
+  if (!files.some((file) => file.isMain)) {
+    throw new Error(
+      `Main addon file '${main}' not found. Available files: ${files
+        .map((file) => file.name)
+        .join(", ")}`,
+    );
+  }
+
+  metadata.permissions = mergeAddonPermissions(metadata.permissions, detectAddonPermissions(files));
+  return { metadata, files };
+}
+
 function ensureAddonsDirectory(appDataDir: string): string {
   const addonsDir = path.join(appDataDir, "addons");
   mkdirSync(addonsDir, { recursive: true });
@@ -255,7 +413,12 @@ function getStagingPath(appDataDir: string, addonId?: string): string {
   if (addonId === undefined) {
     return stagingDir;
   }
-  const target = path.resolve(stagingDir, addonId);
+  return getStagingZipPath(appDataDir, addonId);
+}
+
+function getStagingZipPath(appDataDir: string, addonId: string): string {
+  const stagingDir = path.join(ensureAddonsDirectory(appDataDir), "staging");
+  const target = path.resolve(stagingDir, `${addonId}.zip`);
   if (!pathInside(target, stagingDir)) {
     throw new Error(`Unsafe addon id '${addonId}'`);
   }
@@ -325,6 +488,18 @@ function writeManifest(addonDir: string, manifest: AddonManifestRecord): void {
   writeFileSync(path.join(addonDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function installManifest(
+  manifest: AddonManifestRecord,
+  enableAfterInstall: boolean,
+): AddonManifestRecord {
+  return {
+    ...manifest,
+    enabled: enableAfterInstall,
+    installedAt: new Date().toISOString(),
+    source: "local",
+  };
+}
+
 function manifestEnabled(manifest: AddonManifestRecord): boolean {
   return manifest.enabled ?? true;
 }
@@ -379,7 +554,7 @@ function parseAddonPermissions(value: unknown): AddonPermissionRecord[] | null {
 function parseFunctionPermission(value: unknown): FunctionPermissionRecord {
   if (typeof value === "string") {
     return {
-      name: value,
+      name: requiredPermissionString(value, "name", "function permission"),
       isDeclared: true,
       isDetected: false,
       detectedAt: null,
@@ -405,6 +580,180 @@ function requiredPermissionString(value: unknown, field: string, subject: string
     throw new Error(`Missing '${field}' field in ${subject}`);
   }
   return trimmed;
+}
+
+function validateAddonArchivePath(fileName: string): void {
+  if (fileName === "") {
+    throw new Error("Unsafe addon archive path: path is empty");
+  }
+  if (fileName.includes("\\")) {
+    throw new Error(`Unsafe addon archive path '${fileName}': backslashes are not allowed`);
+  }
+  if (/^[A-Za-z]:/.test(fileName)) {
+    throw new Error(
+      `Unsafe addon archive path '${fileName}': Windows drive prefixes are not allowed`,
+    );
+  }
+  if (path.posix.isAbsolute(fileName)) {
+    throw new Error(`Unsafe addon archive path '${fileName}': absolute paths are not allowed`);
+  }
+
+  let hasNormalComponent = false;
+  for (const component of fileName.split("/")) {
+    if (component === "..") {
+      throw new Error(`Unsafe addon archive path '${fileName}': parent traversal is not allowed`);
+    }
+    if (component === "" || component === ".") {
+      throw new Error(`Unsafe addon archive path '${fileName}'`);
+    }
+    hasNormalComponent = true;
+  }
+  if (!hasNormalComponent) {
+    throw new Error(`Unsafe addon archive path '${fileName}': no file components found`);
+  }
+}
+
+function writeAddonArchiveFile(addonDir: string, file: AddonFileRecord): void {
+  validateAddonArchivePath(file.name);
+  const filePath = path.resolve(addonDir, file.name);
+  if (!pathInside(filePath, addonDir)) {
+    throw new Error(`Unsafe addon archive path '${file.name}': parent traversal is not allowed`);
+  }
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, file.content);
+}
+
+function decodeAddonArchiveText(fileName: string, content: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch (error) {
+    throw new Error(`Failed to read file ${fileName}: ${errorMessage(error)}`);
+  }
+}
+
+function detectAddonPermissions(addonFiles: AddonFileRecord[]): AddonPermissionRecord[] {
+  const detectedByCategory = new Map<string, Set<string>>();
+
+  for (const file of addonFiles) {
+    for (const [category, functions] of PERMISSION_PATTERNS) {
+      for (const functionName of functions) {
+        if (addonFileUsesFunction(file.content, category, functionName)) {
+          const categoryFunctions = detectedByCategory.get(category) ?? new Set<string>();
+          categoryFunctions.add(functionName);
+          detectedByCategory.set(category, categoryFunctions);
+        }
+      }
+    }
+  }
+
+  const detectedAt = new Date().toISOString();
+  return Array.from(detectedByCategory.entries()).map(([category, functions]) => {
+    const pattern = PERMISSION_PATTERNS.find(([candidate]) => candidate === category);
+    return {
+      category,
+      functions: Array.from(functions)
+        .sort((left, right) => left.localeCompare(right))
+        .map((name) => ({
+          name,
+          isDeclared: false,
+          isDetected: true,
+          detectedAt,
+        })),
+      purpose: pattern?.[2] ?? `Access to ${category} functions`,
+    };
+  });
+}
+
+function addonFileUsesFunction(content: string, category: string, functionName: string): boolean {
+  if (functionName.includes(".")) {
+    const [namespace, method] = functionName.split(".");
+    if (
+      namespace &&
+      method &&
+      [`.${namespace}.${method}(`, `${namespace}.${method}(`, `ctx.${namespace}.${method}(`].some(
+        (pattern) => content.includes(pattern),
+      )
+    ) {
+      return true;
+    }
+  }
+
+  const apiCategory = apiCategoryForPermission(category, functionName);
+  const apiPatterns = [
+    `api.${apiCategory}.${functionName}(`,
+    `.api.${apiCategory}.${functionName}(`,
+    `ctx.api.${apiCategory}.${functionName}(`,
+  ];
+  if (apiPatterns.some((pattern) => content.includes(pattern))) {
+    return true;
+  }
+
+  if (category === "events") {
+    const eventPatterns = [
+      `ctx.api.events.import.${functionName}(`,
+      `ctx.api.events.portfolio.${functionName}(`,
+      `ctx.api.events.market.${functionName}(`,
+      `api.events.import.${functionName}(`,
+      `api.events.portfolio.${functionName}(`,
+      `api.events.market.${functionName}(`,
+    ];
+    if (eventPatterns.some((pattern) => content.includes(pattern))) {
+      return true;
+    }
+  }
+
+  return category === "ui" && functionName === "onDisable" && content.includes("ctx.onDisable(");
+}
+
+function apiCategoryForPermission(category: string, functionName: string): string {
+  if (category === "currency") {
+    return "exchangeRates";
+  }
+  if (category === "financial-planning") {
+    return functionName === "calculateDeposits" ? "contributionLimits" : "goals";
+  }
+  if (
+    category === "market-data" &&
+    (functionName === "getProfile" ||
+      functionName === "updateProfile" ||
+      functionName === "updateDataSource")
+  ) {
+    return "assets";
+  }
+  return category === "market-data" ? "market" : category;
+}
+
+function mergeAddonPermissions(
+  declared: AddonPermissionRecord[] | null,
+  detected: AddonPermissionRecord[],
+): AddonPermissionRecord[] {
+  const merged: AddonPermissionRecord[] = (declared ?? []).map((permission) => ({
+    ...permission,
+    functions: permission.functions.map((func) => ({ ...func })),
+  }));
+
+  for (const detectedPermission of detected) {
+    const existing = merged.find(
+      (permission) => permission.category === detectedPermission.category,
+    );
+    if (!existing) {
+      merged.push(detectedPermission);
+      continue;
+    }
+    for (const detectedFunction of detectedPermission.functions) {
+      const existingFunction = existing.functions.find(
+        (func) => func.name === detectedFunction.name,
+      );
+      if (existingFunction) {
+        existingFunction.isDetected = true;
+        existingFunction.detectedAt = detectedFunction.detectedAt;
+      } else {
+        existing.functions.push(detectedFunction);
+      }
+    }
+  }
+
+  return merged;
 }
 
 function readAddonFilesRecursive(
@@ -443,14 +792,14 @@ function clearAddonStaging(appDataDir: string, addonId?: string): void {
   rmSync(stagingPath, { recursive: true, force: true });
 }
 
-function archiveDisabled(): AddonNotImplementedError {
-  return new AddonNotImplementedError(ADDON_ARCHIVE_DISABLED_MESSAGE);
-}
-
 function storeDisabled(): AddonNotImplementedError {
   return new AddonNotImplementedError(ADDON_STORE_DISABLED_MESSAGE);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

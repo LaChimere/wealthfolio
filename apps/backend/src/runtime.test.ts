@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, test } from "bun:test";
+import { strToU8, zipSync } from "fflate";
 
 import type { BackendRuntimeConfig } from "./config";
 import {
@@ -524,6 +525,58 @@ describe("TS backend runtime composition", () => {
       );
       expect(startupAddonsResponse.status).toBe(200);
       await expect(startupAddonsResponse.json()).resolves.toEqual([]);
+
+      const addonZipData = addonZip({
+        "manifest.json": JSON.stringify({
+          id: "runtime-zip-addon",
+          name: "Runtime ZIP Addon",
+          version: "1.0.0",
+          main: "main.js",
+        }),
+        "main.js": "ctx.api.portfolio.getHoldings();",
+      });
+      const addonExtractResponse = await fetch(`${server.baseUrl}/api/v1/addons/extract`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ zipData: Array.from(addonZipData) }),
+      });
+      expect(addonExtractResponse.status).toBe(200);
+      await expect(addonExtractResponse.json()).resolves.toMatchObject({
+        metadata: {
+          id: "runtime-zip-addon",
+          permissions: [
+            {
+              category: "portfolio",
+              functions: [expect.objectContaining({ name: "getHoldings", isDetected: true })],
+            },
+          ],
+        },
+        files: [
+          expect.objectContaining({ name: "manifest.json", isMain: false }),
+          expect.objectContaining({ name: "main.js", isMain: true }),
+        ],
+      });
+
+      const addonInstallResponse = await fetch(`${server.baseUrl}/api/v1/addons/install-zip`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ zipData: Array.from(addonZipData), enableAfterInstall: true }),
+      });
+      expect(addonInstallResponse.status).toBe(200);
+      await expect(addonInstallResponse.json()).resolves.toMatchObject({
+        id: "runtime-zip-addon",
+        enabled: true,
+        source: "local",
+        installedAt: expect.any(String),
+      });
+      const installedRuntimeZipAddonResponse = await fetch(
+        `${server.baseUrl}/api/v1/addons/runtime/runtime-zip-addon`,
+      );
+      expect(installedRuntimeZipAddonResponse.status).toBe(200);
+      await expect(installedRuntimeZipAddonResponse.json()).resolves.toMatchObject({
+        metadata: { id: "runtime-zip-addon" },
+        files: [expect.objectContaining({ name: "main.js", isMain: true })],
+      });
 
       const addonStoreResponse = await fetch(`${server.baseUrl}/api/v1/addons/store/listings`);
       expect(addonStoreResponse.status).toBe(501);
@@ -2122,6 +2175,17 @@ function readRuntimeSyncOutbox(
   db: ReturnType<typeof openSqliteDatabase>,
 ): Array<Record<string, unknown>> {
   return db.query<Record<string, unknown>, []>("SELECT * FROM sync_outbox ORDER BY rowid").all();
+}
+
+function addonZip(files: Record<string, string | Uint8Array>): Uint8Array {
+  return zipSync(
+    Object.fromEntries(
+      Object.entries(files).map(([name, content]) => [
+        name,
+        typeof content === "string" ? strToU8(content) : content,
+      ]),
+    ),
+  );
 }
 
 function seedRuntimeAsset(db: ReturnType<typeof openSqliteDatabase>, assetId: string): void {
