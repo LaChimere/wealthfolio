@@ -15,14 +15,14 @@ and richer provider-specific orchestration. The TypeScript/Bun backend now
 supports a bounded text streaming path for configured providers, provider-native
 and `<think>` fallback reasoning deltas, generated/refined thread titles,
 OpenAI-compatible/Ollama injected tool-call execution, the built-in
-`get_accounts` and `get_holdings` portfolio tools, and validated text/CSV
-attachment content injected into the provider prompt while persisting only
-attachment filename markers. It preserves the Rust-shaped NDJSON event contract
-(`system`, `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`,
-`threadTitleUpdated`, `done`, `error`) and persists user/assistant messages, but
-it intentionally does not wire the remaining portfolio tool registry,
-Anthropic/Gemini tool protocols, or multimodal attachments until those parity
-slices are migrated.
+`get_accounts`, `get_holdings`, and `get_cash_balances` portfolio tools, and
+validated text/CSV attachment content injected into the provider prompt while
+persisting only attachment filename markers. It preserves the Rust-shaped NDJSON
+event contract (`system`, `textDelta`, `reasoningDelta`, `toolCall`,
+`toolResult`, `threadTitleUpdated`, `done`, `error`) and persists user/assistant
+messages, but it intentionally does not wire the remaining portfolio tool
+registry, Anthropic/Gemini tool protocols, or multimodal attachments until those
+parity slices are migrated.
 
 ## Architecture Diagram
 
@@ -65,7 +65,7 @@ slices are migrated.
 │  │  │  Thread Cache   │  │   rig-core      │  │   Tool Registry     │   │  │
 │  │  │  (LRU, 100)     │  │   Agent         │  │   - get_holdings    │   │  │
 │  │  │                 │  │   - streaming   │  │   - get_accounts    │   │  │
-│  │  │  Fast lookups   │  │   - multi-turn  │  │   - search_activity │   │  │
+│  │  │  Fast lookups   │  │   - multi-turn  │  │   - cash balances   │   │  │
 │  │  │  for recent     │  │   - tool calls  │  │   - get_performance │   │  │
 │  │  │  threads        │  │                 │  │   - get_goals       │   │  │
 │  │  └─────────────────┘  └─────────────────┘  └─────────────────────┘   │  │

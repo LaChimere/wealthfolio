@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createPortfolioAiChatTools } from "./ai-chat-tools";
 import type { Account } from "./accounts";
-import type { Holding } from "./holdings";
+import type { DailyAccountValuation, Holding } from "./holdings";
 
 describe("TS AI chat built-in tools", () => {
   test("exposes Rust-compatible get_accounts output", async () => {
@@ -191,6 +191,190 @@ describe("TS AI chat built-in tools", () => {
     expect(data.holdings[0]?.symbol).toBe("SYM0");
     expect(data.holdings[99]?.symbol).toBe("SYM99");
   });
+
+  test("exposes Rust-compatible get_cash_balances output with valuation precedence", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "CAD Account", currency: "CAD" })],
+      },
+      holdingsService: {
+        getLatestValuations: (accountIds) => {
+          expect(accountIds).toEqual(["acct-1"]);
+          return [valuation({ accountId: "acct-1", cashBalance: 2400, fxRateToBase: 1 })];
+        },
+        getHoldings: (accountId) => {
+          expect(accountId).toBe("acct-1");
+          return [
+            cashHolding({ accountId: "acct-1", currency: "CAD", quantity: 1000, baseValue: 1000 }),
+            cashHolding({ accountId: "acct-1", currency: "USD", quantity: 1000, baseValue: 1350 }),
+            holding({ accountId: "acct-1", marketValue: { local: 500, base: 500 } }),
+          ];
+        },
+      },
+      baseCurrency: "CAD",
+    });
+
+    const getCashBalances = tools.find((tool) => tool.name === "get_cash_balances");
+    const result = await getCashBalances?.execute({ accountId: "acct-1" });
+
+    expect(getCashBalances).toMatchObject({
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          accountId: expect.objectContaining({ type: "string" }),
+        }),
+        required: [],
+      },
+    });
+    expect(result).toEqual({
+      data: {
+        accounts: [
+          {
+            accountId: "acct-1",
+            accountName: "CAD Account",
+            accountCurrency: "CAD",
+            balances: [
+              { currency: "CAD", amount: 1000 },
+              { currency: "USD", amount: 1000 },
+            ],
+            totalAccountCurrency: 2400,
+            totalBaseCurrency: 2350,
+          },
+        ],
+        grandTotalBase: 2350,
+        baseCurrency: "CAD",
+      },
+    });
+  });
+
+  test("uses latest valuation when cash market value base is zero", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", currency: "CAD" })],
+      },
+      holdingsService: {
+        getLatestValuations: () => [
+          valuation({ accountId: "acct-1", cashBalance: 1000, fxRateToBase: 1.35 }),
+        ],
+        getHoldings: () => [
+          cashHolding({ accountId: "acct-1", currency: "USD", quantity: 1000, baseValue: 0 }),
+        ],
+      },
+      baseCurrency: "CAD",
+    });
+
+    const result = await tools.find((tool) => tool.name === "get_cash_balances")?.execute({});
+
+    expect(result).toMatchObject({
+      data: {
+        accounts: [
+          expect.objectContaining({
+            totalAccountCurrency: 1000,
+            totalBaseCurrency: 1350,
+          }),
+        ],
+        grandTotalBase: 1350,
+      },
+    });
+  });
+
+  test("defaults get_cash_balances to TOTAL and skips accounts without cash", async () => {
+    const fetchedAccountIds: string[] = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [
+          account({ id: "acct-1", name: "Cash Account", currency: "USD" }),
+          account({ id: "acct-2", name: "Invested Account", currency: "USD" }),
+        ],
+      },
+      holdingsService: {
+        getLatestValuations: (accountIds) => {
+          expect(accountIds).toEqual(["acct-1", "acct-2"]);
+          return [];
+        },
+        getHoldings: (accountId) => {
+          fetchedAccountIds.push(accountId);
+          return accountId === "acct-1"
+            ? [cashHolding({ accountId, currency: "USD", quantity: 25, baseValue: 25 })]
+            : [holding({ accountId, marketValue: { local: 100, base: 100 } })];
+        },
+      },
+      baseCurrency: "USD",
+    });
+
+    const result = await tools.find((tool) => tool.name === "get_cash_balances")?.execute({});
+
+    expect(fetchedAccountIds).toEqual(["acct-1", "acct-2"]);
+    expect(result).toEqual({
+      data: {
+        accounts: [
+          {
+            accountId: "acct-1",
+            accountName: "Cash Account",
+            accountCurrency: "USD",
+            balances: [{ currency: "USD", amount: 25 }],
+            totalAccountCurrency: 25,
+            totalBaseCurrency: 25,
+          },
+        ],
+        grandTotalBase: 25,
+        baseCurrency: "USD",
+      },
+    });
+  });
+
+  test("keeps get_cash_balances empty without querying valuations when no accounts are active", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      holdingsService: {
+        getLatestValuations: () => {
+          throw new Error("should not query valuations for an empty TOTAL target set");
+        },
+        getHoldings: () => {
+          throw new Error("should not query holdings for an empty TOTAL target set");
+        },
+      },
+      baseCurrency: "USD",
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "get_cash_balances")
+      ?.execute({
+        accountId: "",
+      });
+
+    expect(result).toEqual({
+      data: {
+        accounts: [],
+        grandTotalBase: 0,
+        baseCurrency: "USD",
+      },
+    });
+  });
+
+  test("fails get_cash_balances when mixed cash currencies cannot be converted", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", currency: "CAD" })],
+      },
+      holdingsService: {
+        getLatestValuations: () => [],
+        getHoldings: () => [
+          cashHolding({ accountId: "acct-1", currency: "USD", quantity: 100, baseValue: 0 }),
+          cashHolding({ accountId: "acct-1", currency: "EUR", quantity: 50, baseValue: 0 }),
+        ],
+      },
+      baseCurrency: "CAD",
+    });
+
+    await expect(
+      tools.find((tool) => tool.name === "get_cash_balances")?.execute({ accountId: "acct-1" }),
+    ).rejects.toThrow(
+      "Cash balance for account 'acct-1' includes currencies that cannot be converted to base currency.",
+    );
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -255,6 +439,51 @@ function holding(overrides: Partial<Holding>): Holding {
     weight: 1,
     asOfDate: "2026-05-17",
     metadata: null,
+    ...overrides,
+  };
+}
+
+function cashHolding(options: {
+  accountId: string;
+  currency: string;
+  quantity: number;
+  baseValue: number;
+}): Holding {
+  return holding({
+    id: `cash-${options.accountId}-${options.currency}`,
+    accountId: options.accountId,
+    holdingType: "cash",
+    instrument: {
+      id: `cash:${options.currency}`,
+      symbol: options.currency,
+      name: `Cash (${options.currency})`,
+      currency: options.currency,
+      notes: null,
+      pricingMode: "MANUAL",
+      preferredProvider: null,
+      exchangeMic: null,
+      classifications: null,
+    },
+    quantity: options.quantity,
+    localCurrency: options.currency,
+    marketValue: { local: options.quantity, base: options.baseValue },
+  });
+}
+
+function valuation(overrides: Partial<DailyAccountValuation>): DailyAccountValuation {
+  return {
+    id: "valuation-1",
+    accountId: "acct-1",
+    valuationDate: "2026-05-17",
+    accountCurrency: "CAD",
+    baseCurrency: "CAD",
+    fxRateToBase: 1,
+    cashBalance: 0,
+    investmentMarketValue: 0,
+    totalValue: 0,
+    costBasis: 0,
+    netContribution: 0,
+    calculatedAt: "2026-05-17T00:00:00Z",
     ...overrides,
   };
 }
