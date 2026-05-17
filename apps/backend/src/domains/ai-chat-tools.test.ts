@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createPortfolioAiChatTools } from "./ai-chat-tools";
 import type { Account } from "./accounts";
+import type { Goal } from "./goals";
 import type { DailyAccountValuation, Holding } from "./holdings";
 
 describe("TS AI chat built-in tools", () => {
@@ -375,6 +376,103 @@ describe("TS AI chat built-in tools", () => {
       "Cash balance for account 'acct-1' includes currencies that cannot be converted to base currency.",
     );
   });
+
+  test("exposes Rust-compatible get_goals output", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      goalService: {
+        getGoals: () => [
+          goal({
+            id: "goal-1",
+            title: "Retire",
+            description: "Long-term retirement",
+            targetAmount: 1000000,
+            summaryTargetAmount: 1200000,
+            summaryCurrentValue: 300000,
+            summaryProgress: 0.25,
+            targetDate: "2045-01-01",
+          }),
+          goal({
+            id: "goal-2",
+            title: "Emergency Fund",
+            targetAmount: 50000,
+            summaryCurrentValue: 50000,
+            summaryProgress: 1,
+            statusLifecycle: "achieved",
+          }),
+        ],
+      },
+    });
+
+    const getGoals = tools.find((tool) => tool.name === "get_goals");
+    const result = await getGoals?.execute({});
+
+    expect(getGoals).toMatchObject({
+      description: expect.stringContaining("investment goals"),
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    });
+    expect(result).toEqual({
+      data: {
+        goals: [
+          {
+            id: "goal-1",
+            title: "Retire",
+            description: "Long-term retirement",
+            targetAmount: 1200000,
+            currentAmount: 300000,
+            progressPercent: 25,
+            deadline: "2045-01-01",
+            isAchieved: false,
+          },
+          {
+            id: "goal-2",
+            title: "Emergency Fund",
+            description: null,
+            targetAmount: 50000,
+            currentAmount: 50000,
+            progressPercent: 100,
+            deadline: null,
+            isAchieved: true,
+          },
+        ],
+        count: 2,
+        totalTarget: 1250000,
+        totalCurrent: 350000,
+        achievedCount: 1,
+      },
+    });
+  });
+
+  test("truncates get_goals output at Rust-compatible goal limit", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      goalService: {
+        getGoals: () =>
+          Array.from({ length: 55 }, (_, index) =>
+            goal({ id: `goal-${index}`, title: `Goal ${index}`, targetAmount: 100 }),
+          ),
+      },
+    });
+
+    const result = await tools.find((tool) => tool.name === "get_goals")?.execute({});
+
+    expect(result).toMatchObject({
+      data: {
+        count: 50,
+        totalTarget: 5000,
+        truncated: true,
+        originalCount: 55,
+      },
+    });
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -484,6 +582,31 @@ function valuation(overrides: Partial<DailyAccountValuation>): DailyAccountValua
     costBasis: 0,
     netContribution: 0,
     calculatedAt: "2026-05-17T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function goal(overrides: Partial<Goal>): Goal {
+  return {
+    id: "goal-1",
+    goalType: "retirement",
+    title: "Goal",
+    description: null,
+    targetAmount: null,
+    statusLifecycle: "active",
+    statusHealth: "on_track",
+    priority: 0,
+    coverImageKey: null,
+    currency: "USD",
+    startDate: null,
+    targetDate: null,
+    summaryCurrentValue: null,
+    summaryProgress: null,
+    projectedCompletionDate: null,
+    projectedValueAtTargetDate: null,
+    createdAt: "2026-05-17T00:00:00Z",
+    updatedAt: "2026-05-17T00:00:00Z",
+    summaryTargetAmount: null,
     ...overrides,
   };
 }

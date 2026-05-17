@@ -1,9 +1,11 @@
 import type { AccountService } from "./accounts";
 import type { AiChatToolDefinition } from "./ai-chat";
+import type { Goal, GoalService } from "./goals";
 import type { DailyAccountValuation, Holding, HoldingsService } from "./holdings";
 
 const MAX_ACCOUNTS = 50;
 const MAX_HOLDINGS = 100;
+const MAX_GOALS = 50;
 const ZERO_EPSILON = 1e-9;
 
 type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
@@ -13,6 +15,7 @@ export interface PortfolioAiChatToolsOptions {
   accountService: Pick<AccountService, "getActiveAccounts"> &
     Partial<Pick<AccountService, "getAllAccounts">>;
   holdingsService?: PortfolioAiHoldingsService;
+  goalService?: Pick<GoalService, "getGoals">;
   baseCurrency?: string | (() => string | undefined);
 }
 
@@ -40,6 +43,9 @@ export function createPortfolioAiChatTools(
         }),
       );
     }
+  }
+  if (options.goalService) {
+    tools.push(createGetGoalsTool(options.goalService));
   }
   return tools;
 }
@@ -268,6 +274,40 @@ function createGetCashBalancesTool(options: {
   };
 }
 
+function createGetGoalsTool(goalService: Pick<GoalService, "getGoals">): AiChatToolDefinition {
+  return {
+    name: "get_goals",
+    description:
+      "Get investment goals with current progress. Returns goal title, target amount, current amount, progress percentage, and deadline for each goal.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+    execute: () => {
+      const goals = goalService.getGoals();
+      const goalRows = goals.slice(0, MAX_GOALS).map(goalToolDto);
+      const truncated = goals.length > goalRows.length;
+
+      return {
+        data: {
+          goals: goalRows,
+          count: goalRows.length,
+          totalTarget: goalRows.reduce((sum, goal) => sum + goal.targetAmount, 0),
+          totalCurrent: goalRows.reduce((sum, goal) => sum + goal.currentAmount, 0),
+          achievedCount: goalRows.filter((goal) => goal.isAchieved).length,
+          ...(truncated
+            ? {
+                truncated: true,
+                originalCount: goals.length,
+              }
+            : {}),
+        },
+      };
+    },
+  };
+}
+
 function parseHoldingsArgs(args: unknown): { accountId: string; viewMode: string } {
   if (!isRecord(args)) {
     return { accountId: "TOTAL", viewMode: "treemap" };
@@ -300,6 +340,19 @@ function holdingToolDto(holding: Holding, accountNames: Map<string, string>) {
     dayChangePct: holding.dayChangePct,
     weight: holding.weight,
     currency: holding.localCurrency,
+  };
+}
+
+function goalToolDto(goal: Goal) {
+  return {
+    id: goal.id,
+    title: goal.title,
+    description: goal.description,
+    targetAmount: goal.summaryTargetAmount ?? goal.targetAmount ?? 0,
+    currentAmount: goal.summaryCurrentValue ?? 0,
+    progressPercent: (goal.summaryProgress ?? 0) * 100,
+    deadline: goal.targetDate,
+    isAchieved: goal.statusLifecycle === "achieved",
   };
 }
 

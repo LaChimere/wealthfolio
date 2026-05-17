@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 148
+turns_used: 149
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T18:43:36+08:00"
+updated_at: "2026-05-17T18:51:22+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -951,6 +951,11 @@ updated_at: "2026-05-17T18:43:36+08:00"
   base-currency fallback/error behavior, and empty-account short-circuiting now
   match the Rust tool. Backend type-check and focused AI chat/tool/runtime/http
   tests passed.
+- Turn 149: Wired the Rust-shaped `get_goals` AI portfolio tool into the TS
+  runtime registry by sharing the runtime goal service with chat tools,
+  returning persisted summary target/current/progress/deadline fields, achieved
+  counts, and Rust-compatible 50-goal truncation metadata. Backend type-check
+  and focused AI chat/tool/runtime/http tests passed.
 
 ## Deferred items
 
@@ -1013,10 +1018,10 @@ updated_at: "2026-05-17T18:43:36+08:00"
   provider catalog/settings/model listing, local thread/message/tag persistence,
   sync_outbox callbacks for local AI chat mutations, native/fallback
   text/reasoning streaming, generated thread titles, OpenAI-compatible/Ollama
-  injected tool-call execution, built-in `get_accounts`, `get_holdings`, and
-  `get_cash_balances`, and bounded text/CSV attachment prompt injection now have
-  TS runtime parity, while the remaining built-in portfolio tool wiring belongs
-  in dedicated AI runtime slices.
+  injected tool-call execution, built-in `get_accounts`, `get_holdings`,
+  `get_cash_balances`, and `get_goals`, and bounded text/CSV attachment prompt
+  injection now have TS runtime parity, while the remaining built-in portfolio
+  tool wiring belongs in dedicated AI runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can

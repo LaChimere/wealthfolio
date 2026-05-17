@@ -281,6 +281,17 @@ function createServicesFromDatabase(
     },
     symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
   });
+  const goalService = createGoalService(
+    createGoalRepository(db, {
+      queueSyncEvent: (event) => {
+        syncOutboxQueue.queueSyncEvent(event);
+      },
+    }),
+    {
+      accountProvider: accountService,
+      baseCurrency,
+    },
+  );
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -324,7 +335,12 @@ function createServicesFromDatabase(
     aiProviderService,
     aiChatService: createAiChatService(db, {
       aiProviderService,
-      tools: createPortfolioAiChatTools({ accountService, holdingsService, baseCurrency }),
+      tools: createPortfolioAiChatTools({
+        accountService,
+        holdingsService,
+        goalService,
+        baseCurrency,
+      }),
       queueThreadSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "ai_threads",
@@ -398,17 +414,7 @@ function createServicesFromDatabase(
     eventBus,
     deviceSyncService: createDisabledDeviceSyncService(),
     exchangeRateService,
-    goalService: createGoalService(
-      createGoalRepository(db, {
-        queueSyncEvent: (event) => {
-          syncOutboxQueue.queueSyncEvent(event);
-        },
-      }),
-      {
-        accountProvider: accountService,
-        baseCurrency,
-      },
-    ),
+    goalService,
     goalValuationProvider: createGoalValuationProvider(db, accountService),
     healthService: createHealthService(createHealthRepository(db), undefined, {
       accountProvider: accountService,

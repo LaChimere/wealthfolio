@@ -134,8 +134,8 @@
     catalog/settings/model-listing runtime behavior, bounded native/fallback
     text/reasoning AI chat provider streaming, generated thread titles,
     OpenAI-compatible/Ollama injected tool-call execution, built-in
-    `get_accounts`, `get_holdings`, and `get_cash_balances`, and text/CSV
-    attachment prompt injection are wired into standalone runtime while
+    `get_accounts`, `get_holdings`, `get_cash_balances`, and `get_goals`, and
+    text/CSV attachment prompt injection are wired into standalone runtime while
     remaining built-in portfolio tool wiring, Anthropic/Gemini tool protocols,
     and multimodal image/PDF/binary attachments are deferred to AI runtime
     parity slices; alternative asset persistence, manual valuation quotes,
@@ -188,25 +188,26 @@
     mutation, local AI chat sync_outbox callbacks, native/fallback
     text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama injected tool-call execution, built-in
-    `get_accounts`, `get_holdings`, and `get_cash_balances`, and text/CSV
-    attachment prompt injection now have TS runtime parity, while remaining
-    built-in portfolio tool wiring, Anthropic/Gemini tool protocols, and
-    multimodal image/PDF/binary attachments are deferred to AI runtime parity
-    slices; device-sync integration for sync crypto is deferred to device-sync
-    runtime parity slices; bounded account/timezone health status/checks, cache
-    behavior, legacy-classification health issues, and classification migration
-    health-fix dispatch now have TS runtime parity, while calculation-heavy
-    health checks, market sync fix execution, and non-classification
-    `/health/fix` dispatch are deferred to health/calculation parity slices;
-    disabled Connect feature-flag responses, local empty-list routes, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, local sync repositories, subscription
-    entitlement checks, event production, E2EE enrollment, sync engine,
-    snapshot/upload runtime, background workers, device-sync cloud clients,
-    token lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    `get_accounts`, `get_holdings`, `get_cash_balances`, and `get_goals`, and
+    text/CSV attachment prompt injection now have TS runtime parity, while
+    remaining built-in portfolio tool wiring, Anthropic/Gemini tool protocols,
+    and multimodal image/PDF/binary attachments are deferred to AI runtime
+    parity slices; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; bounded account/timezone health
+    status/checks, cache behavior, legacy-classification health issues, and
+    classification migration health-fix dispatch now have TS runtime parity,
+    while calculation-heavy health checks, market sync fix execution, and
+    non-classification `/health/fix` dispatch are deferred to health/calculation
+    parity slices; disabled Connect feature-flag responses, local empty-list
+    routes, local broker sync profile persistence, and disabled device-sync
+    route responses now have TS runtime parity, while real Connect token
+    lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1224,6 +1225,13 @@ contract:
   tool definition, TOTAL/empty-account defaults, active-account expansion,
   cash-only filtering, latest-valuation precedence, zero-base valuation
   fallback, unconvertible-currency errors, and existing runtime route behavior.
+- `pr5-ai-chat-get-goals-tool`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test --run src/domains/ai-chat-tools.test.ts src/domains/ai-chat.test.ts src/runtime.test.ts src/http.test.ts`.
+  Coverage includes the runtime-registered Rust-compatible `get_goals` tool
+  definition, persisted summary target/current/progress/deadline mapping,
+  achieved counts, total target/current sums, 50-goal truncation metadata, and
+  existing runtime route behavior.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1696,8 +1704,8 @@ contract:
   manifest-permission enforcement, AI chat native/fallback text/reasoning
   streaming plus generated thread titles, OpenAI-compatible/Ollama injected
   tool-call execution, built-in `get_accounts`/`get_holdings`/
-  `get_cash_balances`, and text/CSV attachment prompt injection, and explicit
-  portfolio and market-sync deferred runtime gates implemented; broader
+  `get_cash_balances`/`get_goals`, and text/CSV attachment prompt injection, and
+  explicit portfolio and market-sync deferred runtime gates implemented; broader
   migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
