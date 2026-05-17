@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 139
+turns_used: 140
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T16:51:07+08:00"
+updated_at: "2026-05-17T16:58:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -900,6 +900,11 @@ updated_at: "2026-05-17T16:51:07+08:00"
   unconfigured providers, missing API keys, attachments, and provider failures
   surface explicit errors. Backend type-check and focused backend AI/chat/http/
   runtime tests passed.
+- Turn 140: Added frontend AI chat error-code aliasing for backend snake_case
+  runtime errors so provider-not-configured, missing-key, provider-error,
+  not-implemented, and related TS backend responses map to existing
+  user-friendly chat messages instead of falling through to unknown-error UI.
+  Focused AI assistant type tests passed.
 
 ## Deferred items
 

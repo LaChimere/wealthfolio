@@ -112,6 +112,26 @@ describe("parseErrorCode", () => {
     const result = parseErrorCode("missingApiKey", "This should be ignored");
     expect(result.message).toBe(ERROR_CODE_MAP.missingApiKey.message);
   });
+
+  it("should map backend snake_case error codes to user-friendly messages", () => {
+    expect(parseErrorCode("provider_not_configured")).toMatchObject({
+      code: "provider_not_configured",
+      message: ERROR_CODE_MAP.providerNotConfigured.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("missing_api_key")).toMatchObject({
+      message: ERROR_CODE_MAP.missingApiKey.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("provider_error")).toMatchObject({
+      message: ERROR_CODE_MAP.providerError.message,
+      retryable: true,
+    });
+    expect(parseErrorCode("not_implemented")).toMatchObject({
+      message: ERROR_CODE_MAP.notImplemented.message,
+      retryable: false,
+    });
+  });
 });
 
 describe("ERROR_CODE_MAP", () => {
@@ -126,6 +146,7 @@ describe("ERROR_CODE_MAP", () => {
       "providerError",
       "threadNotFound",
       "invalidInput",
+      "notImplemented",
       "internal",
       "cancelled",
       "network",

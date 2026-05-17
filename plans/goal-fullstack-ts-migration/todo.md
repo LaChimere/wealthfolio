@@ -1152,6 +1152,11 @@ contract:
   snapshots, parent-truncated history, missing-key and attachment pre-stream
   errors, provider stream error events, and standalone runtime
   provider-not-configured behavior.
+- `pr5-ai-chat-error-code-frontend`: targeted check passed:
+  `bun run --cwd apps/frontend test --run src/features/ai-assistant/types.test.ts`.
+  Coverage includes mapping TS backend snake_case chat errors such as
+  `provider_not_configured`, `missing_api_key`, `provider_error`, and
+  `not_implemented` to the existing user-friendly frontend chat error messages.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
