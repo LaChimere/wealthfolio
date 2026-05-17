@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 136
+turns_used: 137
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T15:40:49+08:00"
+updated_at: "2026-05-17T15:57:18+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -878,6 +878,13 @@ updated_at: "2026-05-17T15:40:49+08:00"
   runtime manifest fields, staged `{addonId}.zip` install cleanup, route wiring,
   and `fflate` dependency management. Focused add-on/http/runtime tests, backend
   type-check, full `bun run check`, and focused code review passed.
+- Turn 137: Added add-on store HTTP/update/download-staging parity in the TS
+  runtime: store listing parsing, rating submission, update checks with
+  per-add-on fallback errors, direct/redirected store ZIP downloads, staged ZIP
+  validation, update installs that preserve existing enabled state, store
+  headers with app version and instance ID, and standalone runtime wiring
+  through settings-derived instance IDs. Focused add-on/http/runtime tests,
+  backend type-check, full `bun run check`, and focused code review passed.
 
 ## Deferred items
 
@@ -1057,14 +1064,14 @@ updated_at: "2026-05-17T15:40:49+08:00"
   production now have TS runtime parity, and standalone portfolio trigger routes
   now return explicit deferred 501s, while remaining recalculation behavior must
   move with dedicated holdings/portfolio parity slices.
-- Add-on security scanning, sandbox host hardening, store HTTP requests, store
-  download staging, and update behavior remain active follow-ups. reason=the
-  standalone TS backend now supports local installed add-on listing,
+- Add-on security scanning and sandbox host hardening remain active follow-ups.
+  reason=the standalone TS backend now supports local installed add-on listing,
   Rust-compatible manifest normalization, toggles, uninstall, runtime file
-  loading, enabled-on-startup loading, local ZIP extraction/install, staged
+  loading, enabled-on-startup loading, local ZIP extraction/install, add-on
+  store listings/ratings/update checks/download staging/update installs, staged
   `{addonId}.zip` install cleanup, and safe staging cleanup from
-  `appDataDir/addons`, while store, security scan, and sandbox behavior must
-  move with dedicated add-on parity slices.
+  `appDataDir/addons`, while security scan and sandbox behavior must move with
+  dedicated add-on parity slices.
 - Market-data market sync execution and portfolio recalculation side effects
   remain active follow-ups. reason=exchange metadata, local quote
   persistence/import, Yahoo dividends/search/resolve have TS runtime coverage,

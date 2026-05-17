@@ -261,7 +261,11 @@ function createServicesFromDatabase(
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService,
-    addonService: createLocalAddonService({ appDataDir }),
+    addonService: createLocalAddonService({
+      appDataDir,
+      appVersion: readPackageVersion(runtimeOptions.repositoryRoot),
+      instanceId: () => settingsService.getSettings().instanceId,
+    }),
     alternativeAssetService: createAlternativeAssetService(db, {
       eventBus,
       queueAssetSyncEvent: (event) => {

@@ -301,6 +301,11 @@ backend:
   safe path validation, text decoding, manifest/main detection, Rust-compatible
   permission detection/merging, install-time runtime manifest fields, staged
   `{addonId}.zip` install cleanup, and standalone runtime route wiring.
+- Add add-on store HTTP/update/download-staging runtime behavior, including
+  store listing response-shape parsing, rating submissions, update checks with
+  per-add-on fallback errors, direct/redirected ZIP downloads, staged ZIP
+  validation, update installs that preserve existing enabled state, and
+  app-version/instance headers.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -330,19 +335,20 @@ summary, simple account performance, account performance history/summary,
 valuation reads, snapshot metadata, historical snapshot holdings reads, holdings
 import checks, live holdings fan-out, holding detail/by-asset fan-out,
 allocation reads, snapshot deletion, bounded manual snapshot saves, bounded
-snapshot import writes, add-on store/update/sandbox runtime beyond local
-filesystem listing/toggles/runtime loading, manifest normalization, and local
-ZIP extraction/install/staging install, broader market-data runtime beyond
-mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
-single activity delete, and bounded existing-asset/cash/symbol-resolved and
-bounded symbol-created activity create/update/bulk persistence plus CSV
-parse/read-only asset preview/read-only import validation, bounded import apply,
-activity mutation event production, activity/import/asset sync-event callback
-queuing, and domain-event planning/batch processing/worker helper, save-up
-preview calculations, local AI chat thread/message/tag persistence, bounded
-health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, holdings inline portfolio
+snapshot import writes, add-on security-scanning/sandbox runtime beyond local
+filesystem listing/toggles/runtime loading, manifest normalization, local ZIP
+extraction/install/staging install, and store/update/download-staging, broader
+market-data runtime beyond mapping/templates/duplicate lookups, read-only
+search, transfer link/unlink, single activity delete, and bounded
+existing-asset/cash/symbol-resolved and bounded symbol-created activity
+create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
+import validation, bounded import apply, activity mutation event production,
+activity/import/asset sync-event callback queuing, and domain-event
+planning/batch processing/worker helper, save-up preview calculations, local AI
+chat thread/message/tag persistence, bounded health account/timezone
+status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, calculation-heavy health checks or
+non-classification `/health/fix` execution, holdings inline portfolio
 recalculation/job execution, real Connect runtime implementation, real
 device-sync runtime implementation, or Rust runtime removal is in scope for this
 slice.

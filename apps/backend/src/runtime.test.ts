@@ -578,12 +578,6 @@ describe("TS backend runtime composition", () => {
         files: [expect.objectContaining({ name: "main.js", isMain: true })],
       });
 
-      const addonStoreResponse = await fetch(`${server.baseUrl}/api/v1/addons/store/listings`);
-      expect(addonStoreResponse.status).toBe(501);
-      await expect(addonStoreResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
-
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);
       await expect(appInfoResponse.json()).resolves.toMatchObject({

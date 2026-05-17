@@ -85,7 +85,6 @@ export {
   type AiChatUpdateToolResultRequest,
 } from "./domains/ai-chat";
 export {
-  AddonNotImplementedError,
   createLocalAddonService,
   type AddonRatingRequest,
   type AddonService,

@@ -347,6 +347,226 @@ describe("TS addon domain", () => {
     ).rejects.toThrow("Failed to read file main.js");
   });
 
+  test("fetches store listings and submits ratings with Rust-compatible headers", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const calls: Array<{ body?: string; headers: Headers; url: string }> = [];
+    const service = createLocalAddonService({
+      appDataDir,
+      appVersion: "3.4.0",
+      instanceId: () => "",
+      storeBaseUrl: "https://store.test/api/addons/",
+      fetchStore: async (input, init) => {
+        const url = String(input);
+        calls.push({
+          url,
+          headers: new Headers(init?.headers),
+          body: typeof init?.body === "string" ? init.body : undefined,
+        });
+        if (url === "https://store.test/api/addons") {
+          return Response.json({ addons: [{ id: "store-addon" }] });
+        }
+        return Response.json({ ok: true });
+      },
+    });
+
+    await expect(service.fetchStoreListings()).resolves.toEqual([{ id: "store-addon" }]);
+    await expect(
+      service.submitRating({ addonId: "addon/id", rating: 5, review: "Great" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        url: "https://store.test/api/addons",
+        headers: expect.any(Headers),
+      }),
+      expect.objectContaining({
+        url: "https://store.test/api/addons/addon%2Fid/ratings",
+        headers: expect.any(Headers),
+        body: JSON.stringify({ rating: 5, review: "Great" }),
+      }),
+    ]);
+    expect(calls[0]?.headers.get("user-agent")).toBe("Wealthfolio/3.4.0");
+    expect(calls[0]?.headers.get("x-app-version")).toBe("3.4.0");
+    expect(calls[0]?.headers.get("x-instance-id")).toBe("");
+    expect(calls[1]?.headers.get("x-instance-id")).toBe("");
+
+    await expect(service.submitRating({ addonId: "addon/id", rating: 0 })).rejects.toThrow(
+      "Rating must be between 1 and 5",
+    );
+    expect(calls).toHaveLength(2);
+
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => Response.json([{ id: "direct-addon" }]),
+      }).fetchStoreListings(),
+    ).resolves.toEqual([{ id: "direct-addon" }]);
+  });
+
+  test("checks addon updates and preserves per-addon failures", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "update-ok", {
+      manifest: {
+        id: "update-ok",
+        name: "Update OK",
+        version: "1.0.0",
+        main: "main.js",
+      },
+      files: { "main.js": "export default {};" },
+    });
+    writeAddon(appDataDir, "update-fail", {
+      manifest: {
+        id: "update-fail",
+        name: "Update Fail",
+        version: "2.0.0",
+        main: "main.js",
+      },
+      files: { "main.js": "export default {};" },
+    });
+    const service = createLocalAddonService({
+      appDataDir,
+      storeBaseUrl: "https://store.test/api/addons",
+      fetchStore: async (input) => {
+        const url = String(input);
+        if (url.includes("addonId=update-ok&currentVersion=1.0.0")) {
+          return Response.json({
+            addonId: "update-ok",
+            updateInfo: {
+              currentVersion: "1.0.0",
+              latestVersion: "1.1.0",
+              updateAvailable: true,
+            },
+            error: null,
+          });
+        }
+        return new Response("offline", { status: 500, statusText: "Internal Server Error" });
+      },
+    });
+
+    await expect(service.checkAddonUpdate("update-ok")).resolves.toMatchObject({
+      addonId: "update-ok",
+      updateInfo: { latestVersion: "1.1.0", updateAvailable: true },
+    });
+    const allResults = (await service.checkAllAddonUpdates()) as Array<{
+      addonId: string;
+      error: string | null;
+      updateInfo: Record<string, unknown>;
+    }>;
+    expect(allResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ addonId: "update-ok", error: null }),
+        {
+          addonId: "update-fail",
+          updateInfo: {
+            currentVersion: "2.0.0",
+            latestVersion: "unknown",
+            updateAvailable: false,
+            downloadUrl: null,
+            releaseNotes: null,
+            releaseDate: null,
+            changelogUrl: null,
+            isCritical: null,
+            hasBreakingChanges: null,
+            minWealthfolioVersion: null,
+          },
+          error: "Update check API returned error 500 Internal Server Error: offline",
+        },
+      ]),
+    );
+  });
+
+  test("downloads store addons to staging and updates while preserving enabled state", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "store-addon", {
+      manifest: {
+        id: "store-addon",
+        name: "Store Addon",
+        version: "1.0.0",
+        main: "main.js",
+        enabled: true,
+      },
+      files: { "main.js": "export default {};" },
+    });
+    const zipData = addonZip({
+      "manifest.json": JSON.stringify({
+        id: "store-addon",
+        name: "Store Addon",
+        version: "2.0.0",
+        main: "main.js",
+      }),
+      "main.js": "export const updated = true;",
+    });
+    const calls: string[] = [];
+    const service = createLocalAddonService({
+      appDataDir,
+      appVersion: "3.4.0",
+      instanceId: "instance-1",
+      storeBaseUrl: "https://store.test/api/addons",
+      fetchStore: async (input, init) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "https://store.test/api/addons/store-addon/download" && calls.length === 1) {
+          expect(new Headers(init?.headers).get("x-instance-id")).toBe("instance-1");
+          return Response.json({ downloadUrl: "https://cdn.test/store-addon.zip" });
+        }
+        if (url === "https://cdn.test/store-addon.zip") {
+          expect(new Headers(init?.headers).get("x-instance-id")).toBeNull();
+          return new Response(zipData);
+        }
+        return new Response(zipData, { headers: { "content-type": "application/zip" } });
+      },
+    });
+
+    await expect(service.downloadAddonToStaging("store-addon")).resolves.toMatchObject({
+      metadata: expect.objectContaining({ id: "store-addon", version: "2.0.0" }),
+    });
+    expect(existsSync(path.join(appDataDir, "addons", "staging", "store-addon.zip"))).toBe(true);
+
+    await expect(service.updateAddonFromStore("store-addon")).resolves.toMatchObject({
+      id: "store-addon",
+      version: "2.0.0",
+      enabled: true,
+      source: "local",
+    });
+    expect(readFileSync(path.join(appDataDir, "addons", "store-addon", "main.js"), "utf8")).toBe(
+      "export const updated = true;",
+    );
+  });
+
+  test("maps store download and staging validation failures", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const expectedErrors = new Map([
+      [404, "Addon not found or coming soon"],
+      [410, "Addon is inactive or deprecated"],
+      [503, "Download service temporarily unavailable"],
+    ]);
+
+    for (const [status, message] of expectedErrors) {
+      const service = createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => new Response("nope", { status }),
+      });
+      await expect(service.downloadAddonToStaging(`addon-${status}`)).rejects.toThrow(message);
+    }
+
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => Response.json({}),
+      }).downloadAddonToStaging("missing-url"),
+    ).rejects.toThrow("Download API response missing downloadUrl field");
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => new Response(new Uint8Array([1, 2, 3])),
+      }).downloadAddonToStaging("bad-zip"),
+    ).rejects.toThrow("Invalid ZIP data: missing ZIP signature");
+  });
+
   test("rejects empty required manifest fields before runtime loading", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
     writeAddon(appDataDir, "empty-main", {
@@ -482,7 +702,7 @@ describe("TS addon domain", () => {
     expect(enabledAddons.map((addon) => addon.metadata.id)).toEqual(["good-addon"]);
   });
 
-  test("guards unsafe paths and returns explicit disabled errors for deferred addon behavior", async () => {
+  test("guards unsafe paths and clears addon staging safely", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
     const service = createLocalAddonService({ appDataDir });
 
@@ -492,12 +712,9 @@ describe("TS addon domain", () => {
     await expect(
       service.installAddonZip({ zipData: new Uint8Array([1]), enableAfterInstall: true }),
     ).rejects.toThrow("Failed to read ZIP");
-    await expect(service.fetchStoreListings()).rejects.toMatchObject({
-      status: 501,
-      code: "not_implemented",
-    });
 
     await expect(service.clearAddonStaging()).resolves.toBeUndefined();
+    expect(existsSync(path.join(appDataDir, "addons", "staging"))).toBe(true);
     await expect(service.clearAddonStaging("missing-addon")).resolves.toBeUndefined();
   });
 });

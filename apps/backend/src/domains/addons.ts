@@ -43,6 +43,10 @@ export interface AddonService {
 
 export interface LocalAddonServiceOptions {
   appDataDir: string;
+  appVersion?: string;
+  fetchStore?: FetchStore;
+  instanceId?: string | (() => string | undefined);
+  storeBaseUrl?: string;
 }
 
 interface AddonManifestRecord extends Record<string, unknown> {
@@ -97,18 +101,16 @@ interface InstalledAddonRecord {
   isZipAddon: boolean;
 }
 
-export class AddonNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "AddonNotImplementedError";
-  }
+interface AddonStoreContext {
+  appVersion?: string;
+  fetchStore: FetchStore;
+  instanceId?: string | (() => string | undefined);
+  storeBaseUrl: string;
 }
 
-const ADDON_STORE_DISABLED_MESSAGE =
-  "Addon store HTTP and update operations are not yet available in the TS backend runtime.";
+type FetchStore = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+const DEFAULT_ADDON_STORE_API_BASE_URL = "https://wealthfolio.app/api/addons";
 const MAX_ADDON_ZIP_ENTRIES = 10_000;
 const MAX_ADDON_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 const PERMISSION_PATTERNS = [
@@ -187,6 +189,12 @@ const PERMISSION_PATTERNS = [
 
 export function createLocalAddonService(options: LocalAddonServiceOptions): AddonService {
   const appDataDir = path.resolve(options.appDataDir);
+  const storeContext: AddonStoreContext = {
+    appVersion: options.appVersion,
+    fetchStore: options.fetchStore ?? fetch,
+    instanceId: options.instanceId,
+    storeBaseUrl: normalizeStoreBaseUrl(options.storeBaseUrl ?? DEFAULT_ADDON_STORE_API_BASE_URL),
+  };
 
   return {
     async listInstalledAddons() {
@@ -237,27 +245,29 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
     },
 
     async fetchStoreListings() {
-      throw storeDisabled();
+      return fetchAddonStoreListings(storeContext);
     },
 
-    async submitRating() {
-      throw storeDisabled();
+    async submitRating(request) {
+      return submitAddonRating(storeContext, request);
     },
 
-    async checkAddonUpdate() {
-      throw storeDisabled();
+    async checkAddonUpdate(addonId) {
+      return checkAddonUpdate(appDataDir, storeContext, addonId);
     },
 
     async checkAllAddonUpdates() {
-      throw storeDisabled();
+      return checkAllAddonUpdates(appDataDir, storeContext);
     },
 
-    async updateAddonFromStore() {
-      throw storeDisabled();
+    async updateAddonFromStore(addonId) {
+      return updateAddonFromStore(appDataDir, storeContext, addonId);
     },
 
-    async downloadAddonToStaging() {
-      throw storeDisabled();
+    async downloadAddonToStaging(addonId) {
+      const zipData = await downloadAddonFromStore(storeContext, addonId);
+      saveAddonToStaging(appDataDir, addonId, zipData);
+      return extractAddonZip(zipData);
     },
 
     async installAddonFromStaging(request) {
@@ -391,6 +401,282 @@ function extractAddonZip(zipData: Uint8Array): ExtractedAddonRecord {
 
   metadata.permissions = mergeAddonPermissions(metadata.permissions, detectAddonPermissions(files));
   return { metadata, files };
+}
+
+async function fetchAddonStoreListings(context: AddonStoreContext): Promise<unknown[]> {
+  const responseJson = await fetchAddonStoreJson<unknown>(context, context.storeBaseUrl, "Store", {
+    requireInstanceId: true,
+  });
+  if (Array.isArray(responseJson)) {
+    return responseJson;
+  }
+  if (!isRecord(responseJson)) {
+    throw new Error("Invalid API response structure");
+  }
+  const addons = responseJson.addons;
+  if (Array.isArray(addons)) {
+    return addons;
+  }
+  if (addons !== undefined) {
+    throw new Error("'addons' field is not an array in API response");
+  }
+  throw new Error("Invalid API response structure");
+}
+
+async function submitAddonRating(
+  context: AddonStoreContext,
+  request: AddonRatingRequest,
+): Promise<unknown> {
+  if (request.rating < 1 || request.rating > 5) {
+    throw new Error("Rating must be between 1 and 5");
+  }
+  const body: Record<string, unknown> = { rating: request.rating };
+  if (request.review !== undefined) {
+    body.review = request.review;
+  }
+  return fetchAddonStoreJson<unknown>(
+    context,
+    `${context.storeBaseUrl}/${encodeURIComponent(request.addonId)}/ratings`,
+    "Rating submission",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+      requireInstanceId: true,
+    },
+  );
+}
+
+async function checkAddonUpdate(
+  appDataDir: string,
+  context: AddonStoreContext,
+  addonId: string,
+): Promise<unknown> {
+  const addonDir = getAddonPath(appDataDir, addonId);
+  const manifest = readManifestOrError(addonDir);
+  return checkAddonUpdateFromApi(context, addonId, manifest.version);
+}
+
+async function checkAllAddonUpdates(
+  appDataDir: string,
+  context: AddonStoreContext,
+): Promise<unknown[]> {
+  const results: unknown[] = [];
+  for (const addon of listInstalledAddons(appDataDir)) {
+    const addonId = addon.metadata.id;
+    try {
+      results.push(await checkAddonUpdateFromApi(context, addonId, addon.metadata.version));
+    } catch (error) {
+      results.push({
+        addonId,
+        updateInfo: {
+          currentVersion: addon.metadata.version,
+          latestVersion: "unknown",
+          updateAvailable: false,
+          downloadUrl: null,
+          releaseNotes: null,
+          releaseDate: null,
+          changelogUrl: null,
+          isCritical: null,
+          hasBreakingChanges: null,
+          minWealthfolioVersion: null,
+        },
+        error: errorMessage(error),
+      });
+    }
+  }
+  return results;
+}
+
+function checkAddonUpdateFromApi(
+  context: AddonStoreContext,
+  addonId: string,
+  currentVersion: string,
+): Promise<unknown> {
+  const query = new URLSearchParams({ addonId, currentVersion });
+  return fetchAddonStoreJson<unknown>(
+    context,
+    `${context.storeBaseUrl}/update-check?${query.toString()}`,
+    "Update check",
+    { requireInstanceId: true },
+  );
+}
+
+async function updateAddonFromStore(
+  appDataDir: string,
+  context: AddonStoreContext,
+  addonId: string,
+): Promise<AddonManifestRecord> {
+  const addonDir = getAddonPath(appDataDir, addonId);
+  const wasEnabled = readManifestIfExists(addonDir)?.enabled ?? false;
+  const zipData = await downloadAddonFromStore(context, addonId);
+  const extracted = extractAddonZip(zipData);
+
+  if (existsSync(addonDir)) {
+    rmSync(addonDir, { recursive: true, force: false });
+  }
+  mkdirSync(addonDir, { recursive: true });
+
+  for (const file of extracted.files) {
+    writeAddonArchiveFile(addonDir, file);
+  }
+
+  const installed = installManifest(extracted.metadata, wasEnabled);
+  writeManifest(addonDir, installed);
+  return installed;
+}
+
+async function downloadAddonFromStore(
+  context: AddonStoreContext,
+  addonId: string,
+): Promise<Uint8Array> {
+  const response = await context.fetchStore(
+    `${context.storeBaseUrl}/${encodeURIComponent(addonId)}/download`,
+    { headers: addonStoreHeaders(context, { requireInstanceId: true }) },
+  );
+  const contentType = response.headers.get("content-type") ?? "unknown";
+  if (!response.ok) {
+    const errorText = await safeResponseText(response);
+    if (response.status === 404) {
+      throw new Error("Addon not found or coming soon");
+    }
+    if (response.status === 410) {
+      throw new Error("Addon is inactive or deprecated");
+    }
+    if (response.status === 503) {
+      throw new Error("Download service temporarily unavailable");
+    }
+    throw new Error(`Download API returned error ${formatResponseStatus(response)}: ${errorText}`);
+  }
+
+  if (contentType.includes("application/json")) {
+    const responseJson = parseJsonText(await response.text(), "download response");
+    if (!isRecord(responseJson) || typeof responseJson.downloadUrl !== "string") {
+      throw new Error("Download API response missing downloadUrl field");
+    }
+    return downloadAddonPackage(context, responseJson.downloadUrl);
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function downloadAddonPackage(
+  context: AddonStoreContext,
+  downloadUrl: string,
+): Promise<Uint8Array> {
+  const response = await context.fetchStore(downloadUrl, {
+    headers: addonStoreHeaders(context, { requireInstanceId: false }),
+  });
+  if (!response.ok) {
+    throw new Error(`Download failed with status: ${formatResponseStatus(response)}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function saveAddonToStaging(appDataDir: string, addonId: string, zipData: Uint8Array): void {
+  validateAddonZipDataForStaging(zipData);
+  const zipPath = getStagingZipPath(appDataDir, addonId);
+  mkdirSync(path.dirname(zipPath), { recursive: true });
+  writeFileSync(zipPath, zipData);
+}
+
+function validateAddonZipDataForStaging(zipData: Uint8Array): void {
+  if (zipData.byteLength === 0) {
+    throw new Error("Cannot stage empty addon data");
+  }
+  if (
+    zipData.byteLength < 4 ||
+    zipData[0] !== 0x50 ||
+    zipData[1] !== 0x4b ||
+    zipData[2] !== 0x03 ||
+    zipData[3] !== 0x04
+  ) {
+    throw new Error(`Invalid ZIP data: missing ZIP signature (got ${zipData.byteLength} bytes)`);
+  }
+  try {
+    unzipSync(zipData);
+  } catch (error) {
+    throw new Error(`Invalid ZIP data for staging: ${errorMessage(error)}`);
+  }
+}
+
+async function fetchAddonStoreJson<T>(
+  context: AddonStoreContext,
+  url: string,
+  operation: string,
+  options: {
+    body?: BodyInit;
+    headers?: HeadersInit;
+    method?: string;
+    requireInstanceId?: boolean;
+  } = {},
+): Promise<T> {
+  const response = await context.fetchStore(url, {
+    method: options.method,
+    body: options.body,
+    headers: addonStoreHeaders(context, {
+      extraHeaders: options.headers,
+      requireInstanceId: options.requireInstanceId ?? false,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await safeResponseText(response);
+    throw new Error(
+      `${operation} API returned error ${formatResponseStatus(response)}: ${errorText}`,
+    );
+  }
+  return parseJsonText(await response.text(), `${operation} API response`) as T;
+}
+
+function addonStoreHeaders(
+  context: AddonStoreContext,
+  options: { extraHeaders?: HeadersInit; requireInstanceId: boolean },
+): Headers {
+  const headers = new Headers(options.extraHeaders);
+  headers.set(
+    "User-Agent",
+    context.appVersion ? `Wealthfolio/${context.appVersion}` : "Wealthfolio",
+  );
+  if (context.appVersion !== undefined) {
+    headers.set("X-App-Version", context.appVersion);
+  }
+  const instanceId = resolveInstanceId(context.instanceId);
+  if (options.requireInstanceId && instanceId !== undefined) {
+    headers.set("X-Instance-Id", instanceId);
+  }
+  return headers;
+}
+
+function resolveInstanceId(
+  instanceId: string | (() => string | undefined) | undefined,
+): string | undefined {
+  return typeof instanceId === "function" ? instanceId() : instanceId;
+}
+
+function normalizeStoreBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function parseJsonText(text: string, subject: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Failed to parse ${subject} as JSON: ${errorMessage(error)}`);
+  }
+}
+
+async function safeResponseText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
+function formatResponseStatus(response: Response): string {
+  return response.statusText
+    ? `${response.status} ${response.statusText}`
+    : String(response.status);
 }
 
 function ensureAddonsDirectory(appDataDir: string): string {
@@ -790,10 +1076,9 @@ function normalizeAddonFilePath(value: string): string {
 function clearAddonStaging(appDataDir: string, addonId?: string): void {
   const stagingPath = getStagingPath(appDataDir, addonId);
   rmSync(stagingPath, { recursive: true, force: true });
-}
-
-function storeDisabled(): AddonNotImplementedError {
-  return new AddonNotImplementedError(ADDON_STORE_DISABLED_MESSAGE);
+  if (addonId === undefined) {
+    mkdirSync(stagingPath, { recursive: true });
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
