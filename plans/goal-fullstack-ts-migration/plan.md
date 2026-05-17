@@ -268,6 +268,10 @@ backend:
 - Extend sync_outbox runtime wiring to account Create/Update/Delete callbacks,
   preserving Rust-shaped `account` payloads, boolean field serialization, and
   missing delete no-op behavior.
+- Extend sync_outbox runtime wiring to import template and account-template
+  profile callbacks, preserving Rust-shaped `import_template` and
+  `activity_import_profile` payloads, system-template save filtering, stable
+  link entity IDs, and unconditional template Delete emission.
 - Add bounded TS domain-event planning by deriving portfolio job configs,
   broker-sync account IDs, and asset-enrichment IDs from Rust-shaped backend
   event batches while keeping the actual debounced worker execution deferred.

@@ -2410,6 +2410,72 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("queues import template and account-template sync callbacks with Rust-compatible filters", async () => {
+    const db = createActivitiesDb();
+    const syncEvents: ActivitySyncEvent[] = [];
+    const service = createActivityService(db, {
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      await service.saveImportTemplate?.({
+        id: "system-template",
+        name: "System",
+        scope: "SYSTEM",
+        kind: "CSV_ACTIVITY",
+        fieldMappings: { date: "Date" },
+      });
+      await service.saveImportTemplate?.({
+        id: "custom",
+        name: "Custom",
+        scope: "USER",
+        kind: "CSV_HOLDINGS",
+        fieldMappings: { symbol: "Ticker" },
+      });
+      await service.linkAccountTemplate?.("account-2", "custom", "HOLDINGS");
+      await service.saveImportMapping?.({
+        accountId: "account-2",
+        contextKind: "CSV_HOLDINGS",
+        name: "Account Local",
+        fieldMappings: { symbol: "Symbol" },
+      });
+      await service.deleteImportTemplate?.("custom");
+      await service.deleteImportTemplate?.("missing-template");
+
+      expect(syncEvents.map((event) => [event.entity, event.operation, event.entityId])).toEqual([
+        ["import_templates", "Update", "custom"],
+        ["import_account_templates", "Update", expect.any(String)],
+        ["import_account_templates", "Update", syncEvents[1]?.entityId],
+        ["import_templates", "Delete", "custom"],
+        ["import_templates", "Delete", "missing-template"],
+      ]);
+      expect(syncEvents[0]?.payload).toMatchObject({
+        id: "custom",
+        name: "Custom",
+        scope: "USER",
+        kind: "CSV_HOLDINGS",
+        source_system: "",
+        config_version: 1,
+      });
+      expect(syncEvents[1]?.payload).toMatchObject({
+        account_id: "account-2",
+        context_kind: "CSV_HOLDINGS",
+        source_system: "",
+        template_id: "custom",
+      });
+      expect(syncEvents[2]?.payload).toMatchObject({
+        account_id: "account-2",
+        context_kind: "CSV_HOLDINGS",
+        source_system: "",
+        template_id: "acct_account-2_holdings",
+      });
+      expect(syncEvents[3]?.payload).toEqual({ id: "custom" });
+      expect(syncEvents[4]?.payload).toEqual({ id: "missing-template" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks existing duplicate idempotency keys with empty input and chunked lookups", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

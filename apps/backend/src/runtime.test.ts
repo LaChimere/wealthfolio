@@ -1189,6 +1189,92 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime import template sync callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-template-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      let db = openSqliteDatabase(runtime.dbPath);
+      try {
+        db.prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('account-1', 'Runtime Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+        ).run();
+      } finally {
+        db.close();
+      }
+
+      const { activityService } = runtime.options;
+      await activityService.saveImportTemplate?.({
+        id: "system-template",
+        name: "System",
+        scope: "SYSTEM",
+        kind: "CSV_ACTIVITY",
+        fieldMappings: { date: "Date" },
+      });
+      await activityService.saveImportTemplate?.({
+        id: "custom",
+        name: "Custom",
+        scope: "USER",
+        kind: "CSV_HOLDINGS",
+        fieldMappings: { symbol: "Ticker" },
+      });
+      await activityService.linkAccountTemplate?.("account-1", "custom", "HOLDINGS");
+      await activityService.saveImportMapping?.({
+        accountId: "account-1",
+        contextKind: "CSV_HOLDINGS",
+        name: "Account Local",
+        fieldMappings: { symbol: "Symbol" },
+      });
+      await activityService.deleteImportTemplate?.("custom");
+
+      db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.op, row.entity_id])).toEqual([
+          ["import_template", "update", "custom"],
+          ["activity_import_profile", "update", expect.any(String)],
+          ["activity_import_profile", "update", rows[1]?.entity_id],
+          ["import_template", "delete", "custom"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "custom",
+          name: "Custom",
+          scope: "USER",
+          kind: "CSV_HOLDINGS",
+          source_system: "",
+          config_version: 1,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "account-1",
+          context_kind: "CSV_HOLDINGS",
+          source_system: "",
+          template_id: "custom",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          account_id: "account-1",
+          context_kind: "CSV_HOLDINGS",
+          source_system: "",
+          template_id: "acct_account-1_holdings",
+        });
+        expect(JSON.parse(String(rows[3]?.payload))).toEqual({ id: "custom" });
+      } finally {
+        db.close();
+      }
+    } finally {
+      runtime.close();
+    }
+  });
+
   test("persists runtime contribution-limit sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-limit-sync-"));
     const runtime = createSqliteBackedBackendServices({

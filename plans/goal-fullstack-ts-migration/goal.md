@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 125
+turns_used: 126
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T01:02:09+08:00"
+updated_at: "2026-05-17T13:00:10+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -810,6 +810,13 @@ updated_at: "2026-05-17T01:02:09+08:00"
   `account` sync_outbox rows through the shared queue. Focused accounts/runtime
   tests, backend type-check, full `bun run check`, and focused code review
   passed.
+- Turn 126: Extended import template sync callback parity: user import-template
+  saves/deletes and account-template mapping/link updates now queue Rust-shaped
+  `ImportTemplateDB` and `ImportAccountTemplateDB` events, suppress system
+  template save events, preserve stable link entity IDs, and persist runtime
+  `import_template`/`activity_import_profile` sync_outbox rows. Focused
+  activities/runtime tests, backend type-check, full `bun run check`, and
+  focused code review passed.
 
 ## Deferred items
 

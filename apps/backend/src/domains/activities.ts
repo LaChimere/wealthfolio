@@ -205,7 +205,12 @@ export interface ActivityServiceOptions {
 }
 
 export type ActivitySyncOperation = "Create" | "Update" | "Delete";
-export type ActivitySyncPayload = ActivityRow | ImportRunRow | ActivityAssetSyncRow;
+export type ActivitySyncPayload =
+  | ActivityRow
+  | ImportRunRow
+  | ActivityAssetSyncRow
+  | ImportTemplateRow
+  | ImportAccountTemplateRow;
 export type ActivitySyncFilterInput = Pick<
   ActivityRow,
   "import_run_id" | "is_user_modified" | "source_record_id" | "source_system"
@@ -214,7 +219,9 @@ export type ActivitySyncFilterInput = Pick<
 export type ActivitySyncEvent =
   | ActivityRowSyncEvent
   | ActivityImportRunSyncEvent
-  | ActivityAssetSyncEvent;
+  | ActivityAssetSyncEvent
+  | ActivityImportTemplateSyncEvent
+  | ActivityImportAccountTemplateSyncEvent;
 
 export interface ActivityRowSyncEvent {
   entity: "activities";
@@ -235,6 +242,20 @@ export interface ActivityAssetSyncEvent {
   entityId: string;
   operation: "Create";
   payload: ActivityAssetSyncRow;
+}
+
+export interface ActivityImportTemplateSyncEvent {
+  entity: "import_templates";
+  entityId: string;
+  operation: "Update" | "Delete";
+  payload: ImportTemplateRow | { id: string };
+}
+
+export interface ActivityImportAccountTemplateSyncEvent {
+  entity: "import_account_templates";
+  entityId: string;
+  operation: "Update";
+  payload: ImportAccountTemplateRow;
 }
 
 export interface ActivityService {
@@ -975,6 +996,7 @@ export function createActivityService(
           ? `acct_${mapping.accountId}_holdings`
           : `acct_${mapping.accountId}`;
       let saved: ImportMappingData | undefined;
+      let syncEvent: ActivitySyncEvent | undefined;
 
       db.transaction(() => {
         const existingLink = readImportAccountTemplateLink(
@@ -1024,9 +1046,13 @@ export function createActivityService(
           created_at: now,
           updated_at: now,
         });
+        syncEvent = importAccountTemplateSyncEvent(
+          readImportAccountTemplateLinkOrThrow(db, mapping.accountId, mapping.contextKind),
+        );
 
         saved = { ...mapping, templateId: mapping.templateId ?? undefined };
       })();
+      queueActivitySyncEvents(options, syncEvent ? [syncEvent] : []);
 
       if (!saved) {
         throw new Error("Failed to save import mapping");
@@ -1057,43 +1083,60 @@ export function createActivityService(
       const template = normalizeImportTemplateInput(input);
       const config = serializeImportConfig(template);
       const now = sqliteNow();
-      db.query(
-        `
-          INSERT INTO import_templates (
-            id, name, scope, kind, source_system, config_version, config, created_at, updated_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            scope = excluded.scope,
-            kind = excluded.kind,
-            source_system = excluded.source_system,
-            config_version = excluded.config_version,
-            config = excluded.config,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at
-        `,
-      ).run(template.id, template.name, template.scope, template.kind, "", 1, config, now, now);
+      let syncEvent: ActivitySyncEvent | undefined;
+      db.transaction(() => {
+        db.query(
+          `
+            INSERT INTO import_templates (
+              id, name, scope, kind, source_system, config_version, config, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              scope = excluded.scope,
+              kind = excluded.kind,
+              source_system = excluded.source_system,
+              config_version = excluded.config_version,
+              config = excluded.config,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+          `,
+        ).run(template.id, template.name, template.scope, template.kind, "", 1, config, now, now);
+        syncEvent = importTemplateSyncEvent(readImportTemplateRowOrThrow(db, template.id));
+      })();
+      queueActivitySyncEvents(options, syncEvent ? [syncEvent] : []);
       return template;
     },
 
     deleteImportTemplate(id) {
-      db.query("DELETE FROM import_templates WHERE id = ?").run(id);
+      let syncEvent: ActivitySyncEvent | undefined;
+      db.transaction(() => {
+        db.query("DELETE FROM import_templates WHERE id = ?").run(id);
+        syncEvent = importTemplateDeleteSyncEvent(id);
+      })();
+      queueActivitySyncEvents(options, syncEvent ? [syncEvent] : []);
     },
 
     linkAccountTemplate(accountId, templateId, contextKind) {
       const normalizedContextKind = normalizeContextKindValue(contextKind);
       const existingLink = readImportAccountTemplateLink(db, accountId, normalizedContextKind);
       const now = sqliteNow();
-      upsertImportAccountTemplateLink(db, {
-        id: existingLink?.id ?? crypto.randomUUID(),
-        account_id: accountId,
-        context_kind: normalizedContextKind,
-        source_system: "",
-        template_id: templateId,
-        created_at: now,
-        updated_at: now,
-      });
+      let syncEvent: ActivitySyncEvent | undefined;
+      db.transaction(() => {
+        upsertImportAccountTemplateLink(db, {
+          id: existingLink?.id ?? crypto.randomUUID(),
+          account_id: accountId,
+          context_kind: normalizedContextKind,
+          source_system: "",
+          template_id: templateId,
+          created_at: now,
+          updated_at: now,
+        });
+        syncEvent = importAccountTemplateSyncEvent(
+          readImportAccountTemplateLinkOrThrow(db, accountId, normalizedContextKind),
+        );
+      })();
+      queueActivitySyncEvents(options, syncEvent ? [syncEvent] : []);
     },
 
     checkExistingDuplicates(idempotencyKeys) {
@@ -1186,6 +1229,36 @@ function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
   ];
 }
 
+function importTemplateSyncEvent(row: ImportTemplateRow): ActivitySyncEvent | undefined {
+  if (!shouldQueueImportTemplateSyncEvent(row)) {
+    return undefined;
+  }
+  return {
+    entity: "import_templates",
+    entityId: row.id,
+    operation: "Update",
+    payload: { ...row },
+  };
+}
+
+function importTemplateDeleteSyncEvent(templateId: string): ActivitySyncEvent {
+  return {
+    entity: "import_templates",
+    entityId: templateId,
+    operation: "Delete",
+    payload: { id: templateId },
+  };
+}
+
+function importAccountTemplateSyncEvent(row: ImportAccountTemplateRow): ActivitySyncEvent {
+  return {
+    entity: "import_account_templates",
+    entityId: row.id,
+    operation: "Update",
+    payload: { ...row },
+  };
+}
+
 export function shouldQueueActivitySyncEvent(
   operation: ActivitySyncOperation,
   activity: ActivitySyncFilterInput,
@@ -1210,6 +1283,10 @@ function shouldQueueImportRunSyncEvent(row: ImportRunRow): boolean {
   const runType = row.run_type.trim().toUpperCase();
   const sourceSystem = row.source_system.trim().toUpperCase();
   return runType === "IMPORT" && (sourceSystem === "CSV" || sourceSystem === "MANUAL");
+}
+
+function shouldQueueImportTemplateSyncEvent(row: ImportTemplateRow): boolean {
+  return row.scope.trim().toUpperCase() !== "SYSTEM";
 }
 
 function isBlankSyncText(value: string | null): boolean {
@@ -3879,6 +3956,14 @@ function readImportTemplateRow(db: Database, id: string): ImportTemplateRow | nu
     .get(id);
 }
 
+function readImportTemplateRowOrThrow(db: Database, id: string): ImportTemplateRow {
+  const row = readImportTemplateRow(db, id);
+  if (!row) {
+    throw new Error(`Record not found: import template ${id}`);
+  }
+  return row;
+}
+
 function readImportAccountTemplateLink(
   db: Database,
   accountId: string,
@@ -3893,6 +3978,18 @@ function readImportAccountTemplateLink(
       `,
     )
     .get(accountId, contextKind);
+}
+
+function readImportAccountTemplateLinkOrThrow(
+  db: Database,
+  accountId: string,
+  contextKind: string,
+): ImportAccountTemplateRow {
+  const row = readImportAccountTemplateLink(db, accountId, contextKind);
+  if (!row) {
+    throw new Error(`Record not found: import account template ${accountId}/${contextKind}`);
+  }
+  return row;
 }
 
 function upsertImportAccountTemplateLink(db: Database, row: ImportAccountTemplateRow): void {
