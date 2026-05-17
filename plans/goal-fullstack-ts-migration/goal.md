@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 131
+turns_used: 132
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T14:42:35+08:00"
+updated_at: "2026-05-17T14:55:08+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -844,9 +844,15 @@ updated_at: "2026-05-17T14:42:35+08:00"
 - Turn 131: Added bounded local quote-backed symbol performance history:
   `symbol` performance requests now calculate Rust-style cumulative returns,
   carry-forward missing quote days, annualized returns, volatility, and drawdown
-  from existing SQLite quotes instead of returning 501, while provider-backed
-  fetch/resolution remains deferred. Focused portfolio/runtime tests and backend
-  type-check passed.
+  from existing SQLite quote asset IDs instead of returning 501, while
+  provider-backed fetch/resolution remains deferred. Focused portfolio/runtime
+  tests and backend type-check passed.
+- Turn 132: Extended local symbol performance resolution so `symbol` history
+  requests resolve existing local assets by exact `asset_id`, case-insensitive
+  `display_code`, or case-insensitive `instrument_symbol` before reading quotes,
+  while preserving the original response id and keeping provider fetch deferred.
+  Focused portfolio tests, backend type-check, full check, and focused review
+  passed.
 
 ## Deferred items
 

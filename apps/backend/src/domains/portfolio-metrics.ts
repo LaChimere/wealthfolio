@@ -131,6 +131,7 @@ interface AssetRow {
   name: string | null;
   display_code: string | null;
   quote_ccy: string;
+  instrument_symbol: string | null;
 }
 
 interface SnapshotRow {
@@ -792,12 +793,8 @@ function calculateSymbolPerformance(
     );
   }
 
-  const quoteHistory = readSymbolQuoteHistory(
-    db,
-    request.itemId,
-    effectiveStartDate,
-    effectiveEndDate,
-  );
+  const assetId = resolveLocalSymbolPerformanceAssetId(db, request.itemId);
+  const quoteHistory = readSymbolQuoteHistory(db, assetId, effectiveStartDate, effectiveEndDate);
   if (quoteHistory.length === 0) {
     return emptyPerformanceResponse(request.itemId);
   }
@@ -978,7 +975,7 @@ function readAssetsById(db: Database): Map<string, AssetRow> {
   const rows = db
     .query<AssetRow, []>(
       `
-        SELECT id, kind, name, display_code, quote_ccy
+        SELECT id, kind, name, display_code, quote_ccy, instrument_symbol
         FROM assets
         ORDER BY id ASC
       `,
@@ -1006,6 +1003,29 @@ function latestQuoteAsOf(
     )
     .get(assetId, date);
   return row ? reconcileQuoteCurrency(row, asset) : null;
+}
+
+function resolveLocalSymbolPerformanceAssetId(db: Database, itemId: string): string {
+  const row = db
+    .query<{ id: string }, [string, string, string, string, string]>(
+      `
+        SELECT id
+        FROM assets
+        WHERE id = ?
+          OR UPPER(COALESCE(display_code, '')) = UPPER(?)
+          OR UPPER(COALESCE(instrument_symbol, '')) = UPPER(?)
+        ORDER BY
+          CASE
+            WHEN id = ? THEN 0
+            WHEN UPPER(COALESCE(display_code, '')) = UPPER(?) THEN 1
+            ELSE 2
+          END,
+          id ASC
+        LIMIT 1
+      `,
+    )
+    .get(itemId, itemId, itemId, itemId, itemId);
+  return row?.id ?? itemId;
 }
 
 function readSymbolQuoteHistory(

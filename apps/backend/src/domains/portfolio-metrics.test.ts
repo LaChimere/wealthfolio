@@ -571,9 +571,15 @@ describe("TS portfolio metrics domain", () => {
         }),
       ).toEqual(service.calculatePerformanceHistory?.({ itemType: "account", itemId: "SPY" }));
 
-      insertQuote(db, { assetId: "SPY", day: "2026-01-01", close: "100", currency: "USD" });
-      insertQuote(db, { assetId: "SPY", day: "2026-01-03", close: "110", currency: "USD" });
-      insertQuote(db, { assetId: "SPY", day: "2026-01-05", close: "121", currency: "USD" });
+      insertAsset(db, {
+        id: "asset-spy",
+        kind: "INVESTMENT",
+        displayCode: "SPY",
+        instrumentSymbol: "SPY",
+      });
+      insertQuote(db, { assetId: "asset-spy", day: "2026-01-01", close: "100", currency: "USD" });
+      insertQuote(db, { assetId: "asset-spy", day: "2026-01-03", close: "110", currency: "USD" });
+      insertQuote(db, { assetId: "asset-spy", day: "2026-01-05", close: "121", currency: "USD" });
       expect(
         service.calculatePerformanceHistory?.({
           itemType: "symbol",
@@ -778,7 +784,8 @@ function createPortfolioMetricsDb(): Database {
       kind TEXT NOT NULL DEFAULT 'INVESTMENT',
       name TEXT,
       display_code TEXT,
-      quote_ccy TEXT NOT NULL DEFAULT 'USD'
+      quote_ccy TEXT NOT NULL DEFAULT 'USD',
+      instrument_symbol TEXT
     );
     CREATE TABLE holdings_snapshots (
       account_id TEXT NOT NULL,
@@ -877,16 +884,18 @@ function insertAsset(
     name?: string | null;
     displayCode?: string | null;
     quoteCcy?: string;
+    instrumentSymbol?: string | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO assets (id, kind, name, display_code, quote_ccy) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO assets (id, kind, name, display_code, quote_ccy, instrument_symbol) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(
     asset.id,
     asset.kind,
     asset.name ?? null,
     asset.displayCode ?? null,
     asset.quoteCcy ?? "USD",
+    asset.instrumentSymbol ?? null,
   );
 }
 

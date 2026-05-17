@@ -144,19 +144,20 @@
     activity reads, Rust-compatible contribution rules, user-timezone year
     ranges, and FX conversion dates; current/history net-worth, income summary,
     simple account performance, account performance history/summary
-    calculations, local quote-backed symbol performance history, holdings
-    valuation reads, holdings snapshot metadata reads, historical snapshot
-    holdings reads, holdings import checks, live holdings fan-out, holding
-    detail/by-asset fan-out, allocation reads, snapshot deletion, bounded
-    manual/imported snapshot saves, snapshot FX pair registration, and holdings
-    snapshot mutation event production now have TS runtime parity, while
-    provider-backed symbol fetch/resolution is deferred to portfolio/market-data
-    parity slices; actual portfolio job execution and inline valuation
-    recalculation are deferred to holdings/portfolio parity slices; add-on
-    filesystem extraction, runtime loading, store HTTP, staging I/O, and update
-    behavior are deferred to add-on runtime parity slices; market-data market
-    sync and portfolio recalculation behavior are deferred to
-    market-data/portfolio parity slices; activity mutation event production,
+    calculations, local quote-backed symbol performance history with local
+    asset/display/instrument-symbol resolution, holdings valuation reads,
+    holdings snapshot metadata reads, historical snapshot holdings reads,
+    holdings import checks, live holdings fan-out, holding detail/by-asset
+    fan-out, allocation reads, snapshot deletion, bounded manual/imported
+    snapshot saves, snapshot FX pair registration, and holdings snapshot
+    mutation event production now have TS runtime parity, while provider-backed
+    symbol fetch/resolution is deferred to portfolio/market-data parity slices;
+    actual portfolio job execution and inline valuation recalculation are
+    deferred to holdings/portfolio parity slices; add-on filesystem extraction,
+    runtime loading, store HTTP, staging I/O, and update behavior are deferred
+    to add-on runtime parity slices; market-data market sync and portfolio
+    recalculation behavior are deferred to market-data/portfolio parity slices;
+    activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -1271,9 +1272,16 @@ contract:
   `bun test apps/backend/src/runtime.test.ts --test-name-pattern "starts a TS server"`,
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
   Coverage includes local quote-backed `symbol` performance history from SQLite
-  `quotes`, missing quote-day carry-forward, empty missing-symbol responses,
-  annualized returns, volatility, max drawdown, runtime HTTP wiring, and
-  explicit provider-backed fetch/resolution deferral.
+  `quotes`, local asset/display/instrument-symbol resolution, missing quote-day
+  carry-forward, empty missing-symbol responses, annualized returns, volatility,
+  max drawdown, runtime HTTP wiring, and explicit provider-backed
+  fetch/resolution deferral.
+- `pr5-symbol-performance-resolution`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-metrics.test.ts --test-name-pattern "symbol performance|empty responses"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`. Full
+  repository check and focused code review also passed. Coverage includes local
+  asset-id/display-code/instrument-symbol lookup before quote reads while
+  preserving original response IDs and avoiding provider fetches.
 - `pr5-holdings-valuation-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/runtime.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
