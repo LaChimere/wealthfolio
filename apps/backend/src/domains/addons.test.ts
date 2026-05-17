@@ -7,15 +7,38 @@ import { describe, expect, test } from "bun:test";
 import { createLocalAddonService } from "./addons";
 
 interface TestInstalledAddon {
-  metadata: {
-    id: string;
-    name: string;
-    version: string;
-    main?: string;
-    enabled?: boolean;
-  };
+  metadata: TestAddonManifest;
   filePath: string;
   isZipAddon: boolean;
+}
+
+interface TestAddonManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  author: string | null;
+  sdkVersion: string | null;
+  main: string;
+  enabled: boolean | null;
+  permissions: TestAddonPermission[] | null;
+  homepage: string | null;
+  repository: string | null;
+  license: string | null;
+  minWealthfolioVersion: string | null;
+  keywords: string[] | null;
+  icon: string | null;
+}
+
+interface TestAddonPermission {
+  category: string;
+  functions: Array<{
+    name: string;
+    isDeclared: boolean;
+    isDetected: boolean;
+    detectedAt: string | null;
+  }>;
+  purpose: string;
 }
 
 interface TestExtractedAddon {
@@ -47,13 +70,13 @@ describe("TS addon domain", () => {
 
     await expect(service.listInstalledAddons()).resolves.toEqual([
       {
-        metadata: {
+        metadata: normalizedManifest({
           id: "demo-addon",
           name: "Demo Addon",
           version: "1.0.0",
           main: "main.js",
           enabled: true,
-        },
+        }),
         filePath: addonDir,
         isZipAddon: true,
       },
@@ -78,6 +101,143 @@ describe("TS addon domain", () => {
     await service.uninstallAddon("demo-addon");
     expect(existsSync(addonDir)).toBe(false);
     await expect(service.listInstalledAddons()).resolves.toEqual([]);
+  });
+
+  test("normalizes manifests with Rust-compatible optional fields and permissions", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "metadata-addon", {
+      manifest: {
+        id: "metadata-addon",
+        name: "Metadata Addon",
+        version: "1.0.0",
+        main: "main.js",
+        description: 123,
+        enabled: "yes",
+        installedAt: "ignored",
+        source: "store",
+        keywords: ["wealth", 123, "local"],
+        permissions: [
+          {
+            category: "portfolio",
+            purpose: "Read portfolio data",
+            functions: [
+              "getHoldings",
+              {
+                name: "getAccounts",
+                isDeclared: false,
+                isDetected: true,
+                detectedAt: "2026-05-17T00:00:00Z",
+              },
+            ],
+          },
+        ],
+      },
+      files: {
+        "main.js": "export default {};",
+      },
+    });
+    const service = createLocalAddonService({ appDataDir });
+
+    const installed = (await service.listInstalledAddons()) as TestInstalledAddon[];
+    const metadata = installed[0]?.metadata;
+    if (!metadata) {
+      throw new Error("Expected metadata-addon to be installed");
+    }
+    expect(metadata).toEqual(
+      normalizedManifest({
+        id: "metadata-addon",
+        name: "Metadata Addon",
+        version: "1.0.0",
+        main: "main.js",
+        enabled: null,
+        keywords: ["wealth", "local"],
+        permissions: [
+          {
+            category: "portfolio",
+            purpose: "Read portfolio data",
+            functions: [
+              {
+                name: "getHoldings",
+                isDeclared: true,
+                isDetected: false,
+                detectedAt: null,
+              },
+              {
+                name: "getAccounts",
+                isDeclared: false,
+                isDetected: true,
+                detectedAt: "2026-05-17T00:00:00Z",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect("installedAt" in metadata).toBe(false);
+    expect("source" in metadata).toBe(false);
+  });
+
+  test("rejects empty required manifest fields before runtime loading", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "empty-main", {
+      manifest: {
+        id: "empty-main",
+        name: "Empty Main",
+        version: "1.0.0",
+        main: "  ",
+      },
+      files: {
+        "main.js": "export default {};",
+      },
+    });
+    const service = createLocalAddonService({ appDataDir });
+
+    await expect(service.loadAddonForRuntime("empty-main")).rejects.toThrow(
+      "Missing 'main' field in manifest.json",
+    );
+  });
+
+  test("rejects empty required permission fields", async () => {
+    const cases = [
+      {
+        addonId: "empty-category",
+        permission: { category: "", purpose: "Read data", functions: ["getHoldings"] },
+        message: "Missing 'category' field in permission",
+      },
+      {
+        addonId: "empty-purpose",
+        permission: { category: "portfolio", purpose: "  ", functions: ["getHoldings"] },
+        message: "Missing 'purpose' field in permission",
+      },
+      {
+        addonId: "empty-function",
+        permission: {
+          category: "portfolio",
+          purpose: "Read data",
+          functions: [{ name: "\t", isDeclared: true }],
+        },
+        message: "Missing 'name' field in function permission",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+      writeAddon(appDataDir, testCase.addonId, {
+        manifest: {
+          id: testCase.addonId,
+          name: "Invalid Permission",
+          version: "1.0.0",
+          main: "main.js",
+          permissions: [testCase.permission],
+        },
+        files: {
+          "main.js": "export default {};",
+        },
+      });
+      const service = createLocalAddonService({ appDataDir });
+
+      await expect(service.listInstalledAddons()).rejects.toThrow(testCase.message);
+    }
   });
 
   test("uses Rust-compatible top-level entry count for the ZIP addon flag", async () => {
@@ -176,7 +336,7 @@ function writeAddon(
   appDataDir: string,
   addonId: string,
   addon: {
-    manifest: TestInstalledAddon["metadata"];
+    manifest: Record<string, unknown>;
     files: Record<string, string>;
   },
 ): string {
@@ -189,4 +349,27 @@ function writeAddon(
     writeFileSync(filePath, content);
   }
   return addonDir;
+}
+
+function normalizedManifest(
+  manifest: Pick<TestAddonManifest, "id" | "name" | "version" | "main"> &
+    Partial<TestAddonManifest>,
+): TestAddonManifest {
+  return {
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description ?? null,
+    author: manifest.author ?? null,
+    sdkVersion: manifest.sdkVersion ?? null,
+    main: manifest.main,
+    enabled: manifest.enabled ?? null,
+    permissions: manifest.permissions ?? null,
+    homepage: manifest.homepage ?? null,
+    repository: manifest.repository ?? null,
+    license: manifest.license ?? null,
+    minWealthfolioVersion: manifest.minWealthfolioVersion ?? null,
+    keywords: manifest.keywords ?? null,
+    icon: manifest.icon ?? null,
+  };
 }

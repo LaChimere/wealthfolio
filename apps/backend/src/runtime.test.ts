@@ -491,13 +491,13 @@ describe("TS backend runtime composition", () => {
       expect(installedAddonsResponse.status).toBe(200);
       await expect(installedAddonsResponse.json()).resolves.toEqual([
         {
-          metadata: {
+          metadata: expect.objectContaining({
             id: "runtime-addon",
             name: "Runtime Addon",
             version: "1.0.0",
             main: "main.js",
             enabled: true,
-          },
+          }),
           filePath: runtimeAddonDir,
           isZipAddon: false,
         },

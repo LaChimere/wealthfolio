@@ -327,17 +327,18 @@ valuation reads, snapshot metadata, historical snapshot holdings reads, holdings
 import checks, live holdings fan-out, holding detail/by-asset fan-out,
 allocation reads, snapshot deletion, bounded manual snapshot saves, bounded
 snapshot import writes, add-on zip/store runtime beyond local filesystem
-listing/toggles/runtime loading, broader market-data runtime beyond
-mapping/templates/duplicate lookups, read-only search, transfer link/unlink,
-single activity delete, and bounded existing-asset/cash/symbol-resolved and
-bounded symbol-created activity create/update/bulk persistence plus CSV
-parse/read-only asset preview/read-only import validation, bounded import apply,
-activity mutation event production, activity/import/asset sync-event callback
-queuing, and domain-event planning/batch processing/worker helper, save-up
-preview calculations, local AI chat thread/message/tag persistence, bounded
-health account/timezone status/checks and legacy-classification issue
-generation, sync-crypto/device-sync integration, calculation-heavy health checks
-or non-classification `/health/fix` execution, holdings inline portfolio
+listing/toggles/runtime loading and manifest normalization, broader market-data
+runtime beyond mapping/templates/duplicate lookups, read-only search, transfer
+link/unlink, single activity delete, and bounded
+existing-asset/cash/symbol-resolved and bounded symbol-created activity
+create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
+import validation, bounded import apply, activity mutation event production,
+activity/import/asset sync-event callback queuing, and domain-event
+planning/batch processing/worker helper, save-up preview calculations, local AI
+chat thread/message/tag persistence, bounded health account/timezone
+status/checks and legacy-classification issue generation,
+sync-crypto/device-sync integration, calculation-heavy health checks or
+non-classification `/health/fix` execution, holdings inline portfolio
 recalculation/job execution, real Connect runtime implementation, real
 device-sync runtime implementation, or Rust runtime removal is in scope for this
 slice.

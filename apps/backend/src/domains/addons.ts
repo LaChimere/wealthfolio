@@ -47,8 +47,31 @@ interface AddonManifestRecord extends Record<string, unknown> {
   id: string;
   name: string;
   version: string;
-  main?: string;
-  enabled?: boolean;
+  description: string | null;
+  author: string | null;
+  sdkVersion: string | null;
+  main: string;
+  enabled: boolean | null;
+  permissions: AddonPermissionRecord[] | null;
+  homepage: string | null;
+  repository: string | null;
+  license: string | null;
+  minWealthfolioVersion: string | null;
+  keywords: string[] | null;
+  icon: string | null;
+}
+
+interface AddonPermissionRecord {
+  category: string;
+  functions: FunctionPermissionRecord[];
+  purpose: string;
+}
+
+interface FunctionPermissionRecord {
+  name: string;
+  isDeclared: boolean;
+  isDetected: boolean;
+  detectedAt: string | null;
 }
 
 interface AddonFileRecord {
@@ -275,25 +298,27 @@ function parseAddonManifest(value: unknown): AddonManifestRecord {
   if (!isRecord(value)) {
     throw new Error("manifest is not an object");
   }
-  const id = value.id;
-  const name = value.name;
-  const version = value.version;
-  if (typeof id !== "string" || id.trim() === "") {
-    throw new Error("manifest id must be a non-empty string");
-  }
-  if (typeof name !== "string" || name.trim() === "") {
-    throw new Error("manifest name must be a non-empty string");
-  }
-  if (typeof version !== "string" || version.trim() === "") {
-    throw new Error("manifest version must be a non-empty string");
-  }
-  if (value.main !== undefined && value.main !== null && typeof value.main !== "string") {
-    throw new Error("manifest main must be a string when present");
-  }
-  if (value.enabled !== undefined && value.enabled !== null && typeof value.enabled !== "boolean") {
-    throw new Error("manifest enabled must be a boolean when present");
-  }
-  return value as AddonManifestRecord;
+  const id = requiredManifestString(value.id, "id");
+  const name = requiredManifestString(value.name, "name");
+  const version = requiredManifestString(value.version, "version");
+  const main = requiredManifestString(value.main, "main");
+  return {
+    id,
+    name,
+    version,
+    description: optionalManifestString(value.description),
+    author: optionalManifestString(value.author),
+    sdkVersion: optionalManifestString(value.sdkVersion),
+    main,
+    enabled: typeof value.enabled === "boolean" ? value.enabled : null,
+    permissions: parseAddonPermissions(value.permissions),
+    homepage: optionalManifestString(value.homepage),
+    repository: optionalManifestString(value.repository),
+    license: optionalManifestString(value.license),
+    minWealthfolioVersion: optionalManifestString(value.minWealthfolioVersion),
+    keywords: parseOptionalStringArray(value.keywords),
+    icon: optionalManifestString(value.icon),
+  };
 }
 
 function writeManifest(addonDir: string, manifest: AddonManifestRecord): void {
@@ -305,10 +330,81 @@ function manifestEnabled(manifest: AddonManifestRecord): boolean {
 }
 
 function manifestMain(manifest: AddonManifestRecord): string {
-  if (!manifest.main) {
-    throw new Error("Main file not specified");
-  }
   return manifest.main;
+}
+
+function requiredManifestString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Missing '${field}' field in manifest.json`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    throw new Error(`Missing '${field}' field in manifest.json`);
+  }
+  return trimmed;
+}
+
+function optionalManifestString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parseOptionalStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function parseAddonPermissions(value: unknown): AddonPermissionRecord[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.map((permission) => {
+    if (!isRecord(permission)) {
+      throw new Error("Missing 'category' field in permission");
+    }
+    const category = requiredPermissionString(permission.category, "category", "permission");
+    const purpose = requiredPermissionString(permission.purpose, "purpose", "permission");
+    if (!Array.isArray(permission.functions)) {
+      throw new Error("Missing or invalid 'functions' field in permission");
+    }
+    return {
+      category,
+      functions: permission.functions.map(parseFunctionPermission),
+      purpose,
+    };
+  });
+}
+
+function parseFunctionPermission(value: unknown): FunctionPermissionRecord {
+  if (typeof value === "string") {
+    return {
+      name: value,
+      isDeclared: true,
+      isDetected: false,
+      detectedAt: null,
+    };
+  }
+  if (!isRecord(value)) {
+    throw new Error("Missing 'name' field in function permission");
+  }
+  return {
+    name: requiredPermissionString(value.name, "name", "function permission"),
+    isDeclared: typeof value.isDeclared === "boolean" ? value.isDeclared : true,
+    isDetected: typeof value.isDetected === "boolean" ? value.isDetected : false,
+    detectedAt: optionalManifestString(value.detectedAt),
+  };
+}
+
+function requiredPermissionString(value: unknown, field: string, subject: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Missing '${field}' field in ${subject}`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    throw new Error(`Missing '${field}' field in ${subject}`);
+  }
+  return trimmed;
 }
 
 function readAddonFilesRecursive(
