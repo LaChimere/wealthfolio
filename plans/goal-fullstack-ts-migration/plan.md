@@ -325,9 +325,10 @@ current/historical net-worth, income summary, simple account performance,
 account performance history/summary, valuation reads, snapshot metadata,
 historical snapshot holdings reads, holdings import checks, live holdings
 fan-out, holding detail/by-asset fan-out, allocation reads, snapshot deletion,
-bounded manual snapshot saves, bounded snapshot import writes, add-on runtime,
-broader market-data runtime beyond mapping/templates/duplicate lookups,
-read-only search, transfer link/unlink, single activity delete, and bounded
+bounded manual snapshot saves, bounded snapshot import writes, add-on zip/store
+runtime beyond local filesystem listing/toggles/runtime loading, broader
+market-data runtime beyond mapping/templates/duplicate lookups, read-only
+search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved and bounded symbol-created activity
 create/update/bulk persistence plus CSV parse/read-only asset preview/read-only
 import validation, bounded import apply, activity mutation event production,

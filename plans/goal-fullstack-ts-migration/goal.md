@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 132
+turns_used: 133
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T14:55:08+08:00"
+updated_at: "2026-05-17T15:07:27+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -853,6 +853,13 @@ updated_at: "2026-05-17T14:55:08+08:00"
   while preserving the original response id and keeping provider fetch deferred.
   Focused portfolio tests, backend type-check, full check, and focused review
   passed.
+- Turn 133: Wired local add-on filesystem runtime behavior into the standalone
+  TS backend: installed add-on listing, enable toggles, uninstall, runtime file
+  loading, enabled-on-startup loading, safe staging cleanup, explicit disabled
+  archive/store errors, and route/runtime coverage now work against
+  `appDataDir/addons` while zip extraction/install, store HTTP/update, full
+  manifest/security validation, and sandbox host behavior remain deferred.
+  Focused add-on/runtime tests and backend type-check passed.
 
 ## Deferred items
 
@@ -1031,10 +1038,13 @@ updated_at: "2026-05-17T14:55:08+08:00"
   provider-backed import-check symbol lookup, and snapshot mutation event
   production now have TS runtime parity, while remaining recalculation behavior
   must move with dedicated holdings/portfolio parity slices.
-- Add-on filesystem extraction, manifest validation, sandbox/runtime loading,
-  store HTTP requests, staging I/O, and update behavior remain active
-  follow-ups. reason=this slice only adds the guarded HTTP seam, while runtime
-  behavior must move with dedicated add-on parity slices.
+- Add-on zip extraction/install, full manifest/security validation, sandbox host
+  hardening, store HTTP requests, staging install, and update behavior remain
+  active follow-ups. reason=the standalone TS backend now supports local
+  installed add-on listing, toggles, uninstall, runtime file loading,
+  enabled-on-startup loading, and staging cleanup from `appDataDir/addons`,
+  while archive, store, and sandbox behavior must move with dedicated add-on
+  parity slices.
 - Market-data market sync execution and portfolio recalculation side effects
   remain active follow-ups. reason=exchange metadata, local quote
   persistence/import, Yahoo dividends/search/resolve have TS runtime coverage,

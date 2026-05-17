@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -451,6 +451,64 @@ describe("TS backend runtime composition", () => {
         body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: [] }),
       });
       expect(healthDeferredFixResponse.status).toBe(404);
+
+      const runtimeAddonDir = path.join(appDataDir, "addons", "runtime-addon");
+      mkdirSync(runtimeAddonDir, { recursive: true });
+      writeFileSync(
+        path.join(runtimeAddonDir, "manifest.json"),
+        JSON.stringify({
+          id: "runtime-addon",
+          name: "Runtime Addon",
+          version: "1.0.0",
+          main: "main.js",
+          enabled: true,
+        }),
+      );
+      writeFileSync(path.join(runtimeAddonDir, "main.js"), "export default {};");
+
+      const installedAddonsResponse = await fetch(`${server.baseUrl}/api/v1/addons/installed`);
+      expect(installedAddonsResponse.status).toBe(200);
+      await expect(installedAddonsResponse.json()).resolves.toEqual([
+        {
+          metadata: {
+            id: "runtime-addon",
+            name: "Runtime Addon",
+            version: "1.0.0",
+            main: "main.js",
+            enabled: true,
+          },
+          filePath: runtimeAddonDir,
+          isZipAddon: false,
+        },
+      ]);
+
+      const runtimeAddonResponse = await fetch(
+        `${server.baseUrl}/api/v1/addons/runtime/runtime-addon`,
+      );
+      expect(runtimeAddonResponse.status).toBe(200);
+      await expect(runtimeAddonResponse.json()).resolves.toMatchObject({
+        metadata: { id: "runtime-addon" },
+        files: [{ name: "main.js", content: "export default {};", isMain: true }],
+      });
+
+      const addonToggleResponse = await fetch(`${server.baseUrl}/api/v1/addons/toggle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ addonId: "runtime-addon", enabled: false }),
+      });
+      expect(addonToggleResponse.status).toBe(204);
+
+      const startupAddonsResponse = await fetch(
+        `${server.baseUrl}/api/v1/addons/enabled-on-startup`,
+      );
+      expect(startupAddonsResponse.status).toBe(200);
+      await expect(startupAddonsResponse.json()).resolves.toEqual([]);
+
+      const addonStoreResponse = await fetch(`${server.baseUrl}/api/v1/addons/store/listings`);
+      expect(addonStoreResponse.status).toBe(501);
+      await expect(addonStoreResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
 
       const appInfoResponse = await fetch(`${server.baseUrl}/api/v1/app/info`);
       expect(appInfoResponse.status).toBe(200);

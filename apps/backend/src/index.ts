@@ -84,12 +84,14 @@ export {
   type AiChatUpdateThreadRequest,
   type AiChatUpdateToolResultRequest,
 } from "./domains/ai-chat";
-export type {
-  AddonRatingRequest,
-  AddonService,
-  AddonStagingInstallRequest,
-  AddonZipExtractRequest,
-  AddonZipInstallRequest,
+export {
+  AddonNotImplementedError,
+  createLocalAddonService,
+  type AddonRatingRequest,
+  type AddonService,
+  type AddonStagingInstallRequest,
+  type AddonZipExtractRequest,
+  type AddonZipInstallRequest,
 } from "./domains/addons";
 export type {
   AiProviderService,

@@ -7,6 +7,7 @@ import {
   type AccountService,
   type AccountSyncEvent,
 } from "./domains/accounts";
+import { createLocalAddonService } from "./domains/addons";
 import { createAiChatService } from "./domains/ai-chat";
 import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
@@ -259,6 +260,7 @@ function createServicesFromDatabase(
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService,
+    addonService: createLocalAddonService({ appDataDir }),
     alternativeAssetService: createAlternativeAssetService(db, {
       eventBus,
       queueAssetSyncEvent: (event) => {
