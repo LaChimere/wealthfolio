@@ -1,7 +1,12 @@
 import type { AddonContext, SidebarItemHandle } from "@wealthfolio/addon-sdk";
 import React from "react";
 import { toast } from "sonner";
-import { createSDKHostAPIBridge } from "./type-bridge";
+import {
+  createAddonPermissionGuard,
+  createSDKHostAPIBridge,
+  type AddonPermissionGuard,
+  type RuntimeAddonPermission,
+} from "./type-bridge";
 
 // Import all command functions
 import {
@@ -144,19 +149,22 @@ export function triggerAllDisableCallbacks() {
 }
 
 // Create addon-scoped secret functions
-function createAddonScopedSecrets(addonId: string) {
+function createAddonScopedSecrets(addonId: string, permissionGuard: AddonPermissionGuard) {
   const addonPrefix = `addon_${addonId}_`;
 
   return {
     set: async (key: string, value: string): Promise<void> => {
+      permissionGuard.assertAllowed("api.secrets.set");
       const scopedKey = `${addonPrefix}${key}`;
       return setSecret(scopedKey, value);
     },
     get: async (key: string): Promise<string | null> => {
+      permissionGuard.assertAllowed("api.secrets.get");
       const scopedKey = `${addonPrefix}${key}`;
       return getSecret(scopedKey);
     },
     delete: async (key: string): Promise<void> => {
+      permissionGuard.assertAllowed("api.secrets.delete");
       const scopedKey = `${addonPrefix}${key}`;
       return deleteSecret(scopedKey);
     },
@@ -164,7 +172,16 @@ function createAddonScopedSecrets(addonId: string) {
 }
 
 // Create context factory function for addon-specific contexts
-export function createAddonContext(addonId: string): AddonContext {
+export function createAddonContext(
+  addonId: string,
+  permissions?: readonly RuntimeAddonPermission[] | null,
+): AddonContext {
+  const permissionGuard = createAddonPermissionGuard({
+    addonId,
+    permissions,
+    onDenied: (message) => logger.warn(message),
+  });
+
   return {
     sidebar: {
       addItem: (cfg: {
@@ -175,6 +192,8 @@ export function createAddonContext(addonId: string): AddonContext {
         order?: number;
         onClick?: () => void;
       }): SidebarItemHandle => {
+        permissionGuard.assertAllowed("context.sidebar.addItem");
+
         // Create navigation item
         const navItem = {
           icon: cfg.icon ?? '<Icons.Circle className="h-5 w-5" />',
@@ -204,6 +223,8 @@ export function createAddonContext(addonId: string): AddonContext {
         path: string;
         component: React.LazyExoticComponent<React.ComponentType<unknown>>;
       }): void => {
+        permissionGuard.assertAllowed("context.router.add");
+
         // Store the route component
         dynamicRoutes.set(r.path, r.component);
 
@@ -374,12 +395,13 @@ export function createAddonContext(addonId: string): AddonContext {
           toastInfo: (message: string) => toast.info(message),
         },
         addonId,
+        permissionGuard,
       );
 
       // Add the secrets API manually (without `any`)
       const apiWithSecrets = {
         ...baseAPI,
-        secrets: createAddonScopedSecrets(addonId),
+        secrets: createAddonScopedSecrets(addonId, permissionGuard),
       };
 
       return apiWithSecrets;

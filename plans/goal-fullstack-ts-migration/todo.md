@@ -159,42 +159,44 @@
     staging cleanup, Rust-compatible manifest normalization, local ZIP
     extraction/install, permission detection/merging, staged ZIP install, store
     listings/ratings/update checks, store download staging, and store update
-    installs now have TS runtime parity, while add-on security scanning and
-    sandbox host hardening are deferred to add-on runtime parity slices;
-    market-data market sync and portfolio recalculation behavior now have
-    explicit standalone runtime 501 gates and remain deferred to
-    market-data/portfolio parity slices; activity mutation event production,
-    activity/import-run/activity-created-asset sync-event callback queuing,
-    sync_outbox persistence for migrated goal/activity callbacks, FX asset
-    callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
-    asset taxonomy assignment callbacks, direct asset Create/Update/Delete
-    callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
-    update/delete/import callbacks, and local AI chat thread/message/tag
-    callbacks, contribution-limit callbacks, account callbacks, import
-    template/account-template callbacks, holdings snapshot callbacks, and
-    domain-event planning/batch processing/worker helper now have TS runtime
-    parity, while provider-backed asset resolution, remaining quote sync outbox
-    follow-ups outside migrated alternative-asset and market-data quote paths,
-    device-sync push/pull runtime wiring, and portfolio recalculation side
-    effects are deferred to activities/import/device-sync runtime parity slices;
-    AI chat persistence, tag persistence, tool-result mutation, and local AI
-    chat sync_outbox callbacks now have TS runtime parity, while provider
-    streaming, tool execution, and attachments are deferred to AI runtime parity
-    slices; device-sync integration for sync crypto is deferred to device-sync
-    runtime parity slices; bounded account/timezone health status/checks, cache
-    behavior, legacy-classification health issues, and classification migration
-    health-fix dispatch now have TS runtime parity, while calculation-heavy
-    health checks, market sync fix execution, and non-classification
-    `/health/fix` dispatch are deferred to health/calculation parity slices;
-    disabled Connect feature-flag responses, local empty-list routes, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, local sync repositories, subscription
-    entitlement checks, event production, E2EE enrollment, sync engine,
-    snapshot/upload runtime, background workers, device-sync cloud clients,
-    token lifecycle, team-key operations, key material handling, pairing flows,
-    freshness gate persistence, bootstrap transfer, and secret side effects are
-    deferred to Connect/device-sync parity slices.
+    installs and frontend manifest-permission enforcement for SDK domain APIs,
+    UI registration, and scoped secrets now have TS runtime parity, while add-on
+    security scanning, full sandbox isolation, and query-cache hardening are
+    deferred to add-on runtime parity slices; market-data market sync and
+    portfolio recalculation behavior now have explicit standalone runtime 501
+    gates and remain deferred to market-data/portfolio parity slices; activity
+    mutation event production, activity/import-run/activity-created-asset
+    sync-event callback queuing, sync_outbox persistence for migrated
+    goal/activity callbacks, FX asset callbacks, custom provider callbacks,
+    custom taxonomy bundle callbacks, asset taxonomy assignment callbacks,
+    direct asset Create/Update/Delete callbacks, alternative asset/UUID MANUAL
+    quote callbacks, market-data quote update/delete/import callbacks, and local
+    AI chat thread/message/tag callbacks, contribution-limit callbacks, account
+    callbacks, import template/account-template callbacks, holdings snapshot
+    callbacks, and domain-event planning/batch processing/worker helper now have
+    TS runtime parity, while provider-backed asset resolution, remaining quote
+    sync outbox follow-ups outside migrated alternative-asset and market-data
+    quote paths, device-sync push/pull runtime wiring, and portfolio
+    recalculation side effects are deferred to activities/import/device-sync
+    runtime parity slices; AI chat persistence, tag persistence, tool-result
+    mutation, and local AI chat sync_outbox callbacks now have TS runtime
+    parity, while provider streaming, tool execution, and attachments are
+    deferred to AI runtime parity slices; device-sync integration for sync
+    crypto is deferred to device-sync runtime parity slices; bounded
+    account/timezone health status/checks, cache behavior, legacy-classification
+    health issues, and classification migration health-fix dispatch now have TS
+    runtime parity, while calculation-heavy health checks, market sync fix
+    execution, and non-classification `/health/fix` dispatch are deferred to
+    health/calculation parity slices; disabled Connect feature-flag responses,
+    local empty-list routes, local broker sync profile persistence, and disabled
+    device-sync route responses now have TS runtime parity, while real Connect
+    token lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1542,6 +1544,14 @@ contract:
   existing enabled state, and standalone runtime instance-id/app-version wiring.
   Full repository check passed with `bun run check`; focused code review found
   no significant issues.
+- `pr5-addons-runtime-permission-guard`: targeted checks passed:
+  `bun run --cwd apps/frontend test --run src/addons/type-bridge.test.ts src/addons/addons-runtime-context.test.ts`
+  and `bun run --cwd apps/frontend type-check -- --pretty false`. Coverage
+  includes SDK bridge permission allow/deny behavior, bundled manifest category
+  alias compatibility, declared/detected function filtering, UI registration
+  guards, scoped secret guards, and legacy/dev unrestricted fallback when
+  permission metadata is absent. Full repository check passed with
+  `bun run check`; focused code review found no significant issues.
 
 ## Result
 
@@ -1599,9 +1609,9 @@ contract:
   profile callbacks, domain-event planning/batch-processing/worker helper, local
   add-on filesystem runtime with Rust-compatible manifest normalization, local
   ZIP archive extraction/install/staging install, add-on
-  store/update/download-staging runtime behavior, and explicit portfolio and
-  market-sync deferred runtime gates implemented; broader migration remains
-  active.
+  store/update/download-staging runtime behavior, frontend add-on
+  manifest-permission enforcement, and explicit portfolio and market-sync
+  deferred runtime gates implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1619,17 +1629,18 @@ contract:
   move with market-data/portfolio parity slices; provider-backed symbol
   fetch/resolution moves with market-data/provider parity slices; portfolio
   recalculation side effects move with holdings/portfolio parity slices; add-on
-  security scanning and sandbox host hardening move with add-on runtime parity
-  slices; provider-backed asset resolution, remaining quote sync-outbox emission
-  outside migrated alternative-asset and market-data quote paths, sync engine
-  push/pull, and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks,
-  market sync fix execution, and non-classification `/health/fix` dispatch move
-  with health/calculation parity slices; real Connect token lifecycle, cloud
-  HTTP clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, E2EE enrollment, sync engine,
-  snapshot/upload runtime, feature-flag errors, background workers, device-sync
-  cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
-  effects move with Connect/device-sync parity slices.
+  security scanning, full sandbox isolation, and query-cache hardening move with
+  add-on runtime parity slices; provider-backed asset resolution, remaining
+  quote sync-outbox emission outside migrated alternative-asset and market-data
+  quote paths, sync engine push/pull, and portfolio recalculation side effects
+  move with activities/import/device-sync runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; broader
+  health checks, market sync fix execution, and non-classification `/health/fix`
+  dispatch move with health/calculation parity slices; real Connect token
+  lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+  repositories, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

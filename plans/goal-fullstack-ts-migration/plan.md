@@ -306,6 +306,10 @@ backend:
   per-add-on fallback errors, direct/redirected ZIP downloads, staged ZIP
   validation, update installs that preserve existing enabled state, and
   app-version/instance headers.
+- Add frontend add-on runtime permission enforcement for installed manifest
+  permissions, including SDK domain API guards, UI registration guards, scoped
+  secret guards, bundled manifest category aliases, and legacy/dev unrestricted
+  fallback when permission metadata is unavailable.
 - Add bounded health status/check runtime for `/api/v1/health/status` and
   `/api/v1/health/check`, including account tracking-mode issues, timezone
   missing/invalid/mismatch issues with offset-equivalence parity, severity
@@ -335,9 +339,10 @@ summary, simple account performance, account performance history/summary,
 valuation reads, snapshot metadata, historical snapshot holdings reads, holdings
 import checks, live holdings fan-out, holding detail/by-asset fan-out,
 allocation reads, snapshot deletion, bounded manual snapshot saves, bounded
-snapshot import writes, add-on security-scanning/sandbox runtime beyond local
-filesystem listing/toggles/runtime loading, manifest normalization, local ZIP
-extraction/install/staging install, and store/update/download-staging, broader
+snapshot import writes, add-on security-scanning/full sandbox/query-cache
+hardening beyond local filesystem listing/toggles/runtime loading, manifest
+normalization, local ZIP extraction/install/staging install,
+store/update/download-staging, and frontend permission enforcement, broader
 market-data runtime beyond mapping/templates/duplicate lookups, read-only
 search, transfer link/unlink, single activity delete, and bounded
 existing-asset/cash/symbol-resolved and bounded symbol-created activity

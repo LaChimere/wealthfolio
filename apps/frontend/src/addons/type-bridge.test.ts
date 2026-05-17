@@ -1,5 +1,25 @@
 import { vi, describe, it, expect } from "vitest";
-import { createSDKHostAPIBridge, type InternalHostAPI } from "./type-bridge";
+import goalProgressManifest from "../../../../addons/goal-progress-tracker/manifest.json";
+import investmentFeesManifest from "../../../../addons/investment-fees-tracker/manifest.json";
+import {
+  buildAllowedAddonPermissionPaths,
+  createAddonPermissionGuard,
+  createSDKHostAPIBridge,
+  type InternalHostAPI,
+  type RuntimeAddonPermission,
+} from "./type-bridge";
+
+function declaredPermission(category: string, functions: string[]): RuntimeAddonPermission {
+  return {
+    category,
+    purpose: "test",
+    functions: functions.map((name) => ({
+      name,
+      isDeclared: true,
+      isDetected: false,
+    })),
+  };
+}
 
 describe("Addon Type Bridge", () => {
   describe("createSDKHostAPIBridge", () => {
@@ -68,6 +88,122 @@ describe("Addon Type Bridge", () => {
 
       // Should fallback to default addon ID for empty string
       expect(mockLogInfo).toHaveBeenCalledWith("[unknown-addon] test message");
+    });
+
+    it("keeps bundled manifest permissions compatible with SDK API function names", async () => {
+      const getAccounts = vi.fn().mockResolvedValue([]);
+      const getLatestValuations = vi.fn().mockResolvedValue([]);
+      const getGoals = vi.fn().mockResolvedValue([]);
+      const getGoalFunding = vi.fn().mockResolvedValue([]);
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getAccounts,
+          getLatestValuations,
+          getGoals,
+          getGoalFunding,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        goalProgressManifest.id,
+        createAddonPermissionGuard({
+          addonId: goalProgressManifest.id,
+          permissions: goalProgressManifest.permissions as RuntimeAddonPermission[],
+        }),
+      );
+
+      await expect(sdkAPI.accounts.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.portfolio.getLatestValuations([])).resolves.toEqual([]);
+      await expect(sdkAPI.goals.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.goals.getFunding("goal-id")).resolves.toEqual([]);
+
+      expect(getAccounts).toHaveBeenCalledOnce();
+      expect(getLatestValuations).toHaveBeenCalledWith([]);
+      expect(getGoals).toHaveBeenCalledOnce();
+      expect(getGoalFunding).toHaveBeenCalledWith("goal-id");
+    });
+
+    it("supports exchangeRates category declarations from bundled manifests", async () => {
+      const getExchangeRates = vi.fn().mockResolvedValue([]);
+      const getSettings = vi.fn().mockResolvedValue({});
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getExchangeRates,
+          getSettings,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        investmentFeesManifest.id,
+        createAddonPermissionGuard({
+          addonId: investmentFeesManifest.id,
+          permissions: investmentFeesManifest.permissions as RuntimeAddonPermission[],
+        }),
+      );
+
+      await expect(sdkAPI.exchangeRates.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.settings.get()).resolves.toEqual({});
+
+      expect(getExchangeRates).toHaveBeenCalledOnce();
+      expect(getSettings).toHaveBeenCalledOnce();
+    });
+
+    it("blocks undeclared SDK API calls without invoking the host adapter", () => {
+      const getAccounts = vi.fn().mockResolvedValue([]);
+      const createActivity = vi.fn();
+      const warn = vi.fn();
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getAccounts,
+          createActivity,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "secure-addon",
+        createAddonPermissionGuard({
+          addonId: "secure-addon",
+          permissions: [declaredPermission("accounts", ["getAll"])],
+          onDenied: warn,
+        }),
+      );
+
+      expect(() =>
+        sdkAPI.activities.create({} as Parameters<typeof sdkAPI.activities.create>[0]),
+      ).toThrow("Addon secure-addon is not permitted to call api.activities.create");
+      expect(createActivity).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "Addon secure-addon is not permitted to call api.activities.create",
+      );
+    });
+
+    it("maps UI and secrets permissions to context and scoped secret calls", () => {
+      const guard = createAddonPermissionGuard({
+        addonId: "ui-addon",
+        permissions: [
+          declaredPermission("ui", ["sidebar.addItem"]),
+          declaredPermission("secrets", ["get"]),
+        ],
+      });
+
+      expect(() => guard.assertAllowed("context.sidebar.addItem")).not.toThrow();
+      expect(() => guard.assertAllowed("api.secrets.get")).not.toThrow();
+      expect(() => guard.assertAllowed("context.router.add")).toThrow(
+        "Addon ui-addon is not permitted to call context.router.add",
+      );
+      expect(() => guard.assertAllowed("api.secrets.set")).toThrow(
+        "Addon ui-addon is not permitted to call api.secrets.set",
+      );
+    });
+
+    it("ignores permission functions that were neither declared nor detected", () => {
+      const allowedPaths = buildAllowedAddonPermissionPaths([
+        {
+          category: "activities",
+          purpose: "test",
+          functions: [
+            { name: "create", isDeclared: false, isDetected: false },
+            { name: "search", isDeclared: false, isDetected: true },
+          ],
+        },
+      ]);
+
+      expect(allowedPaths.has("api.activities.create")).toBe(false);
+      expect(allowedPaths.has("api.activities.search")).toBe(true);
     });
   });
 });

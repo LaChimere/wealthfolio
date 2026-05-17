@@ -41,9 +41,11 @@ import type {
 } from "@/lib/types";
 import type { HoldingInput } from "@/adapters";
 import type {
+  FunctionPermission,
   Goal as SDKGoal,
   GoalAllocation as SDKGoalAllocation,
   HostAPI as SDKHostAPI,
+  Permission,
 } from "@wealthfolio/addon-sdk";
 
 /**
@@ -202,6 +204,240 @@ export interface InternalHostAPI {
   toastInfo(message: string): void;
 }
 
+type RuntimeFunctionPermission = FunctionPermission | string;
+
+export type RuntimeAddonPermission = Omit<Permission, "functions"> & {
+  readonly functions: readonly RuntimeFunctionPermission[];
+};
+
+export interface AddonPermissionGuard {
+  readonly isRestricted: boolean;
+  assertAllowed(permissionPath: string): void;
+}
+
+interface CreateAddonPermissionGuardOptions {
+  addonId?: string;
+  permissions?: readonly RuntimeAddonPermission[] | null;
+  onDenied?: (message: string) => void;
+}
+
+const MARKET_PERMISSION_PATHS = {
+  searchTicker: ["api.market.searchTicker"],
+  syncHistory: ["api.market.syncHistory"],
+  sync: ["api.market.sync"],
+  getProviders: ["api.market.getProviders"],
+  fetchDividends: ["api.market.fetchDividends"],
+  getProfile: ["api.assets.getProfile"],
+  updateProfile: ["api.assets.updateProfile"],
+  updateDataSource: ["api.assets.updateQuoteMode"],
+} as const;
+
+const EXCHANGE_RATE_PERMISSION_PATHS = {
+  getAll: ["api.exchangeRates.getAll"],
+  update: ["api.exchangeRates.update"],
+  add: ["api.exchangeRates.add"],
+} as const;
+
+const GOAL_PERMISSION_PATHS = {
+  getAll: ["api.goals.getAll"],
+  create: ["api.goals.create"],
+  update: ["api.goals.update"],
+  getFunding: ["api.goals.getFunding"],
+  saveFunding: ["api.goals.saveFunding"],
+  getAllocations: ["api.goals.getAllocations"],
+  updateAllocations: ["api.goals.updateAllocations"],
+  calculateDeposits: ["api.contributionLimits.calculateDeposits"],
+} as const;
+
+const CONTRIBUTION_LIMIT_PERMISSION_PATHS = {
+  getAll: ["api.contributionLimits.getAll"],
+  create: ["api.contributionLimits.create"],
+  update: ["api.contributionLimits.update"],
+  calculateDeposits: ["api.contributionLimits.calculateDeposits"],
+} as const;
+
+const PERMISSION_PATHS_BY_CATEGORY: Record<string, Record<string, readonly string[]>> = {
+  accounts: {
+    getAll: ["api.accounts.getAll"],
+    create: ["api.accounts.create"],
+  },
+  portfolio: {
+    getHoldings: ["api.portfolio.getHoldings"],
+    getHolding: ["api.portfolio.getHolding"],
+    update: ["api.portfolio.update"],
+    recalculate: ["api.portfolio.recalculate"],
+    getIncomeSummary: ["api.portfolio.getIncomeSummary"],
+    getHistoricalValuations: ["api.portfolio.getHistoricalValuations"],
+    getLatestValuations: ["api.portfolio.getLatestValuations"],
+  },
+  activities: {
+    getAll: ["api.activities.getAll"],
+    search: ["api.activities.search"],
+    create: ["api.activities.create"],
+    update: ["api.activities.update"],
+    saveMany: ["api.activities.saveMany"],
+    import: ["api.activities.import"],
+    checkImport: ["api.activities.checkImport"],
+    getImportMapping: ["api.activities.getImportMapping"],
+    saveImportMapping: ["api.activities.saveImportMapping"],
+  },
+  "market-data": MARKET_PERMISSION_PATHS,
+  market: MARKET_PERMISSION_PATHS,
+  assets: {
+    getProfile: ["api.assets.getProfile"],
+    updateProfile: ["api.assets.updateProfile"],
+    updateQuoteMode: ["api.assets.updateQuoteMode"],
+    updateDataSource: ["api.assets.updateQuoteMode"],
+  },
+  quotes: {
+    update: ["api.quotes.update"],
+    getHistory: ["api.quotes.getHistory"],
+  },
+  performance: {
+    calculateHistory: ["api.performance.calculateHistory"],
+    calculateSummary: ["api.performance.calculateSummary"],
+    calculateAccountsSimple: ["api.performance.calculateAccountsSimple"],
+  },
+  currency: EXCHANGE_RATE_PERMISSION_PATHS,
+  exchangeRates: EXCHANGE_RATE_PERMISSION_PATHS,
+  "financial-planning": GOAL_PERMISSION_PATHS,
+  goals: GOAL_PERMISSION_PATHS,
+  "contribution-limits": CONTRIBUTION_LIMIT_PERMISSION_PATHS,
+  contributionLimits: CONTRIBUTION_LIMIT_PERMISSION_PATHS,
+  settings: {
+    get: ["api.settings.get"],
+    update: ["api.settings.update"],
+    backupDatabase: ["api.settings.backupDatabase"],
+  },
+  files: {
+    openCsvDialog: ["api.files.openCsvDialog"],
+    openSaveDialog: ["api.files.openSaveDialog"],
+  },
+  snapshots: {
+    getAll: ["api.snapshots.getAll"],
+    getByDate: ["api.snapshots.getByDate"],
+    save: ["api.snapshots.save"],
+    checkImport: ["api.snapshots.checkImport"],
+    importSnapshots: ["api.snapshots.importSnapshots"],
+    delete: ["api.snapshots.delete"],
+  },
+  events: {
+    onDropHover: ["api.events.import.onDropHover"],
+    onDrop: ["api.events.import.onDrop"],
+    onDropCancelled: ["api.events.import.onDropCancelled"],
+    onUpdateStart: ["api.events.portfolio.onUpdateStart"],
+    onUpdateComplete: ["api.events.portfolio.onUpdateComplete"],
+    onUpdateError: ["api.events.portfolio.onUpdateError"],
+    onSyncStart: ["api.events.market.onSyncStart"],
+    onSyncComplete: ["api.events.market.onSyncComplete"],
+  },
+  "events.import": {
+    onDropHover: ["api.events.import.onDropHover"],
+    onDrop: ["api.events.import.onDrop"],
+    onDropCancelled: ["api.events.import.onDropCancelled"],
+  },
+  "events.portfolio": {
+    onUpdateStart: ["api.events.portfolio.onUpdateStart"],
+    onUpdateComplete: ["api.events.portfolio.onUpdateComplete"],
+    onUpdateError: ["api.events.portfolio.onUpdateError"],
+  },
+  "events.market": {
+    onSyncStart: ["api.events.market.onSyncStart"],
+    onSyncComplete: ["api.events.market.onSyncComplete"],
+  },
+  secrets: {
+    set: ["api.secrets.set"],
+    get: ["api.secrets.get"],
+    delete: ["api.secrets.delete"],
+  },
+  ui: {
+    "sidebar.addItem": ["context.sidebar.addItem"],
+    "router.add": ["context.router.add"],
+    onDisable: ["context.onDisable"],
+  },
+};
+
+const UNRESTRICTED_PERMISSION_GUARD: AddonPermissionGuard = {
+  isRestricted: false,
+  assertAllowed: () => undefined,
+};
+
+function permissionFunctionName(permission: RuntimeFunctionPermission): string {
+  return typeof permission === "string" ? permission : permission.name;
+}
+
+function permissionFunctionIsGranted(permission: RuntimeFunctionPermission): boolean {
+  return typeof permission === "string" || permission.isDeclared || permission.isDetected;
+}
+
+export function buildAllowedAddonPermissionPaths(
+  permissions: readonly RuntimeAddonPermission[],
+): Set<string> {
+  const allowedPaths = new Set<string>();
+
+  for (const permission of permissions) {
+    const pathsByFunction = PERMISSION_PATHS_BY_CATEGORY[permission.category];
+    if (!pathsByFunction) {
+      continue;
+    }
+
+    for (const functionPermission of permission.functions) {
+      if (!permissionFunctionIsGranted(functionPermission)) {
+        continue;
+      }
+
+      const functionName = permissionFunctionName(functionPermission);
+      const paths = pathsByFunction[functionName];
+      if (!paths) {
+        continue;
+      }
+
+      for (const path of paths) {
+        allowedPaths.add(path);
+      }
+    }
+  }
+
+  return allowedPaths;
+}
+
+export function createAddonPermissionGuard({
+  addonId,
+  permissions,
+  onDenied,
+}: CreateAddonPermissionGuardOptions): AddonPermissionGuard {
+  if (permissions == null) {
+    return UNRESTRICTED_PERMISSION_GUARD;
+  }
+
+  const allowedPaths = buildAllowedAddonPermissionPaths(permissions);
+  const normalizedAddonId = addonId?.trim() || "unknown-addon";
+
+  return {
+    isRestricted: true,
+    assertAllowed: (permissionPath: string) => {
+      if (allowedPaths.has(permissionPath)) {
+        return;
+      }
+
+      const message = `Addon ${normalizedAddonId} is not permitted to call ${permissionPath}`;
+      onDenied?.(message);
+      throw new Error(message);
+    },
+  };
+}
+
+function guardAddonApiCall<TArgs extends unknown[], TResult>(
+  permissionGuard: AddonPermissionGuard,
+  permissionPath: string,
+  fn: (...args: TArgs) => TResult,
+): (...args: TArgs) => TResult {
+  return (...args: TArgs) => {
+    permissionGuard.assertAllowed(permissionPath);
+    return fn(...args);
+  };
+}
+
 /**
  * Type bridge utility to convert between internal and SDK types
  * This handles the mapping between the actual implementation types and the public SDK types
@@ -209,7 +445,13 @@ export interface InternalHostAPI {
 export function createSDKHostAPIBridge(
   internalAPI: InternalHostAPI,
   addonId?: string,
+  permissionGuard: AddonPermissionGuard = UNRESTRICTED_PERMISSION_GUARD,
 ): Omit<SDKHostAPI, "secrets"> {
+  const guarded = <TArgs extends unknown[], TResult>(
+    permissionPath: string,
+    fn: (...args: TArgs) => TResult,
+  ) => guardAddonApiCall(permissionGuard, permissionPath, fn);
+
   // Create logger with addon prefix
   const createAddonLogger = (prefix: string) => ({
     error: (message: string) => internalAPI.logError(`[${prefix}] ${message}`),
@@ -301,108 +543,168 @@ export function createSDKHostAPIBridge(
 
   return {
     accounts: {
-      getAll: internalAPI.getAccounts,
-      create: internalAPI.createAccount,
+      getAll: guarded("api.accounts.getAll", internalAPI.getAccounts),
+      create: guarded("api.accounts.create", internalAPI.createAccount),
     },
     portfolio: {
-      getHoldings: internalAPI.getHoldings,
-      getHolding: internalAPI.getHolding,
-      update: internalAPI.updatePortfolio,
-      recalculate: internalAPI.recalculatePortfolio,
-      getIncomeSummary: internalAPI.getIncomeSummary,
-      getHistoricalValuations: internalAPI.getHistoricalValuations,
-      getLatestValuations: internalAPI.getLatestValuations,
+      getHoldings: guarded("api.portfolio.getHoldings", internalAPI.getHoldings),
+      getHolding: guarded("api.portfolio.getHolding", internalAPI.getHolding),
+      update: guarded("api.portfolio.update", internalAPI.updatePortfolio),
+      recalculate: guarded("api.portfolio.recalculate", internalAPI.recalculatePortfolio),
+      getIncomeSummary: guarded("api.portfolio.getIncomeSummary", internalAPI.getIncomeSummary),
+      getHistoricalValuations: guarded(
+        "api.portfolio.getHistoricalValuations",
+        internalAPI.getHistoricalValuations,
+      ),
+      getLatestValuations: guarded(
+        "api.portfolio.getLatestValuations",
+        internalAPI.getLatestValuations,
+      ),
     },
     activities: {
-      getAll: internalAPI.getActivities,
-      search: internalAPI.searchActivities,
-      create: internalAPI.createActivity,
-      update: internalAPI.updateActivity,
-      saveMany: (input: ActivityUpdate[] | ActivityBulkMutationRequest) =>
-        Array.isArray(input)
-          ? internalAPI.saveActivities({ updates: input })
-          : internalAPI.saveActivities(input),
-      import: (activities: ActivityImport[]) => internalAPI.importActivities({ activities }),
-      checkImport: (activities: ActivityImport[]) =>
+      getAll: guarded("api.activities.getAll", internalAPI.getActivities),
+      search: guarded("api.activities.search", internalAPI.searchActivities),
+      create: guarded("api.activities.create", internalAPI.createActivity),
+      update: guarded("api.activities.update", internalAPI.updateActivity),
+      saveMany: guarded(
+        "api.activities.saveMany",
+        (input: ActivityUpdate[] | ActivityBulkMutationRequest) =>
+          Array.isArray(input)
+            ? internalAPI.saveActivities({ updates: input })
+            : internalAPI.saveActivities(input),
+      ),
+      import: guarded("api.activities.import", (activities: ActivityImport[]) =>
+        internalAPI.importActivities({ activities }),
+      ),
+      checkImport: guarded("api.activities.checkImport", (activities: ActivityImport[]) =>
         internalAPI.checkActivitiesImport({ activities }),
-      getImportMapping: internalAPI.getAccountImportMapping,
-      saveImportMapping: internalAPI.saveAccountImportMapping,
+      ),
+      getImportMapping: guarded(
+        "api.activities.getImportMapping",
+        internalAPI.getAccountImportMapping,
+      ),
+      saveImportMapping: guarded(
+        "api.activities.saveImportMapping",
+        internalAPI.saveAccountImportMapping,
+      ),
     },
     market: {
-      searchTicker: internalAPI.searchTicker,
-      syncHistory: internalAPI.syncHistoryQuotes,
-      sync: internalAPI.syncMarketData,
-      getProviders: internalAPI.getMarketDataProviders,
-      fetchDividends: internalAPI.fetchYahooDividends,
+      searchTicker: guarded("api.market.searchTicker", internalAPI.searchTicker),
+      syncHistory: guarded("api.market.syncHistory", internalAPI.syncHistoryQuotes),
+      sync: guarded("api.market.sync", internalAPI.syncMarketData),
+      getProviders: guarded("api.market.getProviders", internalAPI.getMarketDataProviders),
+      fetchDividends: guarded("api.market.fetchDividends", internalAPI.fetchYahooDividends),
     },
     assets: {
-      getProfile: internalAPI.getAssetProfile,
-      updateProfile: internalAPI.updateAssetProfile,
-      updateQuoteMode: internalAPI.updateQuoteMode,
+      getProfile: guarded("api.assets.getProfile", internalAPI.getAssetProfile),
+      updateProfile: guarded("api.assets.updateProfile", internalAPI.updateAssetProfile),
+      updateQuoteMode: guarded("api.assets.updateQuoteMode", internalAPI.updateQuoteMode),
     },
     quotes: {
-      update: internalAPI.updateQuote,
-      getHistory: internalAPI.getQuoteHistory,
+      update: guarded("api.quotes.update", internalAPI.updateQuote),
+      getHistory: guarded("api.quotes.getHistory", internalAPI.getQuoteHistory),
     },
     performance: {
-      calculateHistory: internalAPI.calculatePerformanceHistory,
-      calculateSummary: internalAPI.calculatePerformanceSummary,
-      calculateAccountsSimple: internalAPI.calculateAccountsSimplePerformance,
+      calculateHistory: guarded(
+        "api.performance.calculateHistory",
+        internalAPI.calculatePerformanceHistory,
+      ),
+      calculateSummary: guarded(
+        "api.performance.calculateSummary",
+        internalAPI.calculatePerformanceSummary,
+      ),
+      calculateAccountsSimple: guarded(
+        "api.performance.calculateAccountsSimple",
+        internalAPI.calculateAccountsSimplePerformance,
+      ),
     },
     exchangeRates: {
-      getAll: internalAPI.getExchangeRates,
-      update: internalAPI.updateExchangeRate,
-      add: internalAPI.addExchangeRate,
+      getAll: guarded("api.exchangeRates.getAll", internalAPI.getExchangeRates),
+      update: guarded("api.exchangeRates.update", internalAPI.updateExchangeRate),
+      add: guarded("api.exchangeRates.add", internalAPI.addExchangeRate),
     },
     contributionLimits: {
-      getAll: internalAPI.getContributionLimit,
-      create: internalAPI.createContributionLimit,
-      update: internalAPI.updateContributionLimit,
-      calculateDeposits: internalAPI.calculateDepositsForLimit,
+      getAll: guarded("api.contributionLimits.getAll", internalAPI.getContributionLimit),
+      create: guarded("api.contributionLimits.create", internalAPI.createContributionLimit),
+      update: guarded("api.contributionLimits.update", internalAPI.updateContributionLimit),
+      calculateDeposits: guarded(
+        "api.contributionLimits.calculateDeposits",
+        internalAPI.calculateDepositsForLimit,
+      ),
     },
     goals: {
-      getAll: async () => (await internalAPI.getGoals()).map(toSDKGoal),
-      create: async (goal) => toSDKGoal(await internalAPI.createGoal(goal)),
-      update: async (goal) => toSDKGoal(await internalAPI.updateGoal(goal)),
-      getFunding: getGoalFunding,
-      saveFunding: saveGoalFunding,
-      getAllocations: getGoalAllocations,
-      updateAllocations: updateGoalAllocations,
+      getAll: guarded("api.goals.getAll", async () =>
+        (await internalAPI.getGoals()).map(toSDKGoal),
+      ),
+      create: guarded("api.goals.create", async (goal) =>
+        toSDKGoal(await internalAPI.createGoal(goal)),
+      ),
+      update: guarded("api.goals.update", async (goal) =>
+        toSDKGoal(await internalAPI.updateGoal(goal)),
+      ),
+      getFunding: guarded("api.goals.getFunding", getGoalFunding),
+      saveFunding: guarded("api.goals.saveFunding", saveGoalFunding),
+      getAllocations: guarded("api.goals.getAllocations", getGoalAllocations),
+      updateAllocations: guarded("api.goals.updateAllocations", updateGoalAllocations),
     },
     settings: {
-      get: internalAPI.getSettings,
-      update: internalAPI.updateSettings,
-      backupDatabase: internalAPI.backupDatabase,
+      get: guarded("api.settings.get", internalAPI.getSettings),
+      update: guarded("api.settings.update", internalAPI.updateSettings),
+      backupDatabase: guarded("api.settings.backupDatabase", internalAPI.backupDatabase),
     },
     files: {
-      openCsvDialog: internalAPI.openCsvFileDialog,
-      openSaveDialog: internalAPI.openFileSaveDialog,
+      openCsvDialog: guarded("api.files.openCsvDialog", internalAPI.openCsvFileDialog),
+      openSaveDialog: guarded("api.files.openSaveDialog", internalAPI.openFileSaveDialog),
     },
     snapshots: {
-      getAll: internalAPI.getSnapshots,
-      getByDate: internalAPI.getSnapshotByDate,
-      save: internalAPI.saveManualHoldings,
-      checkImport: internalAPI.checkHoldingsImport,
-      importSnapshots: internalAPI.importHoldingsCsv,
-      delete: internalAPI.deleteSnapshot,
+      getAll: guarded("api.snapshots.getAll", internalAPI.getSnapshots),
+      getByDate: guarded("api.snapshots.getByDate", internalAPI.getSnapshotByDate),
+      save: guarded("api.snapshots.save", internalAPI.saveManualHoldings),
+      checkImport: guarded("api.snapshots.checkImport", internalAPI.checkHoldingsImport),
+      importSnapshots: guarded("api.snapshots.importSnapshots", internalAPI.importHoldingsCsv),
+      delete: guarded("api.snapshots.delete", internalAPI.deleteSnapshot),
     },
 
     logger: createAddonLogger(addonId || "unknown-addon"),
 
     events: {
       import: {
-        onDropHover: internalAPI.listenImportFileDropHover,
-        onDrop: internalAPI.listenImportFileDrop,
-        onDropCancelled: internalAPI.listenImportFileDropCancelled,
+        onDropHover: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.import.onDropHover");
+          return internalAPI.listenImportFileDropHover(handler);
+        },
+        onDrop: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.import.onDrop");
+          return internalAPI.listenImportFileDrop(handler);
+        },
+        onDropCancelled: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.import.onDropCancelled");
+          return internalAPI.listenImportFileDropCancelled(handler);
+        },
       },
       portfolio: {
-        onUpdateStart: internalAPI.listenPortfolioUpdateStart,
-        onUpdateComplete: internalAPI.listenPortfolioUpdateComplete,
-        onUpdateError: internalAPI.listenPortfolioUpdateError,
+        onUpdateStart: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.portfolio.onUpdateStart");
+          return internalAPI.listenPortfolioUpdateStart(handler);
+        },
+        onUpdateComplete: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.portfolio.onUpdateComplete");
+          return internalAPI.listenPortfolioUpdateComplete(handler);
+        },
+        onUpdateError: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.portfolio.onUpdateError");
+          return internalAPI.listenPortfolioUpdateError(handler);
+        },
       },
       market: {
-        onSyncStart: internalAPI.listenMarketSyncStart,
-        onSyncComplete: internalAPI.listenMarketSyncComplete,
+        onSyncStart: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.market.onSyncStart");
+          return internalAPI.listenMarketSyncStart(handler);
+        },
+        onSyncComplete: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.market.onSyncComplete");
+          return internalAPI.listenMarketSyncComplete(handler);
+        },
       },
     },
 

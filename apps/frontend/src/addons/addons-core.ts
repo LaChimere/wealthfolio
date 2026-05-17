@@ -97,11 +97,12 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
     addonCode = addonCode.replace(/\/\/# sourceMappingURL=.*/g, "");
 
     // Extract permission data directly from manifest (already processed by Rust backend)
-    const permissions = extractedAddon.metadata.permissions ?? [];
-    const detectedFunctions = permissions.flatMap((p) =>
+    const permissions = extractedAddon.metadata.permissions ?? null;
+    const permissionsForLogging = permissions ?? [];
+    const detectedFunctions = permissionsForLogging.flatMap((p) =>
       p.functions.filter((f) => f.isDetected).map((f) => f.name),
     );
-    const detectedCategories = [...new Set(permissions.map((p) => p.category))];
+    const detectedCategories = [...new Set(permissionsForLogging.map((p) => p.category))];
 
     logger.info(
       `Permissions for addon ${extractedAddon.metadata.id}: functions=[${detectedFunctions.join(",")}], categories=[${detectedCategories.join(",")}]`,
@@ -165,7 +166,7 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
     }
 
     // Create addon-specific context with scoped secrets
-    const addonSpecificContext = createAddonContext(extractedAddon.metadata.id);
+    const addonSpecificContext = createAddonContext(extractedAddon.metadata.id, permissions);
     const result = await enableFunction(addonSpecificContext);
 
     // Store addon reference for potential cleanup
