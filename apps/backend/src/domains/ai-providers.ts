@@ -152,6 +152,7 @@ export interface AiChatProviderConfigRequest {
 export interface ResolvedAiChatProviderConfig {
   providerId: string;
   modelId: string;
+  titleModelId?: string;
   providerType: string;
   baseUrl: string;
   apiKey?: string;
@@ -332,6 +333,7 @@ export function createAiProviderService(
       const resolved: ResolvedAiChatProviderConfig = {
         providerId,
         modelId,
+        titleModelId: provider.titleModelId ?? provider.defaultModel,
         providerType: provider.type,
         baseUrl: providerBaseUrl(providerId, provider, userSettings),
         capabilities,

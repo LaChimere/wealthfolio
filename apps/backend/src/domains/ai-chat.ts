@@ -211,6 +211,20 @@ interface AiChatStreamIds {
   messageId: string;
 }
 
+interface AiChatTitleContext {
+  currentTitle: string | null;
+  initialTitle: string | null;
+  isNewThread: boolean;
+  userMessage: string;
+}
+
+interface ThreadTitleUpdatedStreamEvent {
+  type: "threadTitleUpdated";
+  threadId: string;
+  runId: string;
+  title: string;
+}
+
 const DEFAULT_THREAD_LIMIT = 20;
 const MAX_THREAD_LIMIT = 100;
 const MAX_HISTORY_CHARS = 120_000;
@@ -223,6 +237,10 @@ const CHAT_CONFIG_SCHEMA_VERSION = 1;
 const PROMPT_TEMPLATE_ID = "wealthfolio-assistant-v1";
 const PROMPT_VERSION = "1.0.0";
 const ATTACHMENT_MARKER = "📎 ";
+const TITLE_FALLBACK_MAX_CHARS = 50;
+const TITLE_PROMPT_MAX_CHARS = 200;
+const TITLE_MAX_CHARS = 100;
+const TITLE_MAX_TOKENS = 20;
 const TEXT_ENCODER = new TextEncoder();
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const TEXT_ONLY_SYSTEM_PROMPT = [
@@ -563,6 +581,7 @@ function prepareSendMessage(
 ): {
   ids: AiChatStreamIds;
   messages: ProviderChatMessage[];
+  title: AiChatTitleContext;
 } {
   const now = timestampNow();
   const isNewThread = !request.threadId;
@@ -611,6 +630,12 @@ function prepareSendMessage(
       messageId: crypto.randomUUID(),
     },
     messages: buildProviderMessages(historyRows, providerPromptText(request)),
+    title: {
+      currentTitle: threadRow.title,
+      initialTitle: isNewThread ? threadRow.title : null,
+      isNewThread,
+      userMessage: request.content,
+    },
   };
 }
 
@@ -709,11 +734,7 @@ function chatConfigSnapshot(providerConfig: ResolvedAiChatProviderConfig): Recor
 }
 
 function deriveInitialThreadTitle(content: string): string | null {
-  const trimmed = content.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return trimmed.length > 50 ? trimmed.slice(0, 50) : trimmed;
+  return truncateToTitle(content, TITLE_FALLBACK_MAX_CHARS) || null;
 }
 
 function truncateHistoryAtParent(
@@ -779,6 +800,7 @@ async function* streamChatResponse(
   prepared: {
     ids: AiChatStreamIds;
     messages: ProviderChatMessage[];
+    title: AiChatTitleContext;
   },
   db: Database,
   options: AiChatServiceOptions,
@@ -791,6 +813,11 @@ async function* streamChatResponse(
   };
 
   let accumulatedText = "";
+  let titlePromise: Promise<string> | null = null;
+  const ensureTitleGenerationStarted = (): Promise<string> => {
+    titlePromise ??= generateThreadTitle(fetchImpl, providerConfig, prepared.title.userMessage);
+    return titlePromise;
+  };
   try {
     for await (const delta of streamProviderText(fetchImpl, providerConfig, prepared.messages)) {
       accumulatedText += delta;
@@ -801,8 +828,10 @@ async function* streamChatResponse(
         messageId: prepared.ids.messageId,
         delta,
       };
+      ensureTitleGenerationStarted();
     }
   } catch (error) {
+    await Promise.resolve(titlePromise).catch(() => null);
     yield {
       type: "error",
       threadId: prepared.ids.threadId,
@@ -812,6 +841,19 @@ async function* streamChatResponse(
       message: errorMessage(error),
     };
     return;
+  }
+
+  ensureTitleGenerationStarted();
+  const generatedTitle = await (titlePromise ?? Promise.resolve(""));
+  const titleEvent = persistGeneratedThreadTitle(
+    generatedTitle,
+    prepared.ids,
+    prepared.title,
+    db,
+    options,
+  );
+  if (titleEvent) {
+    yield titleEvent;
   }
 
   const assistantMessage = db.transaction(() => {
@@ -835,6 +877,318 @@ async function* streamChatResponse(
     messageId: prepared.ids.messageId,
     message: assistantMessage,
   };
+}
+
+function persistGeneratedThreadTitle(
+  generatedTitle: string,
+  ids: AiChatStreamIds,
+  titleContext: AiChatTitleContext,
+  db: Database,
+  options: AiChatServiceOptions,
+): ThreadTitleUpdatedStreamEvent | null {
+  if (!shouldAttemptTitleGeneration(titleContext)) {
+    return null;
+  }
+
+  const nextTitle = generatedTitle.trim().slice(0, TITLE_MAX_CHARS);
+  if (!nextTitle) {
+    return null;
+  }
+
+  const updated = db.transaction(() => {
+    const thread = readThreadRow(db, ids.threadId);
+    if (!thread) {
+      return false;
+    }
+
+    const currentTitle = thread.title?.trim() ?? "";
+    if (!shouldUpdateGeneratedTitle(currentTitle, titleContext.initialTitle)) {
+      return false;
+    }
+    if (currentTitle === nextTitle) {
+      return false;
+    }
+
+    db.prepare("UPDATE ai_threads SET title = ?, updated_at = ? WHERE id = ?").run(
+      nextTitle,
+      timestampNow(),
+      ids.threadId,
+    );
+    queueThreadSyncEvent(options, readRequiredThreadRow(db, ids.threadId), "Update");
+    return true;
+  })();
+
+  return updated
+    ? {
+        type: "threadTitleUpdated",
+        threadId: ids.threadId,
+        runId: ids.runId,
+        title: nextTitle,
+      }
+    : null;
+}
+
+function shouldAttemptTitleGeneration(titleContext: AiChatTitleContext): boolean {
+  return titleContext.isNewThread || !titleContext.currentTitle?.trim();
+}
+
+function shouldUpdateGeneratedTitle(currentTitle: string, initialTitle: string | null): boolean {
+  if (initialTitle === null) {
+    return currentTitle.length === 0;
+  }
+  return currentTitle.length === 0 || currentTitle === initialTitle.trim();
+}
+
+async function generateThreadTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  userMessage: string,
+): Promise<string> {
+  const titleModelId = providerConfig.titleModelId?.trim() || providerConfig.modelId;
+  for (const modelId of titleModelCandidates(titleModelId, providerConfig.modelId)) {
+    try {
+      return await generateThreadTitleWithModel(fetchImpl, providerConfig, modelId, userMessage);
+    } catch {
+      // Fall through to the next model or deterministic fallback, matching Rust behavior.
+    }
+  }
+  return truncateToTitle(userMessage, TITLE_FALLBACK_MAX_CHARS);
+}
+
+function titleModelCandidates(titleModelId: string, chatModelId: string): string[] {
+  return titleModelId === chatModelId ? [chatModelId] : [titleModelId, chatModelId];
+}
+
+async function generateThreadTitleWithModel(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  modelId: string,
+  userMessage: string,
+): Promise<string> {
+  const prompt = titlePrompt(userMessage);
+  const titleConfig: ResolvedAiChatProviderConfig = { ...providerConfig, modelId };
+  const rawTitle = await fetchProviderTitle(fetchImpl, titleConfig, prompt);
+  const title = cleanGeneratedTitle(rawTitle);
+  if (!title || title.length > TITLE_MAX_CHARS) {
+    throw aiChatError("provider_error", "Generated title too long or empty", 502);
+  }
+  return title;
+}
+
+function titlePrompt(userMessage: string): string {
+  return [
+    "Generate a very short plain-text title (max 4 words) for this chat message.",
+    "Rules:",
+    "- Return ONLY the title text",
+    "- No markdown (no **bold**, no *italics*, no backticks)",
+    "- No quotes",
+    '- No leading "Title:" prefix',
+    "",
+    "Message:",
+    `"${truncateToTitle(userMessage, TITLE_PROMPT_MAX_CHARS)}"`,
+    "",
+    "Title:",
+  ].join("\n");
+}
+
+async function fetchProviderTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prompt: string,
+): Promise<string> {
+  switch (providerConfig.providerId) {
+    case "ollama":
+      return fetchOllamaTitle(fetchImpl, providerConfig, prompt);
+    case "anthropic":
+      return fetchAnthropicTitle(fetchImpl, providerConfig, prompt);
+    case "google":
+    case "gemini":
+      return fetchGoogleTitle(fetchImpl, providerConfig, prompt);
+    case "openai":
+    case "groq":
+    case "openrouter":
+    default:
+      return fetchOpenAiCompatibleTitle(fetchImpl, providerConfig, prompt);
+  }
+}
+
+async function fetchOpenAiCompatibleTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prompt: string,
+): Promise<string> {
+  const response = await fetchImpl(openAiChatUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(providerConfig.apiKey ? { authorization: `Bearer ${providerConfig.apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+      max_tokens: TITLE_MAX_TOKENS,
+    }),
+  });
+  await assertProviderResponseOk(response);
+  const payload = await response.json();
+  const choice = parseArrayField(isRecord(payload) ? payload.choices : undefined)[0];
+  if (isRecord(choice) && isRecord(choice.message) && typeof choice.message.content === "string") {
+    return choice.message.content;
+  }
+  throw aiChatError("provider_error", "Provider title response is missing content", 502);
+}
+
+async function fetchOllamaTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prompt: string,
+): Promise<string> {
+  const response = await fetchImpl(ollamaChatUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+      options: { num_predict: TITLE_MAX_TOKENS },
+    }),
+  });
+  await assertProviderResponseOk(response);
+  const payload = await response.json();
+  if (isRecord(payload) && typeof payload.error === "string") {
+    throw aiChatError("provider_error", payload.error, 502);
+  }
+  if (
+    isRecord(payload) &&
+    isRecord(payload.message) &&
+    typeof payload.message.content === "string"
+  ) {
+    return payload.message.content;
+  }
+  throw aiChatError("provider_error", "Provider title response is missing content", 502);
+}
+
+async function fetchAnthropicTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prompt: string,
+): Promise<string> {
+  const response = await fetchImpl(anthropicMessagesUrl(providerConfig.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      ...(providerConfig.apiKey ? { "x-api-key": providerConfig.apiKey } : {}),
+    },
+    body: JSON.stringify({
+      model: providerConfig.modelId,
+      max_tokens: TITLE_MAX_TOKENS,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  await assertProviderResponseOk(response);
+  const payload = await response.json();
+  if (isRecord(payload)) {
+    for (const part of parseArrayField(payload.content)) {
+      if (isRecord(part) && typeof part.text === "string") {
+        return part.text;
+      }
+    }
+  }
+  throw aiChatError("provider_error", "Provider title response is missing content", 502);
+}
+
+async function fetchGoogleTitle(
+  fetchImpl: typeof fetch,
+  providerConfig: ResolvedAiChatProviderConfig,
+  prompt: string,
+): Promise<string> {
+  const response = await fetchImpl(googleGenerateContentUrl(providerConfig, false), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: TITLE_MAX_TOKENS },
+    }),
+  });
+  await assertProviderResponseOk(response);
+  const payload = await response.json();
+  if (isRecord(payload)) {
+    for (const candidate of parseArrayField(payload.candidates)) {
+      if (!isRecord(candidate) || !isRecord(candidate.content)) {
+        continue;
+      }
+      for (const part of parseArrayField(candidate.content.parts)) {
+        if (isRecord(part) && typeof part.text === "string") {
+          return part.text;
+        }
+      }
+    }
+  }
+  throw aiChatError("provider_error", "Provider title response is missing content", 502);
+}
+
+function cleanGeneratedTitle(raw: string): string {
+  let title =
+    raw
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? raw.trim();
+
+  for (let index = 0; index < 4; index += 1) {
+    const trimmed = title.trim();
+    let next = trimmed;
+    if (
+      ((trimmed.startsWith("**") && trimmed.endsWith("**")) ||
+        (trimmed.startsWith("__") && trimmed.endsWith("__"))) &&
+      trimmed.length > 4
+    ) {
+      next = trimmed.slice(2, -2).trim();
+    } else if (
+      ((trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+        (trimmed.startsWith("*") && trimmed.endsWith("*"))) &&
+      trimmed.length > 2
+    ) {
+      next = trimmed.slice(1, -1).trim();
+    }
+    if (next === trimmed) {
+      break;
+    }
+    title = next;
+  }
+
+  return title
+    .trim()
+    .replace(/^[*_"'`]+|[*_"'`]+$/gu, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function truncateToTitle(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  const chars = [...trimmed];
+  if (chars.length <= maxChars) {
+    return trimmed;
+  }
+
+  const truncatedChars = chars.slice(0, maxChars);
+  let lastWhitespaceIndex = -1;
+  for (let index = 0; index < truncatedChars.length; index += 1) {
+    if (/\s/u.test(truncatedChars[index] as string)) {
+      lastWhitespaceIndex = index;
+    }
+  }
+
+  const title =
+    lastWhitespaceIndex > maxChars / 2
+      ? truncatedChars.slice(0, lastWhitespaceIndex).join("")
+      : truncatedChars.join("");
+  return `${title.trim()}...`;
 }
 
 async function* streamProviderText(
@@ -965,7 +1319,7 @@ async function* streamGoogleText(
   messages: ProviderChatMessage[],
 ): AsyncIterable<string> {
   const system = messages.find((message) => message.role === "system")?.content;
-  const response = await fetchImpl(googleGenerateContentUrl(providerConfig), {
+  const response = await fetchImpl(googleGenerateContentUrl(providerConfig, true), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -1155,12 +1509,18 @@ function anthropicMessagesUrl(baseUrl: string): string {
   return normalized.endsWith("/v1") ? `${normalized}/messages` : `${normalized}/v1/messages`;
 }
 
-function googleGenerateContentUrl(providerConfig: ResolvedAiChatProviderConfig): string {
+function googleGenerateContentUrl(
+  providerConfig: ResolvedAiChatProviderConfig,
+  stream: boolean,
+): string {
   const normalized = trimTrailingSlash(providerConfig.baseUrl);
   const base = normalized.endsWith("/v1beta") ? normalized : `${normalized}/v1beta`;
   const model = providerConfig.modelId.replace(/^models\//, "");
-  const url = new URL(`${base}/models/${encodeURIComponent(model)}:streamGenerateContent`);
-  url.searchParams.set("alt", "sse");
+  const method = stream ? "streamGenerateContent" : "generateContent";
+  const url = new URL(`${base}/models/${encodeURIComponent(model)}:${method}`);
+  if (stream) {
+    url.searchParams.set("alt", "sse");
+  }
   if (providerConfig.apiKey) {
     url.searchParams.set("key", providerConfig.apiKey);
   }

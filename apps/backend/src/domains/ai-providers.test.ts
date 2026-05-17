@@ -93,6 +93,12 @@ describe("TS AI provider domain", () => {
       isFavorite: true,
       capabilities: { tools: true, thinking: false, vision: false, streaming: true },
     });
+    expect(service.resolveChatProviderConfig()).toMatchObject({
+      providerId: "openai",
+      modelId: "custom-model",
+      titleModelId: "gpt-b",
+      apiKey: "secret-key",
+    });
     const anthropic = response.providers.find((provider) => provider.id === "anthropic");
     expect(anthropic?.resolvedTuning?.extraOptions).toEqual({ seed: 42 });
   });
@@ -314,6 +320,7 @@ function testCatalogJson(): string {
           "gpt-a": { capabilities: { tools: true, thinking: false, vision: true } },
         },
         defaultModel: "gpt-a",
+        titleModelId: "gpt-b",
         documentationUrl: "https://openai.test/docs",
         tuning: { temperature: 0.2, maxTokens: 1024 },
       },

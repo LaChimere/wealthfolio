@@ -132,8 +132,8 @@
     secret persistence is wired into standalone runtime while real keyring
     integration is deferred to a runtime/keyring parity slice; AI provider
     catalog/settings/model-listing runtime behavior, bounded text-only AI chat
-    provider streaming, and text/CSV attachment prompt injection are wired into
-    standalone runtime while AI chat tool execution, generated titles, and
+    provider streaming, generated thread titles, and text/CSV attachment prompt
+    injection are wired into standalone runtime while AI chat tool execution and
     multimodal image/PDF/binary attachments are deferred to AI runtime parity
     slices; alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, and holdings reads now have TS runtime
@@ -182,8 +182,8 @@
     recalculation side effects are deferred to activities/import/device-sync
     runtime parity slices; AI chat persistence, tag persistence, tool-result
     mutation, local AI chat sync_outbox callbacks, text-only provider streaming,
-    and text/CSV attachment prompt injection now have TS runtime parity, while
-    tool execution, generated titles, and multimodal image/PDF/binary
+    generated thread titles, and text/CSV attachment prompt injection now have
+    TS runtime parity, while tool execution and multimodal image/PDF/binary
     attachments are deferred to AI runtime parity slices; device-sync
     integration for sync crypto is deferred to device-sync runtime parity
     slices; bounded account/timezone health status/checks, cache behavior,
@@ -1165,6 +1165,14 @@ contract:
   count/UTF-8 byte-size validation, text/CSV prompt injection, persisted
   filename markers without raw attachment content, unsupported image attachment
   deferral, and existing provider streaming/runtime route behavior.
+- `pr5-ai-chat-title-runtime`: targeted checks passed:
+  `bun run --cwd apps/backend type-check -- --pretty false` and
+  `bun run --cwd apps/backend test --run src/domains/ai-chat.test.ts src/domains/ai-providers.test.ts src/runtime.test.ts src/http.test.ts`.
+  Coverage includes catalog title-model resolution, generated title cleanup,
+  `threadTitleUpdated` events, persisted thread title updates with sync
+  callbacks, deterministic fallback/no-op behavior, attachment-content exclusion
+  from title prompts, stream-failure title persistence suppression, and existing
+  provider streaming/runtime route behavior.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -1634,9 +1642,10 @@ contract:
   add-on filesystem runtime with Rust-compatible manifest normalization, local
   ZIP archive extraction/install/staging install, add-on
   store/update/download-staging runtime behavior, frontend add-on
-  manifest-permission enforcement, AI chat text streaming plus text/CSV
-  attachment prompt injection, and explicit portfolio and market-sync deferred
-  runtime gates implemented; broader migration remains active.
+  manifest-permission enforcement, AI chat text streaming plus generated thread
+  titles and text/CSV attachment prompt injection, and explicit portfolio and
+  market-sync deferred runtime gates implemented; broader migration remains
+  active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and non-classification
   `/health/fix` execution move with the health/calculation services; the
@@ -1645,10 +1654,10 @@ contract:
   after the current explicit runtime 501 gates; actual portfolio job execution
   moves with portfolio/calculation slices after the current explicit runtime 501
   gates; OS keyring integration moves with a dedicated runtime parity slice; AI
-  chat title generation, tool execution, multimodal image/PDF/binary attachment
-  handling, and richer provider/tool orchestration move with AI runtime parity
-  slices; alternative asset portfolio job enqueue and recalculation side effects
-  move with portfolio parity slices; asset quote-provider interactions,
+  chat tool execution, multimodal image/PDF/binary attachment handling, and
+  richer provider/tool orchestration move with AI runtime parity slices;
+  alternative asset portfolio job enqueue and recalculation side effects move
+  with portfolio parity slices; asset quote-provider interactions,
   auto-classification, and portfolio recalculation side effects move with
   asset/market-data/portfolio parity slices; market-data market sync and
   quote-triggered recalculation side effects move with market-data/portfolio

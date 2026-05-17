@@ -399,6 +399,164 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("generates, persists, and emits refined thread titles", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const syncEvents: SyncEvent[] = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-chat",
+        titleModelId: "gpt-title",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        fetchBodies.push(body);
+        if (body.stream === false) {
+          return Response.json({ choices: [{ message: { content: '"Portfolio Review"' } }] });
+        }
+        return streamResponse([
+          'data: {"choices":[{"delta":{"content":"Done"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+      queueThreadSyncEvent: (event) => syncEvents.push({ entity: "thread", event }),
+      queueMessageSyncEvent: (event) => syncEvents.push({ entity: "message", event }),
+      queueThreadTagSyncEvent: (event) => syncEvents.push({ entity: "tag", event }),
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({ content: "Can you analyze my portfolio risk in detail?" }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "textDelta",
+        "threadTitleUpdated",
+        "done",
+      ]);
+      expect(events[2]).toMatchObject({
+        type: "threadTitleUpdated",
+        title: "Portfolio Review",
+        threadId: events[0]?.threadId,
+        runId: events[0]?.runId,
+      });
+      expect(fetchBodies[1]).toMatchObject({
+        model: "gpt-title",
+        stream: false,
+        max_tokens: 20,
+      });
+      const titlePrompt = String(
+        (fetchBodies[1]?.messages as Array<{ content: string }>)[0]?.content,
+      );
+      expect(titlePrompt).toContain("Generate a very short plain-text title");
+      expect(titlePrompt).toContain("Can you analyze my portfolio risk in detail?");
+
+      const threadId = String(events[0]?.threadId);
+      expect(service.getThread(threadId)?.title).toBe("Portfolio Review");
+      expect(syncEvents).toContainEqual(
+        expect.objectContaining({
+          entity: "thread",
+          event: expect.objectContaining({
+            operation: "Update",
+            payload: expect.objectContaining({ title: "Portfolio Review" }),
+          }),
+        }),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps deterministic titles when title generation falls back to the current title", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const syncEvents: SyncEvent[] = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-chat",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        fetchBodies.push(body);
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        return streamResponse([
+          'data: {"choices":[{"delta":{"content":"Done"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]);
+      },
+      queueThreadSyncEvent: (event) => syncEvents.push({ entity: "thread", event }),
+      queueMessageSyncEvent: (event) => syncEvents.push({ entity: "message", event }),
+      queueThreadTagSyncEvent: (event) => syncEvents.push({ entity: "tag", event }),
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Review attachment",
+          attachments: [{ name: "statement.csv", contentType: "text/csv", data: "symbol\nAAPL" }],
+        }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual(["system", "textDelta", "done"]);
+      expect(fetchBodies).toHaveLength(2);
+      const titlePrompt = String(
+        (fetchBodies[1]?.messages as Array<{ content: string }>)[0]?.content,
+      );
+      expect(titlePrompt).toContain('Message:\n"Review attachment"');
+      expect(titlePrompt).not.toContain("AAPL");
+      const threadId = String(events[0]?.threadId);
+      expect(service.getThread(threadId)?.title).toBe("Review attachment");
+      expect(
+        syncEvents.filter((item) => item.entity === "thread" && item.event.operation === "Update"),
+      ).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not persist generated titles when provider streams fail", async () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-chat",
+        titleModelId: "gpt-title",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return Response.json({ choices: [{ message: { content: "Generated Title" } }] });
+        }
+        return erroringStreamResponse(['data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n']);
+      },
+    });
+
+    try {
+      const events = await collectEvents(await service.sendMessage({ content: "Stream failure" }));
+
+      expect(events.map((event) => event.type)).toEqual(["system", "textDelta", "error"]);
+      const threadId = String(events[0]?.threadId);
+      expect(service.getThread(threadId)?.title).toBe("Stream failure");
+      expect(service.getMessages(threadId)).toMatchObject([{ role: "user" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("streams Ollama text with parent-truncated history for existing threads", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
@@ -698,6 +856,23 @@ function streamResponse(chunks: string[]): Response {
           controller.enqueue(encoder.encode(chunk));
         }
         controller.close();
+      },
+    }),
+  );
+}
+
+function erroringStreamResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (index < chunks.length) {
+          controller.enqueue(encoder.encode(chunks[index] as string));
+          index += 1;
+          return;
+        }
+        controller.error(new Error("provider stream failed"));
       },
     }),
   );
