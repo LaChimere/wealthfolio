@@ -16,8 +16,8 @@ supports a bounded text streaming path for configured providers, provider-native
 and `<think>` fallback reasoning deltas, generated/refined thread titles,
 OpenAI-compatible/Ollama injected tool-call execution, the built-in
 `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-`search_activities`, `get_income`, `get_valuation_history`, and
-`get_asset_allocation` portfolio tools, and validated text/CSV attachment
+`search_activities`, `get_performance`, `get_income`, `get_valuation_history`,
+and `get_asset_allocation` portfolio tools, and validated text/CSV attachment
 content injected into the provider prompt while persisting only attachment
 filename markers. It preserves the Rust-shaped NDJSON event contract (`system`,
 `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`,

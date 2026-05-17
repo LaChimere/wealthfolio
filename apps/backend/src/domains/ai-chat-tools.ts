@@ -10,7 +10,11 @@ import type {
   PortfolioAllocations,
   TaxonomyAllocation,
 } from "./holdings";
-import type { IncomeSummary, PortfolioMetricsService } from "./portfolio-metrics";
+import type {
+  IncomeSummary,
+  PerformanceMetrics,
+  PortfolioMetricsService,
+} from "./portfolio-metrics";
 
 const MAX_ACCOUNTS = 50;
 const MAX_HOLDINGS = 100;
@@ -32,7 +36,9 @@ type PortfolioAiHoldingsService = Pick<HoldingsService, "getHoldings"> &
     >
   >;
 type PortfolioAiActivityService = Pick<ActivityService, "searchActivities">;
-type PortfolioAiMetricsService = Pick<PortfolioMetricsService, "getIncomeSummary">;
+type PortfolioAiMetricsService = Partial<
+  Pick<PortfolioMetricsService, "calculatePerformanceHistory" | "getIncomeSummary">
+>;
 
 export interface PortfolioAiChatToolsOptions {
   accountService: Pick<AccountService, "getActiveAccounts"> &
@@ -104,6 +110,15 @@ export function createPortfolioAiChatTools(
       createSearchActivitiesTool({
         accountService: options.accountService,
         activityService: { searchActivities: options.activityService.searchActivities },
+      }),
+    );
+  }
+  if (options.portfolioMetricsService?.calculatePerformanceHistory) {
+    tools.push(
+      createGetPerformanceTool({
+        calculatePerformanceHistory: options.portfolioMetricsService.calculatePerformanceHistory,
+        baseCurrency: options.baseCurrency,
+        now: options.now,
       }),
     );
   }
@@ -533,6 +548,67 @@ function createGetIncomeTool(
   };
 }
 
+function createGetPerformanceTool(options: {
+  calculatePerformanceHistory: Required<PortfolioMetricsService>["calculatePerformanceHistory"];
+  baseCurrency?: string | (() => string | undefined);
+  now?: () => Date;
+}): AiChatToolDefinition {
+  return {
+    name: "get_performance",
+    description:
+      "Get portfolio performance metrics including TWR, MWR, volatility, and max drawdown. Use account_id='TOTAL' for aggregate performance across all accounts.",
+    parameters: {
+      type: "object",
+      properties: {
+        accountId: {
+          type: "string",
+          description: "Account ID to get performance for, or 'TOTAL' for all accounts",
+          default: "TOTAL",
+        },
+        period: {
+          type: "string",
+          description: "Time period for performance calculation",
+          enum: ["1M", "3M", "6M", "YTD", "1Y", "ALL"],
+          default: "YTD",
+        },
+      },
+      required: [],
+    },
+    execute: async (rawArgs) => {
+      const args = parsePerformanceArgs(rawArgs);
+      const period = args.period.toUpperCase();
+      const endDate = currentUtcDateString(options.now);
+      const metrics = (await Promise.resolve(
+        options.calculatePerformanceHistory({
+          itemType: "account",
+          itemId: args.accountId,
+          startDate: performancePeriodStartDate(period, endDate),
+          endDate,
+        }),
+      )) as PerformanceMetrics;
+
+      return {
+        data: {
+          id: metrics.id,
+          ...(metrics.periodStartDate !== null ? { periodStartDate: metrics.periodStartDate } : {}),
+          ...(metrics.periodEndDate !== null ? { periodEndDate: metrics.periodEndDate } : {}),
+          currency:
+            metrics.currency === "" ? resolveBaseCurrency(options.baseCurrency) : metrics.currency,
+          ...(metrics.cumulativeTwr !== null ? { cumulativeTwr: metrics.cumulativeTwr } : {}),
+          ...(metrics.gainLossAmount !== null ? { gainLossAmount: metrics.gainLossAmount } : {}),
+          ...(metrics.annualizedTwr !== null ? { annualizedTwr: metrics.annualizedTwr } : {}),
+          simpleReturn: metrics.simpleReturn,
+          annualizedSimpleReturn: metrics.annualizedSimpleReturn,
+          ...(metrics.cumulativeMwr !== null ? { cumulativeMwr: metrics.cumulativeMwr } : {}),
+          ...(metrics.annualizedMwr !== null ? { annualizedMwr: metrics.annualizedMwr } : {}),
+          volatility: metrics.volatility,
+          maxDrawdown: metrics.maxDrawdown,
+        },
+      };
+    },
+  };
+}
+
 function createGetValuationHistoryTool(options: {
   accountService: Pick<AccountService, "getActiveAccounts">;
   holdingsService: Pick<Required<HoldingsService>, "getHistoricalValuations">;
@@ -750,6 +826,16 @@ function parseIncomeArgs(args: unknown): { period?: string } {
   };
 }
 
+function parsePerformanceArgs(args: unknown): { accountId: string; period: string } {
+  if (!isRecord(args)) {
+    return { accountId: "TOTAL", period: "YTD" };
+  }
+  return {
+    accountId: typeof args.accountId === "string" && args.accountId ? args.accountId : "TOTAL",
+    period: typeof args.period === "string" && args.period ? args.period : "YTD",
+  };
+}
+
 function parseValuationHistoryArgs(args: unknown): {
   accountId: string;
   startDate?: string;
@@ -893,6 +979,23 @@ async function readAccountValuations(options: {
     netContribution: valuation.netContribution * valuation.fxRateToBase,
     currency: options.baseCurrency,
   }));
+}
+
+function performancePeriodStartDate(period: string, endDate: string): string | undefined {
+  switch (period) {
+    case "1M":
+      return addUtcDays(endDate, -30);
+    case "3M":
+      return addUtcDays(endDate, -90);
+    case "6M":
+      return addUtcDays(endDate, -180);
+    case "YTD":
+      return `${endDate.slice(0, 4)}-01-01`;
+    case "1Y":
+      return addUtcDays(endDate, -365);
+    default:
+      return undefined;
+  }
 }
 
 function taxonomyForGroupBy(

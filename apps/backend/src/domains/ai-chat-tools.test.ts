@@ -10,7 +10,7 @@ import type {
   Holding,
   PortfolioAllocations,
 } from "./holdings";
-import type { IncomeSummary } from "./portfolio-metrics";
+import type { IncomeSummary, PerformanceMetrics, PerformanceRequest } from "./portfolio-metrics";
 
 describe("TS AI chat built-in tools", () => {
   test("exposes Rust-compatible get_accounts output", async () => {
@@ -771,6 +771,144 @@ describe("TS AI chat built-in tools", () => {
     ).rejects.toThrow("Period 'LAST_YEAR' not found in income data");
   });
 
+  test("exposes Rust-compatible get_performance output and default YTD range", async () => {
+    let capturedRequest: PerformanceRequest | undefined;
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      portfolioMetricsService: {
+        calculatePerformanceHistory: (request) => {
+          capturedRequest = request;
+          return performanceMetrics({
+            id: request.itemId,
+            periodStartDate: request.startDate ?? null,
+            periodEndDate: request.endDate ?? null,
+            currency: "",
+            cumulativeTwr: 0.12,
+            gainLossAmount: 250,
+            annualizedTwr: 0.18,
+            simpleReturn: 0.11,
+            annualizedSimpleReturn: 0.17,
+            cumulativeMwr: 0.1,
+            annualizedMwr: 0.16,
+            volatility: 0.08,
+            maxDrawdown: -0.04,
+          });
+        },
+      },
+      baseCurrency: "CAD",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const getPerformance = tools.find((tool) => tool.name === "get_performance");
+    const result = await getPerformance?.execute({});
+
+    expect(getPerformance).toMatchObject({
+      description: expect.stringContaining("portfolio performance metrics"),
+      parameters: {
+        type: "object",
+        properties: expect.objectContaining({
+          accountId: expect.objectContaining({ default: "TOTAL" }),
+          period: expect.objectContaining({
+            enum: ["1M", "3M", "6M", "YTD", "1Y", "ALL"],
+            default: "YTD",
+          }),
+        }),
+        required: [],
+      },
+    });
+    expect(capturedRequest).toEqual({
+      itemType: "account",
+      itemId: "TOTAL",
+      startDate: "2026-01-01",
+      endDate: "2026-06-15",
+    });
+    expect(result).toEqual({
+      data: {
+        id: "TOTAL",
+        periodStartDate: "2026-01-01",
+        periodEndDate: "2026-06-15",
+        currency: "CAD",
+        cumulativeTwr: 0.12,
+        gainLossAmount: 250,
+        annualizedTwr: 0.18,
+        simpleReturn: 0.11,
+        annualizedSimpleReturn: 0.17,
+        cumulativeMwr: 0.1,
+        annualizedMwr: 0.16,
+        volatility: 0.08,
+        maxDrawdown: -0.04,
+      },
+    });
+  });
+
+  test("maps get_performance periods and omits null optional metrics", async () => {
+    const capturedRequests: PerformanceRequest[] = [];
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      portfolioMetricsService: {
+        calculatePerformanceHistory: (request) => {
+          capturedRequests.push(request);
+          return performanceMetrics({
+            id: request.itemId,
+            periodStartDate: null,
+            periodEndDate: null,
+            currency: "USD",
+            cumulativeTwr: null,
+            gainLossAmount: null,
+            annualizedTwr: null,
+            simpleReturn: 0,
+            annualizedSimpleReturn: 0,
+            cumulativeMwr: null,
+            annualizedMwr: null,
+            volatility: 0,
+            maxDrawdown: 0,
+          });
+        },
+      },
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+    const getPerformance = tools.find((tool) => tool.name === "get_performance");
+
+    const oneMonthResult = await getPerformance?.execute({
+      accountId: "acct-1",
+      period: "1m",
+    });
+    const allResult = await getPerformance?.execute({
+      accountId: "acct-1",
+      period: "ALL",
+    });
+
+    expect(capturedRequests).toEqual([
+      {
+        itemType: "account",
+        itemId: "acct-1",
+        startDate: "2026-05-16",
+        endDate: "2026-06-15",
+      },
+      {
+        itemType: "account",
+        itemId: "acct-1",
+        startDate: undefined,
+        endDate: "2026-06-15",
+      },
+    ]);
+    expect(oneMonthResult).toEqual({
+      data: {
+        id: "acct-1",
+        currency: "USD",
+        simpleReturn: 0,
+        annualizedSimpleReturn: 0,
+        volatility: 0,
+        maxDrawdown: 0,
+      },
+    });
+    expect(allResult).toEqual(oneMonthResult);
+  });
+
   test("exposes Rust-compatible aggregate get_valuation_history output", async () => {
     const calls: Array<{ accountId: string; startDate?: string; endDate?: string }> = [];
     const tools = createPortfolioAiChatTools({
@@ -1444,6 +1582,29 @@ function incomeSummary(overrides: Partial<IncomeSummary>): IncomeSummary {
     currency: "USD",
     monthlyAverage: 0,
     yoyGrowth: null,
+    ...overrides,
+  };
+}
+
+function performanceMetrics(overrides: Partial<PerformanceMetrics>): PerformanceMetrics {
+  return {
+    id: "TOTAL",
+    returns: [],
+    periodStartDate: "2026-01-01",
+    periodEndDate: "2026-06-15",
+    currency: "USD",
+    periodGain: 0,
+    periodReturn: null,
+    cumulativeTwr: null,
+    gainLossAmount: null,
+    annualizedTwr: null,
+    simpleReturn: 0,
+    annualizedSimpleReturn: 0,
+    cumulativeMwr: null,
+    annualizedMwr: null,
+    volatility: 0,
+    maxDrawdown: 0,
+    isHoldingsMode: false,
     ...overrides,
   };
 }
