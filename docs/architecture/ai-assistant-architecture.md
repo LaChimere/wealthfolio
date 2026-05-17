@@ -11,20 +11,19 @@ interface.
 
 The Rust `wealthfolio-ai` crate remains the reference implementation for full
 assistant behavior: built-in portfolio tools, multimodal image/PDF attachments,
-and richer provider-specific orchestration. The TypeScript/Bun backend now
-supports a bounded text streaming path for configured providers, provider-native
-and `<think>` fallback reasoning deltas, generated/refined thread titles,
-OpenAI-compatible/Ollama injected tool-call execution, the built-in
-`get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
+and multimodal attachment orchestration. The TypeScript/Bun backend now supports
+a bounded text streaming path for configured providers, provider-native and
+`<think>` fallback reasoning deltas, generated/refined thread titles,
+OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution, the
+built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
 `search_activities`, `get_performance`, `get_income`, `get_valuation_history`,
 `get_asset_allocation`, `get_health_status`, `record_activity`, and
 `record_activities`, and `import_csv` tools, and validated text/CSV attachment
 content injected into the provider prompt while persisting only attachment
 filename markers. It preserves the Rust-shaped NDJSON event contract (`system`,
 `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`,
-`done`, `error`) and persists user/assistant messages, but it intentionally does
-not wire Anthropic/Gemini tool protocols or multimodal attachments until those
-parity slices are migrated.
+`done`, `error`) and persists user/assistant messages, but it intentionally
+keeps multimodal attachments deferred until that parity slice is migrated.
 
 ## Architecture Diagram
 

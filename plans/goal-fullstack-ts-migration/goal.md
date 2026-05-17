@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 158
+turns_used: 159
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T23:27:35+08:00"
+updated_at: "2026-05-17T23:39:48+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1009,6 +1009,13 @@ updated_at: "2026-05-17T23:27:35+08:00"
   badges, and CSV attachment prompt guidance are covered. Backend type-check,
   focused AI chat/tool/runtime/http tests, focused code review with a
   saved-profile flag fix, and full `bun run check` passed.
+- Turn 159: Wired provider-native tool-call protocols for Anthropic and
+  Gemini/Google into the TS AI chat loop: Anthropic tool schemas, block-indexed
+  `tool_use` partial JSON assembly, grouped `tool_result` blocks with
+  `is_error`, Gemini function declarations, function-call/function-response
+  message turns, and synthetic-id suppression are covered. Backend type-check
+  and focused AI chat/tool/runtime/http tests passed after rubber-duck plan
+  review.
 
 ## Deferred items
 

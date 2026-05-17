@@ -218,6 +218,10 @@ interface ProviderChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   toolCallId?: string;
+  toolName?: string;
+  toolResultData?: unknown;
+  toolResultError?: string;
+  toolResultIsError?: boolean;
   toolCalls?: ProviderToolCall[];
 }
 
@@ -274,6 +278,7 @@ const TITLE_MAX_TOKENS = 20;
 const MAX_TOOL_ROUNDS = 4;
 const TEXT_ENCODER = new TextEncoder();
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
+const GOOGLE_SYNTHETIC_TOOL_CALL_PREFIX = "google-tool-call-";
 const TEXT_ONLY_SYSTEM_PROMPT = [
   "You are Wealthfolio's AI assistant.",
   "The TypeScript backend runtime currently streams text responses only.",
@@ -810,7 +815,9 @@ function resolveEffectiveTools(
 }
 
 function providerSupportsToolOrchestration(providerId: string): boolean {
-  return ["openai", "groq", "openrouter", "ollama"].includes(providerId);
+  return ["openai", "groq", "openrouter", "ollama", "anthropic", "google", "gemini"].includes(
+    providerId,
+  );
 }
 
 function systemPromptForTools(tools: EffectiveAiChatTool[]): string {
@@ -1045,6 +1052,7 @@ type AssistantStreamSegment =
 
 interface ProviderToolResult {
   toolCallId: string;
+  toolName: string;
   success: boolean;
   data: unknown;
   meta: Record<string, unknown>;
@@ -1142,7 +1150,11 @@ function providerToolResultMessage(result: ProviderToolResult): ProviderChatMess
   return {
     role: "tool",
     toolCallId: result.toolCallId,
+    toolName: result.toolName,
     content: JSON.stringify(content),
+    toolResultData: result.success ? result.data : null,
+    toolResultError: result.error,
+    toolResultIsError: !result.success,
   };
 }
 
@@ -1154,6 +1166,7 @@ async function executeToolCall(
   if (!tool) {
     return {
       toolCallId: toolCall.id,
+      toolName: toolCall.name,
       success: false,
       data: null,
       meta: {},
@@ -1164,6 +1177,7 @@ async function executeToolCall(
     const output = await tool.execute(toolCall.arguments);
     return {
       toolCallId: toolCall.id,
+      toolName: toolCall.name,
       success: true,
       data: output.data,
       meta: output.meta ?? {},
@@ -1171,6 +1185,7 @@ async function executeToolCall(
   } catch (error) {
     return {
       toolCallId: toolCall.id,
+      toolName: toolCall.name,
       success: false,
       data: null,
       meta: {},
@@ -1604,11 +1619,11 @@ async function* streamProviderSegments(
       yield* streamOllamaSegments(fetchImpl, providerConfig, messages, tools);
       return;
     case "anthropic":
-      yield* streamAnthropicSegments(fetchImpl, providerConfig, messages);
+      yield* streamAnthropicSegments(fetchImpl, providerConfig, messages, tools);
       return;
     case "google":
     case "gemini":
-      yield* streamGoogleSegments(fetchImpl, providerConfig, messages);
+      yield* streamGoogleSegments(fetchImpl, providerConfig, messages, tools);
       return;
     case "openai":
     case "groq":
@@ -1687,8 +1702,10 @@ async function* streamAnthropicSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
+  tools: EffectiveAiChatTool[],
 ): AsyncIterable<AssistantStreamSegment> {
   const system = messages.find((message) => message.role === "system")?.content;
+  const toolCalls = new Map<number, ToolCallAccumulator>();
   const response = await fetchImpl(anthropicMessagesUrl(providerConfig.baseUrl), {
     method: "POST",
     headers: {
@@ -1701,9 +1718,10 @@ async function* streamAnthropicSegments(
       max_tokens: providerMaxTokens(providerConfig),
       stream: true,
       ...(system ? { system } : {}),
-      messages: messages
-        .filter((message) => message.role !== "system")
-        .map((message) => ({ role: message.role, content: message.content })),
+      messages: anthropicMessages(messages),
+      ...(tools.length > 0
+        ? { tools: anthropicToolSpecs(tools), tool_choice: { type: "auto" } }
+        : {}),
     }),
   });
   await assertProviderResponseOk(response);
@@ -1714,6 +1732,10 @@ async function* streamAnthropicSegments(
         typeof payload.error.message === "string" ? payload.error.message : "Anthropic error",
         502,
       );
+    }
+    collectAnthropicToolCallEvent(payload, toolCalls);
+    if (payload.type === "content_block_stop") {
+      return completedAnthropicToolCallSegments(payload, toolCalls);
     }
     if (payload.type === "content_block_delta" && isRecord(payload.delta)) {
       const segments: AssistantStreamSegment[] = [];
@@ -1733,19 +1755,16 @@ async function* streamGoogleSegments(
   fetchImpl: typeof fetch,
   providerConfig: ResolvedAiChatProviderConfig,
   messages: ProviderChatMessage[],
+  tools: EffectiveAiChatTool[],
 ): AsyncIterable<AssistantStreamSegment> {
   const system = messages.find((message) => message.role === "system")?.content;
   const response = await fetchImpl(googleGenerateContentUrl(providerConfig, true), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      contents: messages
-        .filter((message) => message.role !== "system")
-        .map((message) => ({
-          role: message.role === "assistant" ? "model" : "user",
-          parts: [{ text: message.content }],
-        })),
+      contents: googleContents(messages),
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(tools.length > 0 ? { tools: [{ functionDeclarations: googleToolSpecs(tools) }] } : {}),
       generationConfig: googleGenerationConfig(providerConfig),
       ...googleExtraOptions(providerConfig),
     }),
@@ -1762,6 +1781,12 @@ async function* streamGoogleSegments(
         if (isRecord(part) && typeof part.text === "string") {
           segments.push({ type: part.thought === true ? "reasoning" : "text", content: part.text });
         }
+        if (isRecord(part) && isRecord(part.functionCall)) {
+          const toolCall = googleToolCallSegment(part.functionCall, segments.length);
+          if (toolCall) {
+            segments.push(toolCall);
+          }
+        }
       }
     }
     return segments;
@@ -1772,6 +1797,214 @@ interface ToolCallAccumulator {
   id?: string;
   name?: string;
   arguments: string;
+  input?: unknown;
+}
+
+function anthropicMessages(messages: ProviderChatMessage[]): Record<string, unknown>[] {
+  const serialized: Record<string, unknown>[] = [];
+  for (let index = 0; index < messages.length; ) {
+    const message = messages[index] as ProviderChatMessage;
+    if (message.role === "system") {
+      index += 1;
+      continue;
+    }
+    if (message.role === "tool") {
+      const content: Record<string, unknown>[] = [];
+      while (messages[index]?.role === "tool") {
+        content.push(anthropicToolResultBlock(messages[index] as ProviderChatMessage));
+        index += 1;
+      }
+      serialized.push({ role: "user", content });
+      continue;
+    }
+    serialized.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: anthropicContent(message),
+    });
+    index += 1;
+  }
+  return serialized;
+}
+
+function anthropicContent(message: ProviderChatMessage): string | Record<string, unknown>[] {
+  if (!message.toolCalls || message.toolCalls.length === 0) {
+    return message.content;
+  }
+  const blocks: Record<string, unknown>[] = [];
+  if (message.content.trim()) {
+    blocks.push({ type: "text", text: message.content });
+  }
+  for (const toolCall of message.toolCalls) {
+    blocks.push({
+      type: "tool_use",
+      id: toolCall.id,
+      name: toolCall.name,
+      input: isRecord(toolCall.arguments) ? toolCall.arguments : {},
+    });
+  }
+  return blocks;
+}
+
+function anthropicToolResultBlock(message: ProviderChatMessage): Record<string, unknown> {
+  const block: Record<string, unknown> = {
+    type: "tool_result",
+    tool_use_id: message.toolCallId ?? "",
+    content: message.toolResultIsError
+      ? (message.toolResultError ?? message.content)
+      : message.content,
+  };
+  if (message.toolResultIsError) {
+    block.is_error = true;
+  }
+  return block;
+}
+
+function anthropicToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: objectToolParameters(tool.parameters),
+  }));
+}
+
+function collectAnthropicToolCallEvent(
+  payload: Record<string, unknown>,
+  toolCalls: Map<number, ToolCallAccumulator>,
+): void {
+  const index = typeof payload.index === "number" ? payload.index : toolCalls.size;
+  if (payload.type === "content_block_start" && isRecord(payload.content_block)) {
+    if (payload.content_block.type !== "tool_use") {
+      return;
+    }
+    toolCalls.set(index, {
+      id: typeof payload.content_block.id === "string" ? payload.content_block.id : undefined,
+      name: typeof payload.content_block.name === "string" ? payload.content_block.name : undefined,
+      arguments: "",
+      input: payload.content_block.input,
+    });
+    return;
+  }
+  if (payload.type !== "content_block_delta" || !isRecord(payload.delta)) {
+    return;
+  }
+  if (payload.delta.type !== "input_json_delta" || typeof payload.delta.partial_json !== "string") {
+    return;
+  }
+  const existing = toolCalls.get(index) ?? { arguments: "" };
+  existing.arguments += payload.delta.partial_json;
+  toolCalls.set(index, existing);
+}
+
+function completedAnthropicToolCallSegments(
+  payload: Record<string, unknown>,
+  toolCalls: Map<number, ToolCallAccumulator>,
+): AssistantStreamSegment[] {
+  const index = typeof payload.index === "number" ? payload.index : -1;
+  const toolCall = toolCalls.get(index);
+  if (!toolCall) {
+    return [];
+  }
+  toolCalls.delete(index);
+  const segment = completedToolCallSegment(index, toolCall);
+  return segment ? [segment] : [];
+}
+
+function googleContents(messages: ProviderChatMessage[]): Record<string, unknown>[] {
+  const contents: Record<string, unknown>[] = [];
+  for (let index = 0; index < messages.length; ) {
+    const message = messages[index] as ProviderChatMessage;
+    if (message.role === "system") {
+      index += 1;
+      continue;
+    }
+    if (message.role === "tool") {
+      const parts: Record<string, unknown>[] = [];
+      while (messages[index]?.role === "tool") {
+        parts.push(googleFunctionResponsePart(messages[index] as ProviderChatMessage));
+        index += 1;
+      }
+      contents.push({ role: "user", parts });
+      continue;
+    }
+    contents.push({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: googleMessageParts(message),
+    });
+    index += 1;
+  }
+  return contents;
+}
+
+function googleMessageParts(message: ProviderChatMessage): Record<string, unknown>[] {
+  const parts: Record<string, unknown>[] = [];
+  if (message.content.trim()) {
+    parts.push({ text: message.content });
+  }
+  for (const toolCall of message.toolCalls ?? []) {
+    const functionCall: Record<string, unknown> = {
+      name: toolCall.name,
+      args: isRecord(toolCall.arguments) ? toolCall.arguments : {},
+    };
+    const providerId = googleProviderToolCallId(toolCall.id);
+    if (providerId) {
+      functionCall.id = providerId;
+    }
+    parts.push({ functionCall });
+  }
+  return parts.length > 0 ? parts : [{ text: message.content }];
+}
+
+function googleFunctionResponsePart(message: ProviderChatMessage): Record<string, unknown> {
+  const functionResponse: Record<string, unknown> = {
+    name: message.toolName ?? "unknown_tool",
+    response: message.toolResultIsError
+      ? { error: message.toolResultError ?? "Tool execution failed" }
+      : { result: message.toolResultData },
+  };
+  const providerId = googleProviderToolCallId(message.toolCallId);
+  if (providerId) {
+    functionResponse.id = providerId;
+  }
+  return { functionResponse };
+}
+
+function googleToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: objectToolParameters(tool.parameters),
+  }));
+}
+
+function googleToolCallSegment(
+  functionCall: Record<string, unknown>,
+  index: number,
+): AssistantStreamSegment | null {
+  if (typeof functionCall.name !== "string") {
+    return null;
+  }
+  const providerId = typeof functionCall.id === "string" ? functionCall.id : undefined;
+  return {
+    type: "toolCall",
+    toolCall: {
+      id: providerId ?? `${GOOGLE_SYNTHETIC_TOOL_CALL_PREFIX}${index}-${crypto.randomUUID()}`,
+      name: functionCall.name,
+      arguments: isRecord(functionCall.args) ? functionCall.args : {},
+    },
+  };
+}
+
+function googleProviderToolCallId(toolCallId: string | undefined): string | undefined {
+  if (!toolCallId || toolCallId.startsWith(GOOGLE_SYNTHETIC_TOOL_CALL_PREFIX)) {
+    return undefined;
+  }
+  return toolCallId;
+}
+
+function objectToolParameters(parameters: Record<string, unknown>): Record<string, unknown> {
+  return parameters.type === "object"
+    ? parameters
+    : { type: "object", properties: {}, additionalProperties: false };
 }
 
 function openAiMessages(messages: ProviderChatMessage[]): Record<string, unknown>[] {
@@ -1878,18 +2111,30 @@ function* completedToolCallSegments(
   toolCalls: Map<number, ToolCallAccumulator>,
 ): Iterable<AssistantStreamSegment> {
   for (const [index, toolCall] of [...toolCalls.entries()].sort((a, b) => a[0] - b[0])) {
-    if (!toolCall.name) {
-      continue;
+    const segment = completedToolCallSegment(index, toolCall);
+    if (segment) {
+      yield segment;
     }
-    yield {
-      type: "toolCall",
-      toolCall: {
-        id: toolCall.id ?? `tool-call-${index}-${crypto.randomUUID()}`,
-        name: toolCall.name,
-        arguments: parseToolArguments(toolCall.arguments),
-      },
-    };
   }
+}
+
+function completedToolCallSegment(
+  index: number,
+  toolCall: ToolCallAccumulator,
+): AssistantStreamSegment | null {
+  if (!toolCall.name) {
+    return null;
+  }
+  return {
+    type: "toolCall",
+    toolCall: {
+      id: toolCall.id ?? `tool-call-${index}-${crypto.randomUUID()}`,
+      name: toolCall.name,
+      arguments: toolCall.arguments.trim()
+        ? parseToolArguments(toolCall.arguments)
+        : (toolCall.input ?? {}),
+    },
+  };
 }
 
 function ollamaToolCallSegments(message: Record<string, unknown>): AssistantStreamSegment[] {

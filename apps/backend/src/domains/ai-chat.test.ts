@@ -1113,6 +1113,290 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("executes Anthropic tool_use blocks and sends grouped tool_result blocks", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const executed: Array<{ name: string; args: unknown }> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "anthropic",
+        modelId: "claude-tools",
+        providerType: "api",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "secret-key",
+        capabilities: { tools: true, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: {
+            type: "object",
+            properties: { displayMode: { type: "string" } },
+          },
+          execute: (args) => {
+            executed.push({ name: "get_accounts", args });
+            return { data: { accounts: [] } };
+          },
+        },
+        {
+          name: "failing_tool",
+          description: "Fails for tests",
+          parameters: { type: "object", properties: {} },
+          execute: (args) => {
+            executed.push({ name: "failing_tool", args });
+            throw new Error("tool exploded");
+          },
+        },
+      ],
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream !== true) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        if (fetchBodies.length === 1) {
+          return streamResponse([
+            sseData({
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "tool_use", id: "toolu-accounts", name: "get_accounts" },
+            }),
+            sseData({
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: '{"display' },
+            }),
+            sseData({
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: 'Mode":"compact"}' },
+            }),
+            sseData({ type: "content_block_stop", index: 0 }),
+            sseData({
+              type: "content_block_start",
+              index: 1,
+              content_block: { type: "tool_use", id: "toolu-failing", name: "failing_tool" },
+            }),
+            sseData({ type: "content_block_stop", index: 1 }),
+          ]);
+        }
+        return streamResponse([
+          sseData({
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "Checked the tools." },
+          }),
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({ content: "Use Anthropic tools" }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolCall",
+        "toolResult",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]?.toolCall).toMatchObject({
+        id: "toolu-accounts",
+        name: "get_accounts",
+        arguments: { displayMode: "compact" },
+      });
+      expect(events[2]?.toolCall).toMatchObject({
+        id: "toolu-failing",
+        name: "failing_tool",
+        arguments: {},
+      });
+      expect(events[4]?.result).toMatchObject({
+        toolCallId: "toolu-failing",
+        success: false,
+        error: "tool exploded",
+      });
+      expect(executed).toEqual([
+        { name: "get_accounts", args: { displayMode: "compact" } },
+        { name: "failing_tool", args: {} },
+      ]);
+
+      expect(fetchBodies[0]).toMatchObject({
+        system: expect.stringContaining("Available tools: get_accounts, failing_tool"),
+        tools: [
+          expect.objectContaining({
+            name: "get_accounts",
+            input_schema: expect.objectContaining({ type: "object" }),
+          }),
+          expect.objectContaining({ name: "failing_tool" }),
+        ],
+        messages: [{ role: "user", content: "Use Anthropic tools" }],
+      });
+      expect(fetchBodies[1]?.messages).toEqual([
+        { role: "user", content: "Use Anthropic tools" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu-accounts",
+              name: "get_accounts",
+              input: { displayMode: "compact" },
+            },
+            { type: "tool_use", id: "toolu-failing", name: "failing_tool", input: {} },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-accounts",
+              content: '{"accounts":[]}',
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "toolu-failing",
+              content: "tool exploded",
+              is_error: true,
+            },
+          ],
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes Google function calls and omits synthetic function response ids", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "google",
+        modelId: "gemini-tools",
+        providerType: "api",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        apiKey: "secret-key",
+        capabilities: { tools: true, thinking: false, vision: false, streaming: true },
+      }),
+      tools: [
+        {
+          name: "get_accounts",
+          description: "List accounts",
+          parameters: {
+            type: "object",
+            properties: { displayMode: { type: "string" } },
+          },
+          execute: () => ({ data: { accounts: [{ id: "acct-1" }] } }),
+        },
+      ],
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (!url.includes(":streamGenerateContent")) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        const body = JSON.parse(String(init?.body));
+        fetchBodies.push(body);
+        if (fetchBodies.length === 1) {
+          return streamResponse([
+            sseData({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        functionCall: {
+                          name: "get_accounts",
+                          args: { displayMode: "compact" },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          ]);
+        }
+        return streamResponse([
+          sseData({
+            candidates: [{ content: { parts: [{ text: "Found one account." }] } }],
+          }),
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({ content: "Use Gemini tools" }),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(events[1]?.toolCall).toMatchObject({
+        id: expect.stringMatching(/^google-tool-call-/),
+        name: "get_accounts",
+        arguments: { displayMode: "compact" },
+      });
+      expect(fetchBodies[0]).toMatchObject({
+        tools: [
+          {
+            functionDeclarations: [
+              expect.objectContaining({
+                name: "get_accounts",
+                parameters: expect.objectContaining({ type: "object" }),
+              }),
+            ],
+          },
+        ],
+        contents: [{ role: "user", parts: [{ text: "Use Gemini tools" }] }],
+      });
+
+      const followUpContents = fetchBodies[1]?.contents as Array<Record<string, unknown>>;
+      expect(followUpContents).toEqual([
+        { role: "user", parts: [{ text: "Use Gemini tools" }] },
+        {
+          role: "model",
+          parts: [
+            {
+              functionCall: {
+                name: "get_accounts",
+                args: { displayMode: "compact" },
+              },
+            },
+          ],
+        },
+        {
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: "get_accounts",
+                response: { result: { accounts: [{ id: "acct-1" }] } },
+              },
+            },
+          ],
+        },
+      ]);
+      expect(
+        (
+          ((followUpContents[2]?.parts as Array<Record<string, unknown>>)[0]?.functionResponse ??
+            {}) as Record<string, unknown>
+        ).id,
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   test("generates, persists, and emits refined thread titles", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
