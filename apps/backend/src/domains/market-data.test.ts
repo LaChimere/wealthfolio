@@ -84,7 +84,7 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("reports market sync execution as an explicit deferred runtime", async () => {
+  test("keeps broad market sync deferred while preserving no-op modes", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
 
@@ -108,6 +108,332 @@ describe("TS market data domain", () => {
       ).rejects.toMatchObject({
         status: 501,
         code: "not_implemented",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs targeted Yahoo quotes and resets quote sync state", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetch("AAPL", {
+      meta: { currency: "USD" },
+      timestamp: [1767571200],
+      indicators: {
+        quote: [{ open: [10], high: [11], low: [9], close: [10.5], volume: [12345] }],
+        adjclose: [{ adjclose: [10.25] }],
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      insertSyncState(db, {
+        asset_id: "asset-1",
+        data_source: "YAHOO",
+        error_count: 2,
+        last_error: "previous failure",
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-1"] }),
+      ).resolves.toBeUndefined();
+
+      expect(readQuoteByDay(db, "asset-1", "2026-01-05")).toMatchObject({
+        id: "asset-1_2026-01-05_YAHOO",
+        source: "YAHOO",
+        close: "10.5",
+        adjclose: "10.25",
+        volume: "12345",
+        currency: "USD",
+      });
+      expect(readSyncState(db, "asset-1")).toMatchObject({
+        asset_id: "asset-1",
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "asset-1")?.last_synced_at).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("backfill purges only provider quotes and normalizes Yahoo minor currencies", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetch("VOD.L", {
+      meta: { currency: "GBp" },
+      timestamp: [1767484800],
+      indicators: {
+        quote: [{ open: [120], high: [130], low: [119], close: [123.45], volume: [987] }],
+        adjclose: [{ adjclose: [121.5] }],
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T18:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        display_code: "VOD",
+        quote_ccy: "GBP",
+        instrument_symbol: "VOD",
+        instrument_exchange_mic: "XLON",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      insertQuote(db, {
+        id: "old-yahoo",
+        asset_id: "asset-1",
+        day: "2026-01-01",
+        source: "YAHOO",
+        close: "99",
+        currency: "GBP",
+      });
+      insertQuote(db, {
+        id: "broker-quote",
+        asset_id: "asset-1",
+        day: "2026-01-02",
+        source: "BROKER",
+        close: "88",
+        currency: "GBP",
+      });
+      insertQuote(db, {
+        id: "manual-quote",
+        asset_id: "asset-1",
+        day: "2026-01-03",
+        source: "MANUAL",
+        close: "77",
+        currency: "GBP",
+      });
+
+      await service.syncMarketData?.({
+        type: "backfill_history",
+        asset_ids: ["asset-1"],
+        days: 7,
+      });
+
+      expect(readQuote(db, "old-yahoo")).toBeNull();
+      expect(readQuote(db, "broker-quote")).not.toBeNull();
+      expect(readQuote(db, "manual-quote")).not.toBeNull();
+      expect(readQuoteByDay(db, "asset-1", "2026-01-04")).toMatchObject({
+        source: "YAHOO",
+        open: "1.2",
+        high: "1.3",
+        low: "1.19",
+        close: "1.2345",
+        adjclose: "1.215",
+        currency: "GBP",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves provider quotes when backfill returns an empty provider window", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetch("AAPL", null, {
+      code: "Bad Request",
+      description: "Data doesn't exist for startDate = 1767052800",
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      insertQuote(db, {
+        id: "old-yahoo",
+        asset_id: "asset-1",
+        day: "2026-01-01",
+        source: "YAHOO",
+        close: "99",
+        currency: "USD",
+      });
+
+      await service.syncMarketData?.({
+        type: "backfill_history",
+        asset_ids: ["asset-1"],
+        days: 7,
+      });
+
+      expect(readQuote(db, "old-yahoo")).toMatchObject({
+        source: "YAHOO",
+        close: "99",
+      });
+      expect(readSyncState(db, "asset-1")).toMatchObject({
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records targeted Yahoo sync failures without throwing", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetch("BAD", null, {
+      code: "Not Found",
+      description: "No data found, symbol may be delisted",
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        display_code: "BAD",
+        instrument_symbol: "BAD",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-1"] }),
+      ).resolves.toBeUndefined();
+
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()?.count,
+      ).toBe(0);
+      expect(readSyncState(db, "asset-1")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 1,
+        last_error: "Symbol not found: BAD",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("refreshes Yahoo crumbs after unauthorized targeted sync responses", async () => {
+    const db = createMarketDataDb();
+    let chartCalls = 0;
+    let cookieCalls = 0;
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://fc.yahoo.com") {
+        cookieCalls += 1;
+        return Promise.resolve(
+          new Response("", {
+            headers: { "set-cookie": `B=yahoo-history-${cookieCalls}; Path=/; Secure` },
+          }),
+        );
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+        return Promise.resolve(new Response(`history-crumb-${cookieCalls}`));
+      }
+      if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+        chartCalls += 1;
+        if (chartCalls === 1) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history-1");
+          return Promise.resolve(new Response("", { status: 401, statusText: "Unauthorized" }));
+        }
+        expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history-2");
+        return Promise.resolve(
+          Response.json({
+            chart: {
+              result: [
+                {
+                  meta: { currency: "USD" },
+                  timestamp: [1767571200],
+                  indicators: {
+                    quote: [{ close: [10] }],
+                  },
+                },
+              ],
+              error: null,
+            },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-1",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+
+      await service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-1"] });
+
+      expect(cookieCalls).toBe(2);
+      expect(chartCalls).toBe(2);
+      expect(readQuoteByDay(db, "asset-1", "2026-01-05")).toMatchObject({
+        close: "10",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("leaves manual and inactive assets untouched during targeted sync", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => Promise.reject(new Error("fetch should not be called"))) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "manual-asset",
+        quote_mode: "MANUAL",
+        instrument_symbol: "MANUAL",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      insertAsset(db, {
+        id: "inactive-asset",
+        is_active: 0,
+        instrument_symbol: "INACTIVE",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+      insertSyncState(db, {
+        asset_id: "inactive-asset",
+        data_source: "YAHOO",
+        error_count: 3,
+        last_error: "still present",
+      });
+
+      await service.syncMarketData?.({
+        type: "incremental",
+        asset_ids: ["manual-asset", "inactive-asset"],
+      });
+
+      expect(readSyncState(db, "manual-asset")).toBeNull();
+      expect(readSyncState(db, "inactive-asset")).toMatchObject({
+        error_count: 3,
+        last_error: "still present",
       });
     } finally {
       db.close();
@@ -1296,9 +1622,15 @@ function createMarketDataDb(): Database {
     );
     CREATE TABLE quote_sync_state (
       asset_id TEXT NOT NULL PRIMARY KEY,
+      position_closed_date TEXT,
       last_synced_at TEXT,
+      data_source TEXT NOT NULL DEFAULT 'YAHOO',
+      sync_priority INTEGER NOT NULL DEFAULT 1,
       error_count INTEGER NOT NULL,
-      last_error TEXT
+      last_error TEXT,
+      profile_enriched_at TEXT,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
     );
   `);
   return db;
@@ -1351,6 +1683,7 @@ function insertSyncState(
   db: Database,
   state: {
     asset_id: string;
+    data_source?: string;
     last_synced_at?: string | null;
     error_count?: number;
     last_error?: string | null;
@@ -1358,12 +1691,15 @@ function insertSyncState(
 ) {
   db.query(
     `
-      INSERT INTO quote_sync_state (asset_id, last_synced_at, error_count, last_error)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO quote_sync_state (
+        asset_id, last_synced_at, data_source, error_count, last_error
+      )
+      VALUES (?, ?, ?, ?, ?)
     `,
   ).run(
     state.asset_id,
     state.last_synced_at ?? null,
+    state.data_source ?? "YAHOO",
     state.error_count ?? 0,
     state.last_error ?? null,
   );
@@ -1429,6 +1765,51 @@ function readQuoteByDay(
       [string, string]
     >("SELECT * FROM quotes WHERE asset_id = ? AND day = ?")
     .get(assetId, day);
+}
+
+function readSyncState(db: Database, assetId: string): Record<string, unknown> | null {
+  return db
+    .query<Record<string, unknown>, [string]>("SELECT * FROM quote_sync_state WHERE asset_id = ?")
+    .get(assetId);
+}
+
+function yahooHistoryFetch(
+  expectedSymbol: string,
+  result: Record<string, unknown> | null,
+  error: Record<string, unknown> | null = null,
+): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "https://fc.yahoo.com") {
+      return Promise.resolve(
+        new Response("", { headers: { "set-cookie": "B=yahoo-history; Path=/; Secure" } }),
+      );
+    }
+    if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+      expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history");
+      return Promise.resolve(new Response("history-crumb"));
+    }
+    if (
+      url.startsWith(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(expectedSymbol)}?`,
+      )
+    ) {
+      expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history");
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("interval")).toBe("1d");
+      expect(parsed.searchParams.get("events")).toBe("history");
+      expect(parsed.searchParams.get("crumb")).toBe("history-crumb");
+      return Promise.resolve(
+        Response.json({
+          chart: {
+            result: result ? [result] : null,
+            error,
+          },
+        }),
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
 }
 
 function bytes(value: string): Uint8Array {

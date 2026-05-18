@@ -207,8 +207,37 @@ interface AssetQuoteStateRow {
 interface QuoteSyncStateRow {
   asset_id: string;
   last_synced_at: string | null;
+  data_source: string | null;
   error_count: number;
   last_error: string | null;
+}
+
+interface AssetMarketSyncRow {
+  id: string;
+  kind: string;
+  display_code: string | null;
+  quote_ccy: string;
+  quote_mode: string;
+  is_active: number;
+  instrument_type: string | null;
+  instrument_symbol: string | null;
+  instrument_exchange_mic: string | null;
+  provider_config: string | null;
+  metadata: string | null;
+}
+
+interface YahooHistoricalQuote {
+  assetId: string;
+  day: string;
+  timestamp: string;
+  source: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string;
+  adjclose: string | null;
+  volume: string | null;
+  currency: string;
 }
 
 interface QuoteImportAssetRow {
@@ -263,6 +292,9 @@ class YahooUnauthorizedError extends Error {}
 
 const MAX_SYNC_ERRORS = 10;
 const MARKET_CLOSE_GRACE_MINUTES = 60;
+const QUOTE_HISTORY_BUFFER_DAYS = 45;
+const MIN_SYNC_LOOKBACK_DAYS = 5;
+const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
   GBp: "GBP",
   GBX: "GBP",
@@ -380,7 +412,23 @@ export function createMarketDataService(
       if (!marketDataSyncRequiresExecution(marketSyncMode)) {
         return;
       }
-      throw marketDataSyncDeferred();
+      await syncTargetedMarketData(
+        db,
+        marketSyncMode,
+        exchangeCatalog,
+        fetchImpl,
+        {
+          get: () => yahooCrumb,
+          set: (crumb) => {
+            yahooCrumb = crumb;
+          },
+          clear: () => {
+            yahooCrumb = null;
+          },
+        },
+        now(),
+        quoteSyncStateExists,
+      );
     },
   };
 }
@@ -394,6 +442,104 @@ function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolea
     return false;
   }
   return !Array.isArray(marketSyncMode.asset_ids) || marketSyncMode.asset_ids.length > 0;
+}
+
+async function syncTargetedMarketData(
+  db: Database,
+  marketSyncMode: MarketSyncMode,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+    clear: () => void;
+  },
+  now: Date,
+  quoteSyncStateExists: boolean,
+): Promise<void> {
+  if (marketSyncMode.type === "none" || marketSyncMode.asset_ids === null) {
+    throw marketDataSyncDeferred();
+  }
+  const assetIds = dedupe(marketSyncMode.asset_ids);
+  if (assetIds.length === 0) {
+    return;
+  }
+
+  const assets = readAssetsForMarketSync(db, assetIds);
+  const states = quoteSyncStateExists ? readQuoteSyncStates(db, assetIds) : new Map();
+
+  for (const assetId of assetIds) {
+    const asset = assets.get(assetId);
+    if (!asset || shouldSkipMarketSyncAsset(asset)) {
+      continue;
+    }
+
+    const provider = effectiveMarketDataProvider(states.get(asset.id) ?? null, asset);
+    if (provider !== DEFAULT_MARKET_DATA_PROVIDER) {
+      continue;
+    }
+    if (
+      marketSyncMode.type !== "backfill_history" &&
+      (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+    ) {
+      continue;
+    }
+
+    const yahooSymbol = yahooSyncSymbol(asset, exchangeCatalog);
+    if (yahooSymbol === null) {
+      updateQuoteSyncStateAfterFailure(
+        db,
+        quoteSyncStateExists,
+        asset.id,
+        provider,
+        "Asset cannot be mapped to a Yahoo symbol",
+      );
+      continue;
+    }
+
+    const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+      db,
+      asset,
+      provider,
+      marketSyncMode,
+      now,
+      exchangeCatalog,
+    );
+    if (startDate > endDate) {
+      updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+      continue;
+    }
+
+    try {
+      const quotes = await fetchYahooHistoricalQuotes(
+        yahooSymbol,
+        asset.id,
+        asset.quote_ccy,
+        startDate,
+        endDate,
+        fetchImpl,
+        crumbCache,
+      );
+
+      db.transaction(() => {
+        if (purgeProviderQuotes && quotes.length > 0) {
+          deleteProviderQuotesForAsset(db, asset.id, provider);
+        }
+        for (const quote of quotes) {
+          upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+        }
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+      })();
+    } catch (error) {
+      updateQuoteSyncStateAfterFailure(
+        db,
+        quoteSyncStateExists,
+        asset.id,
+        provider,
+        errorMessage(error),
+      );
+    }
+  }
 }
 
 export function parseExchangeList(json: string): ExchangeInfo[] {
@@ -1257,13 +1403,212 @@ function readQuoteSyncStates(db: Database, assetIds: string[]): Map<string, Quot
   const rows = db
     .query<QuoteSyncStateRow, string[]>(
       `
-        SELECT asset_id, last_synced_at, error_count, last_error
+        SELECT asset_id, last_synced_at, data_source, error_count, last_error
         FROM quote_sync_state
         WHERE asset_id IN (${placeholders})
       `,
     )
     .all(...assetIds);
   return new Map(rows.map((row) => [row.asset_id, row]));
+}
+
+function readAssetsForMarketSync(
+  db: Database,
+  assetIds: string[],
+): Map<string, AssetMarketSyncRow> {
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<AssetMarketSyncRow, string[]>(
+      `
+        SELECT
+          id, kind, display_code, quote_ccy, quote_mode, is_active,
+          instrument_type, instrument_symbol, instrument_exchange_mic,
+          provider_config, metadata
+        FROM assets
+        WHERE id IN (${placeholders})
+      `,
+    )
+    .all(...assetIds);
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function shouldSkipMarketSyncAsset(asset: AssetMarketSyncRow): boolean {
+  if (asset.quote_mode.toUpperCase() !== "MARKET") {
+    return true;
+  }
+  if (asset.is_active === 0) {
+    return true;
+  }
+  if (asset.instrument_type === null || asset.instrument_symbol === null) {
+    return true;
+  }
+  return false;
+}
+
+function effectiveMarketDataProvider(
+  state: QuoteSyncStateRow | null,
+  asset: AssetMarketSyncRow,
+): string {
+  const stateProvider = optionalString(state?.data_source);
+  return (stateProvider ?? preferredProvider(asset.provider_config) ?? DEFAULT_MARKET_DATA_PROVIDER)
+    .trim()
+    .toUpperCase();
+}
+
+function yahooSyncSymbol(
+  asset: AssetMarketSyncRow,
+  exchangeCatalog: ExchangeCatalog,
+): string | null {
+  const override = providerOverrideSymbol(asset.provider_config, DEFAULT_MARKET_DATA_PROVIDER);
+  if (override) {
+    return override;
+  }
+  return yahooProviderSymbol(
+    asset.instrument_type ?? "",
+    {
+      instrumentSymbol: asset.instrument_symbol,
+      instrumentExchangeMic: asset.instrument_exchange_mic,
+      quoteCcy: asset.quote_ccy,
+    },
+    exchangeCatalog,
+  );
+}
+
+function providerOverrideSymbol(providerConfig: string | null, provider: string): string | null {
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed) || !isRecord(parsed.overrides)) {
+    return null;
+  }
+  const override = parsed.overrides[provider];
+  if (!isRecord(override)) {
+    return null;
+  }
+  const type = optionalString(override.type);
+  const symbol = optionalString(override.symbol);
+  if (symbol && type !== "crypto_pair" && type !== "fx_pair") {
+    return symbol;
+  }
+  const from = optionalString(override.from);
+  const to = optionalString(override.to);
+  if (type === "fx_pair" && from && to) {
+    return `${from}${to}=X`;
+  }
+  const market = optionalString(override.market);
+  if (type === "crypto_pair" && symbol && market) {
+    return `${symbol}-${market}`;
+  }
+  return null;
+}
+
+function marketSyncWindow(
+  db: Database,
+  asset: AssetMarketSyncRow,
+  provider: string,
+  marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
+  now: Date,
+  exchangeCatalog: ExchangeCatalog,
+): { startDate: string; endDate: string; purgeProviderQuotes: boolean } {
+  const endDate = marketEffectiveDate(now, asset.instrument_exchange_mic, exchangeCatalog);
+  if (marketSyncMode.type === "refetch_recent") {
+    return {
+      startDate: addDays(endDate, -marketSyncMode.days),
+      endDate,
+      purgeProviderQuotes: false,
+    };
+  }
+  if (marketSyncMode.type === "backfill_history") {
+    return {
+      startDate: addDays(endDate, -marketSyncMode.days),
+      endDate,
+      purgeProviderQuotes: true,
+    };
+  }
+
+  const latestProviderDay = readLatestProviderQuoteDay(db, asset.id, provider);
+  const startDate = latestProviderDay
+    ? minIsoDate(
+        addDays(latestProviderDay, -MIN_SYNC_LOOKBACK_DAYS),
+        addDays(endDate, -QUOTE_HISTORY_BUFFER_DAYS),
+      )
+    : addDays(endDate, -QUOTE_HISTORY_BUFFER_DAYS);
+  return { startDate, endDate, purgeProviderQuotes: false };
+}
+
+function readLatestProviderQuoteDay(
+  db: Database,
+  assetId: string,
+  provider: string,
+): string | null {
+  const row = db
+    .query<{ day: string }, [string, string]>(
+      `
+        SELECT day
+        FROM quotes
+        WHERE asset_id = ? AND source = ?
+        ORDER BY day DESC
+        LIMIT 1
+      `,
+    )
+    .get(assetId, provider);
+  return row?.day ?? null;
+}
+
+function deleteProviderQuotesForAsset(db: Database, assetId: string, provider: string): void {
+  db.query("DELETE FROM quotes WHERE asset_id = ? AND source = ?").run(assetId, provider);
+}
+
+function updateQuoteSyncStateAfterSync(
+  db: Database,
+  quoteSyncStateExists: boolean,
+  assetId: string,
+  provider: string,
+): void {
+  if (!quoteSyncStateExists) {
+    return;
+  }
+  const timestamp = timestampNow();
+  db.query(
+    `
+      INSERT INTO quote_sync_state (
+        asset_id, last_synced_at, data_source, sync_priority, error_count,
+        last_error, created_at, updated_at
+      )
+      VALUES (?, ?, ?, 1, 0, NULL, ?, ?)
+      ON CONFLICT(asset_id) DO UPDATE SET
+        last_synced_at = excluded.last_synced_at,
+        data_source = excluded.data_source,
+        error_count = 0,
+        last_error = NULL,
+        updated_at = excluded.updated_at
+    `,
+  ).run(assetId, timestamp, provider, timestamp, timestamp);
+}
+
+function updateQuoteSyncStateAfterFailure(
+  db: Database,
+  quoteSyncStateExists: boolean,
+  assetId: string,
+  provider: string,
+  error: string,
+): void {
+  if (!quoteSyncStateExists) {
+    return;
+  }
+  const timestamp = timestampNow();
+  db.query(
+    `
+      INSERT INTO quote_sync_state (
+        asset_id, last_synced_at, data_source, sync_priority, error_count,
+        last_error, created_at, updated_at
+      )
+      VALUES (?, NULL, ?, 1, 1, ?, ?, ?)
+      ON CONFLICT(asset_id) DO UPDATE SET
+        data_source = excluded.data_source,
+        error_count = quote_sync_state.error_count + 1,
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at
+    `,
+  ).run(assetId, provider, error, timestamp, timestamp);
 }
 
 function quoteSyncErrorSnapshots(db: Database): QuoteSyncErrorSnapshot[] {
@@ -1366,6 +1711,170 @@ function noQuoteReason(
   }
 
   return { code: "NO_DATA", message: "No data available from provider yet" };
+}
+
+async function fetchYahooHistoricalQuotes(
+  symbol: string,
+  assetId: string,
+  fallbackCurrency: string,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  crumbCache: {
+    get: () => YahooCrumbData | null;
+    set: (crumb: YahooCrumbData) => void;
+    clear: () => void;
+  },
+): Promise<YahooHistoricalQuote[]> {
+  for (const retry of [0, 1]) {
+    const crumb = await getYahooCrumb(fetchImpl, crumbCache);
+    const url = new URL(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`,
+    );
+    url.searchParams.set("period1", String(epochSeconds(startDate, "start")));
+    url.searchParams.set("period2", String(epochSeconds(endDate, "end")));
+    url.searchParams.set("interval", "1d");
+    url.searchParams.set("events", "history");
+    url.searchParams.set("crumb", crumb.crumb);
+
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { headers: yahooHeaders(crumb.cookie) });
+    } catch (error) {
+      throw yahooProviderError(`Failed to fetch historical quotes: ${errorMessage(error)}`);
+    }
+    if (response.status === 401 && retry === 0) {
+      crumbCache.clear();
+      continue;
+    }
+    if (!response.ok) {
+      throw yahooProviderError(yahooStatusMessage(response));
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw yahooProviderError(`Failed to parse historical quotes: ${errorMessage(error)}`);
+    }
+    return parseYahooHistoricalQuotes(payload, symbol, assetId, fallbackCurrency);
+  }
+
+  throw yahooProviderError("Yahoo returned 401 Unauthorized");
+}
+
+function parseYahooHistoricalQuotes(
+  payload: unknown,
+  symbol: string,
+  assetId: string,
+  fallbackCurrency: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload) || !isRecord(payload.chart)) {
+    throw yahooProviderError("Failed to parse historical quotes: missing chart");
+  }
+
+  const chartError = payload.chart.error;
+  if (isRecord(chartError)) {
+    const code = typeof chartError.code === "string" ? chartError.code : "";
+    const description = typeof chartError.description === "string" ? chartError.description : null;
+    const normalized = `${code} ${description ?? ""}`.toLowerCase();
+    if (description?.includes("Data doesn't exist for startDate")) {
+      return [];
+    }
+    if (normalized.includes("not found") || normalized.includes("no data")) {
+      throw new Error(`Symbol not found: ${symbol}`);
+    }
+    throw yahooProviderError(`chart error ${code}: ${description ?? code}`);
+  }
+
+  if (!Array.isArray(payload.chart.result) || payload.chart.result.length === 0) {
+    return [];
+  }
+  const [firstResult] = payload.chart.result;
+  if (!isRecord(firstResult)) {
+    throw yahooProviderError("Failed to parse historical quotes: invalid result");
+  }
+  const timestamps = firstResult.timestamp;
+  if (!Array.isArray(timestamps)) {
+    return [];
+  }
+  const indicators = isRecord(firstResult.indicators) ? firstResult.indicators : null;
+  const quote = Array.isArray(indicators?.quote) ? indicators.quote[0] : null;
+  if (!isRecord(quote)) {
+    return [];
+  }
+  const adjclose = Array.isArray(indicators?.adjclose) ? indicators.adjclose[0] : null;
+  const adjcloseValues =
+    isRecord(adjclose) && Array.isArray(adjclose.adjclose) ? adjclose.adjclose : [];
+  const currency = yahooHistoricalCurrency(firstResult, fallbackCurrency);
+  const normalizePrice = yahooHistoricalPriceNormalizer(currency);
+
+  const result: YahooHistoricalQuote[] = [];
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestampSeconds = timestamps[index];
+    const close = yahooPriceNumber(arrayValue(quote.close, index));
+    if (typeof timestampSeconds !== "number" || close === null) {
+      continue;
+    }
+    const timestamp = new Date(timestampSeconds * 1000).toISOString();
+    result.push({
+      assetId,
+      day: timestamp.slice(0, 10),
+      timestamp,
+      source: DEFAULT_MARKET_DATA_PROVIDER,
+      open: normalizePrice(yahooPriceNumber(arrayValue(quote.open, index))),
+      high: normalizePrice(yahooPriceNumber(arrayValue(quote.high, index))),
+      low: normalizePrice(yahooPriceNumber(arrayValue(quote.low, index))),
+      close: normalizePrice(close) ?? "0",
+      adjclose: normalizePrice(yahooPriceNumber(arrayValue(adjcloseValues, index))),
+      volume: decimalString(arrayValue(quote.volume, index)),
+      currency: normalizeCurrencyCode(currency),
+    });
+  }
+  return result.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function yahooHistoricalCurrency(
+  result: Record<string, unknown>,
+  fallbackCurrency: string,
+): string {
+  if (isRecord(result.meta) && typeof result.meta.currency === "string") {
+    return result.meta.currency.trim() || fallbackCurrency;
+  }
+  return fallbackCurrency;
+}
+
+function yahooHistoricalPriceNormalizer(currency: string): (value: number | null) => string | null {
+  const divisor = isMinorCurrency(currency) ? 100 : 1;
+  return (value) => {
+    if (value === null) {
+      return null;
+    }
+    return decimalString(divisor === 1 ? value : value / divisor);
+  };
+}
+
+function arrayValue(value: unknown, index: number): unknown {
+  return Array.isArray(value) ? value[index] : null;
+}
+
+function historicalQuoteToQuoteWrite(quote: YahooHistoricalQuote): QuoteWrite {
+  return {
+    id: quoteId(quote.assetId, quote.day, quote.source),
+    assetId: quote.assetId,
+    day: quote.day,
+    source: quote.source,
+    open: optionalStoredDecimal(quote.open),
+    high: optionalStoredDecimal(quote.high),
+    low: optionalStoredDecimal(quote.low),
+    close: quote.close,
+    adjclose: optionalStoredDecimal(quote.adjclose),
+    volume: optionalStoredDecimal(quote.volume),
+    currency: quote.currency,
+    notes: null,
+    createdAt: timestampNow(),
+    timestamp: quote.timestamp,
+  };
 }
 
 async function fetchYahooDividends(
@@ -1974,6 +2483,21 @@ function isWeekend(date: string): boolean {
 
 function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number): string {
+  const current = new Date(`${date}T00:00:00Z`);
+  current.setUTCDate(current.getUTCDate() + days);
+  return isoDate(current);
+}
+
+function minIsoDate(left: string, right: string): string {
+  return left <= right ? left : right;
+}
+
+function epochSeconds(date: string, boundary: "start" | "end"): number {
+  const time = boundary === "start" ? "00:00:00Z" : "23:59:59Z";
+  return Math.floor(new Date(`${date}T${time}`).getTime() / 1000);
 }
 
 function isIsoDate(value: string): boolean {
