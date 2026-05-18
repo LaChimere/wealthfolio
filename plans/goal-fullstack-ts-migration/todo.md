@@ -253,6 +253,9 @@ contract:
 - [x] Run unit tests: targeted TS backend/domain tests (attach output/excerpt).
 - [ ] Run integration/e2e or before/after check: parity harness and selected
       Electron/web smoke flows (attach proof).
+  - Evidence: standalone runtime smoke now covers HTTP `fetch_fx` -> FX asset
+    registration -> targeted Yahoo quote persistence in
+    `apps/backend/src/runtime.test.ts`.
 - [ ] Capture logs/metrics for performance-sensitive calculation/import slices.
 
 ### Review / Packaging

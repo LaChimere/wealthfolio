@@ -42,11 +42,40 @@ describe("TS backend runtime composition", () => {
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       marketDataFetch: ((input: RequestInfo | URL) => {
-        expect([
-          "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
-          "https://query1.finance.yahoo.com/v1/finance/search?q=SHOP",
-        ]).toContain(String(input));
-        return Promise.resolve(Response.json({ quotes: [] }));
+        const url = String(input);
+        if (
+          url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP" ||
+          url === "https://query1.finance.yahoo.com/v1/finance/search?q=SHOP"
+        ) {
+          return Promise.resolve(Response.json({ quotes: [] }));
+        }
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=runtime-fx; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          return Promise.resolve(new Response("runtime-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/EURUSD%3DX?")) {
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    meta: { currency: "USD" },
+                    timestamp: [1767571200],
+                    indicators: {
+                      quote: [{ close: [1.25] }],
+                    },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
       }) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
@@ -472,17 +501,30 @@ describe("TS backend runtime composition", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: ["asset-1"] }),
       });
-      expect(healthDeferredFixResponse.status).toBe(501);
-      await expect(healthDeferredFixResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(healthDeferredFixResponse.status).toBe(200);
 
       const healthFxFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: "fetch_fx", label: "Fetch Exchange Rates", payload: [] }),
+        body: JSON.stringify({
+          id: "fetch_fx",
+          label: "Fetch Exchange Rates",
+          payload: ["EUR:USD"],
+        }),
       });
       expect(healthFxFixResponse.status).toBe(200);
+      const fxDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const fxQuote = fxDb
+          .query<
+            { close: string; currency: string; source: string },
+            []
+          >("SELECT q.close, q.currency, q.source FROM quotes q INNER JOIN assets a ON a.id = q.asset_id WHERE a.instrument_key = 'FX:EUR/USD'")
+          .get();
+        expect(fxQuote).toEqual({ close: "1.25", currency: "USD", source: "YAHOO" });
+      } finally {
+        fxDb.close();
+      }
 
       const portfolioUpdateResponse = await fetch(`${server.baseUrl}/api/v1/portfolio/update`, {
         method: "POST",
@@ -662,14 +704,16 @@ describe("TS backend runtime composition", () => {
 
       const assetsResponse = await fetch(`${server.baseUrl}/api/v1/assets`);
       expect(assetsResponse.status).toBe(200);
-      await expect(assetsResponse.json()).resolves.toEqual([
-        expect.objectContaining({
-          id: alternativeAsset.assetId,
-          kind: "PROPERTY",
-          quoteMode: "MANUAL",
-          exchangeName: null,
-        }),
-      ]);
+      await expect(assetsResponse.json()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: alternativeAsset.assetId,
+            kind: "PROPERTY",
+            quoteMode: "MANUAL",
+            exchangeName: null,
+          }),
+        ]),
+      );
 
       const assetProfileResponse = await fetch(
         `${server.baseUrl}/api/v1/assets/profile?assetId=${alternativeAsset.assetId}`,

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 173
+turns_used: 174
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T00:16:48+08:00"
+updated_at: "2026-05-19T00:21:50+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1113,6 +1113,11 @@ updated_at: "2026-05-19T00:16:48+08:00"
   and activity runtime wrappers ignore the returned IDs for existing behavior.
   Focused exchange-rate/health tests, backend type-check, full `bun run check`,
   rubber-duck plan review, and code review passed.
+- Turn 174: Added standalone runtime coverage for the HTTP `fetch_fx` fix path:
+  the low-risk runtime smoke now verifies `/api/v1/health/fix` registers an FX
+  pair, uses the composed market-data service to fetch a Yahoo FX quote, and
+  persists the quote in SQLite while preserving existing asset-list assertions.
+  Focused runtime tests, backend type-check, and full `bun run check` passed.
 
 ## Deferred items
 
