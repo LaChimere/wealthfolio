@@ -747,6 +747,120 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds bounded data consistency issues for negative account balances", async () => {
+    const db = createHealthDb();
+    const requestedAccountIds: string[][] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [
+          account({ id: "account-b", name: "Investments B", accountType: "SECURITIES" }),
+          account({ id: "cash-a", name: "Cash A", accountType: "CASH" }),
+          account({ id: "account-a", name: "Investments A", accountType: "SECURITIES" }),
+        ],
+        getActiveNonArchivedAccounts: () => [],
+      },
+      valuationProvider: {
+        getAccountsWithNegativeBalance: (accountIds) => {
+          requestedAccountIds.push(accountIds);
+          return accountIds
+            .map((accountId) => {
+              if (accountId === "account-a") {
+                return {
+                  accountId,
+                  firstNegativeDate: "2026-05-01",
+                  cashBalance: "-50.205",
+                  totalValue: "-20.100",
+                  accountCurrency: "USD",
+                };
+              }
+              if (accountId === "account-b") {
+                return {
+                  accountId,
+                  firstNegativeDate: "2026-05-02",
+                  cashBalance: "10",
+                  totalValue: "-5",
+                  accountCurrency: "CAD",
+                };
+              }
+              if (accountId === "cash-a") {
+                return {
+                  accountId,
+                  firstNegativeDate: "2026-05-03",
+                  cashBalance: "-25.1",
+                  totalValue: "-25.1",
+                  accountCurrency: "USD",
+                };
+              }
+              return null;
+            })
+            .filter((value) => value !== null);
+        },
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(requestedAccountIds).toEqual([["account-a", "account-b"], ["cash-a"]]);
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^negative_account_balance:/),
+          severity: "WARNING",
+          category: "DATA_CONSISTENCY",
+          title: "2 accounts have negative portfolio balance",
+          message:
+            "One or more accounts show a negative total value in their history. This is usually caused by missing buy transactions. Review your activities to fix this.",
+          affectedCount: 2,
+          affectedItems: [
+            {
+              id: "account-a",
+              name: "Investments A",
+              route: "/accounts/account-a",
+            },
+            {
+              id: "account-b",
+              name: "Investments B",
+              route: "/accounts/account-b",
+            },
+          ],
+          navigateAction: { route: "/activities", label: "View Activities" },
+          details: [
+            "Investments A",
+            "First went negative on 2026-05-01.",
+            "Cash: -50.21 USD | Investments: 30.11 USD",
+            "\u2192 Likely missing Transfer In or deposit before a buy transaction.",
+            "",
+            "Investments B",
+            "First went negative on 2026-05-02.",
+            "Cash: 10.00 CAD | Investments: -15.00 CAD",
+            "\u2192 Likely missing Buy transaction before a Sell.",
+          ].join("\n"),
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^negative_cash_balance:/),
+          severity: "INFO",
+          category: "DATA_CONSISTENCY",
+          title: "Cash account had a negative balance",
+          message:
+            "One or more cash accounts show a negative balance in their history. This may be a normal bank overdraft or a missing deposit entry.",
+          affectedCount: 1,
+          affectedItems: [{ id: "cash-a", name: "Cash A", route: "/accounts/cash-a" }],
+          navigateAction: { route: "/activities", label: "View Activities" },
+          details: [
+            "Cash A",
+            "First went negative on 2026-05-03.",
+            "Cash: -25.10 USD",
+            "\u2192 This may be a bank overdraft or a missing deposit entry.",
+          ].join("\n"),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches Rust timezone validity and offset-equivalence behavior", async () => {
     const db = createHealthDb();
     try {

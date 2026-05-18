@@ -31,7 +31,11 @@ import {
 import { createDisabledDeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService } from "./domains/goals";
-import { createHealthRepository, createHealthService } from "./domains/health";
+import {
+  createHealthRepository,
+  createHealthService,
+  type NegativeAccountBalanceInfo,
+} from "./domains/health";
 import { createHoldingsService } from "./domains/holdings";
 import { createMarketDataService } from "./domains/market-data";
 import {
@@ -309,6 +313,7 @@ function createServicesFromDatabase(
     marketDataQuoteProvider: marketDataService,
     marketDataSyncProvider: marketDataService,
     settingsProvider: settingsService,
+    valuationProvider: createNegativeBalanceProvider(db),
   });
 
   const options: BackendRequestHandlerOptions = {
@@ -594,10 +599,74 @@ function createGoalValuationProvider(
   };
 }
 
+function createNegativeBalanceProvider(db: InitializedSqliteDatabase["db"]) {
+  return {
+    getAccountsWithNegativeBalance(accountIds: string[]): NegativeAccountBalanceInfo[] {
+      if (accountIds.length === 0 || !sqliteTableExists(db, "daily_account_valuation")) {
+        return [];
+      }
+      const placeholders = accountIds.map(() => "?").join(", ");
+      return db
+        .query<
+          {
+            account_id: string;
+            valuation_date: string;
+            account_currency: string;
+            cash_balance: string;
+            total_value: string;
+          },
+          string[]
+        >(
+          `
+            WITH negative_valuations AS (
+              SELECT
+                account_id,
+                valuation_date,
+                account_currency,
+                cash_balance,
+                total_value,
+                ROW_NUMBER() OVER (
+                  PARTITION BY account_id
+                  -- Rust uses MIN(valuation_date); keep first-date semantics but
+                  -- choose a deterministic row when recalculations duplicate a day.
+                  ORDER BY valuation_date ASC, id ASC
+                ) AS rn
+              FROM daily_account_valuation
+              WHERE account_id IN (${placeholders})
+                AND CAST(total_value AS REAL) < 0
+            )
+            SELECT account_id, valuation_date, account_currency, cash_balance, total_value
+            FROM negative_valuations
+            WHERE rn = 1
+            ORDER BY account_id ASC
+          `,
+        )
+        .all(...accountIds)
+        .map((row) => ({
+          accountId: row.account_id,
+          firstNegativeDate: row.valuation_date,
+          cashBalance: row.cash_balance,
+          totalValue: row.total_value,
+          accountCurrency: row.account_currency,
+        }));
+    },
+  };
+}
+
 interface DailyAccountValuationRow {
   account_id: string;
   fx_rate_to_base: string;
   total_value: string;
+}
+
+function sqliteTableExists(db: InitializedSqliteDatabase["db"], tableName: string): boolean {
+  const row = db
+    .query<
+      { name: string },
+      [string]
+    >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName);
+  return row !== null;
 }
 
 function parseDecimalText(value: string, fallback: number): number {

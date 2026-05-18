@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 
+import Decimal from "decimal.js";
+
 import type { Account, AccountService } from "./accounts";
 import type { ExchangeRateService, LatestFxRateSnapshot } from "./exchange-rates";
 import type { HoldingsService } from "./holdings";
@@ -93,8 +95,23 @@ export interface HealthServiceOptions {
   >;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
+  valuationProvider?: NegativeBalanceProvider;
   now?: () => Date;
   cacheTtlMs?: number;
+}
+
+export interface NegativeAccountBalanceInfo {
+  accountId: string;
+  firstNegativeDate: string;
+  cashBalance: string;
+  totalValue: string;
+  accountCurrency: string;
+}
+
+export interface NegativeBalanceProvider {
+  getAccountsWithNegativeBalance(
+    accountIds: string[],
+  ): Promise<NegativeAccountBalanceInfo[]> | NegativeAccountBalanceInfo[];
 }
 
 export interface HealthRepository {
@@ -352,6 +369,7 @@ async function runChecks(
     ...(await analyzePriceStaleness(options, config, checkedAt)),
     ...(await analyzeQuoteSyncErrors(options, config, checkedAt)),
     ...(await analyzeFxIntegrity(options, config, checkedAt)),
+    ...(await analyzeDataConsistency(options, checkedAt)),
     ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
     ...analyzeTimezone(options, clientTimezone, checkedAt),
   ]);
@@ -1152,6 +1170,168 @@ function fxPairKey(fromCurrency: string, toCurrency: string): string {
 function getPortfolioHealthAccounts(options: HealthServiceOptions): Account[] | null {
   const accounts = options.accountProvider?.getActiveAccounts?.();
   return accounts ? [...accounts].sort((a, b) => a.id.localeCompare(b.id)) : null;
+}
+
+interface NegativeBalanceIssue {
+  recordId: string;
+  description: string;
+  firstNegativeDate: string;
+  cashBalance: Decimal;
+  totalValue: Decimal;
+  accountCurrency: string;
+}
+
+async function analyzeDataConsistency(
+  options: HealthServiceOptions,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (!options.valuationProvider?.getAccountsWithNegativeBalance) {
+    return [];
+  }
+  const accounts = getPortfolioHealthAccounts(options);
+  if (!accounts) {
+    return [];
+  }
+  const accountNameById = new Map(accounts.map((account) => [account.id, account.name]));
+  const investmentAccountIds = accounts
+    .filter((account) => account.accountType !== "CASH")
+    .map((account) => account.id);
+  const cashAccountIds = accounts
+    .filter((account) => account.accountType === "CASH")
+    .map((account) => account.id);
+  const [negativeInvestmentAccounts, negativeCashAccounts] = await Promise.all([
+    getNegativeBalanceIssues(options.valuationProvider, investmentAccountIds, accountNameById),
+    getNegativeBalanceIssues(options.valuationProvider, cashAccountIds, accountNameById),
+  ]);
+
+  return [
+    ...buildNegativeBalanceIssues({
+      issues: negativeInvestmentAccounts,
+      issueLevel: "account",
+      timestamp,
+    }),
+    ...buildNegativeBalanceIssues({
+      issues: negativeCashAccounts,
+      issueLevel: "cash",
+      timestamp,
+    }),
+  ];
+}
+
+async function getNegativeBalanceIssues(
+  provider: NegativeBalanceProvider,
+  accountIds: string[],
+  accountNameById: Map<string, string>,
+): Promise<NegativeBalanceIssue[]> {
+  if (accountIds.length === 0) {
+    return [];
+  }
+  const rows = await provider.getAccountsWithNegativeBalance(accountIds);
+  return rows
+    .map((row) => ({
+      recordId: row.accountId,
+      description: accountNameById.get(row.accountId) ?? row.accountId,
+      firstNegativeDate: row.firstNegativeDate,
+      cashBalance: new Decimal(row.cashBalance),
+      totalValue: new Decimal(row.totalValue),
+      accountCurrency: row.accountCurrency,
+    }))
+    .sort((a, b) => a.recordId.localeCompare(b.recordId));
+}
+
+function buildNegativeBalanceIssues(input: {
+  issues: NegativeBalanceIssue[];
+  issueLevel: "account" | "cash";
+  timestamp: Date;
+}): HealthIssue[] {
+  if (input.issues.length === 0) {
+    return [];
+  }
+  const accountIds = input.issues.map((issue) => issue.recordId);
+  const dataHash = computeDataHash(accountIds);
+  const count = input.issues.length;
+  const isCash = input.issueLevel === "cash";
+
+  return [
+    {
+      id: `${isCash ? "negative_cash_balance" : "negative_account_balance"}:${dataHash}`,
+      severity: isCash ? "INFO" : "WARNING",
+      category: "DATA_CONSISTENCY",
+      title: negativeBalanceTitle(input.issueLevel, count),
+      message: isCash
+        ? "One or more cash accounts show a negative balance in their history. This may be a normal bank overdraft or a missing deposit entry."
+        : "One or more accounts show a negative total value in their history. This is usually caused by missing buy transactions. Review your activities to fix this.",
+      affectedCount: count,
+      affectedItems: input.issues.map(negativeBalanceAffectedItem),
+      navigateAction: { route: "/activities", label: "View Activities" },
+      details: negativeBalanceDetails(input.issues, input.issueLevel),
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
+  ];
+}
+
+function negativeBalanceTitle(issueLevel: "account" | "cash", count: number): string {
+  if (issueLevel === "cash") {
+    return count === 1
+      ? "Cash account had a negative balance"
+      : `${count} cash accounts had a negative balance`;
+  }
+  return count === 1
+    ? "Account has negative portfolio balance"
+    : `${count} accounts have negative portfolio balance`;
+}
+
+function negativeBalanceAffectedItem(issue: NegativeBalanceIssue): AffectedItem {
+  return {
+    id: issue.recordId,
+    name: issue.description,
+    route: `/accounts/${encodeURIComponent(issue.recordId)}`,
+  };
+}
+
+function negativeBalanceDetails(
+  issues: NegativeBalanceIssue[],
+  issueLevel: "account" | "cash",
+): string {
+  return issues
+    .map((issue) =>
+      issueLevel === "cash" ? negativeCashDetails(issue) : negativeAccountDetails(issue),
+    )
+    .join("\n\n");
+}
+
+function negativeAccountDetails(issue: NegativeBalanceIssue): string {
+  const investments = issue.totalValue.minus(issue.cashBalance);
+  return [
+    issue.description,
+    `First went negative on ${issue.firstNegativeDate}.`,
+    `Cash: ${formatHealthDecimal(issue.cashBalance)} ${issue.accountCurrency} | Investments: ${formatHealthDecimal(investments)} ${issue.accountCurrency}`,
+    negativeBalanceLikelyCause(issue.cashBalance, investments),
+  ].join("\n");
+}
+
+function negativeCashDetails(issue: NegativeBalanceIssue): string {
+  return [
+    issue.description,
+    `First went negative on ${issue.firstNegativeDate}.`,
+    `Cash: ${formatHealthDecimal(issue.cashBalance)} ${issue.accountCurrency}`,
+    "\u2192 This may be a bank overdraft or a missing deposit entry.",
+  ].join("\n");
+}
+
+function negativeBalanceLikelyCause(cash: Decimal, investments: Decimal): string {
+  if (cash.isNegative() && !investments.isNegative()) {
+    return "\u2192 Likely missing Transfer In or deposit before a buy transaction.";
+  }
+  if (!cash.isNegative() && investments.isNegative()) {
+    return "\u2192 Likely missing Buy transaction before a Sell.";
+  }
+  return "\u2192 Multiple data issues \u2014 check activities around this date.";
+}
+
+function formatHealthDecimal(value: Decimal): string {
+  return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
 }
 
 async function analyzeLegacyClassificationMigration(

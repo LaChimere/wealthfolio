@@ -207,19 +207,20 @@
     seam, `fetch_fx` dispatch into the exchange-rate seam, and targeted
     `migrate_classifications` dispatch into the taxonomy migration seam, bounded
     price-staleness Health Center checks, bounded quote-sync error checks, and
-    bounded FX integrity issue generation now have TS runtime parity;
-    market-data no-op sync modes now return success while real provider-backed
-    sync execution remains deferred; remaining calculation-heavy health checks
-    are deferred to health/calculation parity slices; disabled Connect
-    feature-flag responses, local empty-list routes, local broker sync profile
-    persistence, and disabled device-sync route responses now have TS runtime
-    parity, while real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and secret side effects are deferred to
-    Connect/device-sync parity slices.
+    bounded FX integrity issue generation, and bounded negative-balance
+    data-consistency checks now have TS runtime parity; market-data no-op sync
+    modes now return success while real provider-backed sync execution remains
+    deferred; remaining calculation-heavy health checks are deferred to
+    health/calculation parity slices; disabled Connect feature-flag responses,
+    local empty-list routes, local broker sync profile persistence, and disabled
+    device-sync route responses now have TS runtime parity, while real Connect
+    token lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1419,6 +1420,14 @@ contract:
   truncation, persistent-only market-data navigation, warning severity
   non-escalation, strict `>` persistent critical escalation, and `retry_sync`
   fix actions.
+- `pr5-health-negative-balance-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts --timeout 30000`
+  and `bun run --cwd apps/backend type-check -- --pretty false`. Coverage
+  includes non-cash negative portfolio balance warnings, cash-account negative
+  balance info issues, affected account routes, activity navigation, decimal
+  details formatting, likely-cause text, active-account CASH/non-CASH splitting,
+  runtime `daily_account_valuation` provider wiring, and deterministic
+  first-negative-row tie handling after code review.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
