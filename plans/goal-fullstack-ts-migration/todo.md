@@ -205,17 +205,18 @@
     health issues and affected items, classification migration health-fix
     dispatch, `sync_prices`/`retry_sync` dispatch into the market-data sync
     seam, `fetch_fx` dispatch into the exchange-rate seam, and targeted
-    `migrate_classifications` dispatch into the taxonomy migration seam now have
-    TS runtime parity; market-data no-op sync modes now return success while
-    real provider-backed sync execution remains deferred; calculation-heavy
-    health checks are deferred to health/calculation parity slices; disabled
-    Connect feature-flag responses, local empty-list routes, local broker sync
-    profile persistence, and disabled device-sync route responses now have TS
-    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
-    broker sync orchestration, local sync repositories, subscription entitlement
-    checks, event production, E2EE enrollment, sync engine, snapshot/upload
-    runtime, background workers, device-sync cloud clients, token lifecycle,
-    team-key operations, key material handling, pairing flows, freshness gate
+    `migrate_classifications` dispatch into the taxonomy migration seam, and
+    bounded price-staleness Health Center checks now have TS runtime parity;
+    market-data no-op sync modes now return success while real provider-backed
+    sync execution remains deferred; remaining calculation-heavy health checks
+    are deferred to health/calculation parity slices; disabled Connect
+    feature-flag responses, local empty-list routes, local broker sync profile
+    persistence, and disabled device-sync route responses now have TS runtime
+    parity, while real Connect token lifecycle, cloud HTTP clients, broker sync
+    orchestration, local sync repositories, subscription entitlement checks,
+    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
+    background workers, device-sync cloud clients, token lifecycle, team-key
+    operations, key material handling, pairing flows, freshness gate
     persistence, bootstrap transfer, and secret side effects are deferred to
     Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
@@ -1390,6 +1391,15 @@ contract:
   encoding, asset-symbol name fallback, and dismissal hash changes when the
   affected asset set or already-migrated count changes. Rubber-duck plan review
   found no blockers.
+- `pr5-health-price-staleness-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts --timeout 30000`
+  and `bun run --cwd apps/backend type-check -- --pretty false`. Coverage
+  includes active-account holding consolidation, case-insensitive market pricing
+  mode filtering, manual/zero-value handling, missing quote errors, stale quote
+  warnings, strict `>` market-value critical escalation, affected-item routes,
+  `sync_prices` fix actions, standalone runtime provider wiring, and quote
+  timestamp-first staleness calculation refinement after code review. Full
+  `bun run check` passed.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

@@ -77,7 +77,7 @@ export interface ImportHoldingsCsvResult {
 }
 
 export interface HoldingsService {
-  getHoldings(accountId: string): Promise<unknown[]> | unknown[];
+  getHoldings(accountId: string): Promise<Holding[]> | Holding[];
   getHolding(accountId: string, assetId: string): Promise<unknown | null> | unknown | null;
   getAssetHoldings(assetId: string): Promise<unknown[]> | unknown[];
   getHistoricalValuations(

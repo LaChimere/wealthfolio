@@ -2,7 +2,8 @@ import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
 import type { ExchangeRateService } from "./exchange-rates";
-import type { MarketDataService } from "./market-data";
+import type { HoldingsService } from "./holdings";
+import type { LatestQuoteSnapshot, MarketDataService } from "./market-data";
 import type { SettingsService } from "./settings";
 import type { TaxonomyService } from "./taxonomies";
 
@@ -75,7 +76,8 @@ export interface HealthStatus {
 }
 
 export interface HealthServiceOptions {
-  accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
+  accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts"> &
+    Partial<Pick<AccountService, "getActiveAccounts">>;
   classificationMigrationProvider?: Pick<
     TaxonomyService,
     | "getMigrationStatus"
@@ -83,6 +85,8 @@ export interface HealthServiceOptions {
     | "migrateLegacyClassifications"
   >;
   exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs">;
+  holdingsProvider?: Pick<HoldingsService, "getHoldings">;
+  marketDataQuoteProvider?: Pick<MarketDataService, "getLatestQuotes">;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
   now?: () => Date;
@@ -237,10 +241,10 @@ export function createHealthService(
         const stale = now().getTime() - cached.cachedAt.getTime() > cacheTtlMs;
         return cloneStatus(cached.status, stale);
       }
-      return runChecks(repository, options, now, clientTimezone, cachedStatuses);
+      return runChecks(repository, config, options, now, clientTimezone, cachedStatuses);
     },
     async runHealthChecks(clientTimezone) {
-      return runChecks(repository, options, now, clientTimezone, cachedStatuses);
+      return runChecks(repository, config, options, now, clientTimezone, cachedStatuses);
     },
     async executeFix(action) {
       if (action.id === "sync_prices" || action.id === "retry_sync") {
@@ -332,6 +336,7 @@ function parseHealthFixStringArray(action: HealthFixAction, expected: string): s
 
 async function runChecks(
   repository: HealthRepository,
+  config: HealthConfig,
   options: HealthServiceOptions,
   now: () => Date,
   clientTimezone: string | undefined,
@@ -340,6 +345,7 @@ async function runChecks(
   const checkedAt = now();
   const issues = filterDismissedIssues(repository, [
     ...analyzeUnconfiguredAccounts(options, checkedAt),
+    ...(await analyzePriceStaleness(options, config, checkedAt)),
     ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
     ...analyzeTimezone(options, clientTimezone, checkedAt),
   ]);
@@ -450,6 +456,272 @@ function analyzeTimezone(
       timestamp: timestamp.toISOString(),
     },
   ];
+}
+
+interface PriceHealthHolding {
+  assetId: string;
+  symbol: string;
+  name: string | null;
+  marketValue: number;
+  usesMarketPricing: boolean;
+}
+
+async function analyzePriceStaleness(
+  options: HealthServiceOptions,
+  config: HealthConfig,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (
+    !options.accountProvider ||
+    !options.holdingsProvider?.getHoldings ||
+    !options.marketDataQuoteProvider?.getLatestQuotes
+  ) {
+    return [];
+  }
+
+  const accounts =
+    options.accountProvider.getActiveAccounts?.() ??
+    options.accountProvider.getActiveNonArchivedAccounts();
+  const holdingsByAsset = new Map<string, PriceHealthHolding>();
+  let totalPortfolioValue = 0;
+
+  for (const account of [...accounts].sort((a, b) => a.id.localeCompare(b.id))) {
+    const holdings = await options.holdingsProvider.getHoldings(account.id);
+    for (const holding of holdings) {
+      const instrument = holding.instrument;
+      if (!instrument) {
+        continue;
+      }
+      const marketValue = holding.marketValue.base;
+      totalPortfolioValue += marketValue;
+      const existing = holdingsByAsset.get(instrument.id);
+      if (existing) {
+        existing.marketValue += marketValue;
+        continue;
+      }
+      holdingsByAsset.set(instrument.id, {
+        assetId: instrument.id,
+        symbol: instrument.symbol,
+        name: instrument.name,
+        marketValue,
+        usesMarketPricing: instrument.pricingMode.toUpperCase() === "MARKET",
+      });
+    }
+  }
+
+  const holdings = [...holdingsByAsset.values()];
+  if (holdings.length === 0) {
+    return [];
+  }
+
+  const latestQuotes = await options.marketDataQuoteProvider.getLatestQuotes(
+    holdings.map((holding) => holding.assetId),
+  );
+  return analyzePriceStalenessFromSnapshots(holdings, latestQuotes, {
+    config,
+    timestamp,
+    totalPortfolioValue,
+  });
+}
+
+function analyzePriceStalenessFromSnapshots(
+  holdings: PriceHealthHolding[],
+  latestQuotes: Record<string, LatestQuoteSnapshot>,
+  context: { config: HealthConfig; timestamp: Date; totalPortfolioValue: number },
+): HealthIssue[] {
+  const warningTradingDays = Math.max(Math.trunc(context.config.priceStaleWarningHours / 24), 1);
+  const criticalTradingDays = Math.max(Math.trunc(context.config.priceStaleCriticalHours / 24), 1);
+  const warningAssets: PriceHealthHolding[] = [];
+  const errorAssets: PriceHealthHolding[] = [];
+  let warningMarketValue = 0;
+  let errorMarketValue = 0;
+
+  for (const holding of holdings) {
+    if (!holding.usesMarketPricing) {
+      continue;
+    }
+    const latestQuote = latestQuotes[holding.assetId];
+    if (!latestQuote) {
+      errorAssets.push(holding);
+      errorMarketValue += holding.marketValue;
+      continue;
+    }
+    const quoteDate = latestQuoteDate(latestQuote);
+    if (!quoteDate) {
+      errorAssets.push(holding);
+      errorMarketValue += holding.marketValue;
+      continue;
+    }
+    if (holding.marketValue <= 0) {
+      continue;
+    }
+    const daysStale = tradingDaysBetween(quoteDate, latestQuote.effectiveMarketDate);
+    if (daysStale >= criticalTradingDays) {
+      errorAssets.push(holding);
+      errorMarketValue += holding.marketValue;
+    } else if (daysStale >= warningTradingDays) {
+      warningAssets.push(holding);
+      warningMarketValue += holding.marketValue;
+    }
+  }
+
+  return [
+    ...buildPriceStalenessIssues({
+      assets: errorAssets,
+      issueLevel: "error",
+      marketValue: errorMarketValue,
+      latestQuotes,
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+    ...buildPriceStalenessIssues({
+      assets: warningAssets,
+      issueLevel: "warning",
+      marketValue: warningMarketValue,
+      latestQuotes,
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+  ];
+}
+
+function buildPriceStalenessIssues(input: {
+  assets: PriceHealthHolding[];
+  issueLevel: "error" | "warning";
+  marketValue: number;
+  latestQuotes: Record<string, LatestQuoteSnapshot>;
+  timestamp: Date;
+  totalPortfolioValue: number;
+  escalationThreshold: number;
+}): HealthIssue[] {
+  if (input.assets.length === 0) {
+    return [];
+  }
+  const affectedMvPct =
+    input.totalPortfolioValue > 0 ? input.marketValue / input.totalPortfolioValue : 0;
+  const escalated = affectedMvPct > input.escalationThreshold;
+  const severity: HealthSeverity =
+    input.issueLevel === "error"
+      ? escalated
+        ? "CRITICAL"
+        : "ERROR"
+      : escalated
+        ? "CRITICAL"
+        : "WARNING";
+  const assetIds = input.assets.map((asset) => asset.assetId);
+  const missingCount = input.assets.filter(
+    (asset) => !latestQuoteDate(input.latestQuotes[asset.assetId]),
+  ).length;
+  const dataHash = computeDataHash([
+    ...assetIds,
+    severity,
+    String(Math.trunc(affectedMvPct * 100)),
+  ]);
+
+  return [
+    {
+      id: `price_stale:${input.issueLevel}:${dataHash}`,
+      severity,
+      category: "PRICE_STALENESS",
+      title: priceStalenessTitle(input.issueLevel, input.assets, missingCount),
+      message:
+        input.issueLevel === "error" && missingCount > 0
+          ? "Unable to fetch market data for some holdings. This may be due to invalid symbols or provider issues. Your portfolio value may be inaccurate."
+          : input.issueLevel === "error"
+            ? "Some holdings haven't had prices updated in over 3 days. Your portfolio value may be inaccurate."
+            : "Some holdings haven't had prices updated recently. Consider syncing prices.",
+      affectedCount: input.assets.length,
+      affectedMvPct,
+      affectedItems: input.assets.map(priceStalenessAffectedItem),
+      fixAction: { id: "sync_prices", label: "Sync Prices", payload: assetIds },
+      details: priceStalenessDetails(input.assets, input.latestQuotes),
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
+  ];
+}
+
+function priceStalenessTitle(
+  issueLevel: "error" | "warning",
+  assets: PriceHealthHolding[],
+  missingCount: number,
+): string {
+  const count = assets.length;
+  if (issueLevel === "warning") {
+    return count === 1
+      ? "Price update needed for 1 holding"
+      : `Price updates needed for ${count} holdings`;
+  }
+  if (missingCount === count) {
+    return count === 1
+      ? `No market data for ${assets[0]?.symbol ?? ""}`
+      : `No market data for ${count} holdings`;
+  }
+  return count === 1 ? "Outdated price for 1 holding" : `Outdated prices for ${count} holdings`;
+}
+
+function priceStalenessAffectedItem(asset: PriceHealthHolding): AffectedItem {
+  return {
+    id: asset.assetId,
+    name: asset.name ?? asset.symbol,
+    symbol: asset.symbol,
+    route: `/holdings/${encodeURIComponent(asset.assetId)}`,
+  };
+}
+
+function priceStalenessDetails(
+  assets: PriceHealthHolding[],
+  latestQuotes: Record<string, LatestQuoteSnapshot>,
+): string {
+  const lines = assets.slice(0, 5).map((asset, index) => {
+    const name = asset.name ? ` (${asset.name})` : "";
+    const status = latestQuoteDate(latestQuotes[asset.assetId]) ? "outdated" : "no data";
+    return `${index + 1}. ${asset.symbol}${name} - ${status}`;
+  });
+  if (assets.length > 5) {
+    lines.push(`... and ${assets.length - 5} more`);
+  }
+  return lines.join("\n");
+}
+
+function latestQuoteDate(snapshot: LatestQuoteSnapshot | undefined): string | null {
+  return snapshot?.quote?.timestamp.slice(0, 10) ?? snapshot?.quoteDate ?? null;
+}
+
+function tradingDaysBetween(fromDate: string, toDate: string): number {
+  let current = parseDateOnlyUtc(fromDate);
+  const end = parseDateOnlyUtc(toDate);
+  if (end.getTime() <= current.getTime()) {
+    return 0;
+  }
+
+  let tradingDays = 0;
+  current = addUtcDays(current, 1);
+  while (current.getTime() <= end.getTime()) {
+    const day = current.getUTCDay();
+    if (day !== 0 && day !== 6) {
+      tradingDays += 1;
+    }
+    current = addUtcDays(current, 1);
+  }
+  return tradingDays;
+}
+
+function parseDateOnlyUtc(value: string): Date {
+  const parts = value.split("-");
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    throw new Error(`Invalid date: ${value}`);
+  }
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
 async function analyzeLegacyClassificationMigration(

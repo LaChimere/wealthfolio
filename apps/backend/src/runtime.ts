@@ -305,6 +305,8 @@ function createServicesFromDatabase(
     accountProvider: accountService,
     classificationMigrationProvider: taxonomyService,
     exchangeRateProvider: exchangeRateService,
+    holdingsProvider: holdingsService,
+    marketDataQuoteProvider: marketDataService,
     marketDataSyncProvider: marketDataService,
     settingsProvider: settingsService,
   });

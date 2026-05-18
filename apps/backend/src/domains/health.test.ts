@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createHealthRepository, createHealthService, DEFAULT_HEALTH_CONFIG } from "./health";
 import type { Account } from "./accounts";
+import type { Holding } from "./holdings";
 import type { Settings } from "./settings";
 
 describe("TS health domain", () => {
@@ -241,6 +242,182 @@ describe("TS health domain", () => {
       expect(changedMigratedStatus?.issues[0]?.dataHash).not.toBe(
         changedAssetStatus?.issues[0]?.dataHash,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("adds bounded price staleness health issues from holdings and latest quotes", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(
+      createHealthRepository(db),
+      {
+        ...DEFAULT_HEALTH_CONFIG,
+        priceStaleWarningHours: 24,
+        priceStaleCriticalHours: 72,
+        mvEscalationThreshold: 0.3,
+      },
+      {
+        accountProvider: {
+          getActiveAccounts: () => [
+            account({ id: "account-b", isArchived: true }),
+            account({ id: "account-a" }),
+          ],
+          getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: (accountId) =>
+            accountId === "account-a"
+              ? [
+                  holding({
+                    assetId: "asset:warning",
+                    symbol: "WARN-A",
+                    name: "Warning First",
+                    marketValue: 40,
+                    pricingMode: "market",
+                  }),
+                  holding({
+                    assetId: "asset/missing",
+                    symbol: "MISS",
+                    marketValue: 70,
+                    pricingMode: "MARKET",
+                  }),
+                  holding({
+                    assetId: "asset-zero-missing",
+                    symbol: "ZERO",
+                    marketValue: 0,
+                    pricingMode: "MARKET",
+                  }),
+                  holding({
+                    assetId: "asset-zero-stale",
+                    symbol: "ZSTALE",
+                    marketValue: 0,
+                    pricingMode: "MARKET",
+                  }),
+                  holding({
+                    assetId: "asset-manual",
+                    symbol: "MAN",
+                    marketValue: 80,
+                    pricingMode: "MANUAL",
+                  }),
+                ]
+              : [
+                  holding({
+                    assetId: "asset:warning",
+                    symbol: "WARN-B",
+                    name: "Warning Second",
+                    marketValue: 10,
+                    pricingMode: "MARKET",
+                  }),
+                ],
+        },
+        marketDataQuoteProvider: {
+          getLatestQuotes: () => ({
+            "asset:warning": latestQuote({ quoteDate: "2026-05-15" }),
+            "asset-zero-stale": latestQuote({ quoteDate: "2026-05-01" }),
+          }),
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+      },
+    );
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.overallSeverity).toBe("CRITICAL");
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^price_stale:error:/),
+          severity: "CRITICAL",
+          category: "PRICE_STALENESS",
+          title: "No market data for 2 holdings",
+          message: expect.stringContaining("Unable to fetch market data"),
+          affectedCount: 2,
+          affectedMvPct: 0.35,
+          fixAction: {
+            id: "sync_prices",
+            label: "Sync Prices",
+            payload: ["asset/missing", "asset-zero-missing"],
+          },
+          affectedItems: [
+            {
+              id: "asset/missing",
+              name: "MISS",
+              symbol: "MISS",
+              route: "/holdings/asset%2Fmissing",
+            },
+            {
+              id: "asset-zero-missing",
+              name: "ZERO",
+              symbol: "ZERO",
+              route: "/holdings/asset-zero-missing",
+            },
+          ],
+          details: "1. MISS - no data\n2. ZERO - no data",
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^price_stale:warning:/),
+          severity: "WARNING",
+          category: "PRICE_STALENESS",
+          title: "Price update needed for 1 holding",
+          affectedCount: 1,
+          affectedMvPct: 0.25,
+          fixAction: {
+            id: "sync_prices",
+            label: "Sync Prices",
+            payload: ["asset:warning"],
+          },
+          affectedItems: [
+            {
+              id: "asset:warning",
+              name: "Warning First",
+              symbol: "WARN-A",
+              route: "/holdings/asset%3Awarning",
+            },
+          ],
+          details: "1. WARN-A (Warning First) - outdated",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps price staleness severity below critical at the MV threshold", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "account-a" })],
+        getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "asset-warning", symbol: "WARN", marketValue: 30 }),
+          holding({
+            assetId: "asset-manual",
+            symbol: "MAN",
+            marketValue: 70,
+            pricingMode: "MANUAL",
+          }),
+        ],
+      },
+      marketDataQuoteProvider: {
+        getLatestQuotes: () => ({
+          "asset-warning": latestQuote({ quoteDate: "2026-05-15" }),
+        }),
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues[0]).toMatchObject({
+        severity: "WARNING",
+        affectedMvPct: 0.3,
+      });
     } finally {
       db.close();
     }
@@ -644,5 +821,63 @@ function account(update: Partial<Account>): Account {
     provider: null,
     providerAccountId: null,
     ...update,
+  };
+}
+
+function holding(update: {
+  assetId: string;
+  symbol: string;
+  name?: string | null;
+  marketValue: number;
+  pricingMode?: string;
+}): Holding {
+  return {
+    id: `${update.assetId}:holding`,
+    accountId: "account",
+    holdingType: "security",
+    instrument: {
+      id: update.assetId,
+      symbol: update.symbol,
+      name: update.name ?? null,
+      currency: "USD",
+      notes: null,
+      pricingMode: update.pricingMode ?? "MARKET",
+      preferredProvider: null,
+      exchangeMic: "XNAS",
+      classifications: null,
+    },
+    assetKind: "STOCK",
+    quantity: 1,
+    openDate: null,
+    lots: null,
+    contractMultiplier: 1,
+    localCurrency: "USD",
+    baseCurrency: "USD",
+    fxRate: 1,
+    marketValue: { local: update.marketValue, base: update.marketValue },
+    costBasis: null,
+    price: update.marketValue,
+    purchasePrice: null,
+    unrealizedGain: null,
+    unrealizedGainPct: null,
+    realizedGain: null,
+    realizedGainPct: null,
+    totalGain: null,
+    totalGainPct: null,
+    dayChange: null,
+    dayChangePct: null,
+    prevCloseValue: null,
+    weight: 0,
+    asOfDate: "2026-05-18",
+    metadata: null,
+  };
+}
+
+function latestQuote(update: { quoteDate: string }) {
+  return {
+    quote: null,
+    isStale: true,
+    effectiveMarketDate: "2026-05-18",
+    quoteDate: update.quoteDate,
   };
 }
