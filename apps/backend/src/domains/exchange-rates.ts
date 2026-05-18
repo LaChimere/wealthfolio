@@ -15,6 +15,14 @@ export interface ExchangeRate {
   timestamp: string;
 }
 
+export interface LatestFxRateSnapshot {
+  assetId: string;
+  fromCurrency: string;
+  toCurrency: string;
+  instrumentKey: string | null;
+  quoteTimestamp: string | null;
+}
+
 export interface NewExchangeRate {
   fromCurrency: string;
   toCurrency: string;
@@ -24,6 +32,7 @@ export interface NewExchangeRate {
 
 export interface ExchangeRateRepository {
   getLatestExchangeRates(): ExchangeRate[];
+  getLatestFxRateSnapshots(): LatestFxRateSnapshot[];
   getHistoricalExchangeRates(): ExchangeRate[];
   getLatestExchangeRate(fromCurrency: string, toCurrency: string): ExchangeRate | null;
   getLatestExchangeRateBySymbol(symbol: string): ExchangeRate | null;
@@ -53,6 +62,7 @@ export interface ExchangeRateService {
   registerCurrencyPair(fromCurrency: string, toCurrency: string): Promise<void>;
   registerCurrencyPairManual(fromCurrency: string, toCurrency: string): Promise<void>;
   ensureFxPairs(pairs: Array<[string, string]>): Promise<void>;
+  getLatestFxRateSnapshots(): LatestFxRateSnapshot[];
 }
 
 export interface ExchangeRateServiceOptions {
@@ -159,6 +169,25 @@ export function createExchangeRateRepository(
       const latestQuotes = latestFxQuotesByAssetId(db);
       return assets.map((asset) =>
         exchangeRateFromAssetAndQuote(asset, latestQuotes.get(asset.id)),
+      );
+    },
+    getLatestFxRateSnapshots() {
+      const assets = db
+        .query<AssetRow, [string]>(
+          `
+            SELECT ${assetColumns()}
+            FROM assets
+            WHERE kind = ?
+            ORDER BY display_code ASC
+          `,
+        )
+        .all(ASSET_KIND_FX);
+      if (assets.length === 0) {
+        return [];
+      }
+      const latestQuotes = latestFxQuotesByAssetId(db);
+      return assets.map((asset) =>
+        latestFxRateSnapshotFromAsset(asset, latestQuotes.get(asset.id)),
       );
     },
     getHistoricalExchangeRates() {
@@ -416,6 +445,9 @@ export function createExchangeRateService(
     },
     getLatestExchangeRates() {
       return repository.getLatestExchangeRates();
+    },
+    getLatestFxRateSnapshots() {
+      return repository.getLatestFxRateSnapshots();
     },
     async addExchangeRate(newRate) {
       validateCurrency(newRate.fromCurrency, "fromCurrency");
@@ -709,6 +741,19 @@ function exchangeRateFromAssetAndQuote(asset: AssetRow, quote: QuoteRow | undefi
     rate: decimalStringOrZero(quote.close),
     source: quote.source,
     timestamp: parseTimestampOrNow(quote.timestamp),
+  };
+}
+
+function latestFxRateSnapshotFromAsset(
+  asset: AssetRow,
+  quote: QuoteRow | undefined,
+): LatestFxRateSnapshot {
+  return {
+    assetId: asset.id,
+    fromCurrency: asset.instrument_symbol ?? "",
+    toCurrency: asset.quote_ccy,
+    instrumentKey: asset.instrument_key,
+    quoteTimestamp: quote?.timestamp ?? null,
   };
 }
 

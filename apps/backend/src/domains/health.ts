@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
-import type { AccountService } from "./accounts";
-import type { ExchangeRateService } from "./exchange-rates";
+import type { Account, AccountService } from "./accounts";
+import type { ExchangeRateService, LatestFxRateSnapshot } from "./exchange-rates";
 import type { HoldingsService } from "./holdings";
 import type { LatestQuoteSnapshot, MarketDataService } from "./market-data";
 import type { SettingsService } from "./settings";
@@ -76,15 +76,17 @@ export interface HealthStatus {
 }
 
 export interface HealthServiceOptions {
-  accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts"> &
-    Partial<Pick<AccountService, "getActiveAccounts">>;
+  accountProvider?: Partial<
+    Pick<AccountService, "getActiveAccounts" | "getActiveNonArchivedAccounts">
+  >;
   classificationMigrationProvider?: Pick<
     TaxonomyService,
     | "getMigrationStatus"
     | "getLegacyClassificationMigrationDetails"
     | "migrateLegacyClassifications"
   >;
-  exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs">;
+  exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs"> &
+    Partial<Pick<ExchangeRateService, "getLatestFxRateSnapshots">>;
   holdingsProvider?: Pick<HoldingsService, "getHoldings">;
   marketDataQuoteProvider?: Pick<MarketDataService, "getLatestQuotes">;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
@@ -346,6 +348,7 @@ async function runChecks(
   const issues = filterDismissedIssues(repository, [
     ...analyzeUnconfiguredAccounts(options, checkedAt),
     ...(await analyzePriceStaleness(options, config, checkedAt)),
+    ...(await analyzeFxIntegrity(options, config, checkedAt)),
     ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
     ...analyzeTimezone(options, clientTimezone, checkedAt),
   ]);
@@ -359,7 +362,7 @@ function analyzeUnconfiguredAccounts(
   timestamp: Date,
 ): HealthIssue[] {
   const accounts = options.accountProvider
-    ?.getActiveNonArchivedAccounts()
+    ?.getActiveNonArchivedAccounts?.()
     .filter((account) => account.trackingMode === "NOT_SET");
 
   if (!accounts || accounts.length === 0) {
@@ -471,21 +474,18 @@ async function analyzePriceStaleness(
   config: HealthConfig,
   timestamp: Date,
 ): Promise<HealthIssue[]> {
-  if (
-    !options.accountProvider ||
-    !options.holdingsProvider?.getHoldings ||
-    !options.marketDataQuoteProvider?.getLatestQuotes
-  ) {
+  if (!options.holdingsProvider?.getHoldings || !options.marketDataQuoteProvider?.getLatestQuotes) {
     return [];
   }
 
-  const accounts =
-    options.accountProvider.getActiveAccounts?.() ??
-    options.accountProvider.getActiveNonArchivedAccounts();
+  const accounts = getPortfolioHealthAccounts(options);
+  if (!accounts) {
+    return [];
+  }
   const holdingsByAsset = new Map<string, PriceHealthHolding>();
   let totalPortfolioValue = 0;
 
-  for (const account of [...accounts].sort((a, b) => a.id.localeCompare(b.id))) {
+  for (const account of accounts) {
     const holdings = await options.holdingsProvider.getHoldings(account.id);
     for (const holding of holdings) {
       const instrument = holding.instrument;
@@ -722,6 +722,250 @@ function parseDateOnlyUtc(value: string): Date {
 
 function addUtcDays(date: Date, days: number): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+}
+
+interface FxHealthPair {
+  pairId: string;
+  fromCurrency: string;
+  toCurrency: string;
+  affectedMarketValue: number;
+  latestQuoteTimestamp: string | null;
+}
+
+async function analyzeFxIntegrity(
+  options: HealthServiceOptions,
+  config: HealthConfig,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (
+    !options.holdingsProvider?.getHoldings ||
+    !options.exchangeRateProvider?.getLatestFxRateSnapshots
+  ) {
+    return [];
+  }
+
+  const accounts = getPortfolioHealthAccounts(options);
+  if (!accounts) {
+    return [];
+  }
+
+  const pairMarketValues = new Map<
+    string,
+    { fromCurrency: string; toCurrency: string; affectedMarketValue: number }
+  >();
+  let totalPortfolioValue = 0;
+
+  for (const account of accounts) {
+    const holdings = await options.holdingsProvider.getHoldings(account.id);
+    for (const holding of holdings) {
+      const marketValue = holding.marketValue.base;
+      if (holding.localCurrency !== holding.baseCurrency) {
+        const pairId = `${holding.localCurrency}:${holding.baseCurrency}`;
+        const existing = pairMarketValues.get(pairId);
+        if (existing) {
+          existing.affectedMarketValue += Math.abs(marketValue);
+        } else {
+          pairMarketValues.set(pairId, {
+            fromCurrency: holding.localCurrency,
+            toCurrency: holding.baseCurrency,
+            affectedMarketValue: Math.abs(marketValue),
+          });
+        }
+      }
+      if (holding.instrument) {
+        totalPortfolioValue += marketValue;
+      }
+    }
+  }
+
+  if (pairMarketValues.size === 0) {
+    return [];
+  }
+
+  const latestFxRates = fxSnapshotsByPair(options.exchangeRateProvider.getLatestFxRateSnapshots());
+  const pairs = [...pairMarketValues.values()].map((pair) => ({
+    ...pair,
+    pairId: `${pair.fromCurrency}:${pair.toCurrency}`,
+    latestQuoteTimestamp: latestFxQuoteTimestamp(pair, latestFxRates),
+  }));
+
+  return analyzeFxIntegrityFromPairs(pairs, {
+    config,
+    timestamp,
+    totalPortfolioValue,
+  });
+}
+
+function analyzeFxIntegrityFromPairs(
+  pairs: FxHealthPair[],
+  context: { config: HealthConfig; timestamp: Date; totalPortfolioValue: number },
+): HealthIssue[] {
+  const warningThreshold = new Date(
+    context.timestamp.getTime() - context.config.fxStaleWarningHours * 60 * 60 * 1000,
+  );
+  const criticalThreshold = new Date(
+    context.timestamp.getTime() - context.config.fxStaleCriticalHours * 60 * 60 * 1000,
+  );
+  const missingPairs: FxHealthPair[] = [];
+  const staleErrorPairs: FxHealthPair[] = [];
+  const staleWarningPairs: FxHealthPair[] = [];
+  let missingMarketValue = 0;
+  let staleErrorMarketValue = 0;
+  let staleWarningMarketValue = 0;
+
+  for (const pair of pairs) {
+    if (!pair.latestQuoteTimestamp) {
+      missingPairs.push(pair);
+      missingMarketValue += pair.affectedMarketValue;
+      continue;
+    }
+    const quoteTime = new Date(pair.latestQuoteTimestamp);
+    if (quoteTime < criticalThreshold) {
+      staleErrorPairs.push(pair);
+      staleErrorMarketValue += pair.affectedMarketValue;
+    } else if (quoteTime < warningThreshold) {
+      staleWarningPairs.push(pair);
+      staleWarningMarketValue += pair.affectedMarketValue;
+    }
+  }
+
+  return [
+    ...buildFxIntegrityIssues({
+      pairs: missingPairs,
+      issueLevel: "missing",
+      marketValue: missingMarketValue,
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+    ...buildFxIntegrityIssues({
+      pairs: staleErrorPairs,
+      issueLevel: "error",
+      marketValue: staleErrorMarketValue,
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+    ...buildFxIntegrityIssues({
+      pairs: staleWarningPairs,
+      issueLevel: "warning",
+      marketValue: staleWarningMarketValue,
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+  ];
+}
+
+function buildFxIntegrityIssues(input: {
+  pairs: FxHealthPair[];
+  issueLevel: "missing" | "error" | "warning";
+  marketValue: number;
+  timestamp: Date;
+  totalPortfolioValue: number;
+  escalationThreshold: number;
+}): HealthIssue[] {
+  if (input.pairs.length === 0) {
+    return [];
+  }
+  const affectedMvPct =
+    input.totalPortfolioValue > 0 ? input.marketValue / input.totalPortfolioValue : 0;
+  const escalated = affectedMvPct > input.escalationThreshold;
+  const severity: HealthSeverity =
+    input.issueLevel === "warning"
+      ? escalated
+        ? "CRITICAL"
+        : "WARNING"
+      : escalated
+        ? "CRITICAL"
+        : "ERROR";
+  const pairIds = input.pairs.map((pair) => pair.pairId);
+  const dataHash = computeDataHash([...pairIds, severity, String(Math.trunc(affectedMvPct * 100))]);
+
+  return [
+    {
+      id: fxIssueId(input.issueLevel, dataHash),
+      severity,
+      category: "FX_INTEGRITY",
+      title: fxIntegrityTitle(input.issueLevel, input.pairs),
+      message: fxIntegrityMessage(input.issueLevel),
+      affectedCount: input.pairs.length,
+      affectedMvPct,
+      fixAction: { id: "fetch_fx", label: "Fetch Exchange Rates", payload: pairIds },
+      affectedItems: input.pairs.map(fxAffectedItem),
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
+  ];
+}
+
+function fxIssueId(issueLevel: "missing" | "error" | "warning", dataHash: string): string {
+  return issueLevel === "missing" ? `fx_missing:${dataHash}` : `fx_stale:${issueLevel}:${dataHash}`;
+}
+
+function fxIntegrityTitle(
+  issueLevel: "missing" | "error" | "warning",
+  pairs: FxHealthPair[],
+): string {
+  const count = pairs.length;
+  if (issueLevel === "missing") {
+    return count === 1
+      ? `Missing exchange rate for ${pairs[0]?.fromCurrency ?? ""}`
+      : `Missing exchange rates for ${count} currencies`;
+  }
+  if (issueLevel === "error") {
+    return count === 1
+      ? "Outdated exchange rate"
+      : `Outdated exchange rates for ${count} currencies`;
+  }
+  return count === 1
+    ? "Exchange rate update needed"
+    : `Exchange rate updates needed for ${count} currencies`;
+}
+
+function fxIntegrityMessage(issueLevel: "missing" | "error" | "warning"): string {
+  if (issueLevel === "missing") {
+    return "We can't convert some holdings to your base currency. This affects your total portfolio value.";
+  }
+  if (issueLevel === "error") {
+    return "Some exchange rates haven't been updated in over 3 days. Currency conversions may be inaccurate.";
+  }
+  return "Some exchange rates haven't been updated recently. Consider refreshing rates.";
+}
+
+function fxAffectedItem(pair: FxHealthPair): AffectedItem {
+  return {
+    id: pair.pairId,
+    name: `${pair.fromCurrency} \u2192 ${pair.toCurrency}`,
+  };
+}
+
+function fxSnapshotsByPair(snapshots: LatestFxRateSnapshot[]): Map<string, LatestFxRateSnapshot> {
+  return new Map(snapshots.map((snapshot) => [fxSnapshotPairKey(snapshot), snapshot]));
+}
+
+function latestFxQuoteTimestamp(
+  pair: { fromCurrency: string; toCurrency: string },
+  snapshotsByPair: Map<string, LatestFxRateSnapshot>,
+): string | null {
+  const direct = snapshotsByPair.get(fxPairKey(pair.fromCurrency, pair.toCurrency));
+  if (direct) {
+    return direct.quoteTimestamp;
+  }
+  return snapshotsByPair.get(fxPairKey(pair.toCurrency, pair.fromCurrency))?.quoteTimestamp ?? null;
+}
+
+function fxSnapshotPairKey(snapshot: LatestFxRateSnapshot): string {
+  return fxPairKey(snapshot.fromCurrency, snapshot.toCurrency);
+}
+
+function fxPairKey(fromCurrency: string, toCurrency: string): string {
+  return `${fromCurrency.toUpperCase()}:${toCurrency.toUpperCase()}`;
+}
+
+function getPortfolioHealthAccounts(options: HealthServiceOptions): Account[] | null {
+  const accounts = options.accountProvider?.getActiveAccounts?.();
+  return accounts ? [...accounts].sort((a, b) => a.id.localeCompare(b.id)) : null;
 }
 
 async function analyzeLegacyClassificationMigration(

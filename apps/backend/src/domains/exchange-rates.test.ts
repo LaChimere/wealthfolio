@@ -58,6 +58,22 @@ describe("TS exchange rates domain", () => {
           source: "YAHOO",
         }),
       ]);
+      expect(service.getLatestFxRateSnapshots()).toEqual([
+        {
+          assetId: "eur-usd",
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          instrumentKey: "FX:EUR/USD",
+          quoteTimestamp: "2026-01-02T16:00:00.000Z",
+        },
+        {
+          assetId: "usd-cad",
+          fromCurrency: "USD",
+          toCurrency: "CAD",
+          instrumentKey: "FX:USD/CAD",
+          quoteTimestamp: null,
+        },
+      ]);
     } finally {
       db.close();
     }

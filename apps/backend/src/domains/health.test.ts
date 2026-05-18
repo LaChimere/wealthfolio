@@ -423,6 +423,136 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds bounded FX integrity health issues from holdings and FX rate snapshots", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(
+      createHealthRepository(db),
+      {
+        ...DEFAULT_HEALTH_CONFIG,
+        fxStaleWarningHours: 24,
+        fxStaleCriticalHours: 72,
+        mvEscalationThreshold: 0.3,
+      },
+      {
+        accountProvider: {
+          getActiveAccounts: () => [account({ id: "account-a" })],
+          getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: () => [
+            holding({
+              assetId: "asset-eur",
+              symbol: "EURSEC",
+              marketValue: 40,
+              localCurrency: "EUR",
+              baseCurrency: "USD",
+            }),
+            holding({
+              assetId: "cash-gbp",
+              symbol: "GBP",
+              marketValue: 20,
+              localCurrency: "GBP",
+              baseCurrency: "USD",
+              instrument: false,
+            }),
+            holding({
+              assetId: "asset-cad",
+              symbol: "CADSEC",
+              marketValue: 20,
+              localCurrency: "CAD",
+              baseCurrency: "USD",
+            }),
+            holding({
+              assetId: "asset-chf",
+              symbol: "CHFSEC",
+              marketValue: 10,
+              localCurrency: "CHF",
+              baseCurrency: "USD",
+            }),
+            holding({ assetId: "asset-usd", symbol: "USDSEC", marketValue: 130 }),
+          ],
+        },
+        exchangeRateProvider: {
+          ensureFxPairs: () => {},
+          getLatestFxRateSnapshots: () => [
+            fxSnapshot({ fromCurrency: "EUR", toCurrency: "USD", quoteTimestamp: null }),
+            fxSnapshot({
+              fromCurrency: "USD",
+              toCurrency: "EUR",
+              quoteTimestamp: "2026-05-18T12:00:00.000Z",
+            }),
+            fxSnapshot({
+              fromCurrency: "CAD",
+              toCurrency: "USD",
+              quoteTimestamp: "2026-05-14T00:00:00.000Z",
+            }),
+            fxSnapshot({
+              fromCurrency: "CHF",
+              toCurrency: "USD",
+              quoteTimestamp: "2026-05-17T00:00:00.000Z",
+            }),
+          ],
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+      },
+    );
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^fx_missing:/),
+          severity: "ERROR",
+          category: "FX_INTEGRITY",
+          title: "Missing exchange rates for 2 currencies",
+          affectedCount: 2,
+          affectedMvPct: 0.3,
+          fixAction: {
+            id: "fetch_fx",
+            label: "Fetch Exchange Rates",
+            payload: ["EUR:USD", "GBP:USD"],
+          },
+          affectedItems: [
+            { id: "EUR:USD", name: "EUR \u2192 USD" },
+            { id: "GBP:USD", name: "GBP \u2192 USD" },
+          ],
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^fx_stale:error:/),
+          severity: "ERROR",
+          category: "FX_INTEGRITY",
+          title: "Outdated exchange rate",
+          affectedCount: 1,
+          affectedMvPct: 0.1,
+          fixAction: {
+            id: "fetch_fx",
+            label: "Fetch Exchange Rates",
+            payload: ["CAD:USD"],
+          },
+          affectedItems: [{ id: "CAD:USD", name: "CAD \u2192 USD" }],
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^fx_stale:warning:/),
+          severity: "WARNING",
+          category: "FX_INTEGRITY",
+          title: "Exchange rate update needed",
+          affectedCount: 1,
+          affectedMvPct: 0.05,
+          fixAction: {
+            id: "fetch_fx",
+            label: "Fetch Exchange Rates",
+            payload: ["CHF:USD"],
+          },
+          affectedItems: [{ id: "CHF:USD", name: "CHF \u2192 USD" }],
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches Rust timezone validity and offset-equivalence behavior", async () => {
     const db = createHealthDb();
     try {
@@ -830,29 +960,35 @@ function holding(update: {
   name?: string | null;
   marketValue: number;
   pricingMode?: string;
+  localCurrency?: string;
+  baseCurrency?: string;
+  instrument?: boolean;
 }): Holding {
+  const hasInstrument = update.instrument ?? true;
   return {
     id: `${update.assetId}:holding`,
     accountId: "account",
-    holdingType: "security",
-    instrument: {
-      id: update.assetId,
-      symbol: update.symbol,
-      name: update.name ?? null,
-      currency: "USD",
-      notes: null,
-      pricingMode: update.pricingMode ?? "MARKET",
-      preferredProvider: null,
-      exchangeMic: "XNAS",
-      classifications: null,
-    },
-    assetKind: "STOCK",
+    holdingType: hasInstrument ? "security" : "cash",
+    instrument: hasInstrument
+      ? {
+          id: update.assetId,
+          symbol: update.symbol,
+          name: update.name ?? null,
+          currency: update.localCurrency ?? "USD",
+          notes: null,
+          pricingMode: update.pricingMode ?? "MARKET",
+          preferredProvider: null,
+          exchangeMic: "XNAS",
+          classifications: null,
+        }
+      : null,
+    assetKind: hasInstrument ? "STOCK" : null,
     quantity: 1,
     openDate: null,
     lots: null,
     contractMultiplier: 1,
-    localCurrency: "USD",
-    baseCurrency: "USD",
+    localCurrency: update.localCurrency ?? "USD",
+    baseCurrency: update.baseCurrency ?? "USD",
     fxRate: 1,
     marketValue: { local: update.marketValue, base: update.marketValue },
     costBasis: null,
@@ -879,5 +1015,19 @@ function latestQuote(update: { quoteDate: string }) {
     isStale: true,
     effectiveMarketDate: "2026-05-18",
     quoteDate: update.quoteDate,
+  };
+}
+
+function fxSnapshot(update: {
+  fromCurrency: string;
+  toCurrency: string;
+  quoteTimestamp: string | null;
+}) {
+  return {
+    assetId: `${update.fromCurrency}-${update.toCurrency}`,
+    fromCurrency: update.fromCurrency,
+    toCurrency: update.toCurrency,
+    instrumentKey: `FX:${update.fromCurrency}/${update.toCurrency}`,
+    quoteTimestamp: update.quoteTimestamp,
   };
 }
