@@ -270,7 +270,9 @@ function createServicesFromDatabase(
 
   const activityService = createActivityService(db, {
     eventBus,
-    ensureFxPairs: (pairs) => exchangeRateService.ensureFxPairs(pairs),
+    ensureFxPairs: async (pairs) => {
+      await exchangeRateService.ensureFxPairs(pairs);
+    },
     queueSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent(event);
     },

@@ -205,24 +205,25 @@
     slices; bounded account/timezone health status/checks, cache behavior,
     legacy-classification health issues and affected items, classification
     migration health-fix dispatch, `sync_prices`/`retry_sync` dispatch into the
-    market-data sync seam, `fetch_fx` dispatch into the exchange-rate seam, and
-    targeted `migrate_classifications` dispatch into the taxonomy migration
-    seam, bounded price-staleness Health Center checks, bounded quote-sync error
-    checks, and bounded FX integrity issue generation, and bounded
-    negative-balance data-consistency checks now have TS runtime parity;
-    market-data no-op sync modes and targeted Yahoo provider-backed asset sync
-    now execute in TS while broad/all-provider sync, automatic FX quote
-    fetching, and portfolio recalculation remain deferred; remaining
-    calculation-heavy health checks are deferred to health/calculation parity
-    slices; disabled Connect feature-flag responses, local empty-list routes,
-    local broker sync profile persistence, and disabled device-sync route
-    responses now have TS runtime parity, while real Connect token lifecycle,
-    cloud HTTP clients, broker sync orchestration, local sync repositories,
-    subscription entitlement checks, event production, E2EE enrollment, sync
-    engine, snapshot/upload runtime, background workers, device-sync cloud
-    clients, token lifecycle, team-key operations, key material handling,
-    pairing flows, freshness gate persistence, bootstrap transfer, and secret
-    side effects are deferred to Connect/device-sync parity slices.
+    market-data sync seam, `fetch_fx` dispatch into exchange-rate pair
+    registration and targeted market-data sync, and targeted
+    `migrate_classifications` dispatch into the taxonomy migration seam, bounded
+    price-staleness Health Center checks, bounded quote-sync error checks, and
+    bounded FX integrity issue generation, and bounded negative-balance
+    data-consistency checks now have TS runtime parity; market-data no-op sync
+    modes and targeted Yahoo provider-backed asset/FX sync now execute in TS
+    while broad/all-provider sync, automatic/background FX quote fetching, and
+    portfolio recalculation remain deferred; remaining calculation-heavy health
+    checks are deferred to health/calculation parity slices; disabled Connect
+    feature-flag responses, local empty-list routes, local broker sync profile
+    persistence, and disabled device-sync route responses now have TS runtime
+    parity, while real Connect token lifecycle, cloud HTTP clients, broker sync
+    orchestration, local sync repositories, subscription entitlement checks,
+    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
+    background workers, device-sync cloud clients, token lifecycle, team-key
+    operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.

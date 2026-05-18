@@ -306,7 +306,13 @@ export function createHealthService(
             404,
           );
         }
-        await options.exchangeRateProvider.ensureFxPairs(pairs);
+        const fxAssetIds = await options.exchangeRateProvider.ensureFxPairs(pairs);
+        if (options.marketDataSyncProvider?.syncMarketData && fxAssetIds.length > 0) {
+          await options.marketDataSyncProvider.syncMarketData({
+            type: "incremental",
+            asset_ids: fxAssetIds,
+          });
+        }
         clearCache();
         return;
       }

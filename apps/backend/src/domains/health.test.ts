@@ -667,7 +667,7 @@ describe("TS health domain", () => {
           ],
         },
         exchangeRateProvider: {
-          ensureFxPairs: () => {},
+          ensureFxPairs: async () => [],
           getLatestFxRateSnapshots: () => [
             fxSnapshot({ fromCurrency: "EUR", toCurrency: "USD", quoteTimestamp: null }),
             fxSnapshot({
@@ -1042,6 +1042,7 @@ describe("TS health domain", () => {
       exchangeRateProvider: {
         ensureFxPairs: (pairs) => {
           fxPairs.push(pairs);
+          return [];
         },
       },
       settingsProvider: {
@@ -1075,6 +1076,63 @@ describe("TS health domain", () => {
           ["CAD", "USD"],
         ],
         [],
+      ]);
+
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes FX health fixes through pair registration and targeted market sync", async () => {
+    const db = createHealthDb();
+    let settingsReads = 0;
+    const fxPairs: Array<[string, string]>[] = [];
+    const marketSyncModes: unknown[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      exchangeRateProvider: {
+        ensureFxPairs: (pairs) => {
+          fxPairs.push(pairs);
+          return ["fx-eur-usd", "fx-cad-usd"];
+        },
+      },
+      marketDataSyncProvider: {
+        syncMarketData: (mode) => {
+          marketSyncModes.push(mode);
+        },
+      },
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      await service.getHealthStatus?.("UTC");
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(1);
+
+      await service.executeFix?.({
+        id: "fetch_fx",
+        label: "Fetch Exchange Rates",
+        payload: ["EUR:USD", "CAD:USD"],
+      });
+
+      expect(fxPairs).toEqual([
+        [
+          ["EUR", "USD"],
+          ["CAD", "USD"],
+        ],
+      ]);
+      expect(marketSyncModes).toEqual([
+        {
+          type: "incremental",
+          asset_ids: ["fx-eur-usd", "fx-cad-usd"],
+        },
       ]);
 
       await service.getHealthStatus?.("UTC");

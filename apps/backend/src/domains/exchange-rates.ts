@@ -61,7 +61,7 @@ export interface ExchangeRateService {
   deleteExchangeRate(rateId: string): Promise<void>;
   registerCurrencyPair(fromCurrency: string, toCurrency: string): Promise<void>;
   registerCurrencyPairManual(fromCurrency: string, toCurrency: string): Promise<void>;
-  ensureFxPairs(pairs: Array<[string, string]>): Promise<void>;
+  ensureFxPairs(pairs: Array<[string, string]>): Promise<string[]>;
   getLatestFxRateSnapshots(): LatestFxRateSnapshot[];
 }
 
@@ -383,26 +383,26 @@ export function createExchangeRateService(
     fromCurrency: string,
     toCurrency: string,
     source: string,
-  ) => {
+  ): Promise<string | null> => {
     if (fromCurrency === toCurrency || fromCurrency === "" || toCurrency === "") {
-      return;
+      return null;
     }
 
     const normalizedFrom = normalizeCurrencyCode(fromCurrency);
     const normalizedTo = normalizeCurrencyCode(toCurrency);
     if (!normalizedFrom || !normalizedTo || normalizedFrom === normalizedTo) {
-      return;
+      return null;
     }
 
     try {
-      loadLatestExchangeRate(normalizedFrom, normalizedTo);
-      return;
+      return loadLatestExchangeRate(normalizedFrom, normalizedTo).id;
     } catch (error) {
       if (!(error instanceof ExchangeRateNotFoundError)) {
         throw error;
       }
       const assetId = repository.createFxAsset(normalizedFrom, normalizedTo, source);
       publishAssetsCreated(options.eventBus, assetId);
+      return assetId;
     }
   };
 
@@ -478,12 +478,21 @@ export function createExchangeRateService(
       const uniquePairs = new Set(
         pairs.map(([fromCurrency, toCurrency]) => `${fromCurrency}\0${toCurrency}`),
       );
+      const assetIds: string[] = [];
       for (const pair of uniquePairs) {
         const [fromCurrency, toCurrency] = pair.split("\0");
         if (fromCurrency !== undefined && toCurrency !== undefined && fromCurrency !== toCurrency) {
-          await registerCurrencyPairWithSource(fromCurrency, toCurrency, DATA_SOURCE_YAHOO);
+          const assetId = await registerCurrencyPairWithSource(
+            fromCurrency,
+            toCurrency,
+            DATA_SOURCE_YAHOO,
+          );
+          if (assetId) {
+            assetIds.push(assetId);
+          }
         }
       }
+      return [...new Set(assetIds)];
     },
   };
 }

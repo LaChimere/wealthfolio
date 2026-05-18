@@ -385,12 +385,16 @@ describe("TS exchange rates domain", () => {
         .get();
       expect(manualAsset?.provider_config).toBe('{"preferred_provider":"MANUAL"}');
 
-      await service.ensureFxPairs([
+      const ensuredAssetIds = await service.ensureFxPairs([
         ["NOK", "SEK"],
         ["NOK", "SEK"],
         ["EUR", "EUR"],
         ["GBp", "GBP"],
       ]);
+      const nokSekAsset = db
+        .query<{ id: string }, []>("SELECT id FROM assets WHERE instrument_key = 'FX:NOK/SEK'")
+        .get();
+      expect(ensuredAssetIds).toEqual([nokSekAsset?.id]);
       expect(
         db
           .query<
@@ -431,6 +435,7 @@ describe("TS exchange rates domain", () => {
           .get()?.count,
       ).toBe(0);
       expect(service.getLatestExchangeRate("USD", "CAD")).toBe("1.25");
+      expect(await service.ensureFxPairs([["USD", "CAD"]])).toEqual(["cad-usd"]);
 
       await service.deleteExchangeRate("cad-usd");
       expect(() => service.getLatestExchangeRate("USD", "CAD")).toThrow("Exchange rate not found");
