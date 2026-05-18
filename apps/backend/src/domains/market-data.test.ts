@@ -93,6 +93,16 @@ describe("TS market data domain", () => {
         status: 501,
         code: "not_implemented",
       });
+      await expect(service.syncMarketData?.({ type: "none" })).resolves.toBeUndefined();
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: [] }),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.syncMarketData?.({ type: "refetch_recent", asset_ids: [], days: 7 }),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.syncMarketData?.({ type: "backfill_history", asset_ids: [], days: 7 }),
+      ).resolves.toBeUndefined();
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: null }),
       ).rejects.toMatchObject({

@@ -363,7 +363,10 @@ export function createMarketDataService(
       throw marketDataSyncDeferred();
     },
 
-    async syncMarketData() {
+    async syncMarketData(marketSyncMode) {
+      if (!marketDataSyncRequiresExecution(marketSyncMode)) {
+        return;
+      }
       throw marketDataSyncDeferred();
     },
   };
@@ -371,6 +374,13 @@ export function createMarketDataService(
 
 function marketDataSyncDeferred(): MarketDataNotImplementedError {
   return new MarketDataNotImplementedError(MARKET_DATA_SYNC_DEFERRED_MESSAGE);
+}
+
+function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolean {
+  if (marketSyncMode.type === "none") {
+    return false;
+  }
+  return !Array.isArray(marketSyncMode.asset_ids) || marketSyncMode.asset_ids.length > 0;
 }
 
 export function parseExchangeList(json: string): ExchangeInfo[] {

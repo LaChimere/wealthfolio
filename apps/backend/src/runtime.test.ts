@@ -845,6 +845,15 @@ describe("TS backend runtime composition", () => {
       await expect(marketSyncResponse.json()).resolves.toMatchObject({
         code: "not_implemented",
       });
+      const emptyTargetMarketSyncResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/sync`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assetIds: [], refetchAll: false }),
+        },
+      );
+      expect(emptyTargetMarketSyncResponse.status).toBe(204);
       const deleteQuoteResponse = await fetch(
         `${server.baseUrl}/api/v1/market-data/quotes/id/${encodeURIComponent(manualQuoteId)}`,
         { method: "DELETE" },
