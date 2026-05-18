@@ -446,12 +446,22 @@ describe("TS backend runtime composition", () => {
       });
       expect(healthMigrationFixResponse.status).toBe(200);
 
-      const healthDeferredFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+      const healthEmptyPriceSyncFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: [] }),
       });
-      expect(healthDeferredFixResponse.status).toBe(404);
+      expect(healthEmptyPriceSyncFixResponse.status).toBe(400);
+
+      const healthDeferredFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: ["asset-1"] }),
+      });
+      expect(healthDeferredFixResponse.status).toBe(501);
+      await expect(healthDeferredFixResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
 
       const portfolioUpdateResponse = await fetch(`${server.baseUrl}/api/v1/portfolio/update`, {
         method: "POST",

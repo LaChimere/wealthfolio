@@ -304,6 +304,7 @@ function createServicesFromDatabase(
   const healthService = createHealthService(createHealthRepository(db), undefined, {
     accountProvider: accountService,
     classificationMigrationProvider: taxonomyService,
+    marketDataSyncProvider: marketDataService,
     settingsProvider: settingsService,
   });
 

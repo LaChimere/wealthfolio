@@ -311,6 +311,86 @@ describe("TS health domain", () => {
       db.close();
     }
   });
+
+  test("executes price health fixes through market data sync and clears cached status", async () => {
+    const db = createHealthDb();
+    let settingsReads = 0;
+    const syncModes: unknown[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      marketDataSyncProvider: {
+        syncMarketData: (mode) => {
+          syncModes.push(mode);
+        },
+      },
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      await service.getHealthStatus?.("UTC");
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(1);
+
+      await service.executeFix?.({
+        id: "sync_prices",
+        label: "Sync Prices",
+        payload: ["asset-1", ""],
+      });
+      await service.executeFix?.({
+        id: "retry_sync",
+        label: "Retry Sync",
+        payload: ["asset-2"],
+      });
+
+      expect(syncModes).toEqual([
+        { type: "incremental", asset_ids: ["asset-1", ""] },
+        { type: "incremental", asset_ids: ["asset-2"] },
+      ]);
+
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects unsupported or malformed health fix actions before syncing", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      marketDataSyncProvider: {
+        syncMarketData: () => {
+          throw new Error("should not sync invalid health fixes");
+        },
+      },
+    });
+    const serviceWithoutSync = createHealthService(createHealthRepository(db));
+
+    try {
+      await expect(
+        service.executeFix?.({ id: "sync_prices", label: "Sync Prices", payload: [] }),
+      ).rejects.toMatchObject({ status: 400, code: "invalid_payload" });
+      await expect(
+        service.executeFix?.({ id: "retry_sync", label: "Retry Sync", payload: ["asset-1", 1] }),
+      ).rejects.toMatchObject({ status: 400, code: "invalid_payload" });
+      await expect(
+        service.executeFix?.({ id: "fetch_fx", label: "Fetch Exchange Rates", payload: [] }),
+      ).rejects.toMatchObject({ status: 404, code: "not_found" });
+      await expect(
+        serviceWithoutSync.executeFix?.({
+          id: "sync_prices",
+          label: "Sync Prices",
+          payload: ["asset-1"],
+        }),
+      ).rejects.toMatchObject({ status: 404, code: "not_found" });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createHealthDb(): Database {

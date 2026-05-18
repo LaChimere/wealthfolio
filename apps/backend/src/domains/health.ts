@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
+import type { MarketDataService } from "./market-data";
 import type { SettingsService } from "./settings";
 import type { TaxonomyService } from "./taxonomies";
 
@@ -75,6 +76,7 @@ export interface HealthStatus {
 export interface HealthServiceOptions {
   accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
   classificationMigrationProvider?: Pick<TaxonomyService, "getMigrationStatus">;
+  marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
   now?: () => Date;
   cacheTtlMs?: number;
@@ -97,6 +99,18 @@ export interface HealthService {
   getHealthStatus?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
   runHealthChecks?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
   executeFix?(action: HealthFixAction): Promise<void> | void;
+}
+
+class HealthFixError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "HealthFixError";
+    this.code = code;
+    this.status = status;
+  }
 }
 
 interface DismissalRow {
@@ -221,7 +235,42 @@ export function createHealthService(
     async runHealthChecks(clientTimezone) {
       return runChecks(repository, options, now, clientTimezone, cachedStatuses);
     },
+    async executeFix(action) {
+      if (action.id !== "sync_prices" && action.id !== "retry_sync") {
+        throw new HealthFixError("not_found", `Unknown health fix action: ${action.id}`, 404);
+      }
+      if (!options.marketDataSyncProvider?.syncMarketData) {
+        throw new HealthFixError(
+          "not_found",
+          "Market data sync is not available for health fixes",
+          404,
+        );
+      }
+      const assetIds = parseHealthFixAssetIds(action);
+      await options.marketDataSyncProvider.syncMarketData({
+        type: "incremental",
+        asset_ids: assetIds,
+      });
+      clearCache();
+    },
   };
+}
+
+function parseHealthFixAssetIds(action: HealthFixAction): string[] {
+  if (
+    !Array.isArray(action.payload) ||
+    !action.payload.every((value) => typeof value === "string")
+  ) {
+    throw new HealthFixError(
+      "invalid_payload",
+      `Invalid payload for ${action.id}: expected an array of asset IDs`,
+      400,
+    );
+  }
+  if (action.payload.length === 0) {
+    throw new HealthFixError("invalid_payload", "No assets selected for price sync", 400);
+  }
+  return [...action.payload];
 }
 
 async function runChecks(
