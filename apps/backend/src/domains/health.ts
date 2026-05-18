@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
+import type { ExchangeRateService } from "./exchange-rates";
 import type { MarketDataService } from "./market-data";
 import type { SettingsService } from "./settings";
 import type { TaxonomyService } from "./taxonomies";
@@ -76,6 +77,7 @@ export interface HealthStatus {
 export interface HealthServiceOptions {
   accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
   classificationMigrationProvider?: Pick<TaxonomyService, "getMigrationStatus">;
+  exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs">;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
   now?: () => Date;
@@ -236,22 +238,36 @@ export function createHealthService(
       return runChecks(repository, options, now, clientTimezone, cachedStatuses);
     },
     async executeFix(action) {
-      if (action.id !== "sync_prices" && action.id !== "retry_sync") {
-        throw new HealthFixError("not_found", `Unknown health fix action: ${action.id}`, 404);
+      if (action.id === "sync_prices" || action.id === "retry_sync") {
+        const assetIds = parseHealthFixAssetIds(action);
+        if (!options.marketDataSyncProvider?.syncMarketData) {
+          throw new HealthFixError(
+            "not_found",
+            "Market data sync is not available for health fixes",
+            404,
+          );
+        }
+        await options.marketDataSyncProvider.syncMarketData({
+          type: "incremental",
+          asset_ids: assetIds,
+        });
+        clearCache();
+        return;
       }
-      if (!options.marketDataSyncProvider?.syncMarketData) {
-        throw new HealthFixError(
-          "not_found",
-          "Market data sync is not available for health fixes",
-          404,
-        );
+      if (action.id === "fetch_fx") {
+        const pairs = parseHealthFixCurrencyPairs(action);
+        if (!options.exchangeRateProvider?.ensureFxPairs) {
+          throw new HealthFixError(
+            "not_found",
+            "Exchange rate sync is not available for health fixes",
+            404,
+          );
+        }
+        await options.exchangeRateProvider.ensureFxPairs(pairs);
+        clearCache();
+        return;
       }
-      const assetIds = parseHealthFixAssetIds(action);
-      await options.marketDataSyncProvider.syncMarketData({
-        type: "incremental",
-        asset_ids: assetIds,
-      });
-      clearCache();
+      throw new HealthFixError("not_found", `Unknown health fix action: ${action.id}`, 404);
     },
   };
 }
@@ -271,6 +287,32 @@ function parseHealthFixAssetIds(action: HealthFixAction): string[] {
     throw new HealthFixError("invalid_payload", "No assets selected for price sync", 400);
   }
   return [...action.payload];
+}
+
+function parseHealthFixCurrencyPairs(action: HealthFixAction): Array<[string, string]> {
+  if (
+    !Array.isArray(action.payload) ||
+    !action.payload.every((value) => typeof value === "string")
+  ) {
+    throw new HealthFixError(
+      "invalid_payload",
+      `Invalid payload for ${action.id}: expected an array of currency pair IDs`,
+      400,
+    );
+  }
+  return action.payload.map((pairId) => {
+    const parts = pairId.split(":");
+    const fromCurrency = parts[0]?.trim();
+    const toCurrency = parts[1]?.trim();
+    if (parts.length !== 2 || !fromCurrency || !toCurrency) {
+      throw new HealthFixError(
+        "invalid_payload",
+        `Invalid currency pair for ${action.id}: ${pairId}`,
+        400,
+      );
+    }
+    return [fromCurrency, toCurrency];
+  });
 }
 
 async function runChecks(

@@ -359,9 +359,64 @@ describe("TS health domain", () => {
     }
   });
 
+  test("executes FX health fixes through exchange-rate pair registration", async () => {
+    const db = createHealthDb();
+    let settingsReads = 0;
+    const fxPairs: Array<[string, string]>[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      exchangeRateProvider: {
+        ensureFxPairs: (pairs) => {
+          fxPairs.push(pairs);
+        },
+      },
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      await service.getHealthStatus?.("UTC");
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(1);
+
+      await service.executeFix?.({
+        id: "fetch_fx",
+        label: "Fetch Exchange Rates",
+        payload: ["eur:usd", " CAD : USD "],
+      });
+      await service.executeFix?.({
+        id: "fetch_fx",
+        label: "Fetch Exchange Rates",
+        payload: [],
+      });
+
+      expect(fxPairs).toEqual([
+        [
+          ["eur", "usd"],
+          ["CAD", "USD"],
+        ],
+        [],
+      ]);
+
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects unsupported or malformed health fix actions before syncing", async () => {
     const db = createHealthDb();
     const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      exchangeRateProvider: {
+        ensureFxPairs: () => {
+          throw new Error("should not register invalid FX fixes");
+        },
+      },
       marketDataSyncProvider: {
         syncMarketData: () => {
           throw new Error("should not sync invalid health fixes");
@@ -378,13 +433,31 @@ describe("TS health domain", () => {
         service.executeFix?.({ id: "retry_sync", label: "Retry Sync", payload: ["asset-1", 1] }),
       ).rejects.toMatchObject({ status: 400, code: "invalid_payload" });
       await expect(
-        service.executeFix?.({ id: "fetch_fx", label: "Fetch Exchange Rates", payload: [] }),
+        service.executeFix?.({
+          id: "fetch_fx",
+          label: "Fetch Exchange Rates",
+          payload: ["EUR"],
+        }),
+      ).rejects.toMatchObject({ status: 400, code: "invalid_payload" });
+      await expect(
+        service.executeFix?.({
+          id: "migrate_classifications",
+          label: "Migrate Classifications",
+          payload: [],
+        }),
       ).rejects.toMatchObject({ status: 404, code: "not_found" });
       await expect(
         serviceWithoutSync.executeFix?.({
           id: "sync_prices",
           label: "Sync Prices",
           payload: ["asset-1"],
+        }),
+      ).rejects.toMatchObject({ status: 404, code: "not_found" });
+      await expect(
+        serviceWithoutSync.executeFix?.({
+          id: "fetch_fx",
+          label: "Fetch Exchange Rates",
+          payload: ["EUR:USD"],
         }),
       ).rejects.toMatchObject({ status: 404, code: "not_found" });
     } finally {

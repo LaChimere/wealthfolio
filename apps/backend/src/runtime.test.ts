@@ -463,6 +463,13 @@ describe("TS backend runtime composition", () => {
         code: "not_implemented",
       });
 
+      const healthFxFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: "fetch_fx", label: "Fetch Exchange Rates", payload: [] }),
+      });
+      expect(healthFxFixResponse.status).toBe(200);
+
       const portfolioUpdateResponse = await fetch(`${server.baseUrl}/api/v1/portfolio/update`, {
         method: "POST",
         headers: { "content-type": "application/json" },
