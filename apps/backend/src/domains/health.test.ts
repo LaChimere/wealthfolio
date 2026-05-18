@@ -423,6 +423,200 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds bounded quote sync health issues from sync error snapshots", async () => {
+    const db = createHealthDb();
+    const longError = "x".repeat(90);
+    const service = createHealthService(
+      createHealthRepository(db),
+      { ...DEFAULT_HEALTH_CONFIG, mvEscalationThreshold: 0.3 },
+      {
+        accountProvider: {
+          getActiveAccounts: () => [account({ id: "account-a" })],
+          getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: () => [
+            holding({ assetId: "asset-error", symbol: "ERR", marketValue: 30 }),
+            holding({ assetId: "asset-warning", symbol: "WARN", marketValue: 70 }),
+          ],
+        },
+        marketDataQuoteProvider: {
+          getQuoteSyncErrorSnapshots: () => [
+            quoteSyncError({
+              assetId: "asset-manual",
+              symbol: "MAN",
+              errorCount: 11,
+              quoteMode: "MANUAL",
+            }),
+            quoteSyncError({
+              assetId: "asset-error",
+              symbol: "ERR",
+              errorCount: 10,
+              lastError: "provider unavailable",
+            }),
+            quoteSyncError({
+              assetId: "unheld-1",
+              symbol: "U1",
+              errorCount: 9,
+              lastError: longError,
+            }),
+            quoteSyncError({ assetId: "unheld-2", symbol: "U2", errorCount: 8, lastError: null }),
+            quoteSyncError({
+              assetId: "unheld-3",
+              symbol: "U3",
+              errorCount: 7,
+              lastError: "symbol not found",
+            }),
+            quoteSyncError({
+              assetId: "unheld-4",
+              symbol: "U4",
+              errorCount: 6,
+              lastError: "rate limited",
+            }),
+            quoteSyncError({
+              assetId: "unheld-5",
+              symbol: "U5",
+              errorCount: 6,
+              lastError: "provider down",
+            }),
+            quoteSyncError({
+              assetId: "asset-warning",
+              symbol: "WARN",
+              errorCount: 2,
+              lastError: "timeout",
+            }),
+          ],
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+      },
+    );
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^quote_sync:error:/),
+          severity: "ERROR",
+          category: "PRICE_STALENESS",
+          title: "Quotes sync failing for 6 assets",
+          affectedCount: 6,
+          affectedMvPct: 0.3,
+          fixAction: {
+            id: "retry_sync",
+            label: "Retry Sync",
+            payload: ["asset-error", "unheld-1", "unheld-2", "unheld-3", "unheld-4", "unheld-5"],
+          },
+          navigateAction: { route: "/settings/market-data", label: "View Market Data" },
+          affectedItems: [
+            {
+              id: "asset-error",
+              name: "ERR",
+              symbol: "ERR",
+              route: "/holdings/asset-error",
+            },
+            {
+              id: "unheld-1",
+              name: "U1",
+              symbol: "U1",
+              route: "/holdings/unheld-1",
+            },
+            {
+              id: "unheld-2",
+              name: "U2",
+              symbol: "U2",
+              route: "/holdings/unheld-2",
+            },
+            {
+              id: "unheld-3",
+              name: "U3",
+              symbol: "U3",
+              route: "/holdings/unheld-3",
+            },
+            {
+              id: "unheld-4",
+              name: "U4",
+              symbol: "U4",
+              route: "/holdings/unheld-4",
+            },
+            {
+              id: "unheld-5",
+              name: "U5",
+              symbol: "U5",
+              route: "/holdings/unheld-5",
+            },
+          ],
+          details: [
+            "1. ERR - 10 failures: provider unavailable",
+            `2. U1 - 9 failures: ${"x".repeat(80)}`,
+            "3. U2 - 8 failures: Unknown error",
+            "4. U3 - 7 failures: symbol not found",
+            "5. U4 - 6 failures: rate limited",
+            "... and 1 more",
+          ].join("\n"),
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^quote_sync:warning:/),
+          severity: "WARNING",
+          category: "PRICE_STALENESS",
+          title: "Sync issues for WARN",
+          affectedCount: 1,
+          affectedMvPct: 0.7,
+          fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["asset-warning"] },
+          navigateAction: undefined,
+          affectedItems: [
+            {
+              id: "asset-warning",
+              name: "WARN",
+              symbol: "WARN",
+              route: "/holdings/asset-warning",
+            },
+          ],
+          details: "1. WARN - 2 failures: timeout",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports quote sync errors with zero MV when there are no active holdings", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [],
+        getActiveNonArchivedAccounts: () => [],
+      },
+      holdingsProvider: {
+        getHoldings: () => {
+          throw new Error("should not load holdings when there are no active accounts");
+        },
+      },
+      marketDataQuoteProvider: {
+        getQuoteSyncErrorSnapshots: () => [
+          quoteSyncError({ assetId: "unheld", symbol: "UNHELD", errorCount: 6 }),
+        ],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^quote_sync:error:/),
+          severity: "ERROR",
+          affectedMvPct: 0,
+          fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["unheld"] },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds bounded FX integrity health issues from holdings and FX rate snapshots", async () => {
     const db = createHealthDb();
     const service = createHealthService(
@@ -1029,5 +1223,21 @@ function fxSnapshot(update: {
     toCurrency: update.toCurrency,
     instrumentKey: `FX:${update.fromCurrency}/${update.toCurrency}`,
     quoteTimestamp: update.quoteTimestamp,
+  };
+}
+
+function quoteSyncError(update: {
+  assetId: string;
+  symbol: string;
+  errorCount: number;
+  quoteMode?: string;
+  lastError?: string | null;
+}) {
+  return {
+    assetId: update.assetId,
+    symbol: update.symbol,
+    quoteMode: update.quoteMode ?? "MARKET",
+    errorCount: update.errorCount,
+    lastError: update.lastError ?? null,
   };
 }

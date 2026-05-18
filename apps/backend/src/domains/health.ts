@@ -88,7 +88,9 @@ export interface HealthServiceOptions {
   exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs"> &
     Partial<Pick<ExchangeRateService, "getLatestFxRateSnapshots">>;
   holdingsProvider?: Pick<HoldingsService, "getHoldings">;
-  marketDataQuoteProvider?: Pick<MarketDataService, "getLatestQuotes">;
+  marketDataQuoteProvider?: Partial<
+    Pick<MarketDataService, "getLatestQuotes" | "getQuoteSyncErrorSnapshots">
+  >;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
   now?: () => Date;
@@ -348,6 +350,7 @@ async function runChecks(
   const issues = filterDismissedIssues(repository, [
     ...analyzeUnconfiguredAccounts(options, checkedAt),
     ...(await analyzePriceStaleness(options, config, checkedAt)),
+    ...(await analyzeQuoteSyncErrors(options, config, checkedAt)),
     ...(await analyzeFxIntegrity(options, config, checkedAt)),
     ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
     ...analyzeTimezone(options, clientTimezone, checkedAt),
@@ -722,6 +725,189 @@ function parseDateOnlyUtc(value: string): Date {
 
 function addUtcDays(date: Date, days: number): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+}
+
+interface QuoteSyncHealthError {
+  assetId: string;
+  symbol: string;
+  errorCount: number;
+  lastError: string | null;
+  marketValue: number;
+}
+
+async function analyzeQuoteSyncErrors(
+  options: HealthServiceOptions,
+  config: HealthConfig,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (
+    !options.holdingsProvider?.getHoldings ||
+    !options.marketDataQuoteProvider?.getQuoteSyncErrorSnapshots
+  ) {
+    return [];
+  }
+
+  const accounts = getPortfolioHealthAccounts(options);
+  if (!accounts) {
+    return [];
+  }
+  const { holdingMarketValues, totalPortfolioValue } = await gatherInstrumentMarketValues(
+    accounts,
+    options.holdingsProvider,
+  );
+  const syncErrors = (await options.marketDataQuoteProvider.getQuoteSyncErrorSnapshots())
+    .filter((snapshot) => snapshot.quoteMode.toUpperCase() !== "MANUAL")
+    .map((snapshot) => ({
+      assetId: snapshot.assetId,
+      symbol: snapshot.symbol,
+      errorCount: snapshot.errorCount,
+      lastError: snapshot.lastError,
+      marketValue: holdingMarketValues.get(snapshot.assetId) ?? 0,
+    }));
+
+  return analyzeQuoteSyncErrorsFromSnapshots(syncErrors, {
+    config,
+    timestamp,
+    totalPortfolioValue,
+  });
+}
+
+async function gatherInstrumentMarketValues(
+  accounts: Account[],
+  holdingsProvider: Pick<HoldingsService, "getHoldings">,
+): Promise<{ holdingMarketValues: Map<string, number>; totalPortfolioValue: number }> {
+  const holdingMarketValues = new Map<string, number>();
+  let totalPortfolioValue = 0;
+
+  for (const account of accounts) {
+    const holdings = await holdingsProvider.getHoldings(account.id);
+    for (const holding of holdings) {
+      const instrument = holding.instrument;
+      if (!instrument) {
+        continue;
+      }
+      const marketValue = holding.marketValue.base;
+      totalPortfolioValue += marketValue;
+      holdingMarketValues.set(
+        instrument.id,
+        (holdingMarketValues.get(instrument.id) ?? 0) + marketValue,
+      );
+    }
+  }
+
+  return { holdingMarketValues, totalPortfolioValue };
+}
+
+function analyzeQuoteSyncErrorsFromSnapshots(
+  syncErrors: QuoteSyncHealthError[],
+  context: { config: HealthConfig; timestamp: Date; totalPortfolioValue: number },
+): HealthIssue[] {
+  if (syncErrors.length === 0) {
+    return [];
+  }
+
+  const warningErrors = syncErrors.filter((error) => error.errorCount >= 1 && error.errorCount < 6);
+  const persistentErrors = syncErrors.filter((error) => error.errorCount >= 6);
+
+  return [
+    ...buildQuoteSyncIssues({
+      errors: persistentErrors,
+      issueLevel: "error",
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+    ...buildQuoteSyncIssues({
+      errors: warningErrors,
+      issueLevel: "warning",
+      timestamp: context.timestamp,
+      totalPortfolioValue: context.totalPortfolioValue,
+      escalationThreshold: context.config.mvEscalationThreshold,
+    }),
+  ];
+}
+
+function buildQuoteSyncIssues(input: {
+  errors: QuoteSyncHealthError[];
+  issueLevel: "error" | "warning";
+  timestamp: Date;
+  totalPortfolioValue: number;
+  escalationThreshold: number;
+}): HealthIssue[] {
+  if (input.errors.length === 0) {
+    return [];
+  }
+
+  const marketValue = input.errors.reduce((total, error) => total + error.marketValue, 0);
+  const affectedMvPct = input.totalPortfolioValue > 0 ? marketValue / input.totalPortfolioValue : 0;
+  const severity: HealthSeverity =
+    input.issueLevel === "error" && affectedMvPct > input.escalationThreshold
+      ? "CRITICAL"
+      : input.issueLevel === "error"
+        ? "ERROR"
+        : "WARNING";
+  const assetIds = input.errors.map((error) => error.assetId);
+  const dataHash = computeDataHash([...assetIds, severity]);
+
+  return [
+    {
+      id: `quote_sync:${input.issueLevel}:${dataHash}`,
+      severity,
+      category: "PRICE_STALENESS",
+      title: quoteSyncTitle(input.issueLevel, input.errors),
+      message:
+        input.issueLevel === "error"
+          ? "These assets have repeatedly failed to sync prices. Check the symbols or data provider settings."
+          : "Some assets are having trouble syncing prices. This may resolve automatically.",
+      affectedCount: input.errors.length,
+      affectedMvPct,
+      affectedItems: input.errors.map(quoteSyncAffectedItem),
+      fixAction: { id: "retry_sync", label: "Retry Sync", payload: assetIds },
+      navigateAction:
+        input.issueLevel === "error"
+          ? { route: "/settings/market-data", label: "View Market Data" }
+          : undefined,
+      details: quoteSyncDetails(input.errors),
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
+  ];
+}
+
+function quoteSyncTitle(issueLevel: "error" | "warning", errors: QuoteSyncHealthError[]): string {
+  const count = errors.length;
+  if (issueLevel === "error") {
+    return count === 1
+      ? `Quotes sync failing for ${errors[0]?.symbol ?? ""}`
+      : `Quotes sync failing for ${count} assets`;
+  }
+  return count === 1
+    ? `Sync issues for ${errors[0]?.symbol ?? ""}`
+    : `Sync issues for ${count} assets`;
+}
+
+function quoteSyncAffectedItem(error: QuoteSyncHealthError): AffectedItem {
+  return {
+    id: error.assetId,
+    name: error.symbol,
+    symbol: error.symbol,
+    route: `/holdings/${encodeURIComponent(error.assetId)}`,
+  };
+}
+
+function quoteSyncDetails(errors: QuoteSyncHealthError[]): string {
+  const lines = errors.slice(0, 5).map((error, index) => {
+    const message = truncateQuoteSyncError(error.lastError?.trim() || "Unknown error");
+    return `${index + 1}. ${error.symbol} - ${error.errorCount} failures: ${message}`;
+  });
+  if (errors.length > 5) {
+    lines.push(`... and ${errors.length - 5} more`);
+  }
+  return lines.join("\n");
+}
+
+function truncateQuoteSyncError(message: string): string {
+  return message.length > 80 ? message.slice(0, 80) : message;
 }
 
 interface FxHealthPair {

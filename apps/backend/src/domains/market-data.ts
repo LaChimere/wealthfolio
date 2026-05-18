@@ -39,6 +39,14 @@ export interface LatestQuoteSnapshot {
   noQuoteReason?: NoQuoteReason;
 }
 
+export interface QuoteSyncErrorSnapshot {
+  assetId: string;
+  symbol: string;
+  quoteMode: string;
+  errorCount: number;
+  lastError: string | null;
+}
+
 export interface NoQuoteReason {
   code: string;
   message: string;
@@ -106,6 +114,7 @@ export interface MarketDataService {
   getLatestQuotes?(
     assetIds: string[],
   ): Promise<Record<string, LatestQuoteSnapshot>> | Record<string, LatestQuoteSnapshot>;
+  getQuoteSyncErrorSnapshots?(): Promise<QuoteSyncErrorSnapshot[]> | QuoteSyncErrorSnapshot[];
   updateQuote?(symbol: string, quote: Record<string, unknown>): Promise<void> | void;
   deleteQuote?(id: string): Promise<void> | void;
   checkQuotesImport?(
@@ -318,6 +327,10 @@ export function createMarketDataService(
         quoteSyncStateExists,
         now(),
       );
+    },
+
+    getQuoteSyncErrorSnapshots() {
+      return quoteSyncStateExists ? quoteSyncErrorSnapshots(db) : [];
     },
 
     fetchYahooDividends(symbol) {
@@ -1251,6 +1264,40 @@ function readQuoteSyncStates(db: Database, assetIds: string[]): Map<string, Quot
     )
     .all(...assetIds);
   return new Map(rows.map((row) => [row.asset_id, row]));
+}
+
+function quoteSyncErrorSnapshots(db: Database): QuoteSyncErrorSnapshot[] {
+  return db
+    .query<
+      {
+        asset_id: string;
+        symbol: string | null;
+        quote_mode: string | null;
+        error_count: number;
+        last_error: string | null;
+      },
+      []
+    >(
+      `
+        SELECT qss.asset_id,
+          COALESCE(a.display_code, a.instrument_symbol, qss.asset_id) AS symbol,
+          COALESCE(a.quote_mode, 'MARKET') AS quote_mode,
+          qss.error_count,
+          qss.last_error
+        FROM quote_sync_state qss
+        LEFT JOIN assets a ON a.id = qss.asset_id
+        WHERE qss.error_count > 0
+        ORDER BY qss.error_count DESC, qss.asset_id ASC
+      `,
+    )
+    .all()
+    .map((row) => ({
+      assetId: row.asset_id,
+      symbol: row.symbol ?? row.asset_id,
+      quoteMode: row.quote_mode ?? "MARKET",
+      errorCount: row.error_count,
+      lastError: row.last_error,
+    }));
 }
 
 function reconcileQuoteCurrency(quote: Quote, asset: AssetQuoteStateRow): Quote {

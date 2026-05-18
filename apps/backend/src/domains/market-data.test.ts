@@ -263,6 +263,54 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("returns ordered quote sync error snapshots with asset fallbacks", () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db);
+
+    try {
+      insertAsset(db, { id: "manual", display_code: "MAN", quote_mode: "MANUAL" });
+      insertSyncState(db, { asset_id: "manual", error_count: 9, last_error: "manual ignored" });
+      insertSyncState(db, { asset_id: "missing-asset", error_count: 7, last_error: "not found" });
+      insertAsset(db, { id: "aapl", display_code: "AAPL" });
+      insertSyncState(db, { asset_id: "aapl", error_count: 6, last_error: "rate limited" });
+      insertAsset(db, { id: "msft", display_code: null, instrument_symbol: "MSFT" });
+      insertSyncState(db, { asset_id: "msft", error_count: 3, last_error: null });
+
+      expect(service.getQuoteSyncErrorSnapshots?.()).toEqual([
+        {
+          assetId: "manual",
+          symbol: "MAN",
+          quoteMode: "MANUAL",
+          errorCount: 9,
+          lastError: "manual ignored",
+        },
+        {
+          assetId: "missing-asset",
+          symbol: "missing-asset",
+          quoteMode: "MARKET",
+          errorCount: 7,
+          lastError: "not found",
+        },
+        {
+          assetId: "aapl",
+          symbol: "AAPL",
+          quoteMode: "MARKET",
+          errorCount: 6,
+          lastError: "rate limited",
+        },
+        {
+          assetId: "msft",
+          symbol: "MSFT",
+          quoteMode: "MARKET",
+          errorCount: 3,
+          lastError: null,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks quote CSV imports with Rust-compatible validation and asset matching", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
