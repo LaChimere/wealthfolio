@@ -106,30 +106,30 @@
     source testing; FX converter/history and register-pair behavior now have TS
     runtime parity; market-data exchange list, local quote
     history/update/delete, latest quote snapshots, quote CSV check/import, Yahoo
-    dividends, symbol search, resolve-currency, and targeted Yahoo quote-history
-    sync for explicit asset targets now have TS runtime parity; activities
-    import mapping/template storage, duplicate lookup, read-only search,
-    transfer link/unlink, single delete behavior, bounded existing-asset/cash
-    create/update/bulk persistence, symbol-only resolution to existing assets,
-    bounded symbol-based asset creation from explicit metadata, CSV parse, and
-    read-only import asset preview now have TS runtime parity; save-up and
-    retirement goal-plan writes plus save-up preview calculations and save-up
-    goal overview service logic now have bounded TS runtime parity;
-    non-retirement and no-plan retirement summary refresh service logic, guarded
-    valuation-provider HTTP route seams, standalone runtime valuation-map
-    construction, refresh-all summary routing, save-time summary refresh side
-    effects, Rust-compatible retirement input preparation, deterministic
-    retirement calculation primitives, deterministic required-capital/projection
-    engine behavior, deterministic retirement overview assembly, HTTP retirement
-    overview routing, plan-backed retirement summary refresh, retirement
-    projection routing, Monte Carlo routing, scenario-analysis routing,
-    sequence-of-returns routing, stress-tests routing, and decision-sensitivity
-    routing now have bounded TS runtime parity; automatic FX market
-    sync/provider HTTP behavior plus broader all-provider market-data sync
-    execution remain deferred and move to calculation/market-data slices; actual
-    portfolio job execution and event production are explicitly deferred with
-    standalone runtime 501 gates and move to portfolio/calculation slices; TS
-    file-backed secret persistence and native keyring-backed
+    dividends, symbol search, resolve-currency, targeted Yahoo quote-history
+    sync for explicit asset targets, and bounded broad Yahoo sync/history for
+    local assets now have TS runtime parity; activities import mapping/template
+    storage, duplicate lookup, read-only search, transfer link/unlink, single
+    delete behavior, bounded existing-asset/cash create/update/bulk persistence,
+    symbol-only resolution to existing assets, bounded symbol-based asset
+    creation from explicit metadata, CSV parse, and read-only import asset
+    preview now have TS runtime parity; save-up and retirement goal-plan writes
+    plus save-up preview calculations and save-up goal overview service logic
+    now have bounded TS runtime parity; non-retirement and no-plan retirement
+    summary refresh service logic, guarded valuation-provider HTTP route seams,
+    standalone runtime valuation-map construction, refresh-all summary routing,
+    save-time summary refresh side effects, Rust-compatible retirement input
+    preparation, deterministic retirement calculation primitives, deterministic
+    required-capital/projection engine behavior, deterministic retirement
+    overview assembly, HTTP retirement overview routing, plan-backed retirement
+    summary refresh, retirement projection routing, Monte Carlo routing,
+    scenario-analysis routing, sequence-of-returns routing, stress-tests
+    routing, and decision-sensitivity routing now have bounded TS runtime
+    parity; automatic/background FX quote fetching and all-provider market-data
+    sync execution remain deferred and move to calculation/market-data slices;
+    actual portfolio job execution and event production are explicitly deferred
+    with standalone runtime 501 gates and move to portfolio/calculation slices;
+    TS file-backed secret persistence and native keyring-backed
     `WF_SECRET_BACKEND=keyring` are wired into standalone runtime while packaged
     keyring cutover and cross-platform keyring CI remain deferred to a
     runtime/keyring parity slice; AI provider catalog/settings/model-listing
@@ -173,10 +173,10 @@
     installs and frontend manifest-permission enforcement for SDK domain APIs,
     UI registration, and scoped secrets now have TS runtime parity, while add-on
     security scanning, full sandbox isolation, and query-cache hardening are
-    deferred to add-on runtime parity slices; broad/all-provider market-data
+    deferred to add-on runtime parity slices; targeted and bounded broad Yahoo
+    market-data sync now have TS runtime parity, while all-provider/background
     sync and portfolio recalculation behavior remain deferred to
-    market-data/portfolio parity slices, while targeted Yahoo asset sync now has
-    bounded TS runtime parity; activity mutation event production,
+    market-data/portfolio parity slices; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -211,19 +211,19 @@
     price-staleness Health Center checks, bounded quote-sync error checks, and
     bounded FX integrity issue generation, and bounded negative-balance
     data-consistency checks now have TS runtime parity; market-data no-op sync
-    modes and targeted Yahoo provider-backed asset/FX sync now execute in TS
-    while broad/all-provider sync, automatic/background FX quote fetching, and
-    portfolio recalculation remain deferred; remaining calculation-heavy health
-    checks are deferred to health/calculation parity slices; disabled Connect
-    feature-flag responses, local empty-list routes, local broker sync profile
-    persistence, and disabled device-sync route responses now have TS runtime
-    parity, while real Connect token lifecycle, cloud HTTP clients, broker sync
-    orchestration, local sync repositories, subscription entitlement checks,
-    event production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and secret side effects are deferred to
-    Connect/device-sync parity slices.
+    modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync
+    now execute in TS while all-provider/background sync, automatic/background
+    FX quote fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local empty-list routes,
+    local broker sync profile persistence, and disabled device-sync route
+    responses now have TS runtime parity, while real Connect token lifecycle,
+    cloud HTTP clients, broker sync orchestration, local sync repositories,
+    subscription entitlement checks, event production, E2EE enrollment, sync
+    engine, snapshot/upload runtime, background workers, device-sync cloud
+    clients, token lifecycle, team-key operations, key material handling,
+    pairing flows, freshness gate persistence, bootstrap transfer, and secret
+    side effects are deferred to Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -255,7 +255,8 @@ contract:
       Electron/web smoke flows (attach proof).
   - Evidence: standalone runtime smoke now covers HTTP `fetch_fx` -> FX asset
     registration -> targeted Yahoo quote persistence in
-    `apps/backend/src/runtime.test.ts`.
+    `apps/backend/src/runtime.test.ts`, and runtime market-data smoke now covers
+    broad history/incremental sync returning 204 instead of 501.
 - [ ] Capture logs/metrics for performance-sensitive calculation/import slices.
 
 ### Review / Packaging

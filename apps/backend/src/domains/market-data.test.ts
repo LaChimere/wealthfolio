@@ -84,15 +84,15 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("keeps broad market sync deferred while preserving no-op modes", async () => {
+  test("runs broad market sync as a no-op when no local assets qualify", async () => {
     const db = createMarketDataDb();
-    const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => Promise.reject(new Error("fetch should not be called"))) as typeof fetch,
+    });
 
     try {
-      await expect(service.syncHistoryQuotes?.()).rejects.toMatchObject({
-        status: 501,
-        code: "not_implemented",
-      });
+      await expect(service.syncHistoryQuotes?.()).resolves.toBeUndefined();
       await expect(service.syncMarketData?.({ type: "none" })).resolves.toBeUndefined();
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: [] }),
@@ -105,9 +105,147 @@ describe("TS market data domain", () => {
       ).resolves.toBeUndefined();
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: null }),
-      ).rejects.toMatchObject({
-        status: 501,
-        code: "not_implemented",
+      ).resolves.toBeUndefined();
+      await expect(
+        service.syncMarketData?.({ type: "refetch_recent", asset_ids: null, days: 7 }),
+      ).resolves.toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs broad Yahoo market assets while skipping non-Yahoo providers", async () => {
+    const db = createMarketDataDb();
+    const chartSymbols: string[] = [];
+    const fetchImpl = yahooHistoryFetchBySymbol(
+      {
+        AAPL: {
+          result: {
+            meta: { currency: "USD" },
+            timestamp: [1767571200],
+            indicators: { quote: [{ close: [10.5] }] },
+          },
+        },
+      },
+      (symbol) => chartSymbols.push(symbol),
+    );
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-aapl",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+      });
+      insertAsset(db, {
+        id: "asset-msft",
+        display_code: "MSFT",
+        instrument_symbol: "MSFT",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+      insertAsset(db, {
+        id: "manual-asset",
+        quote_mode: "MANUAL",
+        instrument_symbol: "MANUAL",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: null }),
+      ).resolves.toBeUndefined();
+
+      expect(chartSymbols).toEqual(["AAPL"]);
+      expect(readQuoteByDay(db, "asset-aapl", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "10.5",
+      });
+      expect(readSyncState(db, "asset-aapl")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "asset-msft")).toBeNull();
+      expect(readSyncState(db, "manual-asset")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs broad history for inactive referenced assets without catalog quote purges", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetchBySymbol({
+      AAPL: {
+        result: {
+          meta: { currency: "USD" },
+          timestamp: [1767484800],
+          indicators: { quote: [{ close: [12.5] }] },
+        },
+      },
+      MSFT: {
+        result: {
+          meta: { currency: "USD" },
+          timestamp: [1767484800],
+          indicators: { quote: [{ close: [22.5] }] },
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "catalog-asset",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+      });
+      insertQuote(db, {
+        id: "old-catalog-yahoo",
+        asset_id: "catalog-asset",
+        day: "2026-01-01",
+        source: "YAHOO",
+        close: "99",
+        currency: "USD",
+      });
+      insertAsset(db, {
+        id: "inactive-asset",
+        display_code: "MSFT",
+        instrument_symbol: "MSFT",
+        instrument_exchange_mic: "XNAS",
+        is_active: 0,
+      });
+      insertSyncState(db, {
+        asset_id: "inactive-asset",
+        last_synced_at: "2026-01-01T00:00:00.000Z",
+      });
+
+      await expect(service.syncHistoryQuotes?.()).resolves.toBeUndefined();
+
+      expect(readQuote(db, "old-catalog-yahoo")).toMatchObject({
+        source: "YAHOO",
+        close: "99",
+      });
+      expect(readQuoteByDay(db, "catalog-asset", "2026-01-04")).toMatchObject({
+        source: "YAHOO",
+        close: "12.5",
+      });
+      expect(readQuoteByDay(db, "inactive-asset", "2026-01-04")).toMatchObject({
+        source: "YAHOO",
+        close: "22.5",
+      });
+      expect(readSyncState(db, "inactive-asset")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
       });
     } finally {
       db.close();
@@ -1804,6 +1942,50 @@ function yahooHistoryFetch(
           chart: {
             result: result ? [result] : null,
             error,
+          },
+        }),
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+}
+
+function yahooHistoryFetchBySymbol(
+  responses: Record<
+    string,
+    { result?: Record<string, unknown> | null; error?: Record<string, unknown> | null }
+  >,
+  onChartSymbol: (symbol: string) => void = () => {},
+): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "https://fc.yahoo.com") {
+      return Promise.resolve(
+        new Response("", { headers: { "set-cookie": "B=yahoo-history; Path=/; Secure" } }),
+      );
+    }
+    if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+      expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history");
+      return Promise.resolve(new Response("history-crumb"));
+    }
+    if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/")) {
+      expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-history");
+      const parsed = new URL(url);
+      const encodedSymbol = parsed.pathname.split("/").at(-1);
+      const symbol = decodeURIComponent(encodedSymbol ?? "");
+      const response = responses[symbol];
+      if (!response) {
+        throw new Error(`unexpected chart symbol: ${symbol}`);
+      }
+      onChartSymbol(symbol);
+      expect(parsed.searchParams.get("interval")).toBe("1d");
+      expect(parsed.searchParams.get("events")).toBe("history");
+      expect(parsed.searchParams.get("crumb")).toBe("history-crumb");
+      return Promise.resolve(
+        Response.json({
+          chart: {
+            result: response.result ? [response.result] : null,
+            error: response.error ?? null,
           },
         }),
       );

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import { parseCsvRecords } from "../csv";
-import type { MarketSyncMode } from "./portfolio-jobs";
+import { DEFAULT_HISTORY_DAYS, type MarketSyncMode } from "./portfolio-jobs";
 import {
   type QuoteSyncEvent,
   type QuoteSyncOperation,
@@ -146,9 +146,6 @@ export class MarketDataNotImplementedError extends Error {
   }
 }
 
-const MARKET_DATA_SYNC_DEFERRED_MESSAGE =
-  "Market data sync execution is not yet available in the TS backend runtime.";
-
 interface QuoteRow {
   id: string;
   asset_id: string;
@@ -225,6 +222,8 @@ interface AssetMarketSyncRow {
   provider_config: string | null;
   metadata: string | null;
 }
+
+type MarketSyncScope = "targeted" | "broad";
 
 interface YahooHistoricalQuote {
   assetId: string;
@@ -405,14 +404,30 @@ export function createMarketDataService(
     },
 
     async syncHistoryQuotes() {
-      throw marketDataSyncDeferred();
+      await syncMarketDataExecution(
+        db,
+        { type: "backfill_history", asset_ids: null, days: DEFAULT_HISTORY_DAYS },
+        exchangeCatalog,
+        fetchImpl,
+        {
+          get: () => yahooCrumb,
+          set: (crumb) => {
+            yahooCrumb = crumb;
+          },
+          clear: () => {
+            yahooCrumb = null;
+          },
+        },
+        now(),
+        quoteSyncStateExists,
+      );
     },
 
     async syncMarketData(marketSyncMode) {
       if (!marketDataSyncRequiresExecution(marketSyncMode)) {
         return;
       }
-      await syncTargetedMarketData(
+      await syncMarketDataExecution(
         db,
         marketSyncMode,
         exchangeCatalog,
@@ -433,10 +448,6 @@ export function createMarketDataService(
   };
 }
 
-function marketDataSyncDeferred(): MarketDataNotImplementedError {
-  return new MarketDataNotImplementedError(MARKET_DATA_SYNC_DEFERRED_MESSAGE);
-}
-
 function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolean {
   if (marketSyncMode.type === "none") {
     return false;
@@ -444,7 +455,7 @@ function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolea
   return !Array.isArray(marketSyncMode.asset_ids) || marketSyncMode.asset_ids.length > 0;
 }
 
-async function syncTargetedMarketData(
+async function syncMarketDataExecution(
   db: Database,
   marketSyncMode: MarketSyncMode,
   exchangeCatalog: ExchangeCatalog,
@@ -457,10 +468,14 @@ async function syncTargetedMarketData(
   now: Date,
   quoteSyncStateExists: boolean,
 ): Promise<void> {
-  if (marketSyncMode.type === "none" || marketSyncMode.asset_ids === null) {
-    throw marketDataSyncDeferred();
+  if (marketSyncMode.type === "none") {
+    return;
   }
-  const assetIds = dedupe(marketSyncMode.asset_ids);
+  const scope: MarketSyncScope = marketSyncMode.asset_ids === null ? "broad" : "targeted";
+  const assetIds =
+    marketSyncMode.asset_ids === null
+      ? readBroadMarketSyncAssetIds(db, marketSyncMode)
+      : dedupe(marketSyncMode.asset_ids);
   if (assetIds.length === 0) {
     return;
   }
@@ -470,11 +485,12 @@ async function syncTargetedMarketData(
 
   for (const assetId of assetIds) {
     const asset = assets.get(assetId);
-    if (!asset || shouldSkipMarketSyncAsset(asset)) {
+    if (!asset || shouldSkipMarketSyncAsset(asset, marketSyncMode, scope)) {
       continue;
     }
 
-    const provider = effectiveMarketDataProvider(states.get(asset.id) ?? null, asset);
+    const state = states.get(asset.id) ?? null;
+    const provider = effectiveMarketDataProvider(state, asset);
     if (provider !== DEFAULT_MARKET_DATA_PROVIDER) {
       continue;
     }
@@ -504,6 +520,10 @@ async function syncTargetedMarketData(
       marketSyncMode,
       now,
       exchangeCatalog,
+      {
+        scope,
+        state,
+      },
     );
     if (startDate > endDate) {
       updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
@@ -1432,11 +1452,37 @@ function readAssetsForMarketSync(
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-function shouldSkipMarketSyncAsset(asset: AssetMarketSyncRow): boolean {
+function readBroadMarketSyncAssetIds(
+  db: Database,
+  marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
+): string[] {
+  const activeFilter = marketSyncMode.type === "backfill_history" ? "" : "AND is_active != 0";
+  return db
+    .query<{ id: string }, []>(
+      `
+        SELECT id
+        FROM assets
+        WHERE UPPER(quote_mode) = 'MARKET'
+          AND instrument_type IS NOT NULL
+          AND instrument_symbol IS NOT NULL
+          ${activeFilter}
+        ORDER BY id ASC
+      `,
+    )
+    .all()
+    .map((row) => row.id);
+}
+
+function shouldSkipMarketSyncAsset(
+  asset: AssetMarketSyncRow,
+  marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
+  scope: MarketSyncScope,
+): boolean {
   if (asset.quote_mode.toUpperCase() !== "MARKET") {
     return true;
   }
-  if (asset.is_active === 0) {
+  const allowInactive = scope === "broad" && marketSyncMode.type === "backfill_history";
+  if (asset.is_active === 0 && !allowInactive) {
     return true;
   }
   if (asset.instrument_type === null || asset.instrument_symbol === null) {
@@ -1507,6 +1553,7 @@ function marketSyncWindow(
   marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
   now: Date,
   exchangeCatalog: ExchangeCatalog,
+  options: { scope: MarketSyncScope; state: QuoteSyncStateRow | null },
 ): { startDate: string; endDate: string; purgeProviderQuotes: boolean } {
   const endDate = marketEffectiveDate(now, asset.instrument_exchange_mic, exchangeCatalog);
   if (marketSyncMode.type === "refetch_recent") {
@@ -1520,7 +1567,7 @@ function marketSyncWindow(
     return {
       startDate: addDays(endDate, -marketSyncMode.days),
       endDate,
-      purgeProviderQuotes: true,
+      purgeProviderQuotes: shouldPurgeProviderQuotesForBackfill(db, asset.id, options),
     };
   }
 
@@ -1532,6 +1579,37 @@ function marketSyncWindow(
       )
     : addDays(endDate, -QUOTE_HISTORY_BUFFER_DAYS);
   return { startDate, endDate, purgeProviderQuotes: false };
+}
+
+function shouldPurgeProviderQuotesForBackfill(
+  db: Database,
+  assetId: string,
+  options: { scope: MarketSyncScope; state: QuoteSyncStateRow | null },
+): boolean {
+  if (options.scope === "targeted") {
+    return true;
+  }
+  if (options.state?.last_synced_at !== null && options.state?.last_synced_at !== undefined) {
+    return true;
+  }
+  return assetHasActivityReference(db, assetId);
+}
+
+function assetHasActivityReference(db: Database, assetId: string): boolean {
+  if (!tableExists(db, "activities")) {
+    return false;
+  }
+  const row = db
+    .query<{ found: number }, [string]>(
+      `
+        SELECT 1 AS found
+        FROM activities
+        WHERE asset_id = ?
+        LIMIT 1
+      `,
+    )
+    .get(assetId);
+  return row != null;
 }
 
 function readLatestProviderQuoteDay(

@@ -75,6 +75,19 @@ describe("TS backend runtime composition", () => {
             }),
           );
         }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/SHOP.TO?")) {
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: null,
+                error: {
+                  code: "Bad Request",
+                  description: "Data doesn't exist for startDate = 1609718400",
+                },
+              },
+            }),
+          );
+        }
         throw new Error(`unexpected market data fetch: ${url}`);
       }) as typeof fetch,
       repositoryRoot,
@@ -897,19 +910,13 @@ describe("TS backend runtime composition", () => {
         `${server.baseUrl}/api/v1/market-data/sync/history`,
         { method: "POST" },
       );
-      expect(marketHistorySyncResponse.status).toBe(501);
-      await expect(marketHistorySyncResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(marketHistorySyncResponse.status).toBe(204);
       const marketSyncResponse = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refetchAll: false }),
       });
-      expect(marketSyncResponse.status).toBe(501);
-      await expect(marketSyncResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(marketSyncResponse.status).toBe(204);
       const emptyTargetMarketSyncResponse = await fetch(
         `${server.baseUrl}/api/v1/market-data/sync`,
         {

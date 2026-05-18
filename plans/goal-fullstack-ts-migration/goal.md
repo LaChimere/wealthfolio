@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 174
+turns_used: 175
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -1118,6 +1118,14 @@ updated_at: "2026-05-19T00:21:50+08:00"
   pair, uses the composed market-data service to fetch a Yahoo FX quote, and
   persists the quote in SQLite while preserving existing asset-list assertions.
   Focused runtime tests, backend type-check, and full `bun run check` passed.
+- Turn 175: Added bounded broad Yahoo market-data sync execution in the TS
+  runtime: `syncHistoryQuotes` now runs a broad 5-year Yahoo backfill,
+  `/market-data/sync` broad incremental/refetch/backfill no longer return 501
+  for local Yahoo assets, non-Yahoo providers remain skipped, inactive assets
+  are included only for broad history, and broad backfill avoids catalog quote
+  purges without sync/activity references. Focused market-data/runtime tests,
+  type-check, full `bun run check`, rubber-duck plan review, and code review
+  passed.
 
 ## Deferred items
 
@@ -1132,7 +1140,7 @@ updated_at: "2026-05-19T00:21:50+08:00"
   data-consistency checks and targeted Yahoo-backed
   `sync_prices`/`retry_sync`/`fetch_fx` execution now have TS runtime parity,
   while broader classification, remaining data-consistency checks,
-  broad/all-provider market sync, automatic/background FX quote fetching,
+  all-provider/background market sync, automatic/background FX quote fetching,
   remaining affected-item parity, and Rust-generated dismissal-hash carryover
   depend on holdings, quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
@@ -1327,12 +1335,12 @@ updated_at: "2026-05-19T00:21:50+08:00"
   manifest permissions for SDK domain APIs, UI registration, and scoped secrets,
   while archive security scanning, complete browser sandbox isolation, and React
   Query cache access hardening still need dedicated add-on parity slices.
-- Market-data market sync execution and portfolio recalculation side effects
-  remain active follow-ups. reason=exchange metadata, local quote
-  persistence/import, Yahoo dividends/search/resolve have TS runtime coverage,
-  and standalone market-sync routes now return explicit deferred 501s, while
-  sync and recalculation behavior must move with dedicated market-data and
-  portfolio parity slices.
+- Market-data provider breadth and portfolio recalculation side effects remain
+  active follow-ups. reason=exchange metadata, local quote persistence/import,
+  Yahoo dividends/search/resolve, targeted Yahoo sync, and bounded broad Yahoo
+  sync/history have TS runtime coverage, while all-provider/background sync and
+  recalculation behavior must move with dedicated market-data and portfolio
+  parity slices.
 
 ## Blockers
 
