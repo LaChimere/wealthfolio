@@ -202,9 +202,9 @@
     deferred to AI runtime parity slices; device-sync integration for sync
     crypto is deferred to device-sync runtime parity slices; bounded
     account/timezone health status/checks, cache behavior, legacy-classification
-    health issues, classification migration health-fix dispatch,
-    `sync_prices`/`retry_sync` dispatch into the market-data sync seam,
-    `fetch_fx` dispatch into the exchange-rate seam, and targeted
+    health issues and affected items, classification migration health-fix
+    dispatch, `sync_prices`/`retry_sync` dispatch into the market-data sync
+    seam, `fetch_fx` dispatch into the exchange-rate seam, and targeted
     `migrate_classifications` dispatch into the taxonomy migration seam now have
     TS runtime parity; market-data no-op sync modes now return success while
     real provider-backed sync execution remains deferred; calculation-heavy
@@ -1381,6 +1381,15 @@ contract:
   taxonomy legacy migration with selected asset IDs, selected-only taxonomy
   migration/metadata cleanup, missing asset ID no-op handling, standalone
   runtime wiring, and rubber-duck plan review.
+- `pr5-health-legacy-classification-affected-items`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts apps/backend/src/domains/taxonomies.test.ts --timeout 30000`
+  and `bun run --cwd apps/backend type-check -- --pretty false`. Coverage
+  includes internal taxonomy migration details without changing public migration
+  status shape, assets-needing-migration details after targeted migration,
+  Rust-shaped legacy-classification affected items with `/holdings/{id}` route
+  encoding, asset-symbol name fallback, and dismissal hash changes when the
+  affected asset set or already-migrated count changes. Rubber-duck plan review
+  found no blockers.
 - `pr5-health-status-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/runtime.test.ts apps/backend/src/http.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

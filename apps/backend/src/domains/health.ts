@@ -78,7 +78,9 @@ export interface HealthServiceOptions {
   accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
   classificationMigrationProvider?: Pick<
     TaxonomyService,
-    "getMigrationStatus" | "migrateLegacyClassifications"
+    | "getMigrationStatus"
+    | "getLegacyClassificationMigrationDetails"
+    | "migrateLegacyClassifications"
   >;
   exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs">;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
@@ -454,6 +456,32 @@ async function analyzeLegacyClassificationMigration(
   options: HealthServiceOptions,
   timestamp: Date,
 ): Promise<HealthIssue[]> {
+  if (options.classificationMigrationProvider?.getLegacyClassificationMigrationDetails) {
+    const details =
+      await options.classificationMigrationProvider.getLegacyClassificationMigrationDetails();
+    if (details.assetsNeedingMigration.length === 0) {
+      return [];
+    }
+    const affectedItems = details.assetsNeedingMigration.map((asset) => ({
+      id: asset.id,
+      name: asset.name ?? asset.symbol,
+      symbol: asset.symbol,
+      route: `/holdings/${encodeURIComponent(asset.id)}`,
+    }));
+    return [
+      legacyClassificationMigrationIssue({
+        count: details.assetsNeedingMigration.length,
+        dataHash: computeDataHash([
+          "legacy_migration",
+          ...details.assetsNeedingMigration.map((asset) => asset.id).sort(),
+          String(details.assetsAlreadyMigrated),
+        ]),
+        timestamp,
+        affectedItems,
+      }),
+    ];
+  }
+
   if (!options.classificationMigrationProvider?.getMigrationStatus) {
     return [];
   }
@@ -470,24 +498,32 @@ async function analyzeLegacyClassificationMigration(
     String(status.assetsAlreadyMigrated),
   ]);
 
-  return [
-    {
-      id: `classification:legacy_migration:${dataHash}`,
-      severity: "WARNING",
-      category: "CLASSIFICATION",
-      title:
-        count === 1
-          ? "1 asset has legacy classification data"
-          : `${count} assets have legacy classification data`,
-      message:
-        "Some assets have sector/country data from the old format. Migrate to the new taxonomy system for better allocation tracking.",
-      affectedCount: count,
-      fixAction: { id: "migrate_legacy_classifications", label: "Start Migration", payload: null },
-      navigateAction: { route: "/settings/taxonomies", label: "View Classifications" },
-      dataHash,
-      timestamp: timestamp.toISOString(),
-    },
-  ];
+  return [legacyClassificationMigrationIssue({ count, dataHash, timestamp })];
+}
+
+function legacyClassificationMigrationIssue(input: {
+  count: number;
+  dataHash: string;
+  timestamp: Date;
+  affectedItems?: AffectedItem[];
+}): HealthIssue {
+  return {
+    id: `classification:legacy_migration:${input.dataHash}`,
+    severity: "WARNING",
+    category: "CLASSIFICATION",
+    title:
+      input.count === 1
+        ? "1 asset has legacy classification data"
+        : `${input.count} assets have legacy classification data`,
+    message:
+      "Some assets have sector/country data from the old format. Migrate to the new taxonomy system for better allocation tracking.",
+    affectedCount: input.count,
+    affectedItems: input.affectedItems,
+    fixAction: { id: "migrate_legacy_classifications", label: "Start Migration", payload: null },
+    navigateAction: { route: "/settings/taxonomies", label: "View Classifications" },
+    dataHash: input.dataHash,
+    timestamp: input.timestamp.toISOString(),
+  };
 }
 
 function filterDismissedIssues(repository: HealthRepository, issues: HealthIssue[]): HealthIssue[] {

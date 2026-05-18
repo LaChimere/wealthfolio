@@ -658,11 +658,22 @@ describe("TS taxonomies domain", () => {
       seedClassificationTaxonomies(db);
       seedAsset(db, {
         id: "selected",
+        name: "Apple Inc.",
+        displayCode: "AAPL",
         metadata: { legacy: { sectors: [{ name: "Technology", weight: 1 }] } },
       });
       seedAsset(db, {
         id: "unselected",
+        displayCode: "MSFT",
         metadata: { legacy: { countries: [{ name: "United States", weight: 1 }] } },
+      });
+
+      await expect(service.getLegacyClassificationMigrationDetails?.()).resolves.toEqual({
+        assetsNeedingMigration: [
+          { id: "selected", symbol: "AAPL", name: "Apple Inc." },
+          { id: "unselected", symbol: "MSFT", name: null },
+        ],
+        assetsAlreadyMigrated: 0,
       });
 
       await expect(
@@ -685,6 +696,10 @@ describe("TS taxonomies domain", () => {
       expect(readAssetMetadata(db, "selected")).toBeNull();
       expect(readAssetMetadata(db, "unselected")).toEqual({
         legacy: { countries: [{ name: "United States", weight: 1 }] },
+      });
+      await expect(service.getLegacyClassificationMigrationDetails?.()).resolves.toEqual({
+        assetsNeedingMigration: [{ id: "unselected", symbol: "MSFT", name: null }],
+        assetsAlreadyMigrated: 0,
       });
 
       await expect(service.migrateLegacyClassifications?.([])).resolves.toEqual({

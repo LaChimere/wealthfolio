@@ -105,6 +105,17 @@ export interface ClassificationMigrationStatus {
   assetsAlreadyMigrated: number;
 }
 
+export interface ClassificationMigrationAsset {
+  id: string;
+  symbol: string;
+  name: string | null;
+}
+
+export interface ClassificationMigrationDetails {
+  assetsNeedingMigration: ClassificationMigrationAsset[];
+  assetsAlreadyMigrated: number;
+}
+
 export interface ClassificationMigrationResult {
   sectorsMigrated: number;
   countriesMigrated: number;
@@ -158,6 +169,7 @@ export interface TaxonomyRepository extends TaxonomyReadRepository {
   updateCategory(category: TaxonomyCategory): TaxonomyCategory;
   deleteCategory(taxonomyId: string, categoryId: string): number;
   getMigrationStatus(): ClassificationMigrationStatus;
+  getLegacyClassificationMigrationDetails(): ClassificationMigrationDetails;
   migrateLegacyClassifications(assetIds?: readonly string[]): ClassificationMigrationResult;
 }
 
@@ -185,6 +197,9 @@ export interface TaxonomyService extends TaxonomyReadService {
   importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
   exportTaxonomyJson(id: string): string;
   getMigrationStatus?(): Promise<ClassificationMigrationStatus> | ClassificationMigrationStatus;
+  getLegacyClassificationMigrationDetails?():
+    | Promise<ClassificationMigrationDetails>
+    | ClassificationMigrationDetails;
   migrateLegacyClassifications?(
     assetIds?: readonly string[],
   ): Promise<ClassificationMigrationResult> | ClassificationMigrationResult;
@@ -603,6 +618,9 @@ export function createTaxonomyRepository(
     getMigrationStatus() {
       return getClassificationMigrationStatus(db);
     },
+    getLegacyClassificationMigrationDetails() {
+      return getClassificationMigrationDetails(db);
+    },
     migrateLegacyClassifications(assetIds) {
       return migrateLegacyClassifications(db, this, assetIds);
     },
@@ -714,6 +732,9 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
     },
     async getMigrationStatus() {
       return repository.getMigrationStatus();
+    },
+    async getLegacyClassificationMigrationDetails() {
+      return repository.getLegacyClassificationMigrationDetails();
     },
     async migrateLegacyClassifications(assetIds) {
       return repository.migrateLegacyClassifications(assetIds);
@@ -872,10 +893,19 @@ function assetTaxonomyAssignmentFromRow(row: AssetTaxonomyAssignmentRow): AssetT
 }
 
 function getClassificationMigrationStatus(db: Database): ClassificationMigrationStatus {
+  const details = getClassificationMigrationDetails(db);
+  return {
+    needed: details.assetsNeedingMigration.length > 0,
+    assetsWithLegacyData: details.assetsNeedingMigration.length,
+    assetsAlreadyMigrated: details.assetsAlreadyMigrated,
+  };
+}
+
+function getClassificationMigrationDetails(db: Database): ClassificationMigrationDetails {
   const assets = readClassificationAssets(db);
   const gicsTaxonomy = readTaxonomyWithCategoriesNullable(db, "industries_gics");
   const regionsTaxonomy = readTaxonomyWithCategoriesNullable(db, "regions");
-  let assetsWithLegacyData = 0;
+  const assetsNeedingMigration: ClassificationMigrationAsset[] = [];
   let assetsAlreadyMigrated = 0;
 
   for (const asset of assets) {
@@ -895,15 +925,18 @@ function getClassificationMigrationStatus(db: Database): ClassificationMigration
       assignments.some((assignment) => assignment.taxonomyId === regionsTaxonomy.taxonomy.id);
 
     if ((hasLegacySectors && !hasGicsAssignment) || (hasLegacyCountries && !hasRegionsAssignment)) {
-      assetsWithLegacyData += 1;
+      assetsNeedingMigration.push({
+        id: asset.id,
+        symbol: asset.displayCode ?? "",
+        name: asset.name,
+      });
     } else if (hasGicsAssignment || hasRegionsAssignment) {
       assetsAlreadyMigrated += 1;
     }
   }
 
   return {
-    needed: assetsWithLegacyData > 0,
-    assetsWithLegacyData,
+    assetsNeedingMigration,
     assetsAlreadyMigrated,
   };
 }

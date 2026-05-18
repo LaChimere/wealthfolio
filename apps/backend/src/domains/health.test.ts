@@ -186,6 +186,66 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds legacy classification affected items from taxonomy migration details", async () => {
+    const db = createHealthDb();
+    let assetsNeedingMigration = [
+      { id: "asset:one", symbol: "AAPL", name: null },
+      { id: "asset/two", symbol: "MSFT", name: "Microsoft" },
+    ];
+    let assetsAlreadyMigrated = 1;
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      classificationMigrationProvider: {
+        getMigrationStatus: () => {
+          throw new Error("details provider should avoid a second status scan");
+        },
+        getLegacyClassificationMigrationDetails: () => ({
+          assetsNeedingMigration,
+          assetsAlreadyMigrated,
+        }),
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      const firstStatus = await service.runHealthChecks?.("UTC");
+      const firstIssue = firstStatus?.issues[0];
+      expect(firstIssue).toMatchObject({
+        id: expect.stringMatching(/^classification:legacy_migration:/),
+        affectedCount: 2,
+        affectedItems: [
+          {
+            id: "asset:one",
+            name: "AAPL",
+            symbol: "AAPL",
+            route: "/holdings/asset%3Aone",
+          },
+          {
+            id: "asset/two",
+            name: "Microsoft",
+            symbol: "MSFT",
+            route: "/holdings/asset%2Ftwo",
+          },
+        ],
+      });
+
+      assetsNeedingMigration = [
+        { id: "asset:three", symbol: "GOOG", name: null },
+        { id: "asset/two", symbol: "MSFT", name: "Microsoft" },
+      ];
+      const changedAssetStatus = await service.runHealthChecks?.("UTC");
+      expect(changedAssetStatus?.issues[0]?.dataHash).not.toBe(firstIssue?.dataHash);
+
+      assetsAlreadyMigrated = 2;
+      const changedMigratedStatus = await service.runHealthChecks?.("UTC");
+      expect(changedMigratedStatus?.issues[0]?.dataHash).not.toBe(
+        changedAssetStatus?.issues[0]?.dataHash,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches Rust timezone validity and offset-equivalence behavior", async () => {
     const db = createHealthDb();
     try {

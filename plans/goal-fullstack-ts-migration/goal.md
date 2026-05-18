@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 166
+turns_used: 167
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-18T22:08:26+08:00"
+updated_at: "2026-05-18T22:31:56+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1065,6 +1065,12 @@ updated_at: "2026-05-18T22:08:26+08:00"
   successful migration, and preserve the existing full
   `migrate_legacy_classifications` path. Focused health/taxonomy/runtime/http
   tests, backend type-check, and rubber-duck plan review passed.
+- Turn 167: Added Rust-shaped affected items for legacy-classification health
+  issues in the TS runtime: taxonomy now exposes internal migration details with
+  assets needing migration, health issues include `/holdings/{id}` affected-item
+  routes with asset-symbol fallback names, and dismissal hashes now include the
+  affected asset set when details are available. Focused health/taxonomy tests,
+  backend type-check, and rubber-duck plan review passed.
 
 ## Deferred items
 
@@ -1073,12 +1079,12 @@ updated_at: "2026-05-18T22:08:26+08:00"
   legacy-classification health issue generation, `sync_prices`/`retry_sync` fix
   dispatch into the market-data sync seam, `fetch_fx` dispatch into the
   exchange-rate seam, targeted `migrate_classifications` dispatch into the
-  taxonomy migration seam, and no-op market sync modes now have TS runtime
-  parity, while price staleness, quote sync, FX issue generation, broader
-  classification, data-consistency checks, real provider-backed market sync/FX
-  quote execution, full affected-item parity, and Rust-generated dismissal-hash
-  carryover depend on holdings, quotes, FX, assets, valuation, and market sync
-  parity.
+  taxonomy migration seam, legacy-classification affected items, and no-op
+  market sync modes now have TS runtime parity, while price staleness, quote
+  sync, FX issue generation, broader classification, data-consistency checks,
+  real provider-backed market sync/FX quote execution, remaining affected-item
+  parity, and Rust-generated dismissal-hash carryover depend on holdings,
+  quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the
