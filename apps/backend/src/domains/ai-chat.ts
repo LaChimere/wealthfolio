@@ -627,7 +627,9 @@ function isSupportedTextAttachment(attachment: AiChatAttachment): boolean {
 }
 
 function providerSupportsMultimodalAttachments(providerId: string): boolean {
-  return ["anthropic", "google", "gemini"].includes(providerId);
+  return ["anthropic", "google", "gemini", "openai", "groq", "openrouter", "ollama"].includes(
+    providerId,
+  );
 }
 
 function multimodalAttachmentMediaType(
@@ -636,7 +638,7 @@ function multimodalAttachmentMediaType(
 ): string | null {
   const contentType = normalizeContentType(attachment.contentType);
   if (contentType === "application/pdf") {
-    return "application/pdf";
+    return ["anthropic", "google", "gemini"].includes(providerId) ? "application/pdf" : null;
   }
   const normalized =
     contentType === "image/jpg"
@@ -644,11 +646,24 @@ function multimodalAttachmentMediaType(
       : contentType.startsWith("image/")
         ? contentType
         : "";
-  const allowed =
-    providerId === "anthropic"
-      ? new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
-      : new Set(["image/png", "image/jpeg", "image/webp"]);
+  const allowed = multimodalImageMediaTypes(providerId);
   return allowed.has(normalized) ? normalized : null;
+}
+
+function multimodalImageMediaTypes(providerId: string): Set<string> {
+  switch (providerId) {
+    case "anthropic":
+    case "openai":
+      return new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+    case "google":
+    case "gemini":
+    case "groq":
+    case "openrouter":
+    case "ollama":
+      return new Set(["image/png", "image/jpeg", "image/webp"]);
+    default:
+      return new Set();
+  }
 }
 
 function base64AttachmentData(attachment: AiChatAttachment, mediaType: string): string {
@@ -1727,7 +1742,7 @@ async function* streamOpenAiCompatibleSegments(
     },
     body: JSON.stringify({
       model: providerConfig.modelId,
-      messages: openAiMessages(messages),
+      messages: openAiMessages(messages, providerConfig.providerId),
       stream: true,
       ...(tools.length > 0 ? { tools: openAiToolSpecs(tools), tool_choice: "auto" } : {}),
       ...openAiTuningBody(providerConfig),
@@ -2135,7 +2150,10 @@ function objectToolParameters(parameters: Record<string, unknown>): Record<strin
     : { type: "object", properties: {}, additionalProperties: false };
 }
 
-function openAiMessages(messages: ProviderChatMessage[]): Record<string, unknown>[] {
+function openAiMessages(
+  messages: ProviderChatMessage[],
+  providerId: string,
+): Record<string, unknown>[] {
   return messages.map((message) => {
     if (message.role === "tool") {
       return {
@@ -2146,7 +2164,10 @@ function openAiMessages(messages: ProviderChatMessage[]): Record<string, unknown
     }
     const serialized: Record<string, unknown> = {
       role: message.role,
-      content: message.toolCalls && message.toolCalls.length > 0 ? null : message.content,
+      content:
+        message.toolCalls && message.toolCalls.length > 0
+          ? null
+          : openAiMessageContent(message, providerId),
     };
     if (message.toolCalls && message.toolCalls.length > 0) {
       serialized.tool_calls = message.toolCalls.map((toolCall) => ({
@@ -2160,6 +2181,43 @@ function openAiMessages(messages: ProviderChatMessage[]): Record<string, unknown
     }
     return serialized;
   });
+}
+
+function openAiMessageContent(
+  message: ProviderChatMessage,
+  providerId: string,
+): string | Record<string, unknown>[] | null {
+  const imageParts = openAiAttachmentParts(message.attachments ?? [], providerId);
+  if (imageParts.length === 0) {
+    return message.content;
+  }
+  const contentParts: Record<string, unknown>[] = [];
+  if (message.content.trim()) {
+    contentParts.push({ type: "text", text: message.content });
+  }
+  contentParts.push(...imageParts);
+  return contentParts.length > 0 ? contentParts : null;
+}
+
+function openAiAttachmentParts(
+  attachments: AiChatAttachment[],
+  providerId: string,
+): Record<string, unknown>[] {
+  return attachments
+    .filter(isBinaryAttachment)
+    .map((attachment): Record<string, unknown> | null => {
+      const mediaType = multimodalAttachmentMediaType(attachment, providerId);
+      if (!mediaType) {
+        return null;
+      }
+      return {
+        type: "image_url",
+        image_url: {
+          url: `data:${mediaType};base64,${base64AttachmentData(attachment, mediaType)}`,
+        },
+      };
+    })
+    .filter((part): part is Record<string, unknown> => part !== null);
 }
 
 function openAiToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {
@@ -2186,6 +2244,10 @@ function ollamaMessages(messages: ProviderChatMessage[]): Record<string, unknown
       role: message.role,
       content: message.content,
     };
+    const images = ollamaAttachmentImages(message.attachments ?? []);
+    if (images.length > 0) {
+      serialized.images = images;
+    }
     if (message.toolCalls && message.toolCalls.length > 0) {
       serialized.tool_calls = message.toolCalls.map((toolCall) => ({
         id: toolCall.id,
@@ -2197,6 +2259,16 @@ function ollamaMessages(messages: ProviderChatMessage[]): Record<string, unknown
     }
     return serialized;
   });
+}
+
+function ollamaAttachmentImages(attachments: AiChatAttachment[]): string[] {
+  return attachments
+    .filter(isBinaryAttachment)
+    .map((attachment): string | null => {
+      const mediaType = multimodalAttachmentMediaType(attachment, "ollama");
+      return mediaType ? base64AttachmentData(attachment, mediaType) : null;
+    })
+    .filter((data): data is string => data !== null);
 }
 
 function ollamaToolSpecs(tools: EffectiveAiChatTool[]): Record<string, unknown>[] {

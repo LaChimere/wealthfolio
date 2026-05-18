@@ -19,13 +19,14 @@ built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
 `search_activities`, `get_performance`, `get_income`, `get_valuation_history`,
 `get_asset_allocation`, `get_health_status`, `record_activity`,
 `record_activities`, and `import_csv` tools, validated text/CSV attachment
-content injected into the provider prompt, and Anthropic/Gemini image/PDF
-attachments sent as native media parts while persisting only attachment filename
-markers. It preserves the Rust-shaped NDJSON event contract (`system`,
-`textDelta`, `reasoningDelta`, `toolCall`, `toolResult`, `threadTitleUpdated`,
-`done`, `error`) and persists user/assistant messages, but OpenAI-compatible and
-Ollama multimodal attachment support remains deferred until those provider paths
-can send provider-native media payloads safely.
+content injected into the provider prompt, Anthropic/Gemini image/PDF
+attachments sent as native media parts, and OpenAI-compatible/Ollama image
+attachments sent as provider-native media payloads while persisting only
+attachment filename markers. It preserves the Rust-shaped NDJSON event contract
+(`system`, `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`,
+`threadTitleUpdated`, `done`, `error`) and persists user/assistant messages, but
+OpenAI-compatible/Ollama PDF attachment support remains deferred until those
+provider paths support safe native PDF payloads.
 
 ## Architecture Diagram
 

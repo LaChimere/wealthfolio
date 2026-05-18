@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 161
+turns_used: 162
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -1032,6 +1032,14 @@ updated_at: "2026-05-18T20:25:57+08:00"
   CLI `security -w <secret>` path; a second review found no blocking concerns.
   Focused secrets/runtime tests, a native keyring probe, backend type-check, and
   full `bun run check` passed.
+- Turn 162: Added OpenAI-compatible and Ollama image attachment payload support
+  to the TS AI chat loop: OpenAI-compatible providers send validated images as
+  `image_url` content parts, Ollama sends validated images in `images` arrays,
+  provider vision/media allowlists still reject unsupported images and PDFs,
+  `image/jpg` normalizes to `image/jpeg`, data URL prefixes are stripped or
+  reconstructed safely, and persisted chat rows keep only attachment filename
+  markers. Focused AI chat tests and backend type-check passed after rubber-duck
+  plan review.
 
 ## Deferred items
 
@@ -1092,16 +1100,18 @@ updated_at: "2026-05-18T20:25:57+08:00"
   desktop cutover and OS-provider validation across release targets still need a
   dedicated runtime/keyring slice.
 - AI chat tool execution, richer provider orchestration, and multimodal
-  image/PDF/binary attachment behavior remain active follow-ups. reason=AI
-  provider catalog/settings/model listing, local thread/message/tag persistence,
+  PDF/binary attachment behavior remain active follow-ups. reason=AI provider
+  catalog/settings/model listing, local thread/message/tag persistence,
   sync_outbox callbacks for local AI chat mutations, native/fallback
   text/reasoning streaming, generated thread titles, OpenAI-compatible/Ollama
   injected tool-call execution, built-in `get_accounts`, `get_holdings`,
   `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
   `get_income`, `get_valuation_history`, `get_asset_allocation`, and
-  `get_health_status`, and bounded text/CSV attachment prompt injection now have
-  TS runtime parity, while the remaining built-in portfolio tool wiring belongs
-  in dedicated AI runtime slices.
+  `get_health_status`, bounded text/CSV attachment prompt injection,
+  Anthropic/Gemini image/PDF media payloads, and OpenAI-compatible/Ollama image
+  payloads now have TS runtime parity, while provider-native PDF support for
+  OpenAI-compatible/Ollama and richer orchestration belong in dedicated AI
+  runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can
@@ -1170,12 +1180,14 @@ updated_at: "2026-05-18T20:25:57+08:00"
   device-sync push/pull runtime wiring, and portfolio recalculation side effects
   remain active follow-ups for dedicated activities/import/device-sync/portfolio
   parity slices.
-- AI chat tool execution, multimodal provider behavior, and full tool-result
+- AI chat tool execution, multimodal PDF provider behavior, and full tool-result
   side effects remain active follow-ups. reason=local thread/message
   persistence, tool-result mutation, tag persistence, sync callbacks, text-only
   provider streaming, `<think>` reasoning deltas, generated thread titles, and
-  bounded text/CSV attachment prompt injection now have TS runtime parity, while
-  richer orchestration must move with dedicated AI runtime parity slices.
+  bounded text/CSV attachment prompt injection, Anthropic/Gemini image/PDF
+  payloads, and OpenAI-compatible/Ollama image payloads now have TS runtime
+  parity, while richer orchestration must move with dedicated AI runtime parity
+  slices.
 - Device-sync integration for sync crypto remains an active follow-up.
   reason=this slice adds the local TS crypto primitives, while cloud/client key
   material side effects must move with dedicated device-sync runtime slices.

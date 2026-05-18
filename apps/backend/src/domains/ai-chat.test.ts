@@ -1680,6 +1680,124 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("sends OpenAI-compatible image attachments as image_url parts", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-vision",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "Reviewed the image." } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Review screenshot",
+          attachments: [
+            {
+              name: "scan.jpg",
+              contentType: "image/jpg",
+              data: "data:image/jpg;base64,aGVs",
+            },
+          ],
+        }),
+      );
+
+      const userMessage = (fetchBodies[0]?.messages as Array<Record<string, unknown>>)[1];
+      expect(userMessage?.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("Review screenshot"),
+        },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/jpeg;base64,aGVs" },
+        },
+      ]);
+      expect(String(JSON.stringify(userMessage?.content))).not.toContain("data:image/jpg");
+
+      const threadId = String(events[0]?.threadId);
+      const persistedMessages = service.getMessages(threadId);
+      expect(persistedMessages[0]).toMatchObject({
+        role: "user",
+        content: textContent("Review screenshot\n📎 scan.jpg"),
+      });
+      expect(JSON.stringify(persistedMessages[0]?.content)).not.toContain("aGVs");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("sends Ollama image attachments as image arrays", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llava",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        return streamResponse([
+          '{"message":{"content":"Reviewed the local image."},"done":false}\n',
+          '{"done":true}\n',
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Review local scan",
+          attachments: [
+            { name: "scan.png", contentType: "image/png", data: "data:image/png;base64,aGVs" },
+          ],
+        }),
+      );
+
+      const userMessage = (fetchBodies[0]?.messages as Array<Record<string, unknown>>)[1];
+      expect(userMessage).toMatchObject({
+        role: "user",
+        content: expect.stringContaining("Review local scan"),
+        images: ["aGVs"],
+      });
+      expect(String(JSON.stringify(userMessage))).not.toContain("data:image/png");
+
+      const threadId = String(events[0]?.threadId);
+      const persistedMessages = service.getMessages(threadId);
+      expect(persistedMessages[0]).toMatchObject({
+        role: "user",
+        content: textContent("Review local scan\n📎 scan.png"),
+      });
+      expect(JSON.stringify(persistedMessages[0]?.content)).not.toContain("aGVs");
+    } finally {
+      db.close();
+    }
+  });
+
   test("sends Anthropic image and PDF attachments as native media blocks", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
@@ -1863,6 +1981,27 @@ describe("TS AI chat domain", () => {
         capabilities: { tools: false, thinking: false, vision: true, streaming: true },
       }),
     });
+    const openAiPdfDb = createAiChatDb();
+    const openAiPdfService = createAiChatService(openAiPdfDb, {
+      aiProviderService: createProviderResolver({
+        providerId: "openai",
+        modelId: "gpt-vision",
+        providerType: "api",
+        baseUrl: "https://api.openai.test",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+    });
+    const ollamaPdfDb = createAiChatDb();
+    const ollamaPdfService = createAiChatService(ollamaPdfDb, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llava",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+    });
 
     try {
       await expect(
@@ -1877,9 +2016,21 @@ describe("TS AI chat domain", () => {
           attachments: [{ name: "scan.svg", contentType: "image/svg+xml", data: "aGVsbG8=" }],
         }),
       ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      for (const service of [openAiPdfService, ollamaPdfService]) {
+        await expect(
+          service.sendMessage({
+            content: "Read PDF",
+            attachments: [
+              { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+            ],
+          }),
+        ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      }
     } finally {
       visionDisabledDb.close();
       unsupportedTypeDb.close();
+      openAiPdfDb.close();
+      ollamaPdfDb.close();
     }
   });
 
