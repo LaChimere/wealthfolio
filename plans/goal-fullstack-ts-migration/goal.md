@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 160
+turns_used: 161
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-17T23:50:55+08:00"
+updated_at: "2026-05-18T20:25:57+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1024,6 +1024,14 @@ updated_at: "2026-05-17T23:50:55+08:00"
   provider/media combinations fail before chat rows are created. Backend
   type-check and focused AI chat/runtime/http tests passed after rubber-duck
   plan review.
+- Turn 161: Wired TS `WF_SECRET_BACKEND=keyring` startup to a native keyring
+  secret service using `@napi-rs/keyring`, Rust-compatible desktop service IDs,
+  the `default` username, `WF_SECRET_NAMESPACE` normalization, missing-entry
+  null/idempotent delete behavior, and explicit native keyring errors without
+  disk fallback. Rubber-duck review caught and the slice removed the insecure
+  CLI `security -w <secret>` path; a second review found no blocking concerns.
+  Focused secrets/runtime tests, a native keyring probe, backend type-check, and
+  full `bun run check` passed.
 
 ## Deferred items
 
@@ -1078,9 +1086,11 @@ updated_at: "2026-05-17T23:50:55+08:00"
   portfolio jobs still depend on market sync, holdings, snapshot, valuation,
   account, health, and FX service parity beyond route-level job enqueue and SSE
   transport semantics.
-- Real keyring integration remains an active follow-up. reason=file-backed
-  secret persistence now has TS runtime parity, while OS keyring support must
-  move with a dedicated runtime/keyring parity slice.
+- Packaged keyring cutover and cross-platform keyring CI remain active
+  follow-ups. reason=file-backed secret persistence and native
+  `WF_SECRET_BACKEND=keyring` now have TS runtime parity, while production
+  desktop cutover and OS-provider validation across release targets still need a
+  dedicated runtime/keyring slice.
 - AI chat tool execution, richer provider orchestration, and multimodal
   image/PDF/binary attachment behavior remain active follow-ups. reason=AI
   provider catalog/settings/model listing, local thread/message/tag persistence,

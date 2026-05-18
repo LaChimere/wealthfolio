@@ -2025,17 +2025,20 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("fails startup explicitly when TS runtime keyring secrets are requested", () => {
+  test("wires keyring secrets when requested", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
-    expect(() =>
-      createSqliteBackedBackendServices({
-        appDataDir,
-        env: { WF_SECRET_BACKEND: "keyring" },
-        repositoryRoot,
-        secretKey: config.secretKey,
-      }),
-    ).toThrow("WF_SECRET_BACKEND=keyring is not yet available in the TS backend runtime");
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: { WF_SECRET_BACKEND: "keyring" },
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    try {
+      expect(runtime.options.secretService).toBeDefined();
+    } finally {
+      runtime.close();
+    }
   });
 
   test("wires goal valuation routes to latest SQLite account valuations", async () => {

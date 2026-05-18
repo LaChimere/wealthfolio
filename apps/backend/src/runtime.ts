@@ -40,7 +40,11 @@ import {
 } from "./domains/market-data-providers";
 import { createDeferredPortfolioJobService } from "./domains/portfolio-jobs";
 import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
-import { createFileSecretService, deriveSecretsEncryptionKey } from "./domains/secrets";
+import {
+  createFileSecretService,
+  createKeyringSecretService,
+  deriveSecretsEncryptionKey,
+} from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import { createSyncCryptoService } from "./domains/sync-crypto";
 import {
@@ -463,7 +467,9 @@ function createRuntimeSecretService(runtimeOptions: {
 }): BackendRequestHandlerOptions["secretService"] {
   const backend = parseSecretBackend(runtimeOptions.env.WF_SECRET_BACKEND);
   if (backend === "keyring") {
-    throw new Error("WF_SECRET_BACKEND=keyring is not yet available in the TS backend runtime");
+    return createKeyringSecretService({
+      namespace: runtimeOptions.env.WF_SECRET_NAMESPACE,
+    });
   }
   if (!runtimeOptions.secretKey) {
     return undefined;

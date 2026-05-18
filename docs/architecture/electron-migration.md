@@ -96,10 +96,11 @@ database:
 Packaged desktop secrets continue using the same Rust keyring namespace as
 earlier desktop releases:
 
-- service key: `wealthfolio_core::secrets::format_service_id(service)`;
+- service key: `wealthfolio_<lowercase service>`;
 - username: `default`;
-- backend: the Rust `keyring` crate through the shared
-  `wealthfolio-desktop-secrets` crate.
+- backend: Rust uses the `keyring` crate through the shared
+  `wealthfolio-desktop-secrets` crate; the TypeScript/Bun runtime uses the
+  `@napi-rs/keyring` native binding.
 
 This shared namespace is intentional for migration continuity: Electron can read
 the same existing keyring entries written by earlier desktop releases.
@@ -109,11 +110,11 @@ Development secrets use `wealthfolio_dev_<service>` keyring service IDs through
 
 The server file-backed secret store remains valid for web/self-hosted mode and
 is still the default when `WF_SECRET_BACKEND` is unset or set to `file`.
-`WF_SECRET_BACKEND=keyring` is a desktop sidecar mode and requires a server
-binary compiled with the `keyring-backend` Cargo feature. On Linux, the OS
-keyring backend requires a working desktop secret-service provider/session; if
-that provider is unavailable, secret reads/writes surface the keyring error
-instead of falling back to disk.
+`WF_SECRET_BACKEND=keyring` is a desktop mode. Rust sidecars require a server
+binary compiled with the `keyring-backend` Cargo feature; the TS runtime now
+wires the same service IDs through the native keyring binding. Unavailable OS
+keyring providers or native bindings surface errors instead of falling back to
+disk.
 
 ## Frontend adapter strategy
 

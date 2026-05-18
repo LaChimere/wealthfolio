@@ -6,8 +6,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { hkdfSync, randomBytes } from "node:crypto";
+import type { Entry as NativeKeyringEntry } from "@napi-rs/keyring";
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 
@@ -24,10 +26,26 @@ export interface FileSecretServiceOptions {
   randomBytes?: (length: number) => Uint8Array;
 }
 
+export interface KeyringSecretServiceOptions {
+  namespace?: string | null;
+  createEntry?: KeyringEntryFactory;
+}
+
+export interface KeyringEntry {
+  setPassword(secret: string): void;
+  getPassword(): string | null;
+  deletePassword(): boolean;
+}
+
+export type KeyringEntryFactory = (service: string, username: string) => KeyringEntry;
+
 export const SECRET_SERVICE_PREFIX = "wealthfolio_";
+export const SECRET_ENTRY_USERNAME = "default";
 
 const CURRENT_VERSION = 1;
 const CHACHA20_POLY1305_NONCE_LENGTH = 12;
+const require = createRequire(import.meta.url);
+let keyringModule: typeof import("@napi-rs/keyring") | undefined;
 
 interface PlainSecrets {
   version: number;
@@ -77,6 +95,51 @@ export function formatSecretServiceId(service: string): string {
   return `${SECRET_SERVICE_PREFIX}${service.toLowerCase()}`;
 }
 
+export function formatDesktopSecretServiceId(service: string, namespace?: string | null): string {
+  const serviceId = formatSecretServiceId(service);
+  const normalizedNamespace = normalizeSecretNamespace(namespace);
+  if (!normalizedNamespace) {
+    return serviceId;
+  }
+  const serviceSuffix = serviceId.startsWith(SECRET_SERVICE_PREFIX)
+    ? serviceId.slice(SECRET_SERVICE_PREFIX.length)
+    : serviceId;
+  return `${SECRET_SERVICE_PREFIX}${normalizedNamespace}_${serviceSuffix}`;
+}
+
+export function createKeyringSecretService(
+  options: KeyringSecretServiceOptions = {},
+): SecretService {
+  const createEntry = options.createEntry ?? createNativeKeyringEntry;
+  const entryFor = (secretKey: string) =>
+    createEntry(formatDesktopSecretServiceId(secretKey, options.namespace), SECRET_ENTRY_USERNAME);
+
+  return {
+    setSecret(secretKey, secret) {
+      entryFor(secretKey).setPassword(secret);
+    },
+    getSecret(secretKey) {
+      try {
+        return entryFor(secretKey).getPassword();
+      } catch (error) {
+        if (isKeychainNoEntryError(error)) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    deleteSecret(secretKey) {
+      try {
+        entryFor(secretKey).deletePassword();
+      } catch (error) {
+        if (!isKeychainNoEntryError(error)) {
+          throw error;
+        }
+      }
+    },
+  };
+}
+
 function migrateRawKeySecretsIfNeeded(
   filePath: string,
   encryptionKey: Buffer | undefined,
@@ -102,6 +165,53 @@ function migrateRawKeySecretsIfNeeded(
     return;
   }
   persistSecretStore(filePath, encryptionKey, migrated, randomByteSource);
+}
+
+function createNativeKeyringEntry(service: string, username: string): NativeKeyringEntry {
+  const module = loadKeyringModule();
+  return new module.Entry(service, username);
+}
+
+function loadKeyringModule(): typeof import("@napi-rs/keyring") {
+  if (keyringModule) {
+    return keyringModule;
+  }
+  try {
+    keyringModule = require("@napi-rs/keyring") as typeof import("@napi-rs/keyring");
+    return keyringModule;
+  } catch (error) {
+    throw new Error("Failed to load @napi-rs/keyring native binding", { cause: error });
+  }
+}
+
+function normalizeSecretNamespace(namespace?: string | null): string | undefined {
+  const normalized = (namespace ?? "")
+    .trim()
+    .split("")
+    .flatMap((character) => {
+      if (/[A-Za-z0-9]/.test(character)) {
+        return character.toLowerCase();
+      }
+      if (character === "-" || character === "_") {
+        return "_";
+      }
+      return [];
+    })
+    .join("");
+  return normalized || undefined;
+}
+
+function isKeychainNoEntryError(error: unknown): boolean {
+  if (!isRecord(error)) {
+    return false;
+  }
+  if (error.code === 44 || error.status === 44) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : "";
+  return /NoEntry|no entry|not found|could not be found|specified item could not be found|No such key/i.test(
+    message,
+  );
 }
 
 function loadSecretStore(
