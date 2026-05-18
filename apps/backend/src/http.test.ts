@@ -1583,7 +1583,7 @@ describe("TS backend HTTP skeleton", () => {
             authorization: "Bearer sidecar-token",
             "content-type": "application/json",
           },
-          body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: [] }),
+          body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: ["asset-1"] }),
         }),
       );
       expect(deferredFixResponse.status).toBe(404);

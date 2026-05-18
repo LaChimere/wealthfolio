@@ -76,7 +76,10 @@ export interface HealthStatus {
 
 export interface HealthServiceOptions {
   accountProvider?: Pick<AccountService, "getActiveNonArchivedAccounts">;
-  classificationMigrationProvider?: Pick<TaxonomyService, "getMigrationStatus">;
+  classificationMigrationProvider?: Pick<
+    TaxonomyService,
+    "getMigrationStatus" | "migrateLegacyClassifications"
+  >;
   exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs">;
   marketDataSyncProvider?: Pick<MarketDataService, "syncMarketData">;
   settingsProvider?: Pick<SettingsService, "getSettings">;
@@ -254,6 +257,19 @@ export function createHealthService(
         clearCache();
         return;
       }
+      if (action.id === "migrate_classifications") {
+        const assetIds = parseHealthFixStringArray(action, "expected an array of asset IDs");
+        if (!options.classificationMigrationProvider?.migrateLegacyClassifications) {
+          throw new HealthFixError(
+            "not_found",
+            "Classification migration is not available for health fixes",
+            404,
+          );
+        }
+        await options.classificationMigrationProvider.migrateLegacyClassifications(assetIds);
+        clearCache();
+        return;
+      }
       if (action.id === "fetch_fx") {
         const pairs = parseHealthFixCurrencyPairs(action);
         if (!options.exchangeRateProvider?.ensureFxPairs) {
@@ -273,46 +289,43 @@ export function createHealthService(
 }
 
 function parseHealthFixAssetIds(action: HealthFixAction): string[] {
-  if (
-    !Array.isArray(action.payload) ||
-    !action.payload.every((value) => typeof value === "string")
-  ) {
-    throw new HealthFixError(
-      "invalid_payload",
-      `Invalid payload for ${action.id}: expected an array of asset IDs`,
-      400,
-    );
-  }
-  if (action.payload.length === 0) {
+  const assetIds = parseHealthFixStringArray(action, "expected an array of asset IDs");
+  if (assetIds.length === 0) {
     throw new HealthFixError("invalid_payload", "No assets selected for price sync", 400);
   }
-  return [...action.payload];
+  return assetIds;
 }
 
 function parseHealthFixCurrencyPairs(action: HealthFixAction): Array<[string, string]> {
+  return parseHealthFixStringArray(action, "expected an array of currency pair IDs").map(
+    (pairId) => {
+      const parts = pairId.split(":");
+      const fromCurrency = parts[0]?.trim();
+      const toCurrency = parts[1]?.trim();
+      if (parts.length !== 2 || !fromCurrency || !toCurrency) {
+        throw new HealthFixError(
+          "invalid_payload",
+          `Invalid currency pair for ${action.id}: ${pairId}`,
+          400,
+        );
+      }
+      return [fromCurrency, toCurrency];
+    },
+  );
+}
+
+function parseHealthFixStringArray(action: HealthFixAction, expected: string): string[] {
   if (
     !Array.isArray(action.payload) ||
     !action.payload.every((value) => typeof value === "string")
   ) {
     throw new HealthFixError(
       "invalid_payload",
-      `Invalid payload for ${action.id}: expected an array of currency pair IDs`,
+      `Invalid payload for ${action.id}: ${expected}`,
       400,
     );
   }
-  return action.payload.map((pairId) => {
-    const parts = pairId.split(":");
-    const fromCurrency = parts[0]?.trim();
-    const toCurrency = parts[1]?.trim();
-    if (parts.length !== 2 || !fromCurrency || !toCurrency) {
-      throw new HealthFixError(
-        "invalid_payload",
-        `Invalid currency pair for ${action.id}: ${pairId}`,
-        400,
-      );
-    }
-    return [fromCurrency, toCurrency];
-  });
+  return [...action.payload];
 }
 
 async function runChecks(

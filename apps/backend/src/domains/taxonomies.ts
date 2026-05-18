@@ -158,7 +158,7 @@ export interface TaxonomyRepository extends TaxonomyReadRepository {
   updateCategory(category: TaxonomyCategory): TaxonomyCategory;
   deleteCategory(taxonomyId: string, categoryId: string): number;
   getMigrationStatus(): ClassificationMigrationStatus;
-  migrateLegacyClassifications(): ClassificationMigrationResult;
+  migrateLegacyClassifications(assetIds?: readonly string[]): ClassificationMigrationResult;
 }
 
 export interface TaxonomyReadService {
@@ -185,9 +185,9 @@ export interface TaxonomyService extends TaxonomyReadService {
   importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
   exportTaxonomyJson(id: string): string;
   getMigrationStatus?(): Promise<ClassificationMigrationStatus> | ClassificationMigrationStatus;
-  migrateLegacyClassifications?():
-    | Promise<ClassificationMigrationResult>
-    | ClassificationMigrationResult;
+  migrateLegacyClassifications?(
+    assetIds?: readonly string[],
+  ): Promise<ClassificationMigrationResult> | ClassificationMigrationResult;
 }
 
 interface TaxonomyRow {
@@ -603,8 +603,8 @@ export function createTaxonomyRepository(
     getMigrationStatus() {
       return getClassificationMigrationStatus(db);
     },
-    migrateLegacyClassifications() {
-      return migrateLegacyClassifications(db, this);
+    migrateLegacyClassifications(assetIds) {
+      return migrateLegacyClassifications(db, this, assetIds);
     },
   };
 }
@@ -715,8 +715,8 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
     async getMigrationStatus() {
       return repository.getMigrationStatus();
     },
-    async migrateLegacyClassifications() {
-      return repository.migrateLegacyClassifications();
+    async migrateLegacyClassifications(assetIds) {
+      return repository.migrateLegacyClassifications(assetIds);
     },
   };
 }
@@ -918,6 +918,7 @@ function migrateLegacyClassifications(
     | "upsertAssignment"
     | "deleteAssetAssignments"
   >,
+  assetIds?: readonly string[],
 ): ClassificationMigrationResult {
   const result: ClassificationMigrationResult = {
     sectorsMigrated: 0,
@@ -933,8 +934,12 @@ function migrateLegacyClassifications(
   const regionsCategories = new Set(
     repository.getCategories("regions").map((category) => category.id),
   );
+  const assetFilter = assetIds ? new Set(assetIds) : null;
 
   for (const asset of readClassificationAssets(db)) {
+    if (assetFilter && !assetFilter.has(asset.id)) {
+      continue;
+    }
     const legacy = getLegacyClassificationRecord(asset.metadata);
     if (!legacy) {
       continue;

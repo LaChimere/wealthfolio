@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 165
+turns_used: 166
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-18T21:38:00+08:00"
+updated_at: "2026-05-18T22:08:26+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1058,6 +1058,13 @@ updated_at: "2026-05-18T21:38:00+08:00"
   registration, and is wired in standalone runtime while real provider-backed FX
   quote fetching remains part of the market-sync follow-up. Focused
   health/runtime tests and backend type-check passed.
+- Turn 166: Wired targeted Health Center `migrate_classifications` fix dispatch
+  into the TS taxonomy migration seam: health fixes now validate string-array
+  payloads, pass selected asset IDs to legacy classification migration, allow
+  empty payloads as a Rust-compatible no-op, clear cached status after
+  successful migration, and preserve the existing full
+  `migrate_legacy_classifications` path. Focused health/taxonomy/runtime/http
+  tests, backend type-check, and rubber-duck plan review passed.
 
 ## Deferred items
 
@@ -1065,12 +1072,13 @@ updated_at: "2026-05-18T21:38:00+08:00"
   classification migration status/run, bounded account/timezone status/checks,
   legacy-classification health issue generation, `sync_prices`/`retry_sync` fix
   dispatch into the market-data sync seam, `fetch_fx` dispatch into the
-  exchange-rate seam, and no-op market sync modes now have TS runtime parity,
-  while price staleness, quote sync, FX issue generation, broader
+  exchange-rate seam, targeted `migrate_classifications` dispatch into the
+  taxonomy migration seam, and no-op market sync modes now have TS runtime
+  parity, while price staleness, quote sync, FX issue generation, broader
   classification, data-consistency checks, real provider-backed market sync/FX
-  quote execution, classification fix dispatch, full affected-item parity, and
-  Rust-generated dismissal-hash carryover depend on holdings, quotes, FX,
-  assets, valuation, and market sync parity.
+  quote execution, full affected-item parity, and Rust-generated dismissal-hash
+  carryover depend on holdings, quotes, FX, assets, valuation, and market sync
+  parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the
@@ -1095,10 +1103,11 @@ updated_at: "2026-05-18T21:38:00+08:00"
 - Full health status/fix coverage remains an active follow-up. reason=legacy
   classification migration now has TS runtime parity through taxonomy endpoints,
   bounded account/timezone status/checks are wired into standalone runtime, and
-  legacy classification migration issues are surfaced in health status, while
-  price, quote sync, FX, broader classification, consistency checks, and
-  non-classification fix execution depend on holdings, quotes, FX, assets,
-  valuation, and market sync parity beyond local health dismissal/config state.
+  legacy classification migration issues plus targeted migration fix dispatch
+  are surfaced in health status, while price, quote sync, FX, broader
+  classification, consistency checks, and provider-backed fix execution depend
+  on holdings, quotes, FX, assets, valuation, and market sync parity beyond
+  local health dismissal/config state.
 - Market-data exchange list, local quote history/update/delete, latest quote
   snapshots, quote CSV check/import, addon-compatible Yahoo dividends, symbol
   search, and Yahoo-backed symbol quote resolution now have TS runtime parity.

@@ -650,6 +650,57 @@ describe("TS taxonomies domain", () => {
     }
   });
 
+  test("limits legacy classification migration to requested asset IDs", async () => {
+    const db = createTaxonomiesDb();
+    const service = createTaxonomyService(createTaxonomyRepository(db));
+
+    try {
+      seedClassificationTaxonomies(db);
+      seedAsset(db, {
+        id: "selected",
+        metadata: { legacy: { sectors: [{ name: "Technology", weight: 1 }] } },
+      });
+      seedAsset(db, {
+        id: "unselected",
+        metadata: { legacy: { countries: [{ name: "United States", weight: 1 }] } },
+      });
+
+      await expect(
+        service.migrateLegacyClassifications?.(["selected", "missing"]),
+      ).resolves.toEqual({
+        sectorsMigrated: 1,
+        countriesMigrated: 0,
+        assetsProcessed: 1,
+        errors: [],
+      });
+
+      expect(service.getAssetAssignments("selected")).toEqual([
+        expect.objectContaining({
+          taxonomyId: "industries_gics",
+          categoryId: "45",
+          source: "migrated",
+        }),
+      ]);
+      expect(service.getAssetAssignments("unselected")).toEqual([]);
+      expect(readAssetMetadata(db, "selected")).toBeNull();
+      expect(readAssetMetadata(db, "unselected")).toEqual({
+        legacy: { countries: [{ name: "United States", weight: 1 }] },
+      });
+
+      await expect(service.migrateLegacyClassifications?.([])).resolves.toEqual({
+        sectorsMigrated: 0,
+        countriesMigrated: 0,
+        assetsProcessed: 0,
+        errors: [],
+      });
+      expect(readAssetMetadata(db, "unselected")).toEqual({
+        legacy: { countries: [{ name: "United States", weight: 1 }] },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("collects legacy migration parse errors while still cleaning metadata", async () => {
     const db = createTaxonomiesDb();
     const service = createTaxonomyService(createTaxonomyRepository(db));

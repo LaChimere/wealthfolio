@@ -409,9 +409,64 @@ describe("TS health domain", () => {
     }
   });
 
+  test("executes classification migration fixes through taxonomy migration", async () => {
+    const db = createHealthDb();
+    let settingsReads = 0;
+    const migrationAssetIds: (readonly string[] | undefined)[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      classificationMigrationProvider: {
+        migrateLegacyClassifications: (assetIds) => {
+          migrationAssetIds.push(assetIds);
+          return {
+            sectorsMigrated: 0,
+            countriesMigrated: 0,
+            assetsProcessed: 0,
+            errors: [],
+          };
+        },
+      },
+      settingsProvider: {
+        getSettings: () => {
+          settingsReads += 1;
+          return settings({ timezone: "UTC" });
+        },
+      },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+
+    try {
+      await service.getHealthStatus?.("UTC");
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(1);
+
+      await service.executeFix?.({
+        id: "migrate_classifications",
+        label: "Migrate Classifications",
+        payload: ["asset-1", "asset-2"],
+      });
+      await service.executeFix?.({
+        id: "migrate_classifications",
+        label: "Migrate Classifications",
+        payload: [],
+      });
+
+      expect(migrationAssetIds).toEqual([["asset-1", "asset-2"], []]);
+
+      await service.getHealthStatus?.("UTC");
+      expect(settingsReads).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects unsupported or malformed health fix actions before syncing", async () => {
     const db = createHealthDb();
     const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      classificationMigrationProvider: {
+        migrateLegacyClassifications: () => {
+          throw new Error("should not migrate invalid classification fixes");
+        },
+      },
       exchangeRateProvider: {
         ensureFxPairs: () => {
           throw new Error("should not register invalid FX fixes");
@@ -443,9 +498,9 @@ describe("TS health domain", () => {
         service.executeFix?.({
           id: "migrate_classifications",
           label: "Migrate Classifications",
-          payload: [],
+          payload: ["asset-1", 1],
         }),
-      ).rejects.toMatchObject({ status: 404, code: "not_found" });
+      ).rejects.toMatchObject({ status: 400, code: "invalid_payload" });
       await expect(
         serviceWithoutSync.executeFix?.({
           id: "sync_prices",
@@ -458,6 +513,13 @@ describe("TS health domain", () => {
           id: "fetch_fx",
           label: "Fetch Exchange Rates",
           payload: ["EUR:USD"],
+        }),
+      ).rejects.toMatchObject({ status: 404, code: "not_found" });
+      await expect(
+        serviceWithoutSync.executeFix?.({
+          id: "migrate_classifications",
+          label: "Migrate Classifications",
+          payload: ["asset-1"],
         }),
       ).rejects.toMatchObject({ status: 404, code: "not_found" });
     } finally {

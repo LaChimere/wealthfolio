@@ -446,6 +446,20 @@ describe("TS backend runtime composition", () => {
       });
       expect(healthMigrationFixResponse.status).toBe(200);
 
+      const healthTargetedMigrationFixResponse = await fetch(
+        `${server.baseUrl}/api/v1/health/fix`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: "migrate_classifications",
+            label: "Migrate Classifications",
+            payload: [],
+          }),
+        },
+      );
+      expect(healthTargetedMigrationFixResponse.status).toBe(200);
+
       const healthEmptyPriceSyncFixResponse = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
         method: "POST",
         headers: { "content-type": "application/json" },
