@@ -382,6 +382,150 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("converts cross-currency buy lots to position currency", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "cad-account", false, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "cad-account",
+        assetId: "usd-asset",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "2",
+        unitPrice: "10",
+        fee: "1",
+        currency: "EUR",
+        fxRate: "1.5",
+      });
+      seedQuote(db, "usd-asset", "2026-05-14", "12", "USD");
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "CAD",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "EUR" && toCurrency === "USD") {
+              return "1.1";
+            }
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.3";
+            }
+            if (fromCurrency === "EUR" && toCurrency === "CAD") {
+              return "1.5";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["cad-account"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(warnings).toEqual([]);
+      expect(readSnapshot(db, "cad-account", "2026-05-14")).toMatchObject({
+        cash_balances: '{"CAD":"-31.5"}',
+        cost_basis: "23.1",
+        cash_total_account_currency: "-31.5",
+      });
+      expect(readSnapshotPositions(db, "cad-account", "2026-05-14")).toMatchObject({
+        "usd-asset": expect.objectContaining({
+          quantity: "2",
+          averageCost: "11.55",
+          totalCostBasis: "23.1",
+          lots: [
+            expect.objectContaining({
+              acquisitionPrice: "11",
+              acquisitionFees: "1.1",
+              costBasis: "23.1",
+            }),
+          ],
+        }),
+      });
+      expect(readValuation(db, "cad-account", "2026-05-14")).toMatchObject({
+        investment_market_value: "31.2",
+        cash_balance: "-31.5",
+        total_value: "-0.3",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("books cross-currency sell proceeds in account currency when fx rate exists", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "cad-account", false, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
+      seedSnapshot(db, {
+        accountId: "cad-account",
+        date: "2026-05-10",
+        currency: "CAD",
+        positions: {
+          "usd-asset": snapshotPosition("cad-account", "usd-asset", "2", "20", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "20",
+        netContribution: "26",
+      });
+      seedActivity(db, {
+        id: "sell-1",
+        accountId: "cad-account",
+        assetId: "usd-asset",
+        type: "SELL",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        unitPrice: "10",
+        fee: "1",
+        currency: "EUR",
+        fxRate: "1.5",
+      });
+      seedQuote(db, "usd-asset", "2026-05-12", "10", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "CAD",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.3";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: ["cad-account"],
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: "2026-05-12",
+      });
+
+      expect(readSnapshot(db, "cad-account", "2026-05-12")).toMatchObject({
+        cash_balances: '{"CAD":"13.5"}',
+        cost_basis: "10",
+        cash_total_account_currency: "13.5",
+      });
+      expect(readSnapshotPositions(db, "cad-account", "2026-05-12")).toMatchObject({
+        "usd-asset": expect.objectContaining({ quantity: "1", totalCostBasis: "10" }),
+      });
+      expect(readValuation(db, "cad-account", "2026-05-12")).toMatchObject({
+        investment_market_value: "13",
+        cash_balance: "13.5",
+        total_value: "26.5",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("fails transaction snapshot replay for invalid activity dates", async () => {
     const db = createPortfolioJobTestDb();
     try {
@@ -583,17 +727,14 @@ describe("TS portfolio job route config", () => {
         unitPrice: "15",
         fee: "1",
         currency: "CAD",
-        fxRate: "1",
+        fxRate: "0.8",
       });
       seedQuote(db, "usd-asset", "2026-05-12", "12", "USD");
       const service = createLocalPortfolioJobService(db, {
-        baseCurrency: "USD",
+        baseCurrency: "CAD",
         exchangeRateService: {
           initialize() {},
           getExchangeRateForDate(fromCurrency, toCurrency) {
-            if (fromCurrency === "CAD" && toCurrency === "USD") {
-              return "0.8";
-            }
             if (fromCurrency === "USD" && toCurrency === "CAD") {
               return "1.25";
             }
@@ -612,7 +753,7 @@ describe("TS portfolio job route config", () => {
         cash_balances: '{"CAD":"-1"}',
         cost_basis: "24.8",
         net_contribution: "31",
-        net_contribution_base: "24.8",
+        net_contribution_base: "31",
       });
       expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
         "usd-asset": expect.objectContaining({
@@ -627,6 +768,11 @@ describe("TS portfolio job route config", () => {
             }),
           ],
         }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-12")).toMatchObject({
+        investment_market_value: "30",
+        cash_balance: "-1",
+        total_value: "29",
       });
     } finally {
       db.close();

@@ -1294,19 +1294,37 @@ function applyBuyActivity(
   const unitPrice = activityUnitPrice(activity);
   const fee = activityFee(activity);
   const position = getOrCreateActivityPosition(db, state, activity, assetId);
-  const costBasis = quantity.mul(unitPrice).mul(position.contractMultiplier).plus(fee);
+  const unitPriceWithMultiplier = unitPrice.mul(position.contractMultiplier);
+  const unitPriceForLot =
+    position.currency === activity.currency
+      ? unitPriceWithMultiplier
+      : convertActivityAmountToPositionCurrency(
+          unitPriceWithMultiplier,
+          activity,
+          position,
+          state.currency,
+          options,
+        );
+  const feeForLot =
+    position.currency === activity.currency
+      ? fee
+      : convertActivityAmountToPositionCurrency(fee, activity, position, state.currency, options);
+  const costBasis = quantity.mul(unitPriceForLot).plus(feeForLot);
 
   position.lots.push({
     id: activity.id,
     quantity,
     costBasis,
-    acquisitionPrice: unitPrice.mul(position.contractMultiplier),
-    acquisitionFees: fee,
+    acquisitionPrice: unitPriceForLot,
+    acquisitionFees: feeForLot,
     acquisitionDate: activity.activity_date,
   });
   recalculateActivityPosition(position, activity.activity_date);
-  addCash(state, activity.currency, costBasis.negated());
-  warnIfCrossCurrencyActivity(activity, position.currency, options);
+  addBrokerConvertedCash(
+    state,
+    activity,
+    quantity.mul(unitPriceWithMultiplier).plus(fee).negated(),
+  );
 }
 
 function applySellActivity(
@@ -1320,7 +1338,7 @@ function applySellActivity(
   const position = state.positions.get(assetId);
   const multiplier = position?.contractMultiplier ?? new Decimal(1);
   const proceeds = quantity.mul(activityUnitPrice(activity)).mul(multiplier).minus(fee);
-  addCash(state, activity.currency, proceeds);
+  addBrokerConvertedCash(state, activity, proceeds);
 
   if (!position) {
     warnPortfolioJob(
@@ -1512,6 +1530,25 @@ function addCash(state: ActivityRebuildState, currency: string, delta: Decimal):
     currency,
     (state.cashBalances.get(currency) ?? new Decimal(0)).plus(delta),
   );
+}
+
+function addBrokerConvertedCash(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  activityCurrencyDelta: Decimal,
+): void {
+  if (activity.currency !== state.currency) {
+    const activityFxRate = decimalOptionalOrDefault(
+      activity.fx_rate,
+      new Decimal(0),
+      `Invalid activity FX rate for activity ${activity.id}`,
+    );
+    if (!activityFxRate.isZero()) {
+      addCash(state, state.currency, activityCurrencyDelta.mul(activityFxRate));
+      return;
+    }
+  }
+  addCash(state, activity.currency, activityCurrencyDelta);
 }
 
 function addContribution(
@@ -1752,7 +1789,8 @@ function convertActivityAmountToPositionCurrency(
     new Decimal(0),
     `Invalid activity FX rate for activity ${activity.id}`,
   );
-  const canUseActivityFxRate = position.currency === accountCurrency;
+  const canUseActivityFxRate =
+    position.currency === accountCurrency || activity.currency === accountCurrency;
   if (canUseActivityFxRate && !activityFxRate.isZero()) {
     return amount.mul(activityFxRate);
   }
@@ -2047,19 +2085,6 @@ function activityFee(activity: ActivityRebuildRow): Decimal {
     new Decimal(0),
     `Invalid fee for activity ${activity.id}`,
   ).abs();
-}
-
-function warnIfCrossCurrencyActivity(
-  activity: ActivityRebuildRow,
-  positionCurrency: string,
-  options: LocalPortfolioJobServiceOptions,
-): void {
-  if (activity.currency !== positionCurrency) {
-    warnPortfolioJob(
-      options,
-      `Activity ${activity.id} uses ${activity.currency} against ${positionCurrency} position currency; TS snapshot rebuild FX lot conversion remains deferred`,
-    );
-  }
 }
 
 function warnPortfolioJob(options: LocalPortfolioJobServiceOptions, message: string): void {
