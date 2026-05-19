@@ -162,9 +162,10 @@ export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEVERITY_ORDER: HealthSeverity[] = ["INFO", "WARNING", "ERROR", "CRITICAL"];
-const HASH_OFFSET_BASIS = 0xcbf29ce484222325n;
-const HASH_PRIME = 0x100000001b3n;
-const HASH_MASK = 0xffffffffffffffffn;
+const U64_MASK = 0xffffffffffffffffn;
+const RUST_HASH_STR_TERMINATOR = 0xff;
+const RUST_HASH_U32_MAX = 0xffff_ffff;
+const TEXT_ENCODER = new TextEncoder();
 
 export function createHealthRepository(db: Database): HealthRepository {
   return {
@@ -641,11 +642,7 @@ function buildPriceStalenessIssues(input: {
   const missingCount = input.assets.filter(
     (asset) => !latestQuoteDate(input.latestQuotes[asset.assetId]),
   ).length;
-  const dataHash = computeDataHash([
-    ...assetIds,
-    severity,
-    String(Math.trunc(affectedMvPct * 100)),
-  ]);
+  const dataHash = computeDataHashWithSeverityAndMvPct(assetIds, severity, affectedMvPct);
 
   return [
     {
@@ -871,7 +868,7 @@ function buildQuoteSyncIssues(input: {
         ? "ERROR"
         : "WARNING";
   const assetIds = input.errors.map((error) => error.assetId);
-  const dataHash = computeDataHash([...assetIds, severity]);
+  const dataHash = computeDataHashWithSeverity(assetIds, severity);
 
   return [
     {
@@ -1090,7 +1087,7 @@ function buildFxIntegrityIssues(input: {
         ? "CRITICAL"
         : "ERROR";
   const pairIds = input.pairs.map((pair) => pair.pairId);
-  const dataHash = computeDataHash([...pairIds, severity, String(Math.trunc(affectedMvPct * 100))]);
+  const dataHash = computeDataHashWithSeverityAndMvPct(pairIds, severity, affectedMvPct);
 
   return [
     {
@@ -1359,11 +1356,10 @@ async function analyzeLegacyClassificationMigration(
     return [
       legacyClassificationMigrationIssue({
         count: details.assetsNeedingMigration.length,
-        dataHash: computeDataHash([
-          "legacy_migration",
-          ...details.assetsNeedingMigration.map((asset) => asset.id).sort(),
-          String(details.assetsAlreadyMigrated),
-        ]),
+        dataHash: computeDataHashWithI32(
+          details.assetsNeedingMigration.map((asset) => asset.id),
+          details.assetsAlreadyMigrated,
+        ),
         timestamp,
         affectedItems,
       }),
@@ -1514,15 +1510,149 @@ function timezoneOffset(timezone: string, date: Date): string {
 }
 
 function computeDataHash(values: string[]): string {
-  const encoder = new TextEncoder();
-  let hash = HASH_OFFSET_BASIS;
+  return computeRustHealthDataHash((hasher) => writeSortedRustStrings(hasher, values));
+}
+
+function computeDataHashWithSeverity(values: string[], severity: HealthSeverity): string {
+  return computeRustHealthDataHash((hasher) => {
+    writeSortedRustStrings(hasher, values);
+    hasher.writeString(severity);
+  });
+}
+
+function computeDataHashWithSeverityAndMvPct(
+  values: string[],
+  severity: HealthSeverity,
+  mvPct: number,
+): string {
+  return computeRustHealthDataHash((hasher) => {
+    writeSortedRustStrings(hasher, values);
+    hasher.writeString(severity);
+    hasher.writeU32(saturatingF64ToU32(mvPct * 100));
+  });
+}
+
+function computeDataHashWithI32(values: string[], value: number): string {
+  return computeRustHealthDataHash((hasher) => {
+    writeSortedRustStrings(hasher, values);
+    hasher.writeI32(value);
+  });
+}
+
+function writeSortedRustStrings(hasher: RustDefaultHasher, values: string[]): void {
   for (const value of [...values].sort()) {
-    for (const byte of encoder.encode(`${value}\0`)) {
-      hash ^= BigInt(byte);
-      hash = (hash * HASH_PRIME) & HASH_MASK;
+    hasher.writeString(value);
+  }
+}
+
+function computeRustHealthDataHash(write: (hasher: RustDefaultHasher) => void): string {
+  const hasher = new RustDefaultHasher();
+  write(hasher);
+  return hasher.finish();
+}
+
+function saturatingF64ToU32(value: number): number {
+  if (Number.isNaN(value) || value <= 0) {
+    return 0;
+  }
+  if (value >= RUST_HASH_U32_MAX) {
+    return RUST_HASH_U32_MAX;
+  }
+  return Math.trunc(value);
+}
+
+// Matches Rust's current `DefaultHasher` so issue IDs and dismissal hashes
+// created by the Rust backend carry over into the TS runtime.
+class RustDefaultHasher {
+  private v0 = 0x736f6d6570736575n;
+  private v1 = 0x646f72616e646f6dn;
+  private v2 = 0x6c7967656e657261n;
+  private v3 = 0x7465646279746573n;
+  private byteLength = 0;
+  private tail = 0n;
+  private tailLength = 0;
+
+  writeString(value: string): void {
+    this.writeBytes(TEXT_ENCODER.encode(value));
+    this.writeByte(RUST_HASH_STR_TERMINATOR);
+  }
+
+  writeU32(value: number): void {
+    const normalized = value >>> 0;
+    this.writeByte(normalized & 0xff);
+    this.writeByte((normalized >>> 8) & 0xff);
+    this.writeByte((normalized >>> 16) & 0xff);
+    this.writeByte((normalized >>> 24) & 0xff);
+  }
+
+  writeI32(value: number): void {
+    const normalized = value | 0;
+    this.writeByte(normalized & 0xff);
+    this.writeByte((normalized >> 8) & 0xff);
+    this.writeByte((normalized >> 16) & 0xff);
+    this.writeByte((normalized >> 24) & 0xff);
+  }
+
+  finish(): string {
+    const finalBlock = ((BigInt(this.byteLength) & 0xffn) << 56n) | this.tail;
+    this.compress(finalBlock);
+    this.v2 ^= 0xffn;
+    this.sipRound();
+    this.sipRound();
+    this.sipRound();
+    return (this.v0 ^ this.v1 ^ this.v2 ^ this.v3).toString(16);
+  }
+
+  private writeBytes(bytes: Uint8Array): void {
+    for (const byte of bytes) {
+      this.writeByte(byte);
     }
   }
-  return hash.toString(16).padStart(16, "0");
+
+  private writeByte(byte: number): void {
+    this.tail |= BigInt(byte & 0xff) << BigInt(this.tailLength * 8);
+    this.tailLength += 1;
+    this.byteLength += 1;
+    if (this.tailLength === 8) {
+      this.compress(this.tail);
+      this.tail = 0n;
+      this.tailLength = 0;
+    }
+  }
+
+  private compress(block: bigint): void {
+    this.v3 ^= block;
+    this.sipRound();
+    this.v0 ^= block;
+  }
+
+  private sipRound(): void {
+    this.v0 = u64(this.v0 + this.v1);
+    this.v1 = rotateLeft64(this.v1, 13n);
+    this.v1 ^= this.v0;
+    this.v0 = rotateLeft64(this.v0, 32n);
+
+    this.v2 = u64(this.v2 + this.v3);
+    this.v3 = rotateLeft64(this.v3, 16n);
+    this.v3 ^= this.v2;
+
+    this.v0 = u64(this.v0 + this.v3);
+    this.v3 = rotateLeft64(this.v3, 21n);
+    this.v3 ^= this.v0;
+
+    this.v2 = u64(this.v2 + this.v1);
+    this.v1 = rotateLeft64(this.v1, 17n);
+    this.v1 ^= this.v2;
+    this.v2 = rotateLeft64(this.v2, 32n);
+  }
+}
+
+function rotateLeft64(value: bigint, shift: bigint): bigint {
+  return u64((value << shift) | (value >> (64n - shift)));
+}
+
+function u64(value: bigint): bigint {
+  return value & U64_MASK;
 }
 
 function validateHealthConfig(config: HealthConfig): void {

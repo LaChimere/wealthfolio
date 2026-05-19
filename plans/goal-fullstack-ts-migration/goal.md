@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 177
+turns_used: 178
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T20:18:50+08:00"
+updated_at: "2026-05-19T20:48:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1140,6 +1140,14 @@ updated_at: "2026-05-19T20:18:50+08:00"
   unchanged, persisted chat rows still keep only attachment markers, and Ollama
   PDFs remain rejected because the documented `/api/chat` multimodal surface is
   images-only. Focused AI chat tests and backend type-check passed.
+- Turn 178: Preserved Rust Health Center dismissal carryover by replacing the TS
+  health data-hash helper with a Rust `DefaultHasher`-compatible SipHash-1-3
+  subset for string, severity, u32, and i32 components. Existing
+  account/timezone, price-staleness, quote-sync, FX-integrity,
+  legacy-classification, and negative-balance issue IDs now match Rust-generated
+  vectors so matching `health_issue_dismissals` rows remain effective after TS
+  cutover. Focused health tests, type-check, rubber-duck plan review, and
+  focused code review passed.
 
 ## Deferred items
 
@@ -1152,10 +1160,10 @@ updated_at: "2026-05-19T20:18:50+08:00"
   market sync modes, bounded price-staleness checks, bounded quote-sync error
   checks, bounded FX integrity issue generation, and bounded negative-balance
   data-consistency checks and targeted Yahoo-backed
-  `sync_prices`/`retry_sync`/`fetch_fx` execution now have TS runtime parity,
-  while broader classification, remaining data-consistency checks,
-  all-provider/background market sync, automatic/background FX quote fetching,
-  remaining affected-item parity, and Rust-generated dismissal-hash carryover
+  `sync_prices`/`retry_sync`/`fetch_fx` execution plus Rust-compatible dismissal
+  hash carryover now have TS runtime parity, while broader classification,
+  remaining data-consistency checks, all-provider/background market sync,
+  automatic/background FX quote fetching, and remaining affected-item parity
   depend on holdings, quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor

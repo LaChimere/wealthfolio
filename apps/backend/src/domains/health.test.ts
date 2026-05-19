@@ -127,7 +127,8 @@ describe("TS health domain", () => {
       });
       expect(status?.issues).toHaveLength(2);
       expect(status?.issues[0]).toMatchObject({
-        id: expect.stringMatching(/^unconfigured_accounts:/),
+        id: "unconfigured_accounts:9e57101a4bae39fc",
+        dataHash: "9e57101a4bae39fc",
         category: "ACCOUNT_CONFIGURATION",
         title: "2 accounts need setup",
         affectedCount: 2,
@@ -138,7 +139,8 @@ describe("TS health domain", () => {
         navigateAction: { route: "/connect", label: "Configure Accounts" },
       });
       expect(status?.issues[1]).toMatchObject({
-        id: expect.stringMatching(/^timezone_missing:/),
+        id: "timezone_missing:e83d42c69b909df4",
+        dataHash: "e83d42c69b909df4",
         category: "SETTINGS_CONFIGURATION",
         title: "Timezone not configured",
       });
@@ -212,7 +214,8 @@ describe("TS health domain", () => {
       const firstStatus = await service.runHealthChecks?.("UTC");
       const firstIssue = firstStatus?.issues[0];
       expect(firstIssue).toMatchObject({
-        id: expect.stringMatching(/^classification:legacy_migration:/),
+        id: "classification:legacy_migration:773c25a140173500",
+        dataHash: "773c25a140173500",
         affectedCount: 2,
         affectedItems: [
           {
@@ -235,13 +238,11 @@ describe("TS health domain", () => {
         { id: "asset/two", symbol: "MSFT", name: "Microsoft" },
       ];
       const changedAssetStatus = await service.runHealthChecks?.("UTC");
-      expect(changedAssetStatus?.issues[0]?.dataHash).not.toBe(firstIssue?.dataHash);
+      expect(changedAssetStatus?.issues[0]?.dataHash).toBe("a6b5a055bf3293d4");
 
       assetsAlreadyMigrated = 2;
       const changedMigratedStatus = await service.runHealthChecks?.("UTC");
-      expect(changedMigratedStatus?.issues[0]?.dataHash).not.toBe(
-        changedAssetStatus?.issues[0]?.dataHash,
-      );
+      expect(changedMigratedStatus?.issues[0]?.dataHash).toBe("f473797eac0d4eb9");
     } finally {
       db.close();
     }
@@ -328,7 +329,8 @@ describe("TS health domain", () => {
       expect(status?.overallSeverity).toBe("CRITICAL");
       expect(status?.issues).toEqual([
         expect.objectContaining({
-          id: expect.stringMatching(/^price_stale:error:/),
+          id: "price_stale:error:b4e403f04f66bc8e",
+          dataHash: "b4e403f04f66bc8e",
           severity: "CRITICAL",
           category: "PRICE_STALENESS",
           title: "No market data for 2 holdings",
@@ -357,7 +359,8 @@ describe("TS health domain", () => {
           details: "1. MISS - no data\n2. ZERO - no data",
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^price_stale:warning:/),
+          id: "price_stale:warning:619f9047d5f9c28e",
+          dataHash: "619f9047d5f9c28e",
           severity: "WARNING",
           category: "PRICE_STALENESS",
           title: "Price update needed for 1 holding",
@@ -497,7 +500,8 @@ describe("TS health domain", () => {
 
       expect(status?.issues).toEqual([
         expect.objectContaining({
-          id: expect.stringMatching(/^quote_sync:error:/),
+          id: "quote_sync:error:c5096f7487a1d059",
+          dataHash: "c5096f7487a1d059",
           severity: "ERROR",
           category: "PRICE_STALENESS",
           title: "Quotes sync failing for 6 assets",
@@ -557,7 +561,8 @@ describe("TS health domain", () => {
           ].join("\n"),
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^quote_sync:warning:/),
+          id: "quote_sync:warning:c396c3d86ad8efba",
+          dataHash: "c396c3d86ad8efba",
           severity: "WARNING",
           category: "PRICE_STALENESS",
           title: "Sync issues for WARN",
@@ -697,7 +702,8 @@ describe("TS health domain", () => {
 
       expect(status?.issues).toEqual([
         expect.objectContaining({
-          id: expect.stringMatching(/^fx_missing:/),
+          id: "fx_missing:91f6ad09ee63f92d",
+          dataHash: "91f6ad09ee63f92d",
           severity: "ERROR",
           category: "FX_INTEGRITY",
           title: "Missing exchange rates for 2 currencies",
@@ -714,7 +720,8 @@ describe("TS health domain", () => {
           ],
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^fx_stale:error:/),
+          id: "fx_stale:error:17b54e57bd062033",
+          dataHash: "17b54e57bd062033",
           severity: "ERROR",
           category: "FX_INTEGRITY",
           title: "Outdated exchange rate",
@@ -728,7 +735,8 @@ describe("TS health domain", () => {
           affectedItems: [{ id: "CAD:USD", name: "CAD \u2192 USD" }],
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^fx_stale:warning:/),
+          id: "fx_stale:warning:1ff04140a7a43cbf",
+          dataHash: "1ff04140a7a43cbf",
           severity: "WARNING",
           category: "FX_INTEGRITY",
           title: "Exchange rate update needed",
@@ -806,7 +814,8 @@ describe("TS health domain", () => {
       expect(requestedAccountIds).toEqual([["account-a", "account-b"], ["cash-a"]]);
       expect(status?.issues).toEqual([
         expect.objectContaining({
-          id: expect.stringMatching(/^negative_account_balance:/),
+          id: "negative_account_balance:6b256d19e4d59b76",
+          dataHash: "6b256d19e4d59b76",
           severity: "WARNING",
           category: "DATA_CONSISTENCY",
           title: "2 accounts have negative portfolio balance",
@@ -839,7 +848,8 @@ describe("TS health domain", () => {
           ].join("\n"),
         }),
         expect.objectContaining({
-          id: expect.stringMatching(/^negative_cash_balance:/),
+          id: "negative_cash_balance:106c1df9e5f16016",
+          dataHash: "106c1df9e5f16016",
           severity: "INFO",
           category: "DATA_CONSISTENCY",
           title: "Cash account had a negative balance",
