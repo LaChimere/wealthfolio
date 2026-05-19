@@ -211,10 +211,11 @@
     affected items, classification migration health-fix dispatch,
     `sync_prices`/`retry_sync` dispatch into the market-data sync seam,
     `fetch_fx` dispatch into exchange-rate pair registration and targeted
-    market-data sync, and targeted `migrate_classifications` dispatch into the
-    taxonomy migration seam, bounded price-staleness Health Center checks,
-    bounded quote-sync error checks, and bounded FX integrity issue generation,
-    bounded negative-balance data-consistency checks, and Rust-compatible health
+    market-data sync, targeted `migrate_classifications` dispatch into the
+    taxonomy migration seam, and service-level `migrate_legacy_classifications`
+    dispatch, bounded price-staleness Health Center checks, bounded quote-sync
+    error checks, and bounded FX integrity issue generation, bounded
+    negative-balance data-consistency checks, and Rust-compatible health
     dismissal hash carryover now have TS runtime parity; market-data no-op sync
     modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync
     now execute in TS, including market-sync failure/skipped-reason payload
@@ -1869,6 +1870,14 @@ contract:
   sync counts, non-Yahoo skipped-reason reporting, targeted Yahoo failure
   tuples, and portfolio `market:sync-complete` payload forwarding. Focused code
   review found no significant issues.
+- `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
+  and `bun run type-check`. Coverage includes service-level
+  `migrate_legacy_classifications` dispatch to full taxonomy migration without a
+  targeted asset filter, alongside existing targeted `migrate_classifications`
+  dispatch, plus `/health/fix` delegation through HealthService when a
+  dispatcher is present so cache invalidation is preserved. Focused code review
+  found and the slice fixed the HTTP special-case cache-invalidation gap.
 
 ## Result
 

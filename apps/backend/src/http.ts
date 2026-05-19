@@ -2183,14 +2183,14 @@ async function handleHealthFixRequest(
   }
 
   try {
-    if (
-      action.id === "migrate_legacy_classifications" &&
-      taxonomyService?.migrateLegacyClassifications
-    ) {
-      await taxonomyService.migrateLegacyClassifications();
-      return new Response(null, { status: 200 });
-    }
     if (!healthService.executeFix) {
+      if (
+        action.id === "migrate_legacy_classifications" &&
+        taxonomyService?.migrateLegacyClassifications
+      ) {
+        await taxonomyService.migrateLegacyClassifications();
+        return new Response(null, { status: 200 });
+      }
       return jsonResponse({ code: 404, message: "Not Found" }, 404);
     }
     await healthService.executeFix(action);

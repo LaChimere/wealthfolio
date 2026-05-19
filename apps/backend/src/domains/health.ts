@@ -298,6 +298,18 @@ export function createHealthService(
         clearCache();
         return;
       }
+      if (action.id === "migrate_legacy_classifications") {
+        if (!options.classificationMigrationProvider?.migrateLegacyClassifications) {
+          throw new HealthFixError(
+            "not_found",
+            "Classification migration is not available for health fixes",
+            404,
+          );
+        }
+        await options.classificationMigrationProvider.migrateLegacyClassifications();
+        clearCache();
+        return;
+      }
       if (action.id === "fetch_fx") {
         const pairs = parseHealthFixCurrencyPairs(action);
         if (!options.exchangeRateProvider?.ensureFxPairs) {

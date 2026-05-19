@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 179
+turns_used: 180
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T21:29:35+08:00"
+updated_at: "2026-05-19T21:44:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1154,6 +1154,13 @@ updated_at: "2026-05-19T21:29:35+08:00"
   `market:sync-complete` events now forward those details instead of always
   publishing empty arrays. Focused market-data/portfolio tests, full
   `bun run check`, and focused code review passed.
+- Turn 180: Completed service-level Health Center legacy-classification fix
+  dispatch parity: the TS health service now handles its own generated
+  `migrate_legacy_classifications` fix action by invoking the taxonomy migration
+  provider without a targeted asset filter, in addition to the targeted
+  `migrate_classifications` action, and `/health/fix` now delegates through the
+  service when present so cache invalidation is preserved. Focused health/http
+  tests and type-check passed after code-review refinement.
 
 ## Deferred items
 
@@ -1162,16 +1169,17 @@ updated_at: "2026-05-19T21:29:35+08:00"
   legacy-classification health issue generation, `sync_prices`/`retry_sync` fix
   dispatch into the market-data sync seam, `fetch_fx` dispatch into the
   exchange-rate seam, targeted `migrate_classifications` dispatch into the
-  taxonomy migration seam, legacy-classification affected items, and no-op
-  market sync modes, bounded price-staleness checks, bounded quote-sync error
-  checks, bounded FX integrity issue generation, and bounded negative-balance
-  data-consistency checks and targeted Yahoo-backed
-  `sync_prices`/`retry_sync`/`fetch_fx` execution, Rust-compatible dismissal
-  hash carryover, and market-sync failure/skipped-reason event payloads now have
-  TS runtime parity, while broader classification, remaining data-consistency
-  checks, all-provider market sync, background worker orchestration,
-  automatic/background FX quote fetching, and remaining affected-item parity
-  depend on holdings, quotes, FX, assets, valuation, and market sync parity.
+  taxonomy migration seam, service-level `migrate_legacy_classifications`
+  dispatch, legacy-classification affected items, and no-op market sync modes,
+  bounded price-staleness checks, bounded quote-sync error checks, bounded FX
+  integrity issue generation, and bounded negative-balance data-consistency
+  checks and targeted Yahoo-backed `sync_prices`/`retry_sync`/`fetch_fx`
+  execution, Rust-compatible dismissal hash carryover, and market-sync
+  failure/skipped-reason event payloads now have TS runtime parity, while
+  broader classification, remaining data-consistency checks, all-provider market
+  sync, background worker orchestration, automatic/background FX quote fetching,
+  and remaining affected-item parity depend on holdings, quotes, FX, assets,
+  valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the

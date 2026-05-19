@@ -1192,8 +1192,13 @@ describe("TS health domain", () => {
         label: "Migrate Classifications",
         payload: [],
       });
+      await service.executeFix?.({
+        id: "migrate_legacy_classifications",
+        label: "Start Migration",
+        payload: null,
+      });
 
-      expect(migrationAssetIds).toEqual([["asset-1", "asset-2"], []]);
+      expect(migrationAssetIds).toEqual([["asset-1", "asset-2"], [], undefined]);
 
       await service.getHealthStatus?.("UTC");
       expect(settingsReads).toBe(2);

@@ -1759,7 +1759,7 @@ describe("TS backend HTTP skeleton", () => {
     expect(calls).toEqual([
       ["health-status", "America/Toronto"],
       ["health-check", undefined],
-      ["migration-run", undefined],
+      ["health-fix", { id: "migrate_legacy_classifications", label: "Migrate", payload: null }],
       ["migration-status", undefined],
       ["migration-run", undefined],
     ]);
