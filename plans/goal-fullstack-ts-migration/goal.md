@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 175
+turns_used: 176
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T00:21:50+08:00"
+updated_at: "2026-05-19T19:44:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1126,6 +1126,14 @@ updated_at: "2026-05-19T00:21:50+08:00"
   purges without sync/activity references. Focused market-data/runtime tests,
   type-check, full `bun run check`, rubber-duck plan review, and code review
   passed.
+- Turn 176: Added bounded portfolio job execution in the standalone TS runtime:
+  `/api/v1/portfolio/update` and `/api/v1/portfolio/recalculate` now run market
+  sync events, derive account valuations from existing holdings snapshots,
+  regenerate TOTAL snapshots from non-archived accounts, upsert
+  `daily_account_valuation` rows transactionally, and roll back on missing TOTAL
+  FX conversion instead of persisting mixed-currency data. Focused
+  portfolio/runtime tests, type-check, full `bun run check`, rubber-duck plan
+  review, and three code-review refinements passed.
 
 ## Deferred items
 
@@ -1317,14 +1325,15 @@ updated_at: "2026-05-19T00:21:50+08:00"
   runtime remain active follow-ups. reason=the standalone TS backend now wires
   disabled pairing feature-flag responses, while runtime behavior must move with
   dedicated device-sync parity slices.
-- Holdings snapshot reconciliation and actual portfolio recalculation/job
-  execution remain active follow-ups. reason=holdings fan-out, valuation reads,
-  allocation reads, manual/imported snapshot deletion, bounded manual snapshot
-  saves, bounded snapshot import writes, snapshot FX pair registration,
-  provider-backed import-check symbol lookup, and snapshot mutation event
-  production now have TS runtime parity, and standalone portfolio trigger routes
-  now return explicit deferred 501s, while remaining recalculation behavior must
-  move with dedicated holdings/portfolio parity slices.
+- Holdings snapshot reconciliation from activities remains an active follow-up.
+  reason=holdings fan-out, valuation reads, allocation reads, manual/imported
+  snapshot deletion, bounded manual snapshot saves, bounded snapshot import
+  writes, snapshot FX pair registration, provider-backed import-check symbol
+  lookup, snapshot mutation event production, and bounded portfolio job
+  valuation/TOTAL recalculation from existing snapshots now have TS runtime
+  parity, while full activity-derived holdings snapshot rebuilding and
+  background worker orchestration must move with dedicated holdings/portfolio
+  parity slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening
   remain active follow-ups. reason=the standalone TS backend now supports local
   installed add-on listing, Rust-compatible manifest normalization, toggles,
@@ -1335,12 +1344,13 @@ updated_at: "2026-05-19T00:21:50+08:00"
   manifest permissions for SDK domain APIs, UI registration, and scoped secrets,
   while archive security scanning, complete browser sandbox isolation, and React
   Query cache access hardening still need dedicated add-on parity slices.
-- Market-data provider breadth and portfolio recalculation side effects remain
-  active follow-ups. reason=exchange metadata, local quote persistence/import,
-  Yahoo dividends/search/resolve, targeted Yahoo sync, and bounded broad Yahoo
-  sync/history have TS runtime coverage, while all-provider/background sync and
-  recalculation behavior must move with dedicated market-data and portfolio
-  parity slices.
+- Market-data provider breadth and full recalculation side effects remain active
+  follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
+  dividends/search/resolve, targeted Yahoo sync, bounded broad Yahoo
+  sync/history, and bounded portfolio valuation/TOTAL recalculation have TS
+  runtime coverage, while all-provider/background sync, quote-triggered worker
+  orchestration, and activity-derived snapshot rebuilding must move with
+  dedicated market-data and portfolio parity slices.
 
 ## Blockers
 

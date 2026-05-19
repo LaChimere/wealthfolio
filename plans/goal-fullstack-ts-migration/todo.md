@@ -127,14 +127,15 @@
     routing, and decision-sensitivity routing now have bounded TS runtime
     parity; automatic/background FX quote fetching and all-provider market-data
     sync execution remain deferred and move to calculation/market-data slices;
-    actual portfolio job execution and event production are explicitly deferred
-    with standalone runtime 501 gates and move to portfolio/calculation slices;
-    TS file-backed secret persistence and native keyring-backed
-    `WF_SECRET_BACKEND=keyring` are wired into standalone runtime while packaged
-    keyring cutover and cross-platform keyring CI remain deferred to a
-    runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior, bounded native/fallback text/reasoning AI chat provider
-    streaming, generated thread titles,
+    bounded portfolio job execution, event production, valuation recalculation
+    from existing holdings snapshots, and TOTAL snapshot rebuilding now run in
+    the standalone TS runtime, while full holdings snapshot rebuilding from
+    activities moves to portfolio/calculation slices; TS file-backed secret
+    persistence and native keyring-backed `WF_SECRET_BACKEND=keyring` are wired
+    into standalone runtime while packaged keyring cutover and cross-platform
+    keyring CI remain deferred to a runtime/keyring parity slice; AI provider
+    catalog/settings/model-listing runtime behavior, bounded native/fallback
+    text/reasoning AI chat provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -144,30 +145,30 @@
     payloads, and OpenAI-compatible/Ollama image media payloads are wired into
     standalone runtime while OpenAI-compatible/Ollama PDF attachment payloads
     are deferred to AI runtime parity slices; alternative asset persistence,
-    manual valuation quotes, liability link/unlink metadata behavior, and
-    holdings reads now have TS runtime parity, while portfolio job enqueue and
-    recalculation side effects are deferred to portfolio parity slices; asset
-    read/create/profile/quote-mode and delete behavior now have TS runtime
-    parity, while quote-provider interactions, auto-classification, and
-    portfolio recalculation side effects are deferred to
-    asset/market-data/portfolio parity slices; app utility database restore now
-    has TS runtime parity with restart-required readiness after file restore;
-    contribution-limit deposit calculation now has TS runtime parity with SQLite
-    activity reads, Rust-compatible contribution rules, user-timezone year
-    ranges, and FX conversion dates; current/history net-worth, income summary,
-    simple account performance, account performance history/summary
-    calculations, local quote-backed symbol performance history with local
-    asset/display/instrument-symbol resolution, holdings valuation reads,
-    holdings snapshot metadata reads, historical snapshot holdings reads,
+    manual valuation quotes, liability link/unlink metadata behavior, holdings
+    reads, and bounded portfolio job valuation/TOTAL recalculation now have TS
+    runtime parity, while full activity-derived snapshot rebuilding is deferred
+    to portfolio parity slices; asset read/create/profile/quote-mode and delete
+    behavior now have TS runtime parity, while quote-provider interactions,
+    auto-classification, and portfolio recalculation side effects are deferred
+    to asset/market-data/portfolio parity slices; app utility database restore
+    now has TS runtime parity with restart-required readiness after file
+    restore; contribution-limit deposit calculation now has TS runtime parity
+    with SQLite activity reads, Rust-compatible contribution rules,
+    user-timezone year ranges, and FX conversion dates; current/history
+    net-worth, income summary, simple account performance, account performance
+    history/summary calculations, local quote-backed symbol performance history
+    with local asset/display/instrument-symbol resolution, holdings valuation
+    reads, holdings snapshot metadata reads, historical snapshot holdings reads,
     holdings import checks, live holdings fan-out, holding detail/by-asset
     fan-out, allocation reads, snapshot deletion, bounded manual/imported
-    snapshot saves, snapshot FX pair registration, and holdings snapshot
-    mutation event production now have TS runtime parity, while provider-backed
-    symbol fetch/resolution is deferred to portfolio/market-data parity slices;
-    actual portfolio job execution and inline valuation recalculation are
-    deferred to holdings/portfolio parity slices; add-on local filesystem
-    listing, toggles, uninstall, runtime loading, enabled-startup loading,
-    staging cleanup, Rust-compatible manifest normalization, local ZIP
+    snapshot saves, snapshot FX pair registration, holdings snapshot mutation
+    event production, and bounded portfolio job inline valuation/TOTAL
+    recalculation now have TS runtime parity, while provider-backed symbol
+    fetch/resolution and full activity-derived snapshot rebuilding are deferred
+    to portfolio/market-data parity slices; add-on local filesystem listing,
+    toggles, uninstall, runtime loading, enabled-startup loading, staging
+    cleanup, Rust-compatible manifest normalization, local ZIP
     extraction/install, permission detection/merging, staged ZIP install, store
     listings/ratings/update checks, store download staging, and store update
     installs and frontend manifest-permission enforcement for SDK domain APIs,
@@ -1846,6 +1847,16 @@ contract:
   guards, scoped secret guards, and legacy/dev unrestricted fallback when
   permission metadata is absent. Full repository check passed with
   `bun run check`; focused code review found no significant issues.
+- `pr5-portfolio-job-runtime`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts apps/backend/src/runtime.test.ts`
+  and `bun run type-check`. Coverage includes portfolio update/recalculate
+  runtime 202 responses, Rust-canonical market/portfolio event order, bounded
+  valuation writes from existing holdings snapshots, weekend/as-of quote
+  valuation, active/non-archived TOTAL aggregation, explicit archived-account
+  targets, non-base account FX conversion, missing-TOTAL-FX rollback, and
+  deferred-service 501 fallback. Full repository check passed with
+  `bun run check`; rubber-duck plan review and focused code reviews found no
+  remaining significant issues.
 
 ## Result
 
@@ -1912,38 +1923,39 @@ contract:
   `get_income`/`get_valuation_history`/`get_asset_allocation`/
   `get_health_status`/`record_activity`/`record_activities`/`import_csv`,
   text/CSV attachment prompt injection, Anthropic/Gemini image/PDF native media
-  payloads, OpenAI-compatible/Ollama image media payloads, and explicit
-  portfolio and market-sync deferred runtime gates implemented; broader
-  migration remains active.
+  payloads, OpenAI-compatible/Ollama image media payloads, bounded portfolio job
+  valuation/TOTAL recalculation runtime, and explicit remaining market-sync
+  deferred runtime gates implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
   sync/provider HTTP behavior plus broader market-data provider resolution/sync
   behavior move with calculation/market-data slices after the current FX
-  registration/no-op parity and explicit runtime 501 gates; actual portfolio job
-  execution moves with portfolio/calculation slices after the current explicit
-  runtime 501 gates; packaged keyring cutover and cross-platform keyring CI move
-  with a dedicated runtime parity slice; AI chat OpenAI-compatible/Ollama PDF
-  attachment handling and richer provider/tool orchestration move with AI
-  runtime parity slices; alternative asset portfolio job enqueue and
-  recalculation side effects move with portfolio parity slices; asset
-  quote-provider interactions, auto-classification, and portfolio recalculation
-  side effects move with asset/market-data/portfolio parity slices; market-data
-  market sync and quote-triggered recalculation side effects move with
-  market-data/portfolio parity slices; provider-backed symbol fetch/resolution
-  moves with market-data/provider parity slices; portfolio recalculation side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths, sync
-  engine push/pull, and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks
-  and real market sync fix execution move with health/calculation parity slices;
-  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  local sync repositories, subscription entitlement checks, event production,
-  E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  registration/no-op parity and explicit runtime 501 gates; full
+  activity-derived holdings snapshot rebuilding and background portfolio worker
+  orchestration move with portfolio/calculation slices after the current bounded
+  portfolio valuation runtime; packaged keyring cutover and cross-platform
+  keyring CI move with a dedicated runtime parity slice; AI chat
+  OpenAI-compatible/Ollama PDF attachment handling and richer provider/tool
+  orchestration move with AI runtime parity slices; alternative asset portfolio
+  job enqueue and recalculation side effects move with portfolio parity slices;
+  asset quote-provider interactions, auto-classification, and portfolio
+  recalculation side effects move with asset/market-data/portfolio parity
+  slices; market-data market sync and quote-triggered recalculation side effects
+  move with market-data/portfolio parity slices; provider-backed symbol
+  fetch/resolution moves with market-data/provider parity slices; full portfolio
+  snapshot rebuilding side effects move with holdings/portfolio parity slices;
+  add-on security scanning, full sandbox isolation, and query-cache hardening
+  move with add-on runtime parity slices; provider-backed asset resolution,
+  remaining quote sync-outbox emission outside migrated alternative-asset and
+  market-data quote paths, sync engine push/pull, and portfolio recalculation
+  side effects move with activities/import/device-sync runtime parity slices;
+  device-sync integration for sync crypto moves with device-sync parity slices;
+  broader health checks and real market sync fix execution move with
+  health/calculation parity slices; real Connect token lifecycle, cloud HTTP
+  clients, broker sync orchestration, local sync repositories, subscription
+  entitlement checks, event production, E2EE enrollment, sync engine,
+  snapshot/upload runtime, feature-flag errors, background workers, device-sync
+  cloud clients, token lifecycle, team-key operations, key material handling,
+  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
+  effects move with Connect/device-sync parity slices.

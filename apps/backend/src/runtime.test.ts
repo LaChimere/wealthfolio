@@ -544,10 +544,7 @@ describe("TS backend runtime composition", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ accountIds: ["missing"] }),
       });
-      expect(portfolioUpdateResponse.status).toBe(501);
-      await expect(portfolioUpdateResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(portfolioUpdateResponse.status).toBe(202);
 
       const portfolioRecalculateResponse = await fetch(
         `${server.baseUrl}/api/v1/portfolio/recalculate`,
@@ -555,10 +552,7 @@ describe("TS backend runtime composition", () => {
           method: "POST",
         },
       );
-      expect(portfolioRecalculateResponse.status).toBe(501);
-      await expect(portfolioRecalculateResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
+      expect(portfolioRecalculateResponse.status).toBe(202);
 
       const runtimeAddonDir = path.join(appDataDir, "addons", "runtime-addon");
       mkdirSync(runtimeAddonDir, { recursive: true });

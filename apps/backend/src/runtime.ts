@@ -42,7 +42,7 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
-import { createDeferredPortfolioJobService } from "./domains/portfolio-jobs";
+import { createLocalPortfolioJobService } from "./domains/portfolio-jobs";
 import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
 import {
   createFileSecretService,
@@ -452,7 +452,12 @@ function createServicesFromDatabase(
       createMarketDataProviderRepository(db),
     ),
     marketDataService,
-    portfolioJobService: createDeferredPortfolioJobService(),
+    portfolioJobService: createLocalPortfolioJobService(db, {
+      baseCurrency: () => settingsService.getSettings().baseCurrency || "USD",
+      eventBus,
+      exchangeRateService,
+      marketDataService,
+    }),
     portfolioMetricsService,
     restartRequired: () => restartRequired,
     secretService,
