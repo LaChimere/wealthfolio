@@ -338,6 +338,7 @@ function createServicesFromDatabase(
     eventBus,
     exchangeRateService,
     marketDataService,
+    warn: (message) => console.warn(message),
   });
   const goalValuationProvider = createGoalValuationProvider(db, accountService);
   domainEventWorker = createDomainEventWorker(eventBus, {

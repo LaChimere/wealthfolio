@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 182
+turns_used: 183
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T22:25:00+08:00"
+updated_at: "2026-05-19T23:10:49+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1177,6 +1177,14 @@ updated_at: "2026-05-19T22:25:00+08:00"
   failing the domain event batch, matching Rust's best-effort behavior. Focused
   processor/runtime tests, full `bun run check`, and focused code review passed
   after the best-effort active-goal-load refinement.
+- Turn 183: Added bounded activity-derived holdings snapshot rebuilding for
+  transaction-mode accounts in TS portfolio jobs: posted common activity flows
+  replay into cumulative `CALCULATED` snapshots before valuation/TOTAL
+  recalculation, `sinceDate` replay seeds from the latest prior snapshot,
+  HOLDINGS-mode/manual snapshots are preserved, unsupported split/adjustment and
+  asset-transfer cases warn rather than silently no-op, and standalone runtime
+  `activities_changed` events now trigger the rebuild path. Focused
+  portfolio/runtime tests and backend type-check passed.
 
 ## Deferred items
 
@@ -1370,15 +1378,17 @@ updated_at: "2026-05-19T22:25:00+08:00"
   runtime remain active follow-ups. reason=the standalone TS backend now wires
   disabled pairing feature-flag responses, while runtime behavior must move with
   dedicated device-sync parity slices.
-- Holdings snapshot reconciliation from activities remains an active follow-up.
-  reason=holdings fan-out, valuation reads, allocation reads, manual/imported
-  snapshot deletion, bounded manual snapshot saves, bounded snapshot import
-  writes, snapshot FX pair registration, provider-backed import-check symbol
-  lookup, snapshot mutation event production, and bounded portfolio job
-  valuation/TOTAL recalculation from existing snapshots now have TS runtime
-  parity, while full activity-derived holdings snapshot rebuilding and
-  background worker orchestration must move with dedicated holdings/portfolio
-  parity slices.
+- Complex holdings snapshot reconciliation from activities remains an active
+  follow-up. reason=holdings fan-out, valuation reads, allocation reads,
+  manual/imported snapshot deletion, bounded manual snapshot saves, bounded
+  snapshot import writes, snapshot FX pair registration, provider-backed
+  import-check symbol lookup, snapshot mutation event production, and bounded
+  portfolio job valuation/TOTAL recalculation from existing snapshots plus
+  bounded transaction-account replay for posted BUY/SELL/cash-flow activities
+  now have TS runtime parity, while split preprocessing, lot-level asset
+  transfers, adjustment parity, provider-driven enrichment, and background
+  worker orchestration must move with dedicated holdings/portfolio parity
+  slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening
   remain active follow-ups. reason=the standalone TS backend now supports local
   installed add-on listing, Rust-compatible manifest normalization, toggles,
@@ -1395,8 +1405,8 @@ updated_at: "2026-05-19T22:25:00+08:00"
   sync/history, market-sync result payloads, and bounded portfolio
   valuation/TOTAL recalculation have TS runtime coverage, while all-provider
   sync, background orchestration, quote-triggered worker orchestration, and
-  activity-derived snapshot rebuilding must move with dedicated market-data and
-  portfolio parity slices.
+  remaining complex activity-derived snapshot behavior must move with dedicated
+  market-data and portfolio parity slices.
 
 ## Blockers
 

@@ -50,9 +50,15 @@ const PORTFOLIO_UPDATE_START = "portfolio:update-start";
 const PORTFOLIO_UPDATE_COMPLETE = "portfolio:update-complete";
 const PORTFOLIO_UPDATE_ERROR = "portfolio:update-error";
 const DECIMAL_PRECISION = 8;
+const SNAPSHOT_SOURCE_CALCULATED = "CALCULATED";
+const TRACKING_MODE_TRANSACTIONS = "TRANSACTIONS";
+const POSTED_ACTIVITY_STATUS = "POSTED";
 
-interface AccountRow {
+interface PortfolioAccountRow {
   id: string;
+  currency: string;
+  is_archived: number;
+  tracking_mode: string;
 }
 
 interface SnapshotRow {
@@ -126,6 +132,50 @@ interface NormalizedPosition {
   isAlternative: boolean;
   contractMultiplier: Decimal;
   lots: unknown[];
+}
+
+interface RebuildLot {
+  id: string;
+  quantity: Decimal;
+  costBasis: Decimal;
+  acquisitionPrice: Decimal;
+  acquisitionFees: Decimal;
+  acquisitionDate: string;
+}
+
+interface ActivityRebuildPosition extends NormalizedPosition {
+  lots: RebuildLot[];
+}
+
+interface ActivityRebuildState {
+  accountId: string;
+  currency: string;
+  positions: Map<string, ActivityRebuildPosition>;
+  cashBalances: Map<string, Decimal>;
+  netContribution: Decimal;
+  netContributionBase: Decimal;
+}
+
+interface ActivityRebuildRow {
+  id: string;
+  account_id: string;
+  asset_id: string | null;
+  activity_type: string;
+  subtype: string | null;
+  status: string;
+  activity_date: string;
+  quantity: string | null;
+  unit_price: string | null;
+  amount: string | null;
+  fee: string | null;
+  currency: string;
+  fx_rate: string | null;
+}
+
+interface AssetInfoRow {
+  id: string;
+  kind: string;
+  quote_ccy: string | null;
 }
 
 interface CalculatedValuation {
@@ -243,9 +293,26 @@ function recalculatePortfolioFromExistingSnapshots(
   const run = db.transaction(() => {
     const baseCurrency = resolveBaseCurrency(options);
     const nowIso = (options.now ?? (() => new Date()))().toISOString();
-    const nonArchivedAccountIds = readNonArchivedAccountIds(db);
+    const accounts = readPortfolioAccounts(db);
+    const accountById = new Map(accounts.map((account) => [account.id, account]));
+    const nonArchivedAccountIds = accounts
+      .filter((account) => account.is_archived === 0)
+      .map((account) => account.id);
     const targetAccountIds = (config.accountIds ?? nonArchivedAccountIds).filter(
       (accountId) => accountId !== PORTFOLIO_TOTAL_ACCOUNT_ID,
+    );
+    const targetAccounts = targetAccountIds.flatMap((accountId) => {
+      const account = accountById.get(accountId);
+      return account ? [account] : [];
+    });
+
+    rebuildCalculatedSnapshotsFromActivities(
+      db,
+      targetAccounts,
+      config,
+      baseCurrency,
+      nowIso,
+      options,
     );
 
     for (const accountId of targetAccountIds) {
@@ -324,18 +391,20 @@ function refreshTotalSnapshots(
   }
 }
 
-function readNonArchivedAccountIds(db: Database): string[] {
+function readPortfolioAccounts(db: Database): PortfolioAccountRow[] {
   return db
-    .query<AccountRow, []>(
+    .query<PortfolioAccountRow, []>(
       `
-        SELECT id
+        SELECT
+          id,
+          currency,
+          is_archived,
+          COALESCE(tracking_mode, 'NOT_SET') AS tracking_mode
         FROM accounts
-        WHERE is_archived = 0
         ORDER BY name ASC, id ASC
       `,
     )
-    .all()
-    .map((account) => account.id);
+    .all();
 }
 
 function readSnapshots(
@@ -398,6 +467,252 @@ function readIndividualSnapshotsForTotal(db: Database, accountIds: string[]): Pa
     )
     .all(...accountIds, PORTFOLIO_TOTAL_ACCOUNT_ID)
     .map(parseSnapshot);
+}
+
+function rebuildCalculatedSnapshotsFromActivities(
+  db: Database,
+  accounts: PortfolioAccountRow[],
+  config: PortfolioJobConfig,
+  baseCurrency: string,
+  calculatedAt: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  for (const account of accounts) {
+    if (account.tracking_mode !== TRACKING_MODE_TRANSACTIONS) {
+      continue;
+    }
+    rebuildAccountCalculatedSnapshotsFromActivities(
+      db,
+      account,
+      config,
+      baseCurrency,
+      calculatedAt,
+      options,
+    );
+  }
+}
+
+function rebuildAccountCalculatedSnapshotsFromActivities(
+  db: Database,
+  account: PortfolioAccountRow,
+  config: PortfolioJobConfig,
+  baseCurrency: string,
+  calculatedAt: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  const startDate = activityRebuildStartDate(db, account.id, config);
+  const seedSnapshot = startDate ? readLatestSnapshotBeforeDate(db, account.id, startDate) : null;
+  const state = seedSnapshot
+    ? activityStateFromSnapshot(account, parseSnapshot(seedSnapshot))
+    : emptyActivityState(account);
+  const activities = readPostedActivitiesForAccount(db, account.id, startDate);
+  const activitiesByDate = groupActivitiesByDate(activities);
+
+  deleteCalculatedSnapshotsForActivityRebuild(db, account.id, startDate);
+
+  for (const date of Array.from(activitiesByDate.keys()).sort()) {
+    const activitiesForDate = activitiesByDate.get(date) ?? [];
+    for (const activity of activitiesForDate) {
+      processActivityForSnapshot(db, state, activity, baseCurrency, options);
+    }
+    upsertActivityCalculatedSnapshot(db, state, date, baseCurrency, calculatedAt, options);
+  }
+}
+
+function activityRebuildStartDate(
+  db: Database,
+  accountId: string,
+  config: PortfolioJobConfig,
+): string | null {
+  if (config.sinceDate) {
+    return config.sinceDate;
+  }
+  if (config.snapshotMode === "full") {
+    return null;
+  }
+  const latest = latestSnapshotDate(db, accountId);
+  return latest ? nextDate(latest) : null;
+}
+
+function readLatestSnapshotBeforeDate(
+  db: Database,
+  accountId: string,
+  date: string,
+): SnapshotRow | null {
+  return (
+    db
+      .query<SnapshotRow, [string, string]>(
+        `
+          SELECT
+            id,
+            account_id,
+            snapshot_date,
+            currency,
+            positions,
+            cash_balances,
+            cost_basis,
+            net_contribution,
+            net_contribution_base
+          FROM holdings_snapshots
+          WHERE account_id = ?
+            AND snapshot_date < ?
+          ORDER BY snapshot_date DESC, calculated_at DESC
+          LIMIT 1
+        `,
+      )
+      .get(accountId, date) ?? null
+  );
+}
+
+function readPostedActivitiesForAccount(
+  db: Database,
+  accountId: string,
+  startDate: string | null,
+): ActivityRebuildRow[] {
+  return db
+    .query<ActivityRebuildRow, [string]>(
+      `
+        SELECT
+          id,
+          account_id,
+          asset_id,
+          activity_type,
+          subtype,
+          status,
+          activity_date,
+          quantity,
+          unit_price,
+          amount,
+          fee,
+          currency,
+          fx_rate
+        FROM activities
+        WHERE account_id = ?
+          AND status = '${POSTED_ACTIVITY_STATUS}'
+        ORDER BY activity_date ASC, id ASC
+      `,
+    )
+    .all(accountId)
+    .filter((activity) => {
+      if (!startDate) {
+        return true;
+      }
+      return activityLocalDate(activity) >= startDate;
+    });
+}
+
+function groupActivitiesByDate(
+  activities: ActivityRebuildRow[],
+): Map<string, ActivityRebuildRow[]> {
+  const grouped = new Map<string, ActivityRebuildRow[]>();
+  for (const activity of activities) {
+    const date = activityLocalDate(activity);
+    const existing = grouped.get(date) ?? [];
+    existing.push(activity);
+    grouped.set(date, existing);
+  }
+  return grouped;
+}
+
+function deleteCalculatedSnapshotsForActivityRebuild(
+  db: Database,
+  accountId: string,
+  startDate: string | null,
+): void {
+  if (startDate) {
+    db.query(
+      "DELETE FROM holdings_snapshots WHERE account_id = ? AND source = ? AND snapshot_date >= ?",
+    ).run(accountId, SNAPSHOT_SOURCE_CALCULATED, startDate);
+    return;
+  }
+  db.query("DELETE FROM holdings_snapshots WHERE account_id = ? AND source = ?").run(
+    accountId,
+    SNAPSHOT_SOURCE_CALCULATED,
+  );
+}
+
+function emptyActivityState(account: PortfolioAccountRow): ActivityRebuildState {
+  return {
+    accountId: account.id,
+    currency: account.currency,
+    positions: new Map(),
+    cashBalances: new Map(),
+    netContribution: new Decimal(0),
+    netContributionBase: new Decimal(0),
+  };
+}
+
+function activityStateFromSnapshot(
+  account: PortfolioAccountRow,
+  snapshot: ParsedSnapshot,
+): ActivityRebuildState {
+  return {
+    accountId: account.id,
+    currency: account.currency,
+    positions: new Map(
+      Array.from(snapshot.positions.entries()).map(([assetId, position]) => [
+        assetId,
+        rebuildPositionFromSnapshot(position),
+      ]),
+    ),
+    cashBalances: new Map(snapshot.cashBalances),
+    netContribution: snapshot.netContribution,
+    netContributionBase: snapshot.netContributionBase ?? snapshot.netContribution,
+  };
+}
+
+function rebuildPositionFromSnapshot(position: NormalizedPosition): ActivityRebuildPosition {
+  const lots = normalizeRebuildLots(position);
+  return {
+    ...position,
+    quantity: new Decimal(position.quantity),
+    averageCost: new Decimal(position.averageCost),
+    totalCostBasis: new Decimal(position.totalCostBasis),
+    contractMultiplier: new Decimal(position.contractMultiplier),
+    lots,
+  };
+}
+
+function normalizeRebuildLots(position: NormalizedPosition): RebuildLot[] {
+  const lots = position.lots.flatMap((lot, index) => {
+    if (!isRecord(lot)) {
+      return [];
+    }
+    return [
+      {
+        id: stringValue(lot.id ?? `${position.assetId}_seed_${index}`),
+        quantity: decimalOptionalOrDefault(lot.quantity, new Decimal(0), "Invalid lot quantity"),
+        costBasis: decimalOptionalOrDefault(lot.costBasis, new Decimal(0), "Invalid lot cost"),
+        acquisitionPrice: decimalOptionalOrDefault(
+          lot.acquisitionPrice,
+          new Decimal(0),
+          "Invalid lot price",
+        ),
+        acquisitionFees: decimalOptionalOrDefault(
+          lot.acquisitionFees,
+          new Decimal(0),
+          "Invalid lot fees",
+        ),
+        acquisitionDate: stringValue(lot.acquisitionDate ?? position.inceptionDate),
+      },
+    ];
+  });
+  if (lots.length > 0) {
+    return lots;
+  }
+  if (position.quantity.lte(0)) {
+    return [];
+  }
+  return [
+    {
+      id: `${position.assetId}_seed`,
+      quantity: position.quantity,
+      costBasis: position.totalCostBasis,
+      acquisitionPrice: position.averageCost,
+      acquisitionFees: new Decimal(0),
+      acquisitionDate: position.inceptionDate,
+    },
+  ];
 }
 
 function parseSnapshot(row: SnapshotRow): ParsedSnapshot {
@@ -575,6 +890,487 @@ function calculateValuationForSnapshot(
     netContribution: roundDecimal(snapshot.netContribution),
     calculatedAt,
   };
+}
+
+function processActivityForSnapshot(
+  db: Database,
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  switch (activity.activity_type) {
+    case "BUY":
+      applyBuyActivity(db, state, activity, options);
+      break;
+    case "SELL":
+      applySellActivity(state, activity, options);
+      break;
+    case "DEPOSIT":
+      applyContributionActivity(state, activity, baseCurrency, 1);
+      break;
+    case "WITHDRAWAL":
+      applyContributionActivity(state, activity, baseCurrency, -1);
+      break;
+    case "DIVIDEND":
+    case "INTEREST":
+      addCash(state, activity.currency, activityAmount(activity).minus(activityFee(activity)));
+      break;
+    case "CREDIT":
+      applyCreditActivity(state, activity, baseCurrency);
+      break;
+    case "FEE":
+    case "TAX":
+      applyChargeActivity(state, activity);
+      break;
+    case "TRANSFER_IN":
+    case "TRANSFER_OUT":
+      applyCashTransferOrWarn(state, activity, baseCurrency, options);
+      break;
+    case "SPLIT":
+    case "ADJUSTMENT":
+    case "UNKNOWN":
+      warnPortfolioJob(
+        options,
+        `Skipping unsupported activity ${activity.id} (${activity.activity_type}) during TS snapshot rebuild`,
+      );
+      break;
+    default:
+      warnPortfolioJob(
+        options,
+        `Skipping unknown activity ${activity.id} (${activity.activity_type}) during TS snapshot rebuild`,
+      );
+  }
+}
+
+function applyBuyActivity(
+  db: Database,
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  const assetId = requiredActivityAssetId(activity);
+  const quantity = positiveActivityQuantity(activity);
+  const unitPrice = activityUnitPrice(activity);
+  const fee = activityFee(activity);
+  const position = getOrCreateActivityPosition(db, state, activity, assetId);
+  const costBasis = quantity.mul(unitPrice).mul(position.contractMultiplier).plus(fee);
+
+  position.lots.push({
+    id: activity.id,
+    quantity,
+    costBasis,
+    acquisitionPrice: unitPrice.mul(position.contractMultiplier),
+    acquisitionFees: fee,
+    acquisitionDate: activity.activity_date,
+  });
+  recalculateActivityPosition(position, activity.activity_date);
+  addCash(state, activity.currency, costBasis.negated());
+  warnIfCrossCurrencyActivity(activity, position.currency, options);
+}
+
+function applySellActivity(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  const assetId = requiredActivityAssetId(activity);
+  const quantity = positiveActivityQuantity(activity);
+  const fee = activityFee(activity);
+  const position = state.positions.get(assetId);
+  const multiplier = position?.contractMultiplier ?? new Decimal(1);
+  const proceeds = quantity.mul(activityUnitPrice(activity)).mul(multiplier).minus(fee);
+  addCash(state, activity.currency, proceeds);
+
+  if (!position) {
+    warnPortfolioJob(
+      options,
+      `Activity ${activity.id} sold missing position ${assetId}; cash effect was still applied`,
+    );
+    return;
+  }
+  reducePositionLotsFifo(position, quantity, options, activity.id, activity.activity_date);
+}
+
+function applyContributionActivity(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+  direction: 1 | -1,
+): void {
+  const amount = activityAmount(activity).abs().mul(direction);
+  const cashDelta = amount.minus(activityFee(activity));
+  addCash(state, activity.currency, cashDelta);
+  addContribution(state, activity, amount, baseCurrency);
+}
+
+function applyCreditActivity(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+): void {
+  const amount = activityAmount(activity);
+  addCash(state, activity.currency, amount.minus(activityFee(activity)));
+  if (activity.subtype === "BONUS") {
+    addContribution(state, activity, amount, baseCurrency);
+  }
+}
+
+function applyChargeActivity(state: ActivityRebuildState, activity: ActivityRebuildRow): void {
+  const charge = activityFee(activity).isZero() ? activityAmount(activity) : activityFee(activity);
+  if (charge.isZero()) {
+    return;
+  }
+  addCash(state, activity.currency, charge.abs().negated());
+}
+
+function applyCashTransferOrWarn(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  if (activity.asset_id) {
+    warnPortfolioJob(
+      options,
+      `Skipping asset transfer activity ${activity.id} during TS snapshot rebuild; lot-level transfers remain deferred`,
+    );
+    return;
+  }
+  applyContributionActivity(
+    state,
+    activity,
+    baseCurrency,
+    activity.activity_type === "TRANSFER_IN" ? 1 : -1,
+  );
+}
+
+function addCash(state: ActivityRebuildState, currency: string, delta: Decimal): void {
+  state.cashBalances.set(
+    currency,
+    (state.cashBalances.get(currency) ?? new Decimal(0)).plus(delta),
+  );
+}
+
+function addContribution(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  baseCurrency: string,
+): void {
+  state.netContribution = state.netContribution.plus(
+    convertActivityAmountForContribution(activity, amount, state.currency),
+  );
+  state.netContributionBase = state.netContributionBase.plus(
+    convertActivityAmountForContribution(activity, amount, baseCurrency),
+  );
+}
+
+function convertActivityAmountForContribution(
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  targetCurrency: string,
+): Decimal {
+  if (activity.currency === targetCurrency) {
+    return amount;
+  }
+  const rate = decimalOptionalOrDefault(
+    activity.fx_rate,
+    new Decimal(0),
+    "Invalid activity FX rate",
+  );
+  return rate.isZero() ? amount : amount.mul(rate);
+}
+
+function getOrCreateActivityPosition(
+  db: Database,
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  assetId: string,
+): ActivityRebuildPosition {
+  const existing = state.positions.get(assetId);
+  if (existing) {
+    return existing;
+  }
+  const asset = readAssetInfo(db, assetId);
+  const currency = asset?.quote_ccy?.trim() || activity.currency;
+  const position: ActivityRebuildPosition = {
+    id: `${assetId}_${state.accountId}`,
+    accountId: state.accountId,
+    assetId,
+    quantity: new Decimal(0),
+    averageCost: new Decimal(0),
+    totalCostBasis: new Decimal(0),
+    currency,
+    inceptionDate: activity.activity_date,
+    createdAt: activity.activity_date,
+    lastUpdated: activity.activity_date,
+    isAlternative: asset ? asset.kind !== "INVESTMENT" : false,
+    contractMultiplier: new Decimal(1),
+    lots: [],
+  };
+  state.positions.set(assetId, position);
+  return position;
+}
+
+function readAssetInfo(db: Database, assetId: string): AssetInfoRow | null {
+  return (
+    db
+      .query<AssetInfoRow, [string]>(
+        `
+          SELECT id, kind, quote_ccy
+          FROM assets
+          WHERE id = ?
+        `,
+      )
+      .get(assetId) ?? null
+  );
+}
+
+function reducePositionLotsFifo(
+  position: ActivityRebuildPosition,
+  requestedQuantity: Decimal,
+  options: LocalPortfolioJobServiceOptions,
+  activityId: string,
+  activityDate: string,
+): void {
+  let remaining = requestedQuantity;
+  const nextLots: RebuildLot[] = [];
+  for (const lot of position.lots.sort((a, b) =>
+    a.acquisitionDate.localeCompare(b.acquisitionDate),
+  )) {
+    if (remaining.lte(0)) {
+      nextLots.push(lot);
+      continue;
+    }
+    const quantityFromLot = Decimal.min(lot.quantity, remaining);
+    remaining = remaining.minus(quantityFromLot);
+    const quantityLeft = lot.quantity.minus(quantityFromLot);
+    if (quantityLeft.gt(0)) {
+      const ratio = quantityLeft.div(lot.quantity);
+      nextLots.push({
+        ...lot,
+        quantity: quantityLeft,
+        costBasis: lot.costBasis.mul(ratio),
+        acquisitionFees: lot.acquisitionFees.mul(ratio),
+      });
+    }
+  }
+  if (remaining.gt(0)) {
+    warnPortfolioJob(
+      options,
+      `Activity ${activityId} sold more ${position.assetId} than available; reduced only available quantity`,
+    );
+  }
+  position.lots = nextLots;
+  recalculateActivityPosition(position, activityDate);
+}
+
+function recalculateActivityPosition(position: ActivityRebuildPosition, updatedAt: string): void {
+  position.quantity = position.lots.reduce(
+    (total, lot) => total.plus(lot.quantity),
+    new Decimal(0),
+  );
+  position.totalCostBasis = position.lots.reduce(
+    (total, lot) => total.plus(lot.costBasis),
+    new Decimal(0),
+  );
+  position.averageCost = position.quantity.isZero()
+    ? new Decimal(0)
+    : position.totalCostBasis.div(position.quantity);
+  position.lastUpdated = updatedAt;
+}
+
+function upsertActivityCalculatedSnapshot(
+  db: Database,
+  state: ActivityRebuildState,
+  date: string,
+  baseCurrency: string,
+  calculatedAt: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  const id = `${state.accountId}_${date}`;
+  const existing = db
+    .query<{ source: string }, [string]>("SELECT source FROM holdings_snapshots WHERE id = ?")
+    .get(id);
+  if (existing && existing.source !== SNAPSHOT_SOURCE_CALCULATED) {
+    warnPortfolioJob(
+      options,
+      `Skipping calculated snapshot ${id}; existing ${existing.source} snapshot is preserved`,
+    );
+    return;
+  }
+
+  const costBasis = Array.from(state.positions.values()).reduce(
+    (total, position) => total.plus(position.totalCostBasis),
+    new Decimal(0),
+  );
+  const cashTotalAccountCurrency = totalCashInCurrency(
+    state.cashBalances,
+    state.currency,
+    date,
+    options,
+  );
+  const cashTotalBaseCurrency = totalCashInCurrency(
+    state.cashBalances,
+    baseCurrency,
+    date,
+    options,
+  );
+  db.query(
+    `
+      INSERT INTO holdings_snapshots (
+        id,
+        account_id,
+        snapshot_date,
+        currency,
+        positions,
+        cash_balances,
+        cost_basis,
+        net_contribution,
+        net_contribution_base,
+        cash_total_account_currency,
+        cash_total_base_currency,
+        calculated_at,
+        source
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        account_id = excluded.account_id,
+        snapshot_date = excluded.snapshot_date,
+        currency = excluded.currency,
+        positions = excluded.positions,
+        cash_balances = excluded.cash_balances,
+        cost_basis = excluded.cost_basis,
+        net_contribution = excluded.net_contribution,
+        net_contribution_base = excluded.net_contribution_base,
+        cash_total_account_currency = excluded.cash_total_account_currency,
+        cash_total_base_currency = excluded.cash_total_base_currency,
+        calculated_at = excluded.calculated_at,
+        source = excluded.source
+    `,
+  ).run(
+    id,
+    state.accountId,
+    date,
+    state.currency,
+    serializeActivityPositions(state.positions),
+    serializeDecimalRecord(state.cashBalances),
+    decimalToString(costBasis),
+    decimalToString(state.netContribution),
+    decimalToString(state.netContributionBase),
+    decimalToString(cashTotalAccountCurrency),
+    decimalToString(cashTotalBaseCurrency),
+    calculatedAt,
+    SNAPSHOT_SOURCE_CALCULATED,
+  );
+}
+
+function serializeActivityPositions(positions: Map<string, ActivityRebuildPosition>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Array.from(positions.entries())
+        .filter(([, position]) => !position.quantity.isZero())
+        .map(([assetId, position]) => [
+          assetId,
+          {
+            id: position.id,
+            accountId: position.accountId,
+            assetId: position.assetId,
+            quantity: decimalToString(position.quantity),
+            averageCost: decimalToString(position.averageCost),
+            totalCostBasis: decimalToString(position.totalCostBasis),
+            currency: position.currency,
+            inceptionDate: position.inceptionDate,
+            lots: position.lots.map((lot) => ({
+              id: lot.id,
+              quantity: decimalToString(lot.quantity),
+              costBasis: decimalToString(lot.costBasis),
+              acquisitionPrice: decimalToString(lot.acquisitionPrice),
+              acquisitionFees: decimalToString(lot.acquisitionFees),
+              acquisitionDate: lot.acquisitionDate,
+            })),
+            createdAt: position.createdAt,
+            lastUpdated: position.lastUpdated,
+            isAlternative: position.isAlternative,
+            contractMultiplier: decimalToString(position.contractMultiplier),
+          },
+        ]),
+    ),
+  );
+}
+
+function activityLocalDate(activity: ActivityRebuildRow): string {
+  const date = activity.activity_date.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
+  }
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid activity date for activity ${activity.id}: ${date}`);
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function requiredActivityAssetId(activity: ActivityRebuildRow): string {
+  const assetId = activity.asset_id?.trim();
+  if (!assetId) {
+    throw new Error(`Activity ${activity.id} requires an asset`);
+  }
+  return assetId;
+}
+
+function positiveActivityQuantity(activity: ActivityRebuildRow): Decimal {
+  const quantity = decimalOptionalOrDefault(
+    activity.quantity,
+    new Decimal(0),
+    `Invalid quantity for activity ${activity.id}`,
+  ).abs();
+  if (quantity.isZero()) {
+    throw new Error(`Activity ${activity.id} requires a non-zero quantity`);
+  }
+  return quantity;
+}
+
+function activityUnitPrice(activity: ActivityRebuildRow): Decimal {
+  return decimalOptionalOrDefault(
+    activity.unit_price,
+    new Decimal(0),
+    `Invalid unit price for activity ${activity.id}`,
+  );
+}
+
+function activityAmount(activity: ActivityRebuildRow): Decimal {
+  return decimalOptionalOrDefault(
+    activity.amount,
+    new Decimal(0),
+    `Invalid amount for activity ${activity.id}`,
+  );
+}
+
+function activityFee(activity: ActivityRebuildRow): Decimal {
+  return decimalOptionalOrDefault(
+    activity.fee,
+    new Decimal(0),
+    `Invalid fee for activity ${activity.id}`,
+  ).abs();
+}
+
+function warnIfCrossCurrencyActivity(
+  activity: ActivityRebuildRow,
+  positionCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  if (activity.currency !== positionCurrency) {
+    warnPortfolioJob(
+      options,
+      `Activity ${activity.id} uses ${activity.currency} against ${positionCurrency} position currency; TS snapshot rebuild FX lot conversion remains deferred`,
+    );
+  }
+}
+
+function warnPortfolioJob(options: LocalPortfolioJobServiceOptions, message: string): void {
+  options.warn?.(message);
 }
 
 function buildTotalSnapshot(
