@@ -529,6 +529,252 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("preprocesses split activities before transaction snapshot replay", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "2000",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "10",
+        unitPrice: "200",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "split-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "SPLIT",
+        date: "2026-05-15T12:00:00Z",
+        amount: "2",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2026-05-15", "100", "USD");
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "20",
+          averageCost: "100",
+          totalCostBasis: "2000",
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        investment_market_value: "2000",
+        total_value: "2000",
+      });
+      expect(warnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("restarts since-date replay from earliest activity when a split is in range", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedSnapshot(db, {
+        accountId: "account-1",
+        date: "2026-05-14",
+        positions: {
+          "asset-1": snapshotPosition("account-1", "asset-1", "10", "1000", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "1000",
+        netContribution: "1000",
+      });
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "1000",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "10",
+        unitPrice: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "split-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "SPLIT",
+        date: "2026-05-15T12:00:00Z",
+        amount: "5",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2026-05-15", "20", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: ["account-1"],
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: "2026-05-15",
+      });
+
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "50",
+          averageCost: "20",
+          totalCostBasis: "1000",
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        investment_market_value: "1000",
+        total_value: "1000",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not restart split since-date replay when no seed snapshot exists", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "1000",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "10",
+        unitPrice: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "split-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "SPLIT",
+        date: "2026-05-15T12:00:00Z",
+        amount: "5",
+        currency: "USD",
+      });
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: ["account-1"],
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: "2026-05-15",
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-14")).toBeNull();
+      expect(readSnapshot(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balances: "{}",
+        cost_basis: "0",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toEqual({});
+    } finally {
+      db.close();
+    }
+  });
+
+  test("deduplicates same-day split factors across transaction accounts", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAccount(db, "account-2", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      for (const accountId of ["account-1", "account-2"]) {
+        seedActivity(db, {
+          id: `${accountId}-deposit`,
+          accountId,
+          type: "DEPOSIT",
+          date: "2026-05-14T10:00:00Z",
+          amount: "2000",
+          currency: "USD",
+        });
+        seedActivity(db, {
+          id: `${accountId}-buy`,
+          accountId,
+          assetId: "asset-1",
+          type: "BUY",
+          date: "2026-05-14T12:00:00Z",
+          quantity: "10",
+          unitPrice: "200",
+          currency: "USD",
+        });
+        seedActivity(db, {
+          id: `${accountId}-split`,
+          accountId,
+          assetId: "asset-1",
+          type: "SPLIT",
+          date: "2026-05-15T12:00:00Z",
+          amount: "2",
+          currency: "USD",
+        });
+      }
+      seedQuote(db, "asset-1", "2026-05-15", "100", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig(),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({ quantity: "20" }),
+      });
+      expect(readSnapshotPositions(db, "account-2", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({ quantity: "20" }),
+      });
+      expect(readSnapshotPositions(db, "TOTAL", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({ quantity: "40" }),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("full recalculation is transactional and honors explicit archived targets", async () => {
     const db = createPortfolioJobTestDb();
     try {

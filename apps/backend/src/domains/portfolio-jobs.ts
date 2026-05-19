@@ -172,6 +172,8 @@ interface ActivityRebuildRow {
   fx_rate: string | null;
 }
 
+type SplitFactorsByAsset = Map<string, Array<[string, Decimal]>>;
+
 interface AssetInfoRow {
   id: string;
   kind: string;
@@ -477,13 +479,24 @@ function rebuildCalculatedSnapshotsFromActivities(
   calculatedAt: string,
   options: LocalPortfolioJobServiceOptions,
 ): void {
-  for (const account of accounts) {
-    if (account.tracking_mode !== TRACKING_MODE_TRANSACTIONS) {
-      continue;
-    }
+  const transactionAccounts = accounts.filter(
+    (account) => account.tracking_mode === TRACKING_MODE_TRANSACTIONS,
+  );
+  const activitiesByAccount = readPostedActivitiesForAccounts(
+    db,
+    transactionAccounts.map((account) => account.id),
+  );
+  const splitFactors = calculateSplitFactors(
+    Array.from(activitiesByAccount.values()).flat(),
+    options,
+  );
+
+  for (const account of transactionAccounts) {
     rebuildAccountCalculatedSnapshotsFromActivities(
       db,
       account,
+      activitiesByAccount.get(account.id) ?? [],
+      splitFactors,
       config,
       baseCurrency,
       calculatedAt,
@@ -495,17 +508,34 @@ function rebuildCalculatedSnapshotsFromActivities(
 function rebuildAccountCalculatedSnapshotsFromActivities(
   db: Database,
   account: PortfolioAccountRow,
+  allActivities: ActivityRebuildRow[],
+  splitFactors: SplitFactorsByAsset,
   config: PortfolioJobConfig,
   baseCurrency: string,
   calculatedAt: string,
   options: LocalPortfolioJobServiceOptions,
 ): void {
-  const startDate = activityRebuildStartDate(db, account.id, config);
-  const seedSnapshot = startDate ? readLatestSnapshotBeforeDate(db, account.id, startDate) : null;
+  const requestedStartDate = activityRebuildStartDate(db, account.id, config);
+  const requestedSeedSnapshot = requestedStartDate
+    ? readLatestSnapshotBeforeDate(db, account.id, requestedStartDate)
+    : null;
+  const { startDate, useSeedSnapshot } = splitAdjustedActivityStartDate(
+    allActivities,
+    requestedStartDate,
+    requestedSeedSnapshot !== null,
+  );
+  const seedSnapshot = useSeedSnapshot
+    ? requestedSeedSnapshot
+    : startDate
+      ? readLatestSnapshotBeforeDate(db, account.id, startDate)
+      : null;
   const state = seedSnapshot
     ? activityStateFromSnapshot(account, parseSnapshot(seedSnapshot))
     : emptyActivityState(account);
-  const activities = readPostedActivitiesForAccount(db, account.id, startDate);
+  const activities = adjustActivitiesForSplits(
+    filterActivitiesFromDate(allActivities, startDate),
+    splitFactors,
+  );
   const activitiesByDate = groupActivitiesByDate(activities);
 
   deleteCalculatedSnapshotsForActivityRebuild(db, account.id, startDate);
@@ -564,13 +594,16 @@ function readLatestSnapshotBeforeDate(
   );
 }
 
-function readPostedActivitiesForAccount(
+function readPostedActivitiesForAccounts(
   db: Database,
-  accountId: string,
-  startDate: string | null,
-): ActivityRebuildRow[] {
-  return db
-    .query<ActivityRebuildRow, [string]>(
+  accountIds: string[],
+): Map<string, ActivityRebuildRow[]> {
+  if (accountIds.length === 0) {
+    return new Map();
+  }
+  const placeholders = accountIds.map(() => "?").join(", ");
+  const activities = db
+    .query<ActivityRebuildRow, string[]>(
       `
         SELECT
           id,
@@ -587,18 +620,151 @@ function readPostedActivitiesForAccount(
           currency,
           fx_rate
         FROM activities
-        WHERE account_id = ?
+        WHERE account_id IN (${placeholders})
           AND status = '${POSTED_ACTIVITY_STATUS}'
-        ORDER BY activity_date ASC, id ASC
+        ORDER BY account_id ASC, activity_date ASC, id ASC
       `,
     )
-    .all(accountId)
-    .filter((activity) => {
-      if (!startDate) {
-        return true;
+    .all(...accountIds);
+  const grouped = new Map<string, ActivityRebuildRow[]>();
+  for (const activity of activities) {
+    const existing = grouped.get(activity.account_id) ?? [];
+    existing.push(activity);
+    grouped.set(activity.account_id, existing);
+  }
+  return grouped;
+}
+
+function filterActivitiesFromDate(
+  activities: ActivityRebuildRow[],
+  startDate: string | null,
+): ActivityRebuildRow[] {
+  if (!startDate) {
+    return activities;
+  }
+  return activities.filter((activity) => activityLocalDate(activity) >= startDate);
+}
+
+function splitAdjustedActivityStartDate(
+  activities: ActivityRebuildRow[],
+  requestedStartDate: string | null,
+  hasSeedSnapshot: boolean,
+): { startDate: string | null; useSeedSnapshot: boolean } {
+  if (!requestedStartDate) {
+    return { startDate: null, useSeedSnapshot: false };
+  }
+  const earliestActivityDate = activities.at(0) ? activityLocalDate(activities[0]) : null;
+  if (!hasSeedSnapshot || !earliestActivityDate || earliestActivityDate >= requestedStartDate) {
+    return { startDate: requestedStartDate, useSeedSnapshot: hasSeedSnapshot };
+  }
+  const hasSplitInRange = activities.some(
+    (activity) =>
+      activity.activity_type === "SPLIT" && activityLocalDate(activity) >= requestedStartDate,
+  );
+  return hasSplitInRange
+    ? { startDate: earliestActivityDate, useSeedSnapshot: false }
+    : { startDate: requestedStartDate, useSeedSnapshot: true };
+}
+
+function calculateSplitFactors(
+  activities: ActivityRebuildRow[],
+  options: LocalPortfolioJobServiceOptions,
+): SplitFactorsByAsset {
+  const factors = new Map<string, Array<[string, Decimal]>>();
+  for (const activity of activities) {
+    if (activity.activity_type !== "SPLIT") {
+      continue;
+    }
+    const assetId = activity.asset_id?.trim();
+    if (!assetId) {
+      warnPortfolioJob(
+        options,
+        `Missing asset_id for split activity ${activity.id}; split adjustment ignored`,
+      );
+      continue;
+    }
+    if (activity.amount === null || activity.amount === "") {
+      warnPortfolioJob(
+        options,
+        `Missing amount for split activity ${activity.id}; split adjustment ignored`,
+      );
+      continue;
+    }
+    const splitRatio = decimalOrThrow(
+      activity.amount,
+      `Invalid split ratio for activity ${activity.id}`,
+    );
+    if (!splitRatio.isPositive()) {
+      warnPortfolioJob(
+        options,
+        `Invalid split ratio ${activity.amount} for split activity ${activity.id}; split adjustment ignored`,
+      );
+      continue;
+    }
+    const existing = factors.get(assetId) ?? [];
+    existing.push([activityLocalDate(activity), splitRatio]);
+    factors.set(assetId, existing);
+  }
+
+  for (const splits of factors.values()) {
+    splits.sort(([dateA], [dateB]) => dateA.localeCompare(dateB));
+    const seenDates = new Set<string>();
+    for (let index = 0; index < splits.length; index += 1) {
+      const [date] = splits[index];
+      if (seenDates.has(date)) {
+        splits.splice(index, 1);
+        index -= 1;
+      } else {
+        seenDates.add(date);
       }
-      return activityLocalDate(activity) >= startDate;
-    });
+    }
+  }
+  return factors;
+}
+
+function adjustActivitiesForSplits(
+  activities: ActivityRebuildRow[],
+  splitFactors: SplitFactorsByAsset,
+): ActivityRebuildRow[] {
+  return activities.map((activity) => {
+    if (!activity.asset_id || activity.activity_type === "SPLIT") {
+      return activity;
+    }
+    const splits = splitFactors.get(activity.asset_id);
+    if (!splits) {
+      return activity;
+    }
+    const activityDate = activityLocalDate(activity);
+    const cumulativeFactor = splits.reduce((factor, [splitDate, splitRatio]) => {
+      return splitDate > activityDate ? factor.mul(splitRatio) : factor;
+    }, new Decimal(1));
+    if (cumulativeFactor.eq(1)) {
+      return activity;
+    }
+
+    const adjustedQuantity =
+      activity.quantity === null || activity.quantity === ""
+        ? activity.quantity
+        : decimalToString(
+            decimalOrThrow(activity.quantity, `Invalid quantity for activity ${activity.id}`)
+              .abs()
+              .mul(cumulativeFactor),
+          );
+    const adjustedUnitPrice =
+      activity.unit_price === null || activity.unit_price === ""
+        ? activity.unit_price
+        : decimalToString(
+            decimalOrThrow(activity.unit_price, `Invalid unit price for activity ${activity.id}`)
+              .abs()
+              .div(cumulativeFactor),
+          );
+
+    return {
+      ...activity,
+      quantity: adjustedQuantity,
+      unit_price: adjustedUnitPrice,
+    };
+  });
 }
 
 function groupActivitiesByDate(
@@ -931,6 +1097,7 @@ function processActivityForSnapshot(
       applyAdjustmentActivity(state, activity, options);
       break;
     case "SPLIT":
+      break;
     case "UNKNOWN":
       warnPortfolioJob(
         options,

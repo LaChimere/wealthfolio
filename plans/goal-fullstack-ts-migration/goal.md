@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 184
+turns_used: 185
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T23:23:51+08:00"
+updated_at: "2026-05-19T23:31:35+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1189,6 +1189,12 @@ updated_at: "2026-05-19T23:23:51+08:00"
   activity snapshot replay: `OPTION_EXPIRY` activities now remove lots via FIFO
   without cash effects, preserving net contribution while reducing cost basis
   and market value. Focused portfolio tests and backend type-check passed.
+- Turn 185: Added split preprocessing parity for TS activity snapshot replay:
+  valid `SPLIT` ratios now adjust prior activity quantities/prices, same-day
+  asset splits are deduplicated across transaction accounts, and since-date
+  replay restarts from earliest activity when a split enters the recalculation
+  range so historical lots are rebuilt split-adjusted. Focused portfolio tests
+  and backend type-check passed.
 
 ## Deferred items
 
@@ -1388,11 +1394,11 @@ updated_at: "2026-05-19T23:23:51+08:00"
   snapshot import writes, snapshot FX pair registration, provider-backed
   import-check symbol lookup, snapshot mutation event production, and bounded
   portfolio job valuation/TOTAL recalculation from existing snapshots plus
-  bounded transaction-account replay for posted BUY/SELL/cash-flow activities
-  plus option-expiry adjustments now have TS runtime parity, while split
-  preprocessing, lot-level asset transfers, other adjustment parity,
-  provider-driven enrichment, and background worker orchestration must move with
-  dedicated holdings/portfolio parity slices.
+  bounded transaction-account replay for posted BUY/SELL/cash-flow activities,
+  option-expiry adjustments, and split preprocessing now have TS runtime parity,
+  while lot-level asset transfers, other adjustment parity, provider-driven
+  enrichment, and background worker orchestration must move with dedicated
+  holdings/portfolio parity slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening
   remain active follow-ups. reason=the standalone TS backend now supports local
   installed add-on listing, Rust-compatible manifest normalization, toggles,
