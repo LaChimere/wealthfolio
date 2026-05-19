@@ -2125,12 +2125,23 @@ describe("TS backend runtime composition", () => {
     });
 
     try {
+      const { goalService } = runtime.options;
+      if (!goalService) {
+        throw new Error("Runtime domain event test requires goal service");
+      }
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         seedRuntimePortfolioJobInput(db);
       } finally {
         db.close();
       }
+      const goal = await goalService.createGoal({
+        goalType: "custom_save_up",
+        title: "Event Goal",
+        targetAmount: 50,
+        currency: "USD",
+      });
+      await goalService.saveGoalFunding(goal.id, [{ accountId: "account-1", sharePercent: 100 }]);
 
       runtime.options.eventBus?.publish({
         name: HOLDINGS_CHANGED_EVENT,
@@ -2150,6 +2161,10 @@ describe("TS backend runtime composition", () => {
           investment_market_value: "20",
           total_value: "25",
         });
+        expect(readRuntimeGoalSummary(resultDb, goal.id)).toEqual({
+          summary_current_value: 25,
+          summary_progress: 0.5,
+        });
       } finally {
         resultDb.close();
       }
@@ -2162,6 +2177,63 @@ describe("TS backend runtime composition", () => {
       ]);
     } finally {
       unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
+  test("keeps domain event goal refresh best-effort when active goals cannot load", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-goal-refresh-error-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+
+    try {
+      const { goalService } = runtime.options;
+      if (!goalService) {
+        throw new Error("Runtime domain event test requires goal service");
+      }
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+      } finally {
+        db.close();
+      }
+
+      const originalGetGoals = goalService.getGoals;
+      const originalWarn = console.warn;
+      const warnings: string[] = [];
+      goalService.getGoals = () => {
+        throw new Error("goal list failed");
+      };
+      console.warn = (...args) => {
+        warnings.push(args.map(String).join(" "));
+      };
+      try {
+        runtime.options.eventBus?.publish({
+          name: HOLDINGS_CHANGED_EVENT,
+          payload: { account_ids: ["account-1"], asset_ids: ["asset-1"] },
+        });
+        await runtime.close();
+      } finally {
+        goalService.getGoals = originalGetGoals;
+        console.warn = originalWarn;
+      }
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-16")).toMatchObject({
+          total_value: "25",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(warnings).toContain(
+        "Failed to load active goals for summary refresh: goal list failed",
+      );
+    } finally {
       await runtime.close();
     }
   });
@@ -2444,5 +2516,22 @@ function readRuntimeValuation(
         `,
       )
       .get(accountId, date) ?? null
+  );
+}
+
+function readRuntimeGoalSummary(
+  db: ReturnType<typeof openSqliteDatabase>,
+  goalId: string,
+): Record<string, number | null> | null {
+  return (
+    db
+      .query<Record<string, number | null>, [string]>(
+        `
+          SELECT summary_current_value, summary_progress
+          FROM goals
+          WHERE id = ?
+        `,
+      )
+      .get(goalId) ?? null
   );
 }

@@ -189,12 +189,13 @@
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
     template/account-template callbacks, holdings snapshot callbacks,
-    domain-event planning/batch processing/worker helper, and standalone runtime
-    domain-event worker wiring to local portfolio jobs now have TS runtime
-    parity, while provider-backed asset resolution, remaining quote sync outbox
-    follow-ups outside migrated alternative-asset and market-data quote paths,
-    device-sync push/pull runtime wiring, and remaining device-sync side effects
-    are deferred to activities/import/device-sync runtime parity slices; AI chat
+    domain-event planning/batch processing/worker helper, standalone runtime
+    domain-event worker wiring to local portfolio jobs, and post-portfolio
+    active goal-summary refresh now have TS runtime parity, while
+    provider-backed asset resolution, remaining quote sync outbox follow-ups
+    outside migrated alternative-asset and market-data quote paths, device-sync
+    push/pull runtime wiring, and remaining device-sync side effects are
+    deferred to activities/import/device-sync runtime parity slices; AI chat
     persistence, tag persistence, tool-result mutation, local AI chat
     sync_outbox callbacks, native/fallback text/reasoning provider streaming,
     generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
@@ -1888,6 +1889,15 @@ contract:
   flush-and-dispose draining before runtime close/database restore. Full
   repository check passed with `bun run check`; final focused code review found
   no remaining significant issues after the shutdown race fix.
+- `pr5-domain-event-goal-summary-refresh`: targeted checks passed:
+  `bun test apps/backend/src/domain-events/processor.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "domain event|planned actions"`
+  plus the focused best-effort refresh-failure case, `bun run type-check`, and
+  full `bun run check`. Coverage includes Rust queue-worker action order with
+  goal-summary refresh after portfolio job execution and before broker sync,
+  standalone runtime valuation-map reuse, active funded goal summary refresh
+  after a `holdings_changed` portfolio recalculation, no refresh when portfolio
+  jobs are only planned, and best-effort logging for valuation-load,
+  active-goal-load, and per-goal refresh failures.
 
 ## Result
 

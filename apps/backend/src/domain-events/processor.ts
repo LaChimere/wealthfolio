@@ -5,6 +5,7 @@ import { planAssetEnrichment, planBrokerSync, planPortfolioJob } from "./planner
 export interface DomainEventProcessorOptions {
   enrichAssets?: (assetIds: string[]) => Promise<void> | void;
   portfolioJobService?: PortfolioJobService;
+  refreshGoalSummaries?: () => Promise<void> | void;
   syncBrokerAccounts?: (accountIds: string[]) => Promise<void> | void;
   timezone?: string | (() => string | undefined);
 }
@@ -26,7 +27,10 @@ export async function processDomainEventBatch(
 
   const portfolioJob = planPortfolioJob(events, resolveTimezone(options));
   if (portfolioJob) {
-    await options.portfolioJobService?.enqueuePortfolioJob(portfolioJob);
+    if (options.portfolioJobService) {
+      await options.portfolioJobService.enqueuePortfolioJob(portfolioJob);
+      await options.refreshGoalSummaries?.();
+    }
   }
 
   const brokerSyncAccountIds = planBrokerSync(events);

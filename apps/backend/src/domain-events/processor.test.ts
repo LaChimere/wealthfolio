@@ -39,6 +39,9 @@ describe("TS domain event batch processor", () => {
             portfolioJobs.push(config);
           },
         },
+        refreshGoalSummaries() {
+          calls.push("goals:refresh");
+        },
         syncBrokerAccounts(accountIds) {
           calls.push(`broker:${accountIds.join(",")}`);
         },
@@ -46,7 +49,12 @@ describe("TS domain event batch processor", () => {
       },
     );
 
-    expect(calls).toEqual(["enrich:bond-1", "portfolio:account-1", "broker:account-2"]);
+    expect(calls).toEqual([
+      "enrich:bond-1",
+      "portfolio:account-1",
+      "goals:refresh",
+      "broker:account-2",
+    ]);
     expect(plan).toEqual({
       assetEnrichmentIds: ["bond-1"],
       portfolioJob: {
@@ -69,6 +77,28 @@ describe("TS domain event batch processor", () => {
       portfolioJob: null,
       brokerSyncAccountIds: [],
     });
+  });
+
+  test("does not refresh goal summaries when portfolio jobs are only planned", async () => {
+    const calls: string[] = [];
+
+    const plan = await processDomainEventBatch(
+      [
+        event(ACTIVITIES_CHANGED_EVENT, {
+          account_ids: ["account-1"],
+          earliest_activity_at_utc: "2025-01-01T00:00:00.000Z",
+        }),
+      ],
+      {
+        refreshGoalSummaries() {
+          calls.push("goals:refresh");
+        },
+        timezone: "UTC",
+      },
+    );
+
+    expect(plan.portfolioJob?.accountIds).toEqual(["account-1"]);
+    expect(calls).toEqual([]);
   });
 
   test("propagates action failures instead of reporting success", async () => {

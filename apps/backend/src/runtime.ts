@@ -30,7 +30,7 @@ import {
 } from "./domains/custom-providers";
 import { createDisabledDeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
-import { createGoalRepository, createGoalService } from "./domains/goals";
+import { createGoalRepository, createGoalService, type GoalService } from "./domains/goals";
 import {
   createHealthRepository,
   createHealthService,
@@ -339,11 +339,13 @@ function createServicesFromDatabase(
     exchangeRateService,
     marketDataService,
   });
+  const goalValuationProvider = createGoalValuationProvider(db, accountService);
   domainEventWorker = createDomainEventWorker(eventBus, {
     ...(runtimeOptions.domainEventDebounceMs === undefined
       ? {}
       : { debounceMs: runtimeOptions.domainEventDebounceMs }),
     portfolioJobService,
+    refreshGoalSummaries: () => refreshRuntimeGoalSummaries(goalService, goalValuationProvider),
     timezone: () => settingsService.getSettings().timezone,
     onError(error, events) {
       const eventNames = events.map((event) => event.name).join(", ");
@@ -478,7 +480,7 @@ function createServicesFromDatabase(
     deviceSyncService: createDisabledDeviceSyncService(),
     exchangeRateService,
     goalService,
-    goalValuationProvider: createGoalValuationProvider(db, accountService),
+    goalValuationProvider,
     healthService,
     holdingsService,
     marketDataProviderService: createMarketDataProviderService(
@@ -594,6 +596,35 @@ function createRuntimeAccountService(
     baseCurrency,
     eventBus,
   });
+}
+
+async function refreshRuntimeGoalSummaries(
+  goalService: GoalService,
+  goalValuationProvider: GoalValuationProvider,
+): Promise<void> {
+  let valuationMap: Awaited<ReturnType<GoalValuationProvider["getGoalValuationMap"]>>;
+  try {
+    valuationMap = await goalValuationProvider.getGoalValuationMap();
+  } catch (error) {
+    console.warn(`Failed to load valuations for goal summary refresh: ${errorMessage(error)}`);
+    return;
+  }
+
+  let activeGoals: ReturnType<GoalService["getGoals"]>;
+  try {
+    activeGoals = goalService.getGoals().filter((item) => item.statusLifecycle === "active");
+  } catch (error) {
+    console.warn(`Failed to load active goals for summary refresh: ${errorMessage(error)}`);
+    return;
+  }
+
+  for (const goal of activeGoals) {
+    try {
+      await goalService.refreshGoalSummary(goal.id, valuationMap);
+    } catch (error) {
+      console.debug(`Failed to refresh summary for goal ${goal.id}: ${errorMessage(error)}`);
+    }
+  }
 }
 
 function createGoalValuationProvider(
