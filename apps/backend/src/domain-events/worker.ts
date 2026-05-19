@@ -18,6 +18,7 @@ export interface DomainEventWorkerOptions extends DomainEventProcessorOptions {
 export interface DomainEventWorkerHandle {
   dispose(): void;
   flush(): Promise<void>;
+  flushAndDispose(): Promise<void>;
   pendingCount(): number;
 }
 
@@ -101,21 +102,39 @@ export function createDomainEventWorker(
     schedule();
   });
 
+  const disposeImmediate = () => {
+    disposed = true;
+    clearDebounce();
+    pendingEvents.length = 0;
+    unsubscribe();
+  };
+
+  const flush = async () => {
+    clearDebounce();
+    while (processing || pendingEvents.length > 0) {
+      if (processing) {
+        await processing;
+      } else {
+        await processPending(false);
+      }
+    }
+  };
+
   return {
     dispose() {
-      disposed = true;
-      clearDebounce();
-      pendingEvents.length = 0;
-      unsubscribe();
+      disposeImmediate();
     },
     async flush() {
+      await flush();
+    },
+    async flushAndDispose() {
+      disposed = true;
       clearDebounce();
-      while (processing || pendingEvents.length > 0) {
-        if (processing) {
-          await processing;
-        } else {
-          await processPending(false);
-        }
+      unsubscribe();
+      try {
+        await flush();
+      } finally {
+        pendingEvents.length = 0;
       }
     },
     pendingCount() {

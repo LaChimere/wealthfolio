@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 180
+turns_used: 181
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T21:44:39+08:00"
+updated_at: "2026-05-19T22:05:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1161,6 +1161,14 @@ updated_at: "2026-05-19T21:44:39+08:00"
   `migrate_classifications` action, and `/health/fix` now delegates through the
   service when present so cache invalidation is preserved. Focused health/http
   tests and type-check passed after code-review refinement.
+- Turn 181: Wired the existing domain-event worker into the standalone TS
+  runtime: SQLite-backed services now create a worker bound to the shared event
+  bus, timezone settings, and local portfolio job service so
+  `holdings_changed`/related domain events can trigger debounced portfolio
+  recalculation instead of only having isolated planner/processor helpers.
+  Runtime close and database restore now use worker-level flush-and-dispose
+  draining before SQLite shutdown. Focused runtime/domain-event tests, full
+  `bun run check`, and final focused code review passed.
 
 ## Deferred items
 
@@ -1177,9 +1185,9 @@ updated_at: "2026-05-19T21:44:39+08:00"
   execution, Rust-compatible dismissal hash carryover, and market-sync
   failure/skipped-reason event payloads now have TS runtime parity, while
   broader classification, remaining data-consistency checks, all-provider market
-  sync, background worker orchestration, automatic/background FX quote fetching,
-  and remaining affected-item parity depend on holdings, quotes, FX, assets,
-  valuation, and market sync parity.
+  sync, Connect/device-sync background orchestration, automatic/background FX
+  quote fetching, and remaining affected-item parity depend on holdings, quotes,
+  FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
   reason=external source fetches, secret-backed headers, parser/extractor
   behavior, response safety limits, and preview metadata are implemented in the

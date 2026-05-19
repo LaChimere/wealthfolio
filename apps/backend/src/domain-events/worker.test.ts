@@ -99,6 +99,27 @@ describe("TS domain event worker", () => {
     expect(worker.pendingCount()).toBe(0);
     expect(batches).toEqual([]);
   });
+
+  test("flushAndDispose drains queued events without accepting new ones", async () => {
+    const eventBus = createEventBus();
+    const batches: BackendEvent[][] = [];
+    const worker = createDomainEventWorker(eventBus, {
+      debounceMs: 10_000,
+      async processBatch(events) {
+        batches.push(events);
+        eventBus.publish(event(ASSETS_CREATED_EVENT, { asset_ids: ["nested"] }));
+        return { assetEnrichmentIds: [], portfolioJob: null, brokerSyncAccountIds: [] };
+      },
+    });
+
+    eventBus.publish(event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] }));
+    await worker.flushAndDispose();
+    eventBus.publish(event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-2"] }));
+    await worker.flush();
+
+    expect(worker.pendingCount()).toBe(0);
+    expect(batches).toEqual([[event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] })]]);
+  });
 });
 
 function event(name: string, payload?: Record<string, unknown>): BackendEvent {

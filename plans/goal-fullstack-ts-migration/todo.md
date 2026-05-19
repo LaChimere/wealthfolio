@@ -188,13 +188,14 @@
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
-    template/account-template callbacks, holdings snapshot callbacks, and
-    domain-event planning/batch processing/worker helper now have TS runtime
+    template/account-template callbacks, holdings snapshot callbacks,
+    domain-event planning/batch processing/worker helper, and standalone runtime
+    domain-event worker wiring to local portfolio jobs now have TS runtime
     parity, while provider-backed asset resolution, remaining quote sync outbox
     follow-ups outside migrated alternative-asset and market-data quote paths,
-    device-sync push/pull runtime wiring, and portfolio recalculation side
-    effects are deferred to activities/import/device-sync runtime parity slices;
-    AI chat persistence, tag persistence, tool-result mutation, local AI chat
+    device-sync push/pull runtime wiring, and remaining device-sync side effects
+    are deferred to activities/import/device-sync runtime parity slices; AI chat
+    persistence, tag persistence, tool-result mutation, local AI chat
     sync_outbox callbacks, native/fallback text/reasoning provider streaming,
     generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
     tool-call execution, built-in `get_accounts`, `get_holdings`,
@@ -1732,8 +1733,8 @@ contract:
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
   Coverage includes event-bus subscription, debounce batching, explicit
   flush/dispose behavior, pending-event clearing, scheduled error reporting, and
-  flush-time failure propagation while real runtime service wiring remains
-  deferred.
+  flush-time failure propagation while real runtime service wiring remained
+  deferred at that helper-slice stage.
 - `pr5-ai-chat-tags-runtime`: targeted checks passed:
   `bun test apps/backend/src/domains/ai-chat.test.ts apps/backend/src/http.test.ts --grep "AI chat|routes migrated AI chat"`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`; full
@@ -1878,6 +1879,15 @@ contract:
   dispatch, plus `/health/fix` delegation through HealthService when a
   dispatcher is present so cache invalidation is preserved. Focused code review
   found and the slice fixed the HTTP special-case cache-invalidation gap.
+- `pr5-domain-event-runtime-wiring`: targeted checks passed:
+  `bun test apps/backend/src/runtime.test.ts apps/backend/src/domain-events/worker.test.ts --test-name-pattern "domain event"`
+  and `bun run type-check`. Coverage includes standalone SQLite runtime worker
+  creation against the shared event bus, settings-backed timezone, local
+  portfolio job service, close-time worker flush, `holdings_changed` triggering
+  market/portfolio event emission plus valuation/TOTAL recalculation, and worker
+  flush-and-dispose draining before runtime close/database restore. Full
+  repository check passed with `bun run check`; final focused code review found
+  no remaining significant issues after the shutdown race fix.
 
 ## Result
 

@@ -46,7 +46,7 @@ export interface AppUtilityServiceOptions {
   fetchUpdate?: FetchUpdate;
   instanceId?: string | (() => string | undefined);
   now?: () => Date;
-  prepareDatabaseRestore?: () => void;
+  prepareDatabaseRestore?: () => Promise<void> | void;
   restoreSettleDelayMs?: number;
   target?: string;
   updateCacheTtlMs?: number;
@@ -136,7 +136,7 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
       if (!existsSync(normalizedBackupPath)) {
         throw new Error("Backup file not found");
       }
-      options.prepareDatabaseRestore?.();
+      await options.prepareDatabaseRestore?.();
       await sleep(options.restoreSettleDelayMs ?? DEFAULT_RESTORE_SETTLE_DELAY_MS);
       restoreSqliteDatabase(options.appDataDir, normalizedBackupPath, options.env);
     },

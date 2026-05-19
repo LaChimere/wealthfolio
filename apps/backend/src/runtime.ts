@@ -66,6 +66,7 @@ import {
   type InitializedSqliteDatabase,
 } from "./storage/sqlite";
 import { createSyncOutboxQueue } from "./sync-outbox";
+import { createDomainEventWorker, type DomainEventWorkerHandle } from "./domain-events/worker";
 
 export interface SqliteBackedBackendServicesOptions {
   appDataDir?: string;
@@ -76,13 +77,15 @@ export interface SqliteBackedBackendServicesOptions {
   secretKey?: Uint8Array;
   aiProviderCatalogJson?: string;
   marketDataFetch?: typeof fetch;
+  domainEventDebounceMs?: number;
 }
 
 export interface SqliteBackedBackendServices {
   options: BackendRequestHandlerOptions;
   dbPath: string;
   appliedMigrations: string[];
-  close(): void;
+  domainEventWorker: DomainEventWorkerHandle;
+  close(): Promise<void>;
 }
 
 export function createSqliteBackedBackendServices(
@@ -106,6 +109,9 @@ export function createSqliteBackedBackendServices(
       secretKey: options.secretKey,
       aiProviderCatalogJson: options.aiProviderCatalogJson,
       marketDataFetch: options.marketDataFetch,
+      ...(options.domainEventDebounceMs === undefined
+        ? {}
+        : { domainEventDebounceMs: options.domainEventDebounceMs }),
     });
   } catch (error) {
     initialized.db.close();
@@ -162,19 +168,29 @@ function createServicesFromDatabase(
     secretKey?: Uint8Array;
     aiProviderCatalogJson?: string;
     marketDataFetch?: typeof fetch;
+    domainEventDebounceMs?: number;
   },
 ): SqliteBackedBackendServices {
   const eventBus = runtimeOptions.eventBus ?? createEventBus();
   const { db } = initialized;
   let closed = false;
   let restartRequired = false;
+  let domainEventWorker: DomainEventWorkerHandle | undefined;
   const closeDatabase = () => {
     if (!closed) {
       db.close();
       closed = true;
     }
   };
-  const prepareDatabaseRestore = () => {
+  const flushAndDisposeDomainEventWorker = async () => {
+    const worker = domainEventWorker;
+    if (!worker) {
+      return;
+    }
+    await worker.flushAndDispose();
+  };
+  const prepareDatabaseRestore = async () => {
+    await flushAndDisposeDomainEventWorker();
     if (!closed) {
       try {
         db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
@@ -317,6 +333,23 @@ function createServicesFromDatabase(
     settingsProvider: settingsService,
     valuationProvider: createNegativeBalanceProvider(db),
   });
+  const portfolioJobService = createLocalPortfolioJobService(db, {
+    baseCurrency: () => settingsService.getSettings().baseCurrency || "USD",
+    eventBus,
+    exchangeRateService,
+    marketDataService,
+  });
+  domainEventWorker = createDomainEventWorker(eventBus, {
+    ...(runtimeOptions.domainEventDebounceMs === undefined
+      ? {}
+      : { debounceMs: runtimeOptions.domainEventDebounceMs }),
+    portfolioJobService,
+    timezone: () => settingsService.getSettings().timezone,
+    onError(error, events) {
+      const eventNames = events.map((event) => event.name).join(", ");
+      console.warn(`Domain event processing failed for [${eventNames}]: ${errorMessage(error)}`);
+    },
+  });
 
   const options: BackendRequestHandlerOptions = {
     accountService,
@@ -452,12 +485,7 @@ function createServicesFromDatabase(
       createMarketDataProviderRepository(db),
     ),
     marketDataService,
-    portfolioJobService: createLocalPortfolioJobService(db, {
-      baseCurrency: () => settingsService.getSettings().baseCurrency || "USD",
-      eventBus,
-      exchangeRateService,
-      marketDataService,
-    }),
+    portfolioJobService,
     portfolioMetricsService,
     restartRequired: () => restartRequired,
     secretService,
@@ -470,8 +498,13 @@ function createServicesFromDatabase(
     options,
     dbPath: initialized.dbPath,
     appliedMigrations: initialized.appliedMigrations,
-    close() {
-      closeDatabase();
+    domainEventWorker,
+    async close() {
+      try {
+        await flushAndDisposeDomainEventWorker();
+      } finally {
+        closeDatabase();
+      }
     },
   };
 }

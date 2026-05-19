@@ -9,7 +9,7 @@ if (import.meta.main) {
   try {
     server = startBackendServer(config, runtime.options);
   } catch (error) {
-    runtime.close();
+    await runtime.close();
     throw error;
   }
   console.info(`Wealthfolio TS backend database path: ${runtime.dbPath}`);
@@ -20,8 +20,12 @@ if (import.meta.main) {
 
   const stop = () => {
     server.stop();
-    runtime.close();
-    process.exit(0);
+    void runtime
+      .close()
+      .catch((error) => {
+        console.error("Wealthfolio TS backend shutdown failed:", error);
+      })
+      .finally(() => process.exit(0));
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);

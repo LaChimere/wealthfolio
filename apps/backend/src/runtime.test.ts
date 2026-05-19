@@ -13,6 +13,7 @@ import {
 } from "./runtime";
 import { startBackendServer } from "./server";
 import { openSqliteDatabase } from "./storage/sqlite";
+import { HOLDINGS_CHANGED_EVENT } from "./domain-events/planner";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 const config: BackendRuntimeConfig = {
@@ -988,10 +989,10 @@ describe("TS backend runtime composition", () => {
       expect(settingsAfterRestoreResponse.status).toBe(503);
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
 
-    expect(() => runtime.close()).not.toThrow();
+    await expect(runtime.close()).resolves.toBeUndefined();
     const restoredDb = openSqliteDatabase(path.join(appDataDir, "app.db"));
     try {
       expect(
@@ -1097,7 +1098,7 @@ describe("TS backend runtime composition", () => {
       });
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1215,7 +1216,7 @@ describe("TS backend runtime composition", () => {
       }
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1290,11 +1291,11 @@ describe("TS backend runtime composition", () => {
       }
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
   });
 
-  test("persists runtime direct asset sync callbacks to sync_outbox", () => {
+  test("persists runtime direct asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-sync-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
@@ -1366,7 +1367,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1437,11 +1438,11 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
-  test("persists runtime market-data UUID manual quote deletes to sync_outbox", () => {
+  test("persists runtime market-data UUID manual quote deletes to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-sync-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
@@ -1484,11 +1485,11 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
-  test("persists runtime AI chat sync callbacks to sync_outbox", () => {
+  test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
@@ -1561,7 +1562,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1646,7 +1647,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1721,7 +1722,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1807,7 +1808,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1860,7 +1861,7 @@ describe("TS backend runtime composition", () => {
       }
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -1921,7 +1922,7 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -2003,7 +2004,7 @@ describe("TS backend runtime composition", () => {
       }
     } finally {
       server.stop();
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -2106,11 +2107,66 @@ describe("TS backend runtime composition", () => {
         db.close();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
-  test("wires keyring secrets when requested", () => {
+  test("wires runtime domain events to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-domain-events-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+      } finally {
+        db.close();
+      }
+
+      runtime.options.eventBus?.publish({
+        name: HOLDINGS_CHANGED_EVENT,
+        payload: { account_ids: ["account-1"], asset_ids: ["asset-1"] },
+      });
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-16")).toMatchObject({
+          cash_balance: "5",
+          investment_market_value: "20",
+          total_value: "25",
+        });
+        expect(readRuntimeValuation(resultDb, "TOTAL", "2026-05-16")).toMatchObject({
+          cash_balance: "5",
+          investment_market_value: "20",
+          total_value: "25",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toEqual([
+        HOLDINGS_CHANGED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
+  test("wires keyring secrets when requested", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
     const runtime = createSqliteBackedBackendServices({
@@ -2122,7 +2178,7 @@ describe("TS backend runtime composition", () => {
     try {
       expect(runtime.options.secretService).toBeDefined();
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 
@@ -2248,7 +2304,7 @@ describe("TS backend runtime composition", () => {
         server.stop();
       }
     } finally {
-      runtime.close();
+      await runtime.close();
     }
   });
 });
@@ -2284,6 +2340,66 @@ function seedRuntimeAsset(db: ReturnType<typeof openSqliteDatabase>, assetId: st
   ).run(assetId);
 }
 
+function seedRuntimePortfolioJobInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('account-1', 'Runtime Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('asset-1', 'INVESTMENT', 'Runtime Asset', 'RUNTIME', NULL, NULL, 1, 'MANUAL',
+        'USD', 'EQUITY', 'RUNTIME', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO quotes (
+        id, asset_id, day, source, close, currency, created_at, timestamp
+      )
+      VALUES ('asset-1_2026-05-14_MANUAL', 'asset-1', '2026-05-14', 'MANUAL',
+        '10', 'USD', '2026-05-14T16:00:00Z', '2026-05-14T16:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO holdings_snapshots (
+        id, account_id, snapshot_date, currency, positions, cash_balances,
+        cost_basis, net_contribution, net_contribution_base, source
+      )
+      VALUES ('account-1_2026-05-16', 'account-1', '2026-05-16', 'USD',
+        ?, '{"USD":"5"}', '12', '17', '17', 'MANUAL_ENTRY')
+    `,
+  ).run(
+    JSON.stringify({
+      "asset-1": {
+        id: "asset-1_account-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        quantity: "2",
+        averageCost: "6",
+        totalCostBasis: "12",
+        currency: "USD",
+        inceptionDate: "2026-01-01T00:00:00Z",
+        createdAt: "2026-01-01T00:00:00Z",
+        lastUpdated: "2026-01-01T00:00:00Z",
+        isAlternative: false,
+        contractMultiplier: "1",
+        lots: [],
+      },
+    }),
+  );
+}
+
 function seedRuntimeValuation(
   db: ReturnType<typeof openSqliteDatabase>,
   valuation: {
@@ -2309,5 +2425,24 @@ function seedRuntimeValuation(
     valuation.fxRateToBase,
     valuation.totalValue,
     `${valuation.date}T00:00:00Z`,
+  );
+}
+
+function readRuntimeValuation(
+  db: ReturnType<typeof openSqliteDatabase>,
+  accountId: string,
+  date: string,
+): Record<string, string> | null {
+  return (
+    db
+      .query<Record<string, string>, [string, string]>(
+        `
+          SELECT *
+          FROM daily_account_valuation
+          WHERE account_id = ?
+            AND valuation_date = ?
+        `,
+      )
+      .get(accountId, date) ?? null
   );
 }
