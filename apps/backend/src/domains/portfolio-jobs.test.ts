@@ -853,6 +853,70 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("leaves non-option adjustments as no-op without warnings", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "2",
+        unitPrice: "10",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "adjustment-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "ADJUSTMENT",
+        subtype: "RETURN_OF_CAPITAL",
+        date: "2026-05-15T12:00:00Z",
+        quantity: "1",
+        amount: "5",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2026-05-15", "10", "USD");
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(warnings).toEqual([]);
+      expect(readSnapshot(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balances: '{"USD":"80"}',
+        cost_basis: "20",
+        net_contribution: "100",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "asset-1": expect.objectContaining({ quantity: "2", totalCostBasis: "20" }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        investment_market_value: "20",
+        total_value: "100",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("applies option-expiry adjustments without cash effects", async () => {
     const db = createPortfolioJobTestDb();
     try {

@@ -1486,10 +1486,6 @@ function applyAdjustmentActivity(
   options: LocalPortfolioJobServiceOptions,
 ): void {
   if (!activity.subtype || activity.subtype.toUpperCase() !== "OPTION_EXPIRY") {
-    warnPortfolioJob(
-      options,
-      `Skipping unsupported adjustment activity ${activity.id} (${activity.subtype ?? "none"}) during TS snapshot rebuild`,
-    );
     return;
   }
 
