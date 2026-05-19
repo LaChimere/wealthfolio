@@ -1744,6 +1744,68 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("sends OpenAI-compatible PDF attachments as file content parts", async () => {
+    const db = createAiChatDb();
+    const fetchBodies: Array<Record<string, unknown>> = [];
+    const service = createAiChatService(db, {
+      aiProviderService: createProviderResolver({
+        providerId: "openrouter",
+        modelId: "gpt-document",
+        providerType: "api",
+        baseUrl: "https://openrouter.test/api",
+        apiKey: "secret-key",
+        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
+      }),
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        fetchBodies.push(body);
+        return streamResponse([
+          sseData({ choices: [{ delta: { content: "Reviewed the statement." } }] }),
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    try {
+      const events = await collectEvents(
+        await service.sendMessage({
+          content: "Review statement",
+          attachments: [
+            { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+          ],
+        }),
+      );
+
+      const userMessage = (fetchBodies[0]?.messages as Array<Record<string, unknown>>)[1];
+      expect(userMessage?.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("Review statement"),
+        },
+        {
+          type: "file",
+          file: {
+            file_data: "data:application/pdf;base64,JVBERi0=",
+            filename: "statement.pdf",
+          },
+        },
+      ]);
+
+      const threadId = String(events[0]?.threadId);
+      const persistedMessages = service.getMessages(threadId);
+      expect(persistedMessages[0]).toMatchObject({
+        role: "user",
+        content: textContent("Review statement\n📎 statement.pdf"),
+      });
+      expect(JSON.stringify(persistedMessages[0]?.content)).not.toContain("JVBERi0=");
+    } finally {
+      db.close();
+    }
+  });
+
   test("sends Ollama image attachments as image arrays", async () => {
     const db = createAiChatDb();
     const fetchBodies: Array<Record<string, unknown>> = [];
@@ -1981,17 +2043,6 @@ describe("TS AI chat domain", () => {
         capabilities: { tools: false, thinking: false, vision: true, streaming: true },
       }),
     });
-    const openAiPdfDb = createAiChatDb();
-    const openAiPdfService = createAiChatService(openAiPdfDb, {
-      aiProviderService: createProviderResolver({
-        providerId: "openai",
-        modelId: "gpt-vision",
-        providerType: "api",
-        baseUrl: "https://api.openai.test",
-        apiKey: "secret-key",
-        capabilities: { tools: false, thinking: false, vision: true, streaming: true },
-      }),
-    });
     const ollamaPdfDb = createAiChatDb();
     const ollamaPdfService = createAiChatService(ollamaPdfDb, {
       aiProviderService: createProviderResolver({
@@ -2016,20 +2067,17 @@ describe("TS AI chat domain", () => {
           attachments: [{ name: "scan.svg", contentType: "image/svg+xml", data: "aGVsbG8=" }],
         }),
       ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
-      for (const service of [openAiPdfService, ollamaPdfService]) {
-        await expect(
-          service.sendMessage({
-            content: "Read PDF",
-            attachments: [
-              { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
-            ],
-          }),
-        ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
-      }
+      await expect(
+        ollamaPdfService.sendMessage({
+          content: "Read PDF",
+          attachments: [
+            { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
     } finally {
       visionDisabledDb.close();
       unsupportedTypeDb.close();
-      openAiPdfDb.close();
       ollamaPdfDb.close();
     }
   });

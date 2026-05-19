@@ -638,7 +638,9 @@ function multimodalAttachmentMediaType(
 ): string | null {
   const contentType = normalizeContentType(attachment.contentType);
   if (contentType === "application/pdf") {
-    return ["anthropic", "google", "gemini"].includes(providerId) ? "application/pdf" : null;
+    return ["anthropic", "google", "gemini", "openai", "groq", "openrouter"].includes(providerId)
+      ? "application/pdf"
+      : null;
   }
   const normalized =
     contentType === "image/jpg"
@@ -2187,15 +2189,15 @@ function openAiMessageContent(
   message: ProviderChatMessage,
   providerId: string,
 ): string | Record<string, unknown>[] | null {
-  const imageParts = openAiAttachmentParts(message.attachments ?? [], providerId);
-  if (imageParts.length === 0) {
+  const attachmentParts = openAiAttachmentParts(message.attachments ?? [], providerId);
+  if (attachmentParts.length === 0) {
     return message.content;
   }
   const contentParts: Record<string, unknown>[] = [];
   if (message.content.trim()) {
     contentParts.push({ type: "text", text: message.content });
   }
-  contentParts.push(...imageParts);
+  contentParts.push(...attachmentParts);
   return contentParts.length > 0 ? contentParts : null;
 }
 
@@ -2210,10 +2212,20 @@ function openAiAttachmentParts(
       if (!mediaType) {
         return null;
       }
+      const data = base64AttachmentData(attachment, mediaType);
+      if (mediaType === "application/pdf") {
+        return {
+          type: "file",
+          file: {
+            file_data: `data:${mediaType};base64,${data}`,
+            filename: attachment.name,
+          },
+        };
+      }
       return {
         type: "image_url",
         image_url: {
-          url: `data:${mediaType};base64,${base64AttachmentData(attachment, mediaType)}`,
+          url: `data:${mediaType};base64,${data}`,
         },
       };
     })

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 176
+turns_used: 177
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T19:44:00+08:00"
+updated_at: "2026-05-19T20:18:50+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1134,6 +1134,12 @@ updated_at: "2026-05-19T19:44:00+08:00"
   FX conversion instead of persisting mixed-currency data. Focused
   portfolio/runtime tests, type-check, full `bun run check`, rubber-duck plan
   review, and three code-review refinements passed.
+- Turn 177: Added OpenAI-compatible Chat Completions PDF attachment payloads to
+  the TS AI chat loop: validated PDFs now serialize as `type: "file"` content
+  parts with data-URL `file_data` and `filename`, image serialization remains
+  unchanged, persisted chat rows still keep only attachment markers, and Ollama
+  PDFs remain rejected because the documented `/api/chat` multimodal surface is
+  images-only. Focused AI chat tests and backend type-check passed.
 
 ## Deferred items
 
@@ -1209,10 +1215,10 @@ updated_at: "2026-05-19T19:44:00+08:00"
   `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
   `get_income`, `get_valuation_history`, `get_asset_allocation`, and
   `get_health_status`, bounded text/CSV attachment prompt injection,
-  Anthropic/Gemini image/PDF media payloads, and OpenAI-compatible/Ollama image
-  payloads now have TS runtime parity, while provider-native PDF support for
-  OpenAI-compatible/Ollama and richer orchestration belong in dedicated AI
-  runtime slices.
+  Anthropic/Gemini image/PDF media payloads, OpenAI-compatible image/PDF media
+  payloads, and Ollama image payloads now have TS runtime parity, while Ollama
+  native PDF support remains unsupported by documented `/api/chat` payloads and
+  richer orchestration belongs in dedicated AI runtime slices.
 - Alternative asset persistence, quote writes, liability metadata merging, and
   current/history net-worth calculations now have bounded TS runtime parity.
   reason=the standalone backend reads/writes local asset/quote records and can
