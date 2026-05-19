@@ -92,23 +92,25 @@ describe("TS market data domain", () => {
     });
 
     try {
-      await expect(service.syncHistoryQuotes?.()).resolves.toBeUndefined();
-      await expect(service.syncMarketData?.({ type: "none" })).resolves.toBeUndefined();
+      await expect(service.syncHistoryQuotes?.()).resolves.toMatchObject(emptySyncResult());
+      await expect(service.syncMarketData?.({ type: "none" })).resolves.toMatchObject(
+        emptySyncResult(),
+      );
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: [] }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject(emptySyncResult());
       await expect(
         service.syncMarketData?.({ type: "refetch_recent", asset_ids: [], days: 7 }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject(emptySyncResult());
       await expect(
         service.syncMarketData?.({ type: "backfill_history", asset_ids: [], days: 7 }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject(emptySyncResult());
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: null }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject(emptySyncResult());
       await expect(
         service.syncMarketData?.({ type: "refetch_recent", asset_ids: null, days: 7 }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject(emptySyncResult());
     } finally {
       db.close();
     }
@@ -158,7 +160,14 @@ describe("TS market data domain", () => {
 
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: null }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 1,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [["asset-msft", "Provider not implemented: BOERSE_FRANKFURT"]],
+      });
 
       expect(chartSymbols).toEqual(["AAPL"]);
       expect(readQuoteByDay(db, "asset-aapl", "2026-01-05")).toMatchObject({
@@ -228,7 +237,14 @@ describe("TS market data domain", () => {
         last_synced_at: "2026-01-01T00:00:00.000Z",
       });
 
-      await expect(service.syncHistoryQuotes?.()).resolves.toBeUndefined();
+      await expect(service.syncHistoryQuotes?.()).resolves.toMatchObject({
+        synced: 2,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+        failures: [],
+        skippedReasons: [],
+      });
 
       expect(readQuote(db, "old-catalog-yahoo")).toMatchObject({
         source: "YAHOO",
@@ -285,7 +301,14 @@ describe("TS market data domain", () => {
 
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-1"] }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
 
       expect(readQuoteByDay(db, "asset-1", "2026-01-05")).toMatchObject({
         id: "asset-1_2026-01-05_YAHOO",
@@ -451,7 +474,14 @@ describe("TS market data domain", () => {
 
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-1"] }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        skipped: 0,
+        quotesSynced: 0,
+        failures: [["BAD", "Symbol not found: BAD"]],
+        skippedReasons: [],
+      });
 
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()?.count,
@@ -1909,6 +1939,17 @@ function readSyncState(db: Database, assetId: string): Record<string, unknown> |
   return db
     .query<Record<string, unknown>, [string]>("SELECT * FROM quote_sync_state WHERE asset_id = ?")
     .get(assetId);
+}
+
+function emptySyncResult() {
+  return {
+    synced: 0,
+    failed: 0,
+    skipped: 0,
+    quotesSynced: 0,
+    failures: [],
+    skippedReasons: [],
+  };
 }
 
 function yahooHistoryFetch(

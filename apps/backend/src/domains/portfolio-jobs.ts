@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 
 import type { BackendEventBus } from "../events";
 import type { ExchangeRateService } from "./exchange-rates";
-import type { MarketDataService } from "./market-data";
+import type { MarketDataService, MarketDataSyncResult } from "./market-data";
 
 export type MarketSyncMode =
   | { type: "none" }
@@ -197,11 +197,11 @@ async function executePortfolioJob(
   if (config.marketSyncMode.type !== "none" && options.marketDataService?.syncMarketData) {
     options.eventBus?.publish({ name: MARKET_SYNC_START });
     try {
-      await options.marketDataService.syncMarketData(config.marketSyncMode);
+      const syncResult = await options.marketDataService.syncMarketData(config.marketSyncMode);
       options.exchangeRateService?.initialize();
       options.eventBus?.publish({
         name: MARKET_SYNC_COMPLETE,
-        payload: { failed_syncs: [], skipped_reasons: [] },
+        payload: marketSyncCompletePayload(syncResult),
       });
     } catch (error) {
       options.eventBus?.publish({
@@ -223,6 +223,16 @@ async function executePortfolioJob(
     });
     throw error;
   }
+}
+
+function marketSyncCompletePayload(result: MarketDataSyncResult | void): {
+  failed_syncs: Array<[string, string]>;
+  skipped_reasons: Array<[string, string]>;
+} {
+  return {
+    failed_syncs: result?.failures ?? [],
+    skipped_reasons: result?.skippedReasons ?? [],
+  };
 }
 
 function recalculatePortfolioFromExistingSnapshots(

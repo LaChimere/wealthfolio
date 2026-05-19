@@ -176,9 +176,11 @@
     UI registration, and scoped secrets now have TS runtime parity, while add-on
     security scanning, full sandbox isolation, and query-cache hardening are
     deferred to add-on runtime parity slices; targeted and bounded broad Yahoo
-    market-data sync now have TS runtime parity, while all-provider/background
-    sync and portfolio recalculation behavior remain deferred to
-    market-data/portfolio parity slices; activity mutation event production,
+    market-data sync now have TS runtime parity, while all-provider sync,
+    background orchestration, and portfolio recalculation behavior remain
+    deferred to market-data/portfolio parity slices; market-sync result
+    accounting and portfolio `market:sync-complete` failure/skipped-reason
+    payloads now have TS parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -215,18 +217,20 @@
     bounded negative-balance data-consistency checks, and Rust-compatible health
     dismissal hash carryover now have TS runtime parity; market-data no-op sync
     modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync
-    now execute in TS while all-provider/background sync, automatic/background
-    FX quote fetching, and portfolio recalculation remain deferred; remaining
-    calculation-heavy health checks are deferred to health/calculation parity
-    slices; disabled Connect feature-flag responses, local empty-list routes,
-    local broker sync profile persistence, and disabled device-sync route
-    responses now have TS runtime parity, while real Connect token lifecycle,
-    cloud HTTP clients, broker sync orchestration, local sync repositories,
-    subscription entitlement checks, event production, E2EE enrollment, sync
-    engine, snapshot/upload runtime, background workers, device-sync cloud
-    clients, token lifecycle, team-key operations, key material handling,
-    pairing flows, freshness gate persistence, bootstrap transfer, and secret
-    side effects are deferred to Connect/device-sync parity slices.
+    now execute in TS, including market-sync failure/skipped-reason payload
+    propagation, while all-provider sync, background orchestration,
+    automatic/background FX quote fetching, and portfolio recalculation remain
+    deferred; remaining calculation-heavy health checks are deferred to
+    health/calculation parity slices; disabled Connect feature-flag responses,
+    local empty-list routes, local broker sync profile persistence, and disabled
+    device-sync route responses now have TS runtime parity, while real Connect
+    token lifecycle, cloud HTTP clients, broker sync orchestration, local sync
+    repositories, subscription entitlement checks, event production, E2EE
+    enrollment, sync engine, snapshot/upload runtime, background workers,
+    device-sync cloud clients, token lifecycle, team-key operations, key
+    material handling, pairing flows, freshness gate persistence, bootstrap
+    transfer, and secret side effects are deferred to Connect/device-sync parity
+    slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -1859,6 +1863,12 @@ contract:
   deferred-service 501 fallback. Full repository check passed with
   `bun run check`; rubber-duck plan review and focused code reviews found no
   remaining significant issues.
+- `pr5-market-sync-result-payloads`: targeted checks passed:
+  `bun test apps/backend/src/domains/market-data.test.ts apps/backend/src/domains/portfolio-jobs.test.ts`
+  and `bun run check`. Coverage includes empty-result sync modes, broad Yahoo
+  sync counts, non-Yahoo skipped-reason reporting, targeted Yahoo failure
+  tuples, and portfolio `market:sync-complete` payload forwarding. Focused code
+  review found no significant issues.
 
 ## Result
 
@@ -1925,9 +1935,9 @@ contract:
   `get_income`/`get_valuation_history`/`get_asset_allocation`/
   `get_health_status`/`record_activity`/`record_activities`/`import_csv`,
   text/CSV attachment prompt injection, Anthropic/Gemini image/PDF native media
-  payloads, OpenAI-compatible/Ollama image media payloads, bounded portfolio job
-  valuation/TOTAL recalculation runtime, and explicit remaining market-sync
-  deferred runtime gates implemented; broader migration remains active.
+  payloads, OpenAI-compatible image/PDF and Ollama image media payloads, bounded
+  portfolio job valuation/TOTAL recalculation runtime, and market-sync
+  result/payload parity implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -1943,21 +1953,22 @@ contract:
   asset portfolio job enqueue and recalculation side effects move with portfolio
   parity slices; asset quote-provider interactions, auto-classification, and
   portfolio recalculation side effects move with asset/market-data/portfolio
-  parity slices; market-data market sync and quote-triggered recalculation side
-  effects move with market-data/portfolio parity slices; provider-backed symbol
-  fetch/resolution moves with market-data/provider parity slices; full portfolio
-  snapshot rebuilding side effects move with holdings/portfolio parity slices;
-  add-on security scanning, full sandbox isolation, and query-cache hardening
-  move with add-on runtime parity slices; provider-backed asset resolution,
-  remaining quote sync-outbox emission outside migrated alternative-asset and
-  market-data quote paths, sync engine push/pull, and portfolio recalculation
-  side effects move with activities/import/device-sync runtime parity slices;
-  device-sync integration for sync crypto moves with device-sync parity slices;
-  broader health checks and real market sync fix execution move with
-  health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-  clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, E2EE enrollment, sync engine,
-  snapshot/upload runtime, feature-flag errors, background workers, device-sync
-  cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
-  effects move with Connect/device-sync parity slices.
+  parity slices; all-provider market sync, background orchestration, and
+  quote-triggered recalculation side effects move with market-data/portfolio
+  parity slices; provider-backed symbol fetch/resolution moves with
+  market-data/provider parity slices; full portfolio snapshot rebuilding side
+  effects move with holdings/portfolio parity slices; add-on security scanning,
+  full sandbox isolation, and query-cache hardening move with add-on runtime
+  parity slices; provider-backed asset resolution, remaining quote sync-outbox
+  emission outside migrated alternative-asset and market-data quote paths, sync
+  engine push/pull, and portfolio recalculation side effects move with
+  activities/import/device-sync runtime parity slices; device-sync integration
+  for sync crypto moves with device-sync parity slices; broader health checks
+  and real market sync fix execution move with health/calculation parity slices;
+  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
+  local sync repositories, subscription entitlement checks, event production,
+  E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 178
+turns_used: 179
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T20:48:39+08:00"
+updated_at: "2026-05-19T21:29:35+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1148,6 +1148,12 @@ updated_at: "2026-05-19T20:48:39+08:00"
   vectors so matching `health_issue_dismissals` rows remain effective after TS
   cutover. Focused health tests, type-check, rubber-duck plan review, and
   focused code review passed.
+- Turn 179: Added market-sync result accounting parity for the standalone TS
+  runtime: market-data sync now returns Rust-shaped synced/failed/skipped quote
+  counts plus failure and skipped-reason tuples, and portfolio job
+  `market:sync-complete` events now forward those details instead of always
+  publishing empty arrays. Focused market-data/portfolio tests, full
+  `bun run check`, and focused code review passed.
 
 ## Deferred items
 
@@ -1160,9 +1166,10 @@ updated_at: "2026-05-19T20:48:39+08:00"
   market sync modes, bounded price-staleness checks, bounded quote-sync error
   checks, bounded FX integrity issue generation, and bounded negative-balance
   data-consistency checks and targeted Yahoo-backed
-  `sync_prices`/`retry_sync`/`fetch_fx` execution plus Rust-compatible dismissal
-  hash carryover now have TS runtime parity, while broader classification,
-  remaining data-consistency checks, all-provider/background market sync,
+  `sync_prices`/`retry_sync`/`fetch_fx` execution, Rust-compatible dismissal
+  hash carryover, and market-sync failure/skipped-reason event payloads now have
+  TS runtime parity, while broader classification, remaining data-consistency
+  checks, all-provider market sync, background worker orchestration,
   automatic/background FX quote fetching, and remaining affected-item parity
   depend on holdings, quotes, FX, assets, valuation, and market sync parity.
 - Custom provider `test-source` local source testing now has TS runtime parity.
@@ -1300,9 +1307,9 @@ updated_at: "2026-05-19T20:48:39+08:00"
   persistence, tool-result mutation, tag persistence, sync callbacks, text-only
   provider streaming, `<think>` reasoning deltas, generated thread titles, and
   bounded text/CSV attachment prompt injection, Anthropic/Gemini image/PDF
-  payloads, and OpenAI-compatible/Ollama image payloads now have TS runtime
-  parity, while richer orchestration must move with dedicated AI runtime parity
-  slices.
+  payloads, OpenAI-compatible image/PDF payloads, and Ollama image payloads now
+  have TS runtime parity, while richer orchestration must move with dedicated AI
+  runtime parity slices.
 - Device-sync integration for sync crypto remains an active follow-up.
   reason=this slice adds the local TS crypto primitives, while cloud/client key
   material side effects must move with dedicated device-sync runtime slices.
@@ -1361,10 +1368,11 @@ updated_at: "2026-05-19T20:48:39+08:00"
 - Market-data provider breadth and full recalculation side effects remain active
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
   dividends/search/resolve, targeted Yahoo sync, bounded broad Yahoo
-  sync/history, and bounded portfolio valuation/TOTAL recalculation have TS
-  runtime coverage, while all-provider/background sync, quote-triggered worker
-  orchestration, and activity-derived snapshot rebuilding must move with
-  dedicated market-data and portfolio parity slices.
+  sync/history, market-sync result payloads, and bounded portfolio
+  valuation/TOTAL recalculation have TS runtime coverage, while all-provider
+  sync, background orchestration, quote-triggered worker orchestration, and
+  activity-derived snapshot rebuilding must move with dedicated market-data and
+  portfolio parity slices.
 
 ## Blockers
 

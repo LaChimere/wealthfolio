@@ -105,6 +105,15 @@ export interface ResolvedQuote {
   resolvedProviderId: string | null;
 }
 
+export interface MarketDataSyncResult {
+  synced: number;
+  failed: number;
+  skipped: number;
+  quotesSynced: number;
+  failures: Array<[string, string]>;
+  skippedReasons: Array<[string, string]>;
+}
+
 export interface MarketDataService {
   getExchanges?(): Promise<ExchangeInfo[]> | ExchangeInfo[];
   searchSymbol?(query: string): Promise<SymbolSearchResult[]> | SymbolSearchResult[];
@@ -125,8 +134,10 @@ export interface MarketDataService {
     quotes: unknown[],
     overwriteExisting: boolean,
   ): Promise<QuoteImport[]> | QuoteImport[];
-  syncHistoryQuotes?(): Promise<void> | void;
-  syncMarketData?(marketSyncMode: MarketSyncMode): Promise<void> | void;
+  syncHistoryQuotes?(): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
+  syncMarketData?(
+    marketSyncMode: MarketSyncMode,
+  ): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
 }
 
 export interface MarketDataServiceOptions {
@@ -404,7 +415,7 @@ export function createMarketDataService(
     },
 
     async syncHistoryQuotes() {
-      await syncMarketDataExecution(
+      return syncMarketDataExecution(
         db,
         { type: "backfill_history", asset_ids: null, days: DEFAULT_HISTORY_DAYS },
         exchangeCatalog,
@@ -425,9 +436,9 @@ export function createMarketDataService(
 
     async syncMarketData(marketSyncMode) {
       if (!marketDataSyncRequiresExecution(marketSyncMode)) {
-        return;
+        return emptyMarketDataSyncResult();
       }
-      await syncMarketDataExecution(
+      return syncMarketDataExecution(
         db,
         marketSyncMode,
         exchangeCatalog,
@@ -455,6 +466,31 @@ function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolea
   return !Array.isArray(marketSyncMode.asset_ids) || marketSyncMode.asset_ids.length > 0;
 }
 
+function emptyMarketDataSyncResult(): MarketDataSyncResult {
+  return {
+    synced: 0,
+    failed: 0,
+    skipped: 0,
+    quotesSynced: 0,
+    failures: [],
+    skippedReasons: [],
+  };
+}
+
+function addMarketSyncFailure(
+  result: MarketDataSyncResult,
+  assetLabel: string,
+  message: string,
+): void {
+  result.failed += 1;
+  result.failures.push([assetLabel, message]);
+}
+
+function addMarketSyncSkip(result: MarketDataSyncResult, assetId: string, reason: string): void {
+  result.skipped += 1;
+  result.skippedReasons.push([assetId, reason]);
+}
+
 async function syncMarketDataExecution(
   db: Database,
   marketSyncMode: MarketSyncMode,
@@ -467,9 +503,10 @@ async function syncMarketDataExecution(
   },
   now: Date,
   quoteSyncStateExists: boolean,
-): Promise<void> {
+): Promise<MarketDataSyncResult> {
+  const result = emptyMarketDataSyncResult();
   if (marketSyncMode.type === "none") {
-    return;
+    return result;
   }
   const scope: MarketSyncScope = marketSyncMode.asset_ids === null ? "broad" : "targeted";
   const assetIds =
@@ -477,7 +514,7 @@ async function syncMarketDataExecution(
       ? readBroadMarketSyncAssetIds(db, marketSyncMode)
       : dedupe(marketSyncMode.asset_ids);
   if (assetIds.length === 0) {
-    return;
+    return result;
   }
 
   const assets = readAssetsForMarketSync(db, assetIds);
@@ -485,19 +522,27 @@ async function syncMarketDataExecution(
 
   for (const assetId of assetIds) {
     const asset = assets.get(assetId);
-    if (!asset || shouldSkipMarketSyncAsset(asset, marketSyncMode, scope)) {
+    if (!asset) {
+      addMarketSyncSkip(result, assetId, "Asset not found");
+      continue;
+    }
+    const skipReason = marketSyncAssetSkipReason(asset, marketSyncMode, scope);
+    if (skipReason) {
+      addMarketSyncSkip(result, asset.id, skipReason);
       continue;
     }
 
     const state = states.get(asset.id) ?? null;
     const provider = effectiveMarketDataProvider(state, asset);
     if (provider !== DEFAULT_MARKET_DATA_PROVIDER) {
+      addMarketSyncSkip(result, asset.id, `Provider not implemented: ${provider}`);
       continue;
     }
     if (
       marketSyncMode.type !== "backfill_history" &&
       (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
     ) {
+      addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
       continue;
     }
 
@@ -508,6 +553,11 @@ async function syncMarketDataExecution(
         quoteSyncStateExists,
         asset.id,
         provider,
+        "Asset cannot be mapped to a Yahoo symbol",
+      );
+      addMarketSyncFailure(
+        result,
+        marketSyncResultAssetLabel(asset),
         "Asset cannot be mapped to a Yahoo symbol",
       );
       continue;
@@ -527,6 +577,7 @@ async function syncMarketDataExecution(
     );
     if (startDate > endDate) {
       updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+      addMarketSyncSkip(result, asset.id, "No quote refresh needed");
       continue;
     }
 
@@ -550,16 +601,15 @@ async function syncMarketDataExecution(
         }
         updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
       })();
+      result.synced += 1;
+      result.quotesSynced += quotes.length;
     } catch (error) {
-      updateQuoteSyncStateAfterFailure(
-        db,
-        quoteSyncStateExists,
-        asset.id,
-        provider,
-        errorMessage(error),
-      );
+      const message = errorMessage(error);
+      updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+      addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
     }
   }
+  return result;
 }
 
 export function parseExchangeList(json: string): ExchangeInfo[] {
@@ -1473,22 +1523,26 @@ function readBroadMarketSyncAssetIds(
     .map((row) => row.id);
 }
 
-function shouldSkipMarketSyncAsset(
+function marketSyncAssetSkipReason(
   asset: AssetMarketSyncRow,
   marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
   scope: MarketSyncScope,
-): boolean {
+): string | null {
   if (asset.quote_mode.toUpperCase() !== "MARKET") {
-    return true;
+    return "Manual pricing mode";
   }
   const allowInactive = scope === "broad" && marketSyncMode.type === "backfill_history";
   if (asset.is_active === 0 && !allowInactive) {
-    return true;
+    return "Inactive asset";
   }
   if (asset.instrument_type === null || asset.instrument_symbol === null) {
-    return true;
+    return "Asset has no instrument mapping";
   }
-  return false;
+  return null;
+}
+
+function marketSyncResultAssetLabel(asset: AssetMarketSyncRow): string {
+  return asset.display_code ?? asset.instrument_symbol ?? asset.id;
 }
 
 function effectiveMarketDataProvider(

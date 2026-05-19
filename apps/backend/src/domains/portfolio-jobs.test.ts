@@ -95,6 +95,14 @@ describe("TS portfolio job route config", () => {
         marketDataService: {
           syncMarketData(mode) {
             synced.push(mode);
+            return {
+              synced: 1,
+              failed: 1,
+              skipped: 1,
+              quotesSynced: 2,
+              failures: [["BAD", "timeout"]],
+              skippedReasons: [["manual", "Manual pricing mode"]],
+            };
           },
         },
         now: () => new Date("2026-05-17T00:00:00Z"),
@@ -109,6 +117,10 @@ describe("TS portfolio job route config", () => {
         "portfolio:update-start",
         "portfolio:update-complete",
       ]);
+      expect(events[1]?.payload).toEqual({
+        failed_syncs: [["BAD", "timeout"]],
+        skipped_reasons: [["manual", "Manual pricing mode"]],
+      });
       expect(readValuation(db, "account-1", "2026-05-16")).toMatchObject({
         cash_balance: "5",
         investment_market_value: "20",
