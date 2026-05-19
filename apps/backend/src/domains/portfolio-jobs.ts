@@ -168,6 +168,7 @@ interface ActivityRebuildRow {
   account_id: string;
   asset_id: string | null;
   activity_type: string;
+  activity_type_override: string | null;
   subtype: string | null;
   status: string;
   activity_date: string;
@@ -583,7 +584,7 @@ function prepareAccountActivityReplayContext(
     ? activityStateFromSnapshot(account, parseSnapshot(seedSnapshot))
     : emptyActivityState(account);
   const activities = adjustActivitiesForSplits(
-    filterActivitiesFromDate(allActivities, startDate),
+    compileActivitiesForReplay(filterActivitiesFromDate(allActivities, startDate)),
     splitFactors,
   );
   return {
@@ -655,6 +656,7 @@ function readPostedActivitiesForAccounts(
           account_id,
           asset_id,
           activity_type,
+          activity_type_override,
           subtype,
           status,
           activity_date,
@@ -712,13 +714,80 @@ function splitAdjustedActivityStartDate(
     : { startDate: requestedStartDate, useSeedSnapshot: true };
 }
 
+function compileActivitiesForReplay(activities: ActivityRebuildRow[]): ActivityRebuildRow[] {
+  return activities.flatMap((activity) => compileActivityForReplay(activity));
+}
+
+function compileActivityForReplay(activity: ActivityRebuildRow): ActivityRebuildRow[] {
+  const activityType = activityEffectiveType(activity);
+  const subtype = activity.subtype?.toUpperCase() ?? null;
+
+  if (activityType === "DIVIDEND" && (subtype === "DRIP" || subtype === "DIVIDEND_IN_KIND")) {
+    return compileAssetIncomeActivity(activity, "DIVIDEND", "dividend");
+  }
+  if (activityType === "INTEREST" && subtype === "STAKING_REWARD") {
+    return compileAssetIncomeActivity(activity, "INTEREST", "interest");
+  }
+  return [activity];
+}
+
+function compileAssetIncomeActivity(
+  activity: ActivityRebuildRow,
+  incomeActivityType: "DIVIDEND" | "INTEREST",
+  incomeIdSuffix: "dividend" | "interest",
+): ActivityRebuildRow[] {
+  const quantity = decimalOptionalOrDefault(
+    activity.quantity,
+    new Decimal(0),
+    `Invalid quantity for activity ${activity.id}`,
+  );
+  const unitPrice =
+    activity.unit_price === null || activity.unit_price === ""
+      ? null
+      : decimalOrThrow(activity.unit_price, `Invalid unit price for activity ${activity.id}`);
+  const amount =
+    activity.amount === null || activity.amount === ""
+      ? null
+      : decimalOrThrow(activity.amount, `Invalid amount for activity ${activity.id}`);
+  const derivedAmount = unitPrice?.mul(quantity) ?? null;
+  const incomeAmount = amount?.isZero() === false ? amount : (derivedAmount ?? amount);
+  const acquisitionUnitPrice =
+    incomeAmount && !quantity.isZero() ? incomeAmount.div(quantity) : unitPrice;
+
+  const incomeLeg: ActivityRebuildRow = {
+    ...activity,
+    id: `${activity.id}:${incomeIdSuffix}`,
+    activity_type: incomeActivityType,
+    activity_type_override: null,
+    subtype: null,
+    quantity: null,
+    unit_price: null,
+    amount: incomeAmount ? decimalToString(incomeAmount) : null,
+  };
+  const buyLeg: ActivityRebuildRow = {
+    ...activity,
+    id: `${activity.id}:buy`,
+    activity_type: "BUY",
+    activity_type_override: null,
+    subtype: null,
+    unit_price: acquisitionUnitPrice ? decimalToString(acquisitionUnitPrice) : null,
+    amount: null,
+    fee: "0",
+  };
+  return [incomeLeg, buyLeg];
+}
+
+function activityEffectiveType(activity: ActivityRebuildRow): string {
+  return (activity.activity_type_override ?? activity.activity_type).toUpperCase();
+}
+
 function calculateSplitFactors(
   activities: ActivityRebuildRow[],
   options: LocalPortfolioJobServiceOptions,
 ): SplitFactorsByAsset {
   const factors = new Map<string, Array<[string, Decimal]>>();
   for (const activity of activities) {
-    if (activity.activity_type !== "SPLIT") {
+    if (activityEffectiveType(activity) !== "SPLIT") {
       continue;
     }
     const assetId = activity.asset_id?.trim();
@@ -773,7 +842,7 @@ function adjustActivitiesForSplits(
   splitFactors: SplitFactorsByAsset,
 ): ActivityRebuildRow[] {
   return activities.map((activity) => {
-    if (!activity.asset_id || activity.activity_type === "SPLIT") {
+    if (!activity.asset_id || activityEffectiveType(activity) === "SPLIT") {
       return activity;
     }
     const splits = splitFactors.get(activity.asset_id);
@@ -1238,7 +1307,7 @@ function processActivityForSnapshot(
   options: LocalPortfolioJobServiceOptions,
   transferLotsCache: TransferLotsCache,
 ): void {
-  switch (activity.activity_type) {
+  switch (activityEffectiveType(activity)) {
     case "BUY":
       applyBuyActivity(db, state, activity, options);
       break;

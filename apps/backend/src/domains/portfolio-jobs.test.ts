@@ -223,6 +223,94 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("compiles asset income subtypes before transaction snapshot replay", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "drip-asset", "USD");
+      seedAsset(db, "kind-asset", "USD");
+      seedAsset(db, "stake-asset", "USD");
+      seedActivity(db, {
+        id: "drip-1",
+        accountId: "account-1",
+        assetId: "drip-asset",
+        type: "DIVIDEND",
+        subtype: "DRIP",
+        date: "2026-05-15T10:00:00Z",
+        quantity: "5",
+        unitPrice: "20",
+        amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "kind-1",
+        accountId: "account-1",
+        assetId: "kind-asset",
+        type: "UNKNOWN",
+        activityTypeOverride: "DIVIDEND",
+        subtype: "DIVIDEND_IN_KIND",
+        date: "2026-05-15T11:00:00Z",
+        quantity: "2",
+        unitPrice: "7",
+        amount: null,
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "stake-1",
+        accountId: "account-1",
+        assetId: "stake-asset",
+        type: "INTEREST",
+        subtype: "STAKING_REWARD",
+        date: "2026-05-15T12:00:00Z",
+        quantity: "0.01",
+        unitPrice: "2000",
+        amount: "20",
+        currency: "USD",
+      });
+      seedQuote(db, "drip-asset", "2026-05-15", "20", "USD");
+      seedQuote(db, "kind-asset", "2026-05-15", "7", "USD");
+      seedQuote(db, "stake-asset", "2026-05-15", "2000", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balances: '{"USD":"0"}',
+        cost_basis: "134",
+        net_contribution: "0",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "drip-asset": expect.objectContaining({
+          quantity: "5",
+          totalCostBasis: "100",
+          lots: [expect.objectContaining({ id: "drip-1:buy", costBasis: "100" })],
+        }),
+        "kind-asset": expect.objectContaining({
+          quantity: "2",
+          totalCostBasis: "14",
+          lots: [expect.objectContaining({ id: "kind-1:buy", costBasis: "14" })],
+        }),
+        "stake-asset": expect.objectContaining({
+          quantity: "0.01",
+          totalCostBasis: "20",
+          lots: [expect.objectContaining({ id: "stake-1:buy", costBasis: "20" })],
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balance: "0",
+        investment_market_value: "134",
+        total_value: "134",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps holdings-mode snapshots manual and skips activity replay", async () => {
     const db = createPortfolioJobTestDb();
     try {
@@ -1643,6 +1731,7 @@ function createPortfolioJobTestDb(): Database {
       account_id TEXT NOT NULL,
       asset_id TEXT,
       activity_type TEXT NOT NULL,
+      activity_type_override TEXT,
       subtype TEXT,
       status TEXT NOT NULL DEFAULT 'POSTED',
       activity_date TEXT NOT NULL,
@@ -1737,6 +1826,7 @@ function seedActivity(
     accountId: string;
     assetId?: string | null;
     type: string;
+    activityTypeOverride?: string | null;
     subtype?: string | null;
     status?: string;
     date: string;
@@ -1752,16 +1842,17 @@ function seedActivity(
   db.query(
     `
       INSERT INTO activities (
-        id, account_id, asset_id, activity_type, subtype, status, activity_date,
+        id, account_id, asset_id, activity_type, activity_type_override, subtype, status, activity_date,
         quantity, unit_price, amount, fee, currency, fx_rate, source_group_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     activity.id,
     activity.accountId,
     activity.assetId ?? null,
     activity.type,
+    activity.activityTypeOverride ?? null,
     activity.subtype ?? null,
     activity.status ?? "POSTED",
     activity.date,

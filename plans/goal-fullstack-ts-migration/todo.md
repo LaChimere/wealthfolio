@@ -131,18 +131,17 @@
     from existing holdings snapshots, TOTAL snapshot rebuilding, and bounded
     transaction-account snapshot rebuilding from posted common activities,
     BUY/SELL broker FX handling, option contract multipliers, option-expiry
-    adjustments, split preprocessing, lot-level asset transfers, and other
-    adjustment no-op behavior now run in the standalone TS runtime, while
-    remaining complex activity replay moves to portfolio/calculation slices; TS
-    file-backed secret persistence and native keyring-backed
-    `WF_SECRET_BACKEND=keyring` are wired into standalone runtime while packaged
-    keyring cutover and cross-platform keyring CI remain deferred to a
-    runtime/keyring parity slice; AI provider catalog/settings/model-listing
-    runtime behavior, bounded native/fallback text/reasoning AI chat provider
-    streaming, generated thread titles,
-    OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
-    built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-    `search_activities`, `get_performance`, `get_income`,
+    adjustments, split preprocessing, lot-level asset transfers, other
+    adjustment no-op behavior, and DRIP/dividend-in-kind/staking-reward activity
+    compiler expansion now run in the standalone TS runtime; TS file-backed
+    secret persistence and native keyring-backed `WF_SECRET_BACKEND=keyring` are
+    wired into standalone runtime while packaged keyring cutover and
+    cross-platform keyring CI remain deferred to a runtime/keyring parity slice;
+    AI provider catalog/settings/model-listing runtime behavior, bounded
+    native/fallback text/reasoning AI chat provider streaming, generated thread
+    titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call
+    execution, built-in `get_accounts`, `get_holdings`, `get_cash_balances`,
+    `get_goals`, `search_activities`, `get_performance`, `get_income`,
     `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
     `record_activity`, `record_activities`, and `import_csv`, text/CSV
     attachment prompt injection, Anthropic/Gemini image/PDF native media
@@ -154,8 +153,9 @@
     valuation/TOTAL recalculation, bounded transaction-account activity snapshot
     rebuilding, BUY/SELL broker FX handling, option contract multipliers,
     option-expiry adjustments, split preprocessing, lot-level asset-transfer
-    replay, and other adjustment no-op behavior now have TS runtime parity;
-    asset read/create/profile/quote-mode and delete behavior now have TS runtime
+    replay, other adjustment no-op behavior, and DRIP/dividend-in-kind/staking
+    reward activity compiler expansion now have TS runtime parity; asset
+    read/create/profile/quote-mode and delete behavior now have TS runtime
     parity, while quote-provider interactions, auto-classification, and
     portfolio recalculation side effects are deferred to
     asset/market-data/portfolio parity slices; app utility database restore now
@@ -173,10 +173,11 @@
     event production, bounded portfolio job inline valuation/TOTAL
     recalculation, bounded transaction-account activity snapshot rebuilding,
     BUY/SELL broker FX handling, option contract multipliers, option-expiry
-    adjustments, split preprocessing, lot-level asset-transfer replay, and other
-    adjustment no-op behavior now have TS runtime parity, while provider-backed
-    symbol fetch/resolution is deferred to portfolio/market-data parity slices;
-    add-on local filesystem listing, toggles, uninstall, runtime loading,
+    adjustments, split preprocessing, lot-level asset-transfer replay, other
+    adjustment no-op behavior, and DRIP/dividend-in-kind/staking-reward activity
+    compiler expansion now have TS runtime parity, while provider-backed symbol
+    fetch/resolution is deferred to portfolio/market-data parity slices; add-on
+    local filesystem listing, toggles, uninstall, runtime loading,
     enabled-startup loading, staging cleanup, Rust-compatible manifest
     normalization, local ZIP extraction/install, permission detection/merging,
     staged ZIP install, store listings/ratings/update checks, store download
