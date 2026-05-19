@@ -526,6 +526,79 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("uses option contract multipliers from asset metadata", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "option-1", "USD", {
+        instrumentType: "OPTION",
+        metadata: { option: { multiplier: "100" } },
+      });
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "1000",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "option-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "2",
+        unitPrice: "3",
+        fee: "5",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "sell-1",
+        accountId: "account-1",
+        assetId: "option-1",
+        type: "SELL",
+        date: "2026-05-15T12:00:00Z",
+        quantity: "1",
+        unitPrice: "4",
+        fee: "1",
+        currency: "USD",
+      });
+      seedQuote(db, "option-1", "2026-05-14", "3", "USD");
+      seedQuote(db, "option-1", "2026-05-15", "4", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balances: '{"USD":"794"}',
+        cost_basis: "302.5",
+        net_contribution: "1000",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "option-1": expect.objectContaining({
+          quantity: "1",
+          averageCost: "302.5",
+          totalCostBasis: "302.5",
+          contractMultiplier: "100",
+          lots: [expect.objectContaining({ quantity: "1", costBasis: "302.5" })],
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        investment_market_value: "400",
+        cash_balance: "794",
+        total_value: "1194",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("fails transaction snapshot replay for invalid activity dates", async () => {
     const db = createPortfolioJobTestDb();
     try {
@@ -1561,7 +1634,9 @@ function createPortfolioJobTestDb(): Database {
     CREATE TABLE assets (
       id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL DEFAULT 'INVESTMENT',
-      quote_ccy TEXT
+      quote_ccy TEXT,
+      instrument_type TEXT,
+      metadata TEXT
     );
     CREATE TABLE activities (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1636,13 +1711,23 @@ function seedAccount(
   ).run(accountId, accountId, currency, archived ? 0 : 1, archived ? 1 : 0, trackingMode);
 }
 
-function seedAsset(db: Database, assetId: string, quoteCurrency: string): void {
+function seedAsset(
+  db: Database,
+  assetId: string,
+  quoteCurrency: string,
+  options: { instrumentType?: string | null; metadata?: Record<string, unknown> | null } = {},
+): void {
   db.query(
     `
-      INSERT INTO assets (id, kind, quote_ccy)
-      VALUES (?, 'INVESTMENT', ?)
+      INSERT INTO assets (id, kind, quote_ccy, instrument_type, metadata)
+      VALUES (?, 'INVESTMENT', ?, ?, ?)
     `,
-  ).run(assetId, quoteCurrency);
+  ).run(
+    assetId,
+    quoteCurrency,
+    options.instrumentType ?? null,
+    options.metadata ? JSON.stringify(options.metadata) : null,
+  );
 }
 
 function seedActivity(

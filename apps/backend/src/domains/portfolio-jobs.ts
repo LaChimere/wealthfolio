@@ -196,6 +196,8 @@ interface AssetInfoRow {
   id: string;
   kind: string;
   quote_ccy: string | null;
+  instrument_type: string | null;
+  metadata: string | null;
 }
 
 interface CalculatedValuation {
@@ -1667,7 +1669,7 @@ function getOrCreateActivityPosition(
     createdAt: activity.activity_date,
     lastUpdated: activity.activity_date,
     isAlternative: asset ? asset.kind !== "INVESTMENT" : false,
-    contractMultiplier: new Decimal(1),
+    contractMultiplier: asset ? assetContractMultiplier(asset) : new Decimal(1),
     lots: [],
   };
   state.positions.set(assetId, position);
@@ -1835,13 +1837,31 @@ function readAssetInfo(db: Database, assetId: string): AssetInfoRow | null {
     db
       .query<AssetInfoRow, [string]>(
         `
-          SELECT id, kind, quote_ccy
+          SELECT id, kind, quote_ccy, instrument_type, metadata
           FROM assets
           WHERE id = ?
         `,
       )
       .get(assetId) ?? null
   );
+}
+
+function assetContractMultiplier(asset: AssetInfoRow): Decimal {
+  if (asset.instrument_type !== "OPTION") {
+    return new Decimal(1);
+  }
+  if (asset.metadata?.trim()) {
+    const metadata = parseJsonRecord(asset.metadata);
+    const option = metadata.option;
+    if (isRecord(option) && option.multiplier !== undefined && option.multiplier !== null) {
+      return decimalOptionalOrDefault(
+        option.multiplier,
+        new Decimal(100),
+        `Invalid option multiplier for asset ${asset.id}`,
+      );
+    }
+  }
+  return new Decimal(100);
 }
 
 function reducePositionLotsFifo(

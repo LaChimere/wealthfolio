@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 188
+turns_used: 189
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T00:31:36+08:00"
+updated_at: "2026-05-20T00:40:38+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1211,6 +1211,11 @@ updated_at: "2026-05-20T00:31:36+08:00"
   currency, and BUY/SELL cash effects book in account currency when broker
   `fx_rate` is present. Focused portfolio tests, backend type-check, and focused
   code review passed.
+- Turn 189: Added Rust-compatible option contract multiplier handling for TS
+  activity snapshot replay: newly created positions now read OPTION metadata
+  multipliers, default OPTION assets to 100, and carry multiplier effects
+  through BUY/SELL cash, cost basis, lots, and valuation. Focused portfolio
+  tests, backend type-check, and focused code review passed.
 
 ## Deferred items
 
@@ -1411,11 +1416,11 @@ updated_at: "2026-05-20T00:31:36+08:00"
   import-check symbol lookup, snapshot mutation event production, and bounded
   portfolio job valuation/TOTAL recalculation from existing snapshots plus
   bounded transaction-account replay for posted BUY/SELL/cash-flow activities,
-  including broker FX cash/lot conversion, option-expiry adjustments, other
-  adjustment no-op behavior, split preprocessing, and lot-level asset transfers
-  now have TS runtime parity, while provider-driven enrichment and background
-  worker orchestration must move with dedicated holdings/portfolio parity
-  slices.
+  including broker FX cash/lot conversion and option contract multipliers,
+  option-expiry adjustments, other adjustment no-op behavior, split
+  preprocessing, and lot-level asset transfers now have TS runtime parity, while
+  provider-driven enrichment and background worker orchestration must move with
+  dedicated holdings/portfolio parity slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening
   remain active follow-ups. reason=the standalone TS backend now supports local
   installed add-on listing, Rust-compatible manifest normalization, toggles,

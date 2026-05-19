@@ -130,15 +130,16 @@
     bounded portfolio job execution, event production, valuation recalculation
     from existing holdings snapshots, TOTAL snapshot rebuilding, and bounded
     transaction-account snapshot rebuilding from posted common activities,
-    BUY/SELL broker FX handling, option-expiry adjustments, split preprocessing,
-    lot-level asset transfers, and other adjustment no-op behavior now run in
-    the standalone TS runtime, while remaining complex activity replay moves to
-    portfolio/calculation slices; TS file-backed secret persistence and native
-    keyring-backed `WF_SECRET_BACKEND=keyring` are wired into standalone runtime
-    while packaged keyring cutover and cross-platform keyring CI remain deferred
-    to a runtime/keyring parity slice; AI provider
-    catalog/settings/model-listing runtime behavior, bounded native/fallback
-    text/reasoning AI chat provider streaming, generated thread titles,
+    BUY/SELL broker FX handling, option contract multipliers, option-expiry
+    adjustments, split preprocessing, lot-level asset transfers, and other
+    adjustment no-op behavior now run in the standalone TS runtime, while
+    remaining complex activity replay moves to portfolio/calculation slices; TS
+    file-backed secret persistence and native keyring-backed
+    `WF_SECRET_BACKEND=keyring` are wired into standalone runtime while packaged
+    keyring cutover and cross-platform keyring CI remain deferred to a
+    runtime/keyring parity slice; AI provider catalog/settings/model-listing
+    runtime behavior, bounded native/fallback text/reasoning AI chat provider
+    streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -151,42 +152,44 @@
     alternative asset persistence, manual valuation quotes, liability
     link/unlink metadata behavior, holdings reads, bounded portfolio job
     valuation/TOTAL recalculation, bounded transaction-account activity snapshot
-    rebuilding, BUY/SELL broker FX handling, option-expiry adjustments, split
-    preprocessing, lot-level asset-transfer replay, and other adjustment no-op
-    behavior now have TS runtime parity; asset read/create/profile/quote-mode
-    and delete behavior now have TS runtime parity, while quote-provider
-    interactions, auto-classification, and portfolio recalculation side effects
-    are deferred to asset/market-data/portfolio parity slices; app utility
-    database restore now has TS runtime parity with restart-required readiness
-    after file restore; contribution-limit deposit calculation now has TS
-    runtime parity with SQLite activity reads, Rust-compatible contribution
-    rules, user-timezone year ranges, and FX conversion dates; current/history
-    net-worth, income summary, simple account performance, account performance
-    history/summary calculations, local quote-backed symbol performance history
-    with local asset/display/instrument-symbol resolution, holdings valuation
-    reads, holdings snapshot metadata reads, historical snapshot holdings reads,
+    rebuilding, BUY/SELL broker FX handling, option contract multipliers,
+    option-expiry adjustments, split preprocessing, lot-level asset-transfer
+    replay, and other adjustment no-op behavior now have TS runtime parity;
+    asset read/create/profile/quote-mode and delete behavior now have TS runtime
+    parity, while quote-provider interactions, auto-classification, and
+    portfolio recalculation side effects are deferred to
+    asset/market-data/portfolio parity slices; app utility database restore now
+    has TS runtime parity with restart-required readiness after file restore;
+    contribution-limit deposit calculation now has TS runtime parity with SQLite
+    activity reads, Rust-compatible contribution rules, user-timezone year
+    ranges, and FX conversion dates; current/history net-worth, income summary,
+    simple account performance, account performance history/summary
+    calculations, local quote-backed symbol performance history with local
+    asset/display/instrument-symbol resolution, holdings valuation reads,
+    holdings snapshot metadata reads, historical snapshot holdings reads,
     holdings import checks, live holdings fan-out, holding detail/by-asset
     fan-out, allocation reads, snapshot deletion, bounded manual/imported
     snapshot saves, snapshot FX pair registration, holdings snapshot mutation
     event production, bounded portfolio job inline valuation/TOTAL
     recalculation, bounded transaction-account activity snapshot rebuilding,
-    BUY/SELL broker FX handling, option-expiry adjustments, split preprocessing,
-    lot-level asset-transfer replay, and other adjustment no-op behavior now
-    have TS runtime parity, while provider-backed symbol fetch/resolution is
-    deferred to portfolio/market-data parity slices; add-on local filesystem
-    listing, toggles, uninstall, runtime loading, enabled-startup loading,
-    staging cleanup, Rust-compatible manifest normalization, local ZIP
-    extraction/install, permission detection/merging, staged ZIP install, store
-    listings/ratings/update checks, store download staging, and store update
-    installs and frontend manifest-permission enforcement for SDK domain APIs,
-    UI registration, and scoped secrets now have TS runtime parity, while add-on
-    security scanning, full sandbox isolation, and query-cache hardening are
-    deferred to add-on runtime parity slices; targeted and bounded broad Yahoo
-    market-data sync now have TS runtime parity, while all-provider sync,
-    background orchestration, and portfolio recalculation behavior remain
-    deferred to market-data/portfolio parity slices; market-sync result
-    accounting and portfolio `market:sync-complete` failure/skipped-reason
-    payloads now have TS parity; activity mutation event production,
+    BUY/SELL broker FX handling, option contract multipliers, option-expiry
+    adjustments, split preprocessing, lot-level asset-transfer replay, and other
+    adjustment no-op behavior now have TS runtime parity, while provider-backed
+    symbol fetch/resolution is deferred to portfolio/market-data parity slices;
+    add-on local filesystem listing, toggles, uninstall, runtime loading,
+    enabled-startup loading, staging cleanup, Rust-compatible manifest
+    normalization, local ZIP extraction/install, permission detection/merging,
+    staged ZIP install, store listings/ratings/update checks, store download
+    staging, and store update installs and frontend manifest-permission
+    enforcement for SDK domain APIs, UI registration, and scoped secrets now
+    have TS runtime parity, while add-on security scanning, full sandbox
+    isolation, and query-cache hardening are deferred to add-on runtime parity
+    slices; targeted and bounded broad Yahoo market-data sync now have TS
+    runtime parity, while all-provider sync, background orchestration, and
+    portfolio recalculation behavior remain deferred to market-data/portfolio
+    parity slices; market-sync result accounting and portfolio
+    `market:sync-complete` failure/skipped-reason payloads now have TS parity;
+    activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -1993,9 +1996,10 @@ contract:
   payloads, OpenAI-compatible image/PDF and Ollama image media payloads, bounded
   portfolio job valuation/TOTAL recalculation runtime, bounded
   transaction-account activity snapshot rebuilding, BUY/SELL broker FX handling,
-  option-expiry adjustment replay, split preprocessing, lot-level asset-transfer
-  replay, other adjustment no-op behavior, and market-sync result/payload parity
-  implemented; broader migration remains active.
+  option contract multipliers, option-expiry adjustment replay, split
+  preprocessing, lot-level asset-transfer replay, other adjustment no-op
+  behavior, and market-sync result/payload parity implemented; broader migration
+  remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
