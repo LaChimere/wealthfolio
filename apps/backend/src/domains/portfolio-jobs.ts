@@ -927,8 +927,10 @@ function processActivityForSnapshot(
     case "TRANSFER_OUT":
       applyCashTransferOrWarn(state, activity, baseCurrency, options);
       break;
-    case "SPLIT":
     case "ADJUSTMENT":
+      applyAdjustmentActivity(state, activity, options);
+      break;
+    case "SPLIT":
     case "UNKNOWN":
       warnPortfolioJob(
         options,
@@ -1042,6 +1044,37 @@ function applyCashTransferOrWarn(
     activity,
     baseCurrency,
     activity.activity_type === "TRANSFER_IN" ? 1 : -1,
+  );
+}
+
+function applyAdjustmentActivity(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  if (!activity.subtype || activity.subtype.toUpperCase() !== "OPTION_EXPIRY") {
+    warnPortfolioJob(
+      options,
+      `Skipping unsupported adjustment activity ${activity.id} (${activity.subtype ?? "none"}) during TS snapshot rebuild`,
+    );
+    return;
+  }
+
+  const assetId = requiredActivityAssetId(activity);
+  const position = state.positions.get(assetId);
+  if (!position) {
+    warnPortfolioJob(
+      options,
+      `Option expiry activity ${activity.id} found no position ${assetId}; no holdings changed`,
+    );
+    return;
+  }
+  reducePositionLotsFifo(
+    position,
+    positiveActivityQuantity(activity),
+    options,
+    activity.id,
+    activity.activity_date,
   );
 }
 

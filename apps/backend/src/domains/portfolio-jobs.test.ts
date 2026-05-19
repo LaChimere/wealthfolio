@@ -465,6 +465,70 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("applies option-expiry adjustments without cash effects", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "option-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "30",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "option-1",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "3",
+        unitPrice: "10",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "expiry-1",
+        accountId: "account-1",
+        assetId: "option-1",
+        type: "ADJUSTMENT",
+        subtype: "OPTION_EXPIRY",
+        date: "2026-05-15T12:00:00Z",
+        quantity: "1",
+        currency: "USD",
+      });
+      seedQuote(db, "option-1", "2026-05-15", "10", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balances: '{"USD":"0"}',
+        cost_basis: "20",
+        net_contribution: "30",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-15")).toMatchObject({
+        "option-1": expect.objectContaining({
+          quantity: "2",
+          totalCostBasis: "20",
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-15")).toMatchObject({
+        cash_balance: "0",
+        investment_market_value: "20",
+        total_value: "20",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("full recalculation is transactional and honors explicit archived targets", async () => {
     const db = createPortfolioJobTestDb();
     try {

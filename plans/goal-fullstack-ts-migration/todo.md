@@ -1910,6 +1910,11 @@ contract:
   DRAFT activity exclusion, HOLDINGS-mode/manual snapshot preservation,
   `sinceDate` seeding from the latest prior snapshot, and runtime
   `activities_changed` events triggering the rebuild path.
+- `pr5-option-expiry-snapshot-rebuild`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --timeout 30000` and
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`. Coverage
+  includes `ADJUSTMENT`/`OPTION_EXPIRY` replay removing lots via FIFO without
+  cash effects while preserving net contribution and reducing cost basis.
 
 ## Result
 
@@ -1978,26 +1983,27 @@ contract:
   text/CSV attachment prompt injection, Anthropic/Gemini image/PDF native media
   payloads, OpenAI-compatible image/PDF and Ollama image media payloads, bounded
   portfolio job valuation/TOTAL recalculation runtime, bounded
-  transaction-account activity snapshot rebuilding, and market-sync
-  result/payload parity implemented; broader migration remains active.
+  transaction-account activity snapshot rebuilding, option-expiry adjustment
+  replay, and market-sync result/payload parity implemented; broader migration
+  remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
   sync/provider HTTP behavior plus broader market-data provider resolution/sync
   behavior move with calculation/market-data slices after the current FX
-  registration/no-op parity and explicit runtime 501 gates; split/adjustment
-  handling, lot-level asset-transfer replay, and background portfolio worker
-  orchestration move with portfolio/calculation slices after the current bounded
-  portfolio valuation/activity-replay runtime; packaged keyring cutover and
-  cross-platform keyring CI move with a dedicated runtime parity slice; AI chat
-  richer provider/tool orchestration and any future Ollama PDF support move with
-  AI runtime parity slices if Ollama documents non-image file inputs;
-  alternative asset portfolio job enqueue and recalculation side effects move
-  with portfolio parity slices; asset quote-provider interactions,
-  auto-classification, and portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; all-provider market sync,
-  background orchestration, and quote-triggered recalculation side effects move
-  with market-data/portfolio parity slices; provider-backed symbol
+  registration/no-op parity and explicit runtime 501 gates; split handling,
+  non-option adjustment handling, lot-level asset-transfer replay, and
+  background portfolio worker orchestration move with portfolio/calculation
+  slices after the current bounded portfolio valuation/activity-replay runtime;
+  packaged keyring cutover and cross-platform keyring CI move with a dedicated
+  runtime parity slice; AI chat richer provider/tool orchestration and any
+  future Ollama PDF support move with AI runtime parity slices if Ollama
+  documents non-image file inputs; alternative asset portfolio job enqueue and
+  recalculation side effects move with portfolio parity slices; asset
+  quote-provider interactions, auto-classification, and portfolio recalculation
+  side effects move with asset/market-data/portfolio parity slices; all-provider
+  market sync, background orchestration, and quote-triggered recalculation side
+  effects move with market-data/portfolio parity slices; provider-backed symbol
   fetch/resolution moves with market-data/provider parity slices; full portfolio
   snapshot rebuilding side effects move with holdings/portfolio parity slices;
   add-on security scanning, full sandbox isolation, and query-cache hardening
