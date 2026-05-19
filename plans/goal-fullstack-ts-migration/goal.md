@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 185
+turns_used: 186
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-19T23:31:35+08:00"
+updated_at: "2026-05-20T00:10:16+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1195,6 +1195,13 @@ updated_at: "2026-05-19T23:31:35+08:00"
   replay restarts from earliest activity when a split enters the recalculation
   range so historical lots are rebuilt split-adjusted. Focused portfolio tests
   and backend type-check passed.
+- Turn 186: Added lot-level asset transfer parity for TS activity snapshot
+  replay: same-day `TRANSFER_OUT` accounts now run before paired `TRANSFER_IN`
+  accounts by `source_group_id`, same-account pairs avoid unit-price fallback,
+  FIFO removed lots carry acquisition dates/cost basis into destination
+  accounts, unpaired cached lots warn, and external transfer-ins use
+  position-currency fallback lots with FX conversion. Focused portfolio/runtime
+  tests, full `bun run check`, and three focused code-review passes completed.
 
 ## Deferred items
 
@@ -1395,8 +1402,8 @@ updated_at: "2026-05-19T23:31:35+08:00"
   import-check symbol lookup, snapshot mutation event production, and bounded
   portfolio job valuation/TOTAL recalculation from existing snapshots plus
   bounded transaction-account replay for posted BUY/SELL/cash-flow activities,
-  option-expiry adjustments, and split preprocessing now have TS runtime parity,
-  while lot-level asset transfers, other adjustment parity, provider-driven
+  option-expiry adjustments, split preprocessing, and lot-level asset transfers
+  now have TS runtime parity, while other adjustment parity, provider-driven
   enrichment, and background worker orchestration must move with dedicated
   holdings/portfolio parity slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening

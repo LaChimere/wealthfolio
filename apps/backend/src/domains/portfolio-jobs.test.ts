@@ -411,20 +411,250 @@ describe("TS portfolio job route config", () => {
     }
   });
 
-  test("warns and preserves seeded positions for deferred asset transfers", async () => {
+  test("carries lots across paired same-day asset transfers", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "dest-account", false, "USD", "TRANSACTIONS");
+      seedAccount(db, "source-account", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "source-account",
+        type: "DEPOSIT",
+        date: "2026-05-10T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "source-account",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-10T12:00:00Z",
+        quantity: "2",
+        unitPrice: "10",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "transfer-out-1",
+        accountId: "source-account",
+        assetId: "asset-1",
+        type: "TRANSFER_OUT",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        fee: "1",
+        currency: "USD",
+        sourceGroupId: "transfer-group-1",
+      });
+      seedActivity(db, {
+        id: "transfer-in-1",
+        accountId: "dest-account",
+        assetId: "asset-1",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        unitPrice: "999",
+        fee: "2",
+        currency: "USD",
+        sourceGroupId: "transfer-group-1",
+      });
+      seedQuote(db, "asset-1", "2026-05-12", "10", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig(),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "source-account", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"79"}',
+        cost_basis: "10",
+        net_contribution: "90",
+      });
+      expect(readSnapshotPositions(db, "source-account", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "1",
+          totalCostBasis: "10",
+          lots: [expect.objectContaining({ id: "buy-1", quantity: "1", costBasis: "10" })],
+        }),
+      });
+      expect(readSnapshot(db, "dest-account", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"-2"}',
+        cost_basis: "10",
+        net_contribution: "10",
+      });
+      expect(readSnapshotPositions(db, "dest-account", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "1",
+          totalCostBasis: "10",
+          lots: [
+            expect.objectContaining({
+              id: "transfer-in-1",
+              acquisitionDate: "2026-05-10T12:00:00Z",
+              acquisitionPrice: "10",
+              costBasis: "10",
+            }),
+          ],
+        }),
+      });
+      expect(readSnapshotPositions(db, "TOTAL", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({ quantity: "2", totalCostBasis: "20" }),
+      });
+      expect(readValuation(db, "TOTAL", "2026-05-12")).toMatchObject({
+        investment_market_value: "20",
+        cash_balance: "77",
+        total_value: "97",
+        net_contribution: "100",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to unit-price lots for external asset transfer-ins", async () => {
     const db = createPortfolioJobTestDb();
     try {
       seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
       seedAsset(db, "asset-1", "USD");
-      seedSnapshot(db, {
+      seedActivity(db, {
+        id: "transfer-in-1",
         accountId: "account-1",
-        date: "2026-05-10",
-        positions: {
-          "asset-1": snapshotPosition("account-1", "asset-1", "2", "20", "USD"),
+        assetId: "asset-1",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "2",
+        unitPrice: "15",
+        fee: "1",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2026-05-12", "15", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"-1"}',
+        cost_basis: "31",
+        net_contribution: "31",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "2",
+          averageCost: "15.5",
+          totalCostBasis: "31",
+          lots: [
+            expect.objectContaining({
+              id: "transfer-in-1",
+              acquisitionFees: "1",
+              costBasis: "31",
+            }),
+          ],
+        }),
+      });
+      expect(readValuation(db, "account-1", "2026-05-12")).toMatchObject({
+        investment_market_value: "30",
+        cash_balance: "-1",
+        total_value: "29",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("converts external transfer-in fallback lots to position currency", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
+      seedActivity(db, {
+        id: "transfer-in-1",
+        accountId: "account-1",
+        assetId: "usd-asset",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "2",
+        unitPrice: "15",
+        fee: "1",
+        currency: "CAD",
+        fxRate: "1",
+      });
+      seedQuote(db, "usd-asset", "2026-05-12", "12", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "USD",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "CAD" && toCurrency === "USD") {
+              return "0.8";
+            }
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.25";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
         },
-        cashBalances: {},
-        costBasis: "20",
-        netContribution: "20",
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balances: '{"CAD":"-1"}',
+        cost_basis: "24.8",
+        net_contribution: "31",
+        net_contribution_base: "24.8",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
+        "usd-asset": expect.objectContaining({
+          quantity: "2",
+          averageCost: "12.4",
+          totalCostBasis: "24.8",
+          lots: [
+            expect.objectContaining({
+              acquisitionPrice: "12",
+              acquisitionFees: "0.8",
+              costBasis: "24.8",
+            }),
+          ],
+        }),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("warns when transfer-out lots are never consumed", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-10T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-10T12:00:00Z",
+        quantity: "1",
+        unitPrice: "10",
+        currency: "USD",
       });
       seedActivity(db, {
         id: "transfer-out-1",
@@ -434,6 +664,164 @@ describe("TS portfolio job route config", () => {
         date: "2026-05-12T12:00:00Z",
         quantity: "1",
         currency: "USD",
+        sourceGroupId: "missing-destination-group",
+      });
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(warnings).toContain(
+        "TransferOut transfer-out-1 cached lots for source_group_id missing-destination-group but no paired TransferIn consumed them",
+      );
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cost_basis: "0",
+        net_contribution: "90",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("converts transferred cost basis from position currency", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "dest-account", false, "CAD", "TRANSACTIONS");
+      seedAccount(db, "source-account", false, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
+      seedSnapshot(db, {
+        accountId: "source-account",
+        date: "2026-05-10",
+        currency: "CAD",
+        positions: {
+          "usd-asset": snapshotPosition("source-account", "usd-asset", "1", "10", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "10",
+        netContribution: "13",
+        netContributionBase: "9",
+      });
+      seedActivity(db, {
+        id: "transfer-out-1",
+        accountId: "source-account",
+        assetId: "usd-asset",
+        type: "TRANSFER_OUT",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        currency: "USD",
+        fxRate: "1.3",
+        sourceGroupId: "cross-currency-group",
+      });
+      seedActivity(db, {
+        id: "transfer-in-1",
+        accountId: "dest-account",
+        assetId: "usd-asset",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        unitPrice: "999",
+        currency: "USD",
+        fxRate: "1.3",
+        sourceGroupId: "cross-currency-group",
+      });
+      seedQuote(db, "usd-asset", "2026-05-12", "10", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "EUR",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.3";
+            }
+            if (fromCurrency === "USD" && toCurrency === "EUR") {
+              return "0.9";
+            }
+            if (fromCurrency === "CAD" && toCurrency === "EUR") {
+              return "0.7";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: ["source-account", "dest-account"],
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: "2026-05-12",
+      });
+
+      expect(readSnapshot(db, "source-account", "2026-05-12")).toMatchObject({
+        cost_basis: "0",
+        net_contribution: "0",
+        net_contribution_base: "0",
+      });
+      expect(readSnapshot(db, "dest-account", "2026-05-12")).toMatchObject({
+        cost_basis: "10",
+        net_contribution: "13",
+        net_contribution_base: "9",
+      });
+      expect(readValuation(db, "dest-account", "2026-05-12")).toMatchObject({
+        account_currency: "CAD",
+        investment_market_value: "13",
+        total_value: "13",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("orders same-account paired transfers before unit-price fallback", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "deposit-1",
+        accountId: "account-1",
+        type: "DEPOSIT",
+        date: "2026-05-10T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-1",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-10T12:00:00Z",
+        quantity: "1",
+        unitPrice: "10",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "a-transfer-in",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        unitPrice: "999",
+        currency: "USD",
+        sourceGroupId: "same-account-group",
+      });
+      seedActivity(db, {
+        id: "z-transfer-out",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "TRANSFER_OUT",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        currency: "USD",
+        sourceGroupId: "same-account-group",
       });
       seedQuote(db, "asset-1", "2026-05-12", "10", "USD");
       const warnings: string[] = [];
@@ -443,22 +831,22 @@ describe("TS portfolio job route config", () => {
       });
 
       await service.enqueuePortfolioJob({
-        accountIds: ["account-1"],
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
         marketSyncMode: { type: "none" },
-        snapshotMode: "full",
-        valuationMode: "full",
-        sinceDate: "2026-05-12",
       });
 
-      expect(warnings).toContain(
-        "Skipping asset transfer activity transfer-out-1 during TS snapshot rebuild; lot-level transfers remain deferred",
-      );
-      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
-        "asset-1": expect.objectContaining({ quantity: "2", totalCostBasis: "20" }),
+      expect(warnings).toEqual([]);
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"90"}',
+        cost_basis: "10",
+        net_contribution: "100",
       });
-      expect(readValuation(db, "account-1", "2026-05-12")).toMatchObject({
-        investment_market_value: "20",
-        total_value: "20",
+      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "1",
+          totalCostBasis: "10",
+          lots: [expect.objectContaining({ id: "a-transfer-in", costBasis: "10" })],
+        }),
       });
     } finally {
       db.close();
@@ -978,7 +1366,8 @@ function createPortfolioJobTestDb(): Database {
       amount TEXT,
       fee TEXT,
       currency TEXT NOT NULL,
-      fx_rate TEXT
+      fx_rate TEXT,
+      source_group_id TEXT
     );
     CREATE TABLE holdings_snapshots (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1062,15 +1451,16 @@ function seedActivity(
     fee?: string | null;
     currency: string;
     fxRate?: string | null;
+    sourceGroupId?: string | null;
   },
 ): void {
   db.query(
     `
       INSERT INTO activities (
         id, account_id, asset_id, activity_type, subtype, status, activity_date,
-        quantity, unit_price, amount, fee, currency, fx_rate
+        quantity, unit_price, amount, fee, currency, fx_rate, source_group_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     activity.id,
@@ -1086,6 +1476,7 @@ function seedActivity(
     activity.fee ?? null,
     activity.currency,
     activity.fxRate ?? null,
+    activity.sourceGroupId ?? null,
   );
 }
 

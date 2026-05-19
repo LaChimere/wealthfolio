@@ -156,6 +156,13 @@ interface ActivityRebuildState {
   netContributionBase: Decimal;
 }
 
+interface ActivityReplayContext {
+  account: PortfolioAccountRow;
+  state: ActivityRebuildState;
+  startDate: string | null;
+  activitiesByDate: Map<string, ActivityRebuildRow[]>;
+}
+
 interface ActivityRebuildRow {
   id: string;
   account_id: string;
@@ -170,9 +177,20 @@ interface ActivityRebuildRow {
   fee: string | null;
   currency: string;
   fx_rate: string | null;
+  source_group_id: string | null;
 }
 
 type SplitFactorsByAsset = Map<string, Array<[string, Decimal]>>;
+type TransferLotsCache = Map<string, TransferredLotBatch[]>;
+
+interface TransferredLotBatch {
+  assetId: string;
+  sourceActivityId: string;
+  currency: string;
+  isAlternative: boolean;
+  contractMultiplier: Decimal;
+  lots: RebuildLot[];
+}
 
 interface AssetInfoRow {
   id: string;
@@ -490,31 +508,61 @@ function rebuildCalculatedSnapshotsFromActivities(
     Array.from(activitiesByAccount.values()).flat(),
     options,
   );
-
-  for (const account of transactionAccounts) {
-    rebuildAccountCalculatedSnapshotsFromActivities(
+  const contexts = transactionAccounts.map((account) =>
+    prepareAccountActivityReplayContext(
       db,
       account,
       activitiesByAccount.get(account.id) ?? [],
       splitFactors,
       config,
-      baseCurrency,
-      calculatedAt,
-      options,
-    );
+    ),
+  );
+  const replayDates = Array.from(
+    new Set(contexts.flatMap((context) => Array.from(context.activitiesByDate.keys()))),
+  ).sort();
+  const transferLotsCache: TransferLotsCache = new Map();
+
+  for (const context of contexts) {
+    deleteCalculatedSnapshotsForActivityRebuild(db, context.account.id, context.startDate);
   }
+
+  for (const date of replayDates) {
+    const contextsForDate = contexts.filter((context) => context.activitiesByDate.has(date));
+    for (const context of orderReplayContextsByTransferDeps(contextsForDate, date, options)) {
+      const activitiesForDate = orderActivitiesByTransferDeps(
+        context.activitiesByDate.get(date) ?? [],
+        options,
+      );
+      for (const activity of activitiesForDate) {
+        processActivityForSnapshot(
+          db,
+          context.state,
+          activity,
+          baseCurrency,
+          options,
+          transferLotsCache,
+        );
+      }
+      upsertActivityCalculatedSnapshot(
+        db,
+        context.state,
+        date,
+        baseCurrency,
+        calculatedAt,
+        options,
+      );
+    }
+  }
+  warnForUnpairedTransferredLots(transferLotsCache, options);
 }
 
-function rebuildAccountCalculatedSnapshotsFromActivities(
+function prepareAccountActivityReplayContext(
   db: Database,
   account: PortfolioAccountRow,
   allActivities: ActivityRebuildRow[],
   splitFactors: SplitFactorsByAsset,
   config: PortfolioJobConfig,
-  baseCurrency: string,
-  calculatedAt: string,
-  options: LocalPortfolioJobServiceOptions,
-): void {
+): ActivityReplayContext {
   const requestedStartDate = activityRebuildStartDate(db, account.id, config);
   const requestedSeedSnapshot = requestedStartDate
     ? readLatestSnapshotBeforeDate(db, account.id, requestedStartDate)
@@ -536,17 +584,12 @@ function rebuildAccountCalculatedSnapshotsFromActivities(
     filterActivitiesFromDate(allActivities, startDate),
     splitFactors,
   );
-  const activitiesByDate = groupActivitiesByDate(activities);
-
-  deleteCalculatedSnapshotsForActivityRebuild(db, account.id, startDate);
-
-  for (const date of Array.from(activitiesByDate.keys()).sort()) {
-    const activitiesForDate = activitiesByDate.get(date) ?? [];
-    for (const activity of activitiesForDate) {
-      processActivityForSnapshot(db, state, activity, baseCurrency, options);
-    }
-    upsertActivityCalculatedSnapshot(db, state, date, baseCurrency, calculatedAt, options);
-  }
+  return {
+    account,
+    state,
+    startDate,
+    activitiesByDate: groupActivitiesByDate(activities),
+  };
 }
 
 function activityRebuildStartDate(
@@ -618,7 +661,8 @@ function readPostedActivitiesForAccounts(
           amount,
           fee,
           currency,
-          fx_rate
+          fx_rate,
+          source_group_id
         FROM activities
         WHERE account_id IN (${placeholders})
           AND status = '${POSTED_ACTIVITY_STATUS}'
@@ -778,6 +822,132 @@ function groupActivitiesByDate(
     grouped.set(date, existing);
   }
   return grouped;
+}
+
+function orderReplayContextsByTransferDeps(
+  contexts: ActivityReplayContext[],
+  date: string,
+  options: LocalPortfolioJobServiceOptions,
+): ActivityReplayContext[] {
+  if (contexts.length <= 1) {
+    return contexts;
+  }
+
+  const outIndexByGroup = new Map<string, number>();
+  const inIndexByGroup = new Map<string, number>();
+  for (const [index, context] of contexts.entries()) {
+    for (const activity of context.activitiesByDate.get(date) ?? []) {
+      const groupId = activitySourceGroupId(activity);
+      if (!groupId) {
+        continue;
+      }
+      if (activity.activity_type === "TRANSFER_OUT") {
+        outIndexByGroup.set(groupId, index);
+      } else if (activity.activity_type === "TRANSFER_IN") {
+        inIndexByGroup.set(groupId, index);
+      }
+    }
+  }
+
+  const successors = Array.from({ length: contexts.length }, () => new Set<number>());
+  const inDegree = Array.from({ length: contexts.length }, () => 0);
+  for (const [groupId, outIndex] of outIndexByGroup) {
+    const inIndex = inIndexByGroup.get(groupId);
+    if (inIndex === undefined || inIndex === outIndex || successors[outIndex].has(inIndex)) {
+      continue;
+    }
+    successors[outIndex].add(inIndex);
+    inDegree[inIndex] += 1;
+  }
+  if (successors.every((edges) => edges.size === 0)) {
+    return contexts;
+  }
+
+  return stableTopologicalOrder(contexts, successors, inDegree, () =>
+    warnPortfolioJob(
+      options,
+      `Detected cyclic same-day transfer dependencies on ${date}; preserving input account order for remaining accounts`,
+    ),
+  );
+}
+
+function orderActivitiesByTransferDeps(
+  activities: ActivityRebuildRow[],
+  options: LocalPortfolioJobServiceOptions,
+): ActivityRebuildRow[] {
+  if (activities.length <= 1) {
+    return activities;
+  }
+
+  const outIndexByGroup = new Map<string, number>();
+  const inIndexByGroup = new Map<string, number>();
+  for (const [index, activity] of activities.entries()) {
+    const groupId = activitySourceGroupId(activity);
+    if (!groupId) {
+      continue;
+    }
+    if (activity.activity_type === "TRANSFER_OUT") {
+      outIndexByGroup.set(groupId, index);
+    } else if (activity.activity_type === "TRANSFER_IN") {
+      inIndexByGroup.set(groupId, index);
+    }
+  }
+
+  const successors = Array.from({ length: activities.length }, () => new Set<number>());
+  const inDegree = Array.from({ length: activities.length }, () => 0);
+  for (const [groupId, outIndex] of outIndexByGroup) {
+    const inIndex = inIndexByGroup.get(groupId);
+    if (inIndex === undefined || inIndex === outIndex || successors[outIndex].has(inIndex)) {
+      continue;
+    }
+    successors[outIndex].add(inIndex);
+    inDegree[inIndex] += 1;
+  }
+  if (successors.every((edges) => edges.size === 0)) {
+    return activities;
+  }
+
+  return stableTopologicalOrder(activities, successors, inDegree, () =>
+    warnPortfolioJob(
+      options,
+      `Detected cyclic same-account transfer dependencies on ${activityLocalDate(activities[0])}; preserving input activity order for remaining activities`,
+    ),
+  );
+}
+
+function stableTopologicalOrder<T>(
+  items: T[],
+  successors: Array<Set<number>>,
+  inDegree: number[],
+  onCycle?: () => void,
+): T[] {
+  const queue = inDegree.flatMap((degree, index) => (degree === 0 ? [index] : []));
+  const orderedIndexes: number[] = [];
+
+  while (queue.length > 0) {
+    const index = queue.shift();
+    if (index === undefined) {
+      break;
+    }
+    orderedIndexes.push(index);
+    for (const successor of successors[index]) {
+      inDegree[successor] -= 1;
+      if (inDegree[successor] === 0) {
+        queue.push(successor);
+      }
+    }
+  }
+
+  if (orderedIndexes.length < items.length) {
+    onCycle?.();
+    const seen = new Set(orderedIndexes);
+    for (let index = 0; index < items.length; index += 1) {
+      if (!seen.has(index)) {
+        orderedIndexes.push(index);
+      }
+    }
+  }
+  return orderedIndexes.map((index) => items[index]);
 }
 
 function deleteCalculatedSnapshotsForActivityRebuild(
@@ -1064,6 +1234,7 @@ function processActivityForSnapshot(
   activity: ActivityRebuildRow,
   baseCurrency: string,
   options: LocalPortfolioJobServiceOptions,
+  transferLotsCache: TransferLotsCache,
 ): void {
   switch (activity.activity_type) {
     case "BUY":
@@ -1091,7 +1262,7 @@ function processActivityForSnapshot(
       break;
     case "TRANSFER_IN":
     case "TRANSFER_OUT":
-      applyCashTransferOrWarn(state, activity, baseCurrency, options);
+      applyTransferActivity(db, state, activity, baseCurrency, options, transferLotsCache);
       break;
     case "ADJUSTMENT":
       applyAdjustmentActivity(state, activity, options);
@@ -1193,24 +1364,119 @@ function applyChargeActivity(state: ActivityRebuildState, activity: ActivityRebu
   addCash(state, activity.currency, charge.abs().negated());
 }
 
-function applyCashTransferOrWarn(
+function applyTransferActivity(
+  db: Database,
   state: ActivityRebuildState,
   activity: ActivityRebuildRow,
   baseCurrency: string,
   options: LocalPortfolioJobServiceOptions,
+  transferLotsCache: TransferLotsCache,
 ): void {
-  if (activity.asset_id) {
-    warnPortfolioJob(
-      options,
-      `Skipping asset transfer activity ${activity.id} during TS snapshot rebuild; lot-level transfers remain deferred`,
+  if (!activity.asset_id) {
+    applyContributionActivity(
+      state,
+      activity,
+      baseCurrency,
+      activity.activity_type === "TRANSFER_IN" ? 1 : -1,
     );
     return;
   }
-  applyContributionActivity(
+  if (activity.activity_type === "TRANSFER_IN") {
+    applyAssetTransferIn(db, state, activity, baseCurrency, options, transferLotsCache);
+  } else {
+    applyAssetTransferOut(state, activity, baseCurrency, options, transferLotsCache);
+  }
+}
+
+function applyAssetTransferOut(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+  transferLotsCache: TransferLotsCache,
+): void {
+  const assetId = requiredActivityAssetId(activity);
+  applyTransferFeeCash(state, activity);
+
+  const position = state.positions.get(assetId);
+  if (!position) {
+    warnPortfolioJob(
+      options,
+      `Attempted to transfer out non-existent position ${assetId} via activity ${activity.id}; fee applied only`,
+    );
+    return;
+  }
+
+  const removedLots = reducePositionLotsFifo(
+    position,
+    positiveActivityQuantity(activity),
+    options,
+    activity.id,
+    activity.activity_date,
+    "transferred out",
+  );
+  if (removedLots.length === 0) {
+    return;
+  }
+
+  const groupId = activitySourceGroupId(activity);
+  if (groupId) {
+    const existing = transferLotsCache.get(groupId) ?? [];
+    existing.push({
+      assetId,
+      sourceActivityId: activity.id,
+      currency: position.currency,
+      isAlternative: position.isAlternative,
+      contractMultiplier: position.contractMultiplier,
+      lots: removedLots.map(cloneRebuildLot),
+    });
+    transferLotsCache.set(groupId, existing);
+  }
+
+  const removedCostBasis = sumLotCostBasis(removedLots);
+  addPositionContribution(
     state,
     activity,
+    removedCostBasis.negated(),
+    position.currency,
     baseCurrency,
-    activity.activity_type === "TRANSFER_IN" ? 1 : -1,
+    options,
+  );
+}
+
+function applyAssetTransferIn(
+  db: Database,
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+  transferLotsCache: TransferLotsCache,
+): void {
+  const assetId = requiredActivityAssetId(activity);
+  const position = getOrCreateActivityPosition(db, state, activity, assetId);
+  const groupId = activitySourceGroupId(activity);
+  const cachedBatch = groupId
+    ? takeCachedTransferredLotBatch(transferLotsCache, groupId, assetId)
+    : null;
+  const addedCostBasis = cachedBatch
+    ? addTransferredLots(position, activity, cachedBatch)
+    : addFallbackTransferLot(position, activity, state.currency, options);
+
+  if (groupId && !cachedBatch) {
+    warnPortfolioJob(
+      options,
+      `TransferIn ${activity.id} has source_group_id but no cached lots from paired TransferOut; using unit_price fallback`,
+    );
+  }
+
+  applyTransferFeeCash(state, activity);
+  addPositionContribution(
+    state,
+    activity,
+    addedCostBasis,
+    position.currency,
+    baseCurrency,
+    options,
   );
 }
 
@@ -1266,6 +1532,68 @@ function addContribution(
   );
 }
 
+function addPositionContribution(
+  state: ActivityRebuildState,
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  positionCurrency: string,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  state.netContribution = state.netContribution.plus(
+    convertPositionAmountForContribution(
+      activity,
+      amount,
+      positionCurrency,
+      state.currency,
+      state.currency,
+      options,
+    ),
+  );
+  state.netContributionBase = state.netContributionBase.plus(
+    convertPositionAmountForContribution(
+      activity,
+      amount,
+      positionCurrency,
+      baseCurrency,
+      state.currency,
+      options,
+    ),
+  );
+}
+
+function convertPositionAmountForContribution(
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  positionCurrency: string,
+  targetCurrency: string,
+  accountCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  if (positionCurrency === targetCurrency) {
+    return amount;
+  }
+  const activityFxRate = decimalOptionalOrDefault(
+    activity.fx_rate,
+    new Decimal(0),
+    `Invalid activity FX rate for activity ${activity.id}`,
+  );
+  if (
+    activity.currency === positionCurrency &&
+    targetCurrency === accountCurrency &&
+    !activityFxRate.isZero()
+  ) {
+    return amount.mul(activityFxRate);
+  }
+  return convertRequired(
+    amount,
+    positionCurrency,
+    targetCurrency,
+    activityLocalDate(activity),
+    options,
+  );
+}
+
 function convertActivityAmountForContribution(
   activity: ActivityRebuildRow,
   amount: Decimal,
@@ -1313,6 +1641,161 @@ function getOrCreateActivityPosition(
   return position;
 }
 
+function applyTransferFeeCash(state: ActivityRebuildState, activity: ActivityRebuildRow): void {
+  const fee = activityFee(activity);
+  if (!fee.isZero()) {
+    addCash(state, activity.currency, fee.negated());
+  }
+}
+
+function takeCachedTransferredLotBatch(
+  transferLotsCache: TransferLotsCache,
+  groupId: string,
+  assetId: string,
+): TransferredLotBatch | null {
+  const batches = transferLotsCache.get(groupId);
+  if (!batches) {
+    return null;
+  }
+  const batchIndex = batches.findIndex((batch) => batch.assetId === assetId);
+  if (batchIndex < 0) {
+    return null;
+  }
+  const [batch] = batches.splice(batchIndex, 1);
+  if (batches.length === 0) {
+    transferLotsCache.delete(groupId);
+  }
+  return batch ?? null;
+}
+
+function warnForUnpairedTransferredLots(
+  transferLotsCache: TransferLotsCache,
+  options: LocalPortfolioJobServiceOptions,
+): void {
+  for (const [groupId, batches] of transferLotsCache) {
+    for (const batch of batches) {
+      warnPortfolioJob(
+        options,
+        `TransferOut ${batch.sourceActivityId} cached lots for source_group_id ${groupId} but no paired TransferIn consumed them`,
+      );
+    }
+  }
+}
+
+function addTransferredLots(
+  position: ActivityRebuildPosition,
+  activity: ActivityRebuildRow,
+  batch: TransferredLotBatch,
+): Decimal {
+  position.currency = batch.currency;
+  position.isAlternative = batch.isAlternative;
+  position.contractMultiplier = batch.contractMultiplier;
+  const transferredLots = batch.lots
+    .filter((lot) => lot.quantity.gt(0))
+    .map((lot, index, lots) => ({
+      ...cloneRebuildLot(lot),
+      id: lots.length === 1 ? activity.id : `${activity.id}_lot${index}`,
+    }));
+  position.lots.push(...transferredLots);
+  sortPositionLots(position);
+  updatePositionInceptionFromLots(position);
+  recalculateActivityPosition(position, activity.activity_date);
+  return sumLotCostBasis(transferredLots);
+}
+
+function addFallbackTransferLot(
+  position: ActivityRebuildPosition,
+  activity: ActivityRebuildRow,
+  accountCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  const quantity = positiveActivityQuantity(activity);
+  const unitPrice = activityUnitPrice(activity).mul(position.contractMultiplier);
+  const fee = activityFee(activity);
+  const unitPriceForLot =
+    position.currency === activity.currency
+      ? unitPrice
+      : convertActivityAmountToPositionCurrency(
+          unitPrice,
+          activity,
+          position,
+          accountCurrency,
+          options,
+        );
+  const feeForLot =
+    position.currency === activity.currency
+      ? fee
+      : convertActivityAmountToPositionCurrency(fee, activity, position, accountCurrency, options);
+  const costBasis = quantity.mul(unitPriceForLot).plus(feeForLot);
+  position.lots.push({
+    id: activity.id,
+    quantity,
+    costBasis,
+    acquisitionPrice: unitPriceForLot,
+    acquisitionFees: feeForLot,
+    acquisitionDate: activity.activity_date,
+  });
+  sortPositionLots(position);
+  updatePositionInceptionFromLots(position);
+  recalculateActivityPosition(position, activity.activity_date);
+  return costBasis;
+}
+
+function convertActivityAmountToPositionCurrency(
+  amount: Decimal,
+  activity: ActivityRebuildRow,
+  position: ActivityRebuildPosition,
+  accountCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  if (activity.currency === position.currency) {
+    return amount;
+  }
+  const activityFxRate = decimalOptionalOrDefault(
+    activity.fx_rate,
+    new Decimal(0),
+    `Invalid activity FX rate for activity ${activity.id}`,
+  );
+  const canUseActivityFxRate = position.currency === accountCurrency;
+  if (canUseActivityFxRate && !activityFxRate.isZero()) {
+    return amount.mul(activityFxRate);
+  }
+  return convertRequired(
+    amount,
+    activity.currency,
+    position.currency,
+    activityLocalDate(activity),
+    options,
+  );
+}
+
+function cloneRebuildLot(lot: RebuildLot): RebuildLot {
+  return {
+    id: lot.id,
+    quantity: lot.quantity,
+    costBasis: lot.costBasis,
+    acquisitionPrice: lot.acquisitionPrice,
+    acquisitionFees: lot.acquisitionFees,
+    acquisitionDate: lot.acquisitionDate,
+  };
+}
+
+function sumLotCostBasis(lots: RebuildLot[]): Decimal {
+  return lots.reduce((total, lot) => total.plus(lot.costBasis), new Decimal(0));
+}
+
+function sortPositionLots(position: ActivityRebuildPosition): void {
+  position.lots.sort((a, b) => a.acquisitionDate.localeCompare(b.acquisitionDate));
+}
+
+function updatePositionInceptionFromLots(position: ActivityRebuildPosition): void {
+  const earliestLot = position.lots.at(0);
+  if (earliestLot && earliestLot.acquisitionDate < position.inceptionDate) {
+    position.inceptionDate = earliestLot.acquisitionDate;
+    position.createdAt = earliestLot.acquisitionDate;
+  }
+}
+
 function readAssetInfo(db: Database, assetId: string): AssetInfoRow | null {
   return (
     db
@@ -1333,9 +1816,11 @@ function reducePositionLotsFifo(
   options: LocalPortfolioJobServiceOptions,
   activityId: string,
   activityDate: string,
-): void {
+  operation = "sold",
+): RebuildLot[] {
   let remaining = requestedQuantity;
   const nextLots: RebuildLot[] = [];
+  const removedLots: RebuildLot[] = [];
   for (const lot of position.lots.sort((a, b) =>
     a.acquisitionDate.localeCompare(b.acquisitionDate),
   )) {
@@ -1346,6 +1831,13 @@ function reducePositionLotsFifo(
     const quantityFromLot = Decimal.min(lot.quantity, remaining);
     remaining = remaining.minus(quantityFromLot);
     const quantityLeft = lot.quantity.minus(quantityFromLot);
+    const removedRatio = quantityFromLot.div(lot.quantity);
+    removedLots.push({
+      ...lot,
+      quantity: quantityFromLot,
+      costBasis: lot.costBasis.mul(removedRatio),
+      acquisitionFees: lot.acquisitionFees.mul(removedRatio),
+    });
     if (quantityLeft.gt(0)) {
       const ratio = quantityLeft.div(lot.quantity);
       nextLots.push({
@@ -1359,11 +1851,12 @@ function reducePositionLotsFifo(
   if (remaining.gt(0)) {
     warnPortfolioJob(
       options,
-      `Activity ${activityId} sold more ${position.assetId} than available; reduced only available quantity`,
+      `Activity ${activityId} ${operation} more ${position.assetId} than available; reduced only available quantity`,
     );
   }
   position.lots = nextLots;
   recalculateActivityPosition(position, activityDate);
+  return removedLots;
 }
 
 function recalculateActivityPosition(position: ActivityRebuildPosition, updatedAt: string): void {
@@ -1510,6 +2003,10 @@ function activityLocalDate(activity: ActivityRebuildRow): string {
     throw new Error(`Invalid activity date for activity ${activity.id}: ${date}`);
   }
   return parsed.toISOString().slice(0, 10);
+}
+
+function activitySourceGroupId(activity: ActivityRebuildRow): string | null {
+  return activity.source_group_id?.trim() || null;
 }
 
 function requiredActivityAssetId(activity: ActivityRebuildRow): string {
