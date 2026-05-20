@@ -1901,6 +1901,13 @@ contract:
   routes enqueuing incremental portfolio recalculation jobs after successful
   mutations, while metadata and liability link/unlink routes do not enqueue
   portfolio jobs.
+- `pr5-settings-portfolio-job-side-effects`: targeted checks passed:
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "settings domain"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes timezone-only settings updates enqueuing no-market-sync full
+  recalculation jobs, theme-only updates staying no-op for portfolio jobs, and
+  base-currency updates taking precedence with a backfill-history full
+  recalculation job when timezone also changes.
 - `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
   and `bun run type-check`. Coverage includes service-level
@@ -2019,8 +2026,9 @@ contract:
   option contract multipliers, option-expiry adjustment replay, split
   preprocessing, lot-level asset-transfer replay, other adjustment no-op
   behavior, market-sync result/payload parity, market-data quote/sync portfolio
-  job side effects, exchange-rate mutation portfolio job side effects, and
-  alternative-asset mutation portfolio job side effects implemented; broader
+  job side effects, exchange-rate mutation portfolio job side effects,
+  alternative-asset mutation portfolio job side effects, and settings
+  base-currency/timezone portfolio job side effects implemented; broader
   migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix

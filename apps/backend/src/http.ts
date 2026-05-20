@@ -112,7 +112,7 @@ import {
 } from "./domains/retirement-plan";
 import type { SecretService } from "./domains/secrets";
 import { previewSaveUpOverview, type SaveUpInput } from "./domains/save-up";
-import type { SettingsService, SettingsUpdate } from "./domains/settings";
+import type { Settings, SettingsService, SettingsUpdate } from "./domains/settings";
 import type { SyncCryptoService } from "./domains/sync-crypto";
 import type {
   NewAssetTaxonomyAssignment,
@@ -441,7 +441,13 @@ async function routeRequest(
   }
 
   if (options.settingsService && url.pathname.startsWith("/api/v1/settings")) {
-    return await routeSettingsRequest(request, url, config, options.settingsService);
+    return await routeSettingsRequest(
+      request,
+      url,
+      config,
+      options.settingsService,
+      options.portfolioJobService,
+    );
   }
 
   if (options.includeDebugRoutes) {
@@ -3084,6 +3090,7 @@ async function routeSettingsRequest(
   url: URL,
   config: BackendRuntimeConfig,
   settingsService: SettingsService,
+  portfolioJobService?: PortfolioJobService,
 ): Promise<Response> {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -3101,7 +3108,10 @@ async function routeSettingsRequest(
       return update;
     }
     try {
-      return jsonResponse(settingsService.updateSettings(update));
+      const previous = settingsService.getSettings();
+      const updated = settingsService.updateSettings(update);
+      enqueueSettingsPortfolioRecalculation(portfolioJobService, previous, updated);
+      return jsonResponse(updated);
     } catch (error) {
       return jsonResponse(
         { code: 400, message: error instanceof Error ? error.message : String(error) },
@@ -3113,6 +3123,31 @@ async function routeSettingsRequest(
     return jsonResponse(settingsService.isAutoUpdateCheckEnabled());
   }
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function enqueueSettingsPortfolioRecalculation(
+  portfolioJobService: PortfolioJobService | undefined,
+  previous: Pick<Settings, "baseCurrency" | "timezone">,
+  updated: Pick<Settings, "baseCurrency" | "timezone">,
+): void {
+  if (updated.baseCurrency !== previous.baseCurrency) {
+    enqueuePortfolioJobBestEffort(
+      portfolioJobService,
+      {
+        accountIds: null,
+        marketSyncMode: { type: "backfill_history", asset_ids: null, days: DEFAULT_HISTORY_DAYS },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: null,
+      },
+      "Base currency change",
+    );
+    return;
+  }
+
+  if (updated.timezone !== previous.timezone) {
+    enqueueFullPortfolioRecalculation(portfolioJobService, "Timezone change");
+  }
 }
 
 function accountIdFromPath(pathname: string): string | undefined {

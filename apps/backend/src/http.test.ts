@@ -198,6 +198,7 @@ describe("TS backend HTTP skeleton", () => {
 
   test("routes migrated settings domain only when a service is provided", async () => {
     const db = new Database(":memory:");
+    const enqueued: PortfolioJobConfig[] = [];
     db.exec(`
       CREATE TABLE app_settings (
         setting_key TEXT NOT NULL PRIMARY KEY,
@@ -206,6 +207,11 @@ describe("TS backend HTTP skeleton", () => {
     `);
     const handler = createBackendRequestHandler(config, {
       settingsService: createSettingsService(db),
+      portfolioJobService: {
+        enqueuePortfolioJob(config) {
+          enqueued.push(config);
+        },
+      },
     });
 
     try {
@@ -227,6 +233,54 @@ describe("TS backend HTTP skeleton", () => {
         theme: "dark",
         timezone: "America/Toronto",
       });
+      expect(enqueued).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
+      const themeOnlyResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/settings", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ theme: "light" }),
+        }),
+      );
+      expect(themeOnlyResponse.status).toBe(200);
+      expect(enqueued).toHaveLength(1);
+      const baseCurrencyResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/settings", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ baseCurrency: "CAD", timezone: "Europe/London" }),
+        }),
+      );
+      expect(baseCurrencyResponse.status).toBe(200);
+      expect(enqueued).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+        {
+          accountIds: null,
+          marketSyncMode: { type: "backfill_history", asset_ids: null, days: 1_825 },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
       await expect(
         (
           await handler(
