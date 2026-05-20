@@ -2117,7 +2117,16 @@ contract:
   `CUSTOM:<code>` symbol overrides, no Yahoo fallback, persisted
   `CUSTOM_SCRAPER:<code>` quote rows, zero-price quote persistence,
   date-timezone normalization, quote sync state source updates, and explicit
-  skips for historical custom backfill and general-purpose custom-provider sync.
+  skips for historical custom backfill.
+- `pr5-market-data-general-custom-provider-latest-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts` and
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, and focused code review. Coverage includes `CUSTOM_SCRAPER`
+  assets without `custom_provider_code` using enabled custom providers in
+  priority order, skipping disabled and non-`{SYMBOL}` sources, trying latest
+  before historical fallback sources, honoring per-source `CUSTOM:<code>` symbol
+  overrides, persisting `CUSTOM_SCRAPER:<code>` quote rows, and updating quote
+  sync state to the actual successful source.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2132,15 +2141,15 @@ contract:
   runtime parity slices if Ollama documents non-image file inputs; asset
   quote-provider interactions, auto-classification, and portfolio recalculation
   side effects move with asset/market-data/portfolio parity slices; all-provider
-  market sync, historical/general-purpose custom provider sync, and background
-  orchestration move with market-data/portfolio parity slices; remaining
-  provider-backed symbol fetch/resolution and sync breadth moves with
-  market-data/provider parity slices; full portfolio snapshot rebuilding side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths, sync
-  engine push/pull, and portfolio recalculation side effects move with
+  market sync, historical custom provider sync, and background orchestration
+  move with market-data/portfolio parity slices; remaining provider-backed
+  symbol fetch/resolution and sync breadth moves with market-data/provider
+  parity slices; full portfolio snapshot rebuilding side effects move with
+  holdings/portfolio parity slices; add-on security scanning, full sandbox
+  isolation, and query-cache hardening move with add-on runtime parity slices;
+  provider-backed asset resolution, remaining quote sync-outbox emission outside
+  migrated alternative-asset and market-data quote paths, sync engine push/pull,
+  and portfolio recalculation side effects move with
   activities/import/device-sync runtime parity slices; device-sync integration
   for sync crypto moves with device-sync parity slices; broader health checks
   and real market sync fix execution move with health/calculation parity slices;

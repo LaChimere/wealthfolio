@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   CustomProviderSource,
   CustomProviderSourceKind,
+  CustomProviderWithSources,
   TestSourceRequest,
 } from "./custom-providers";
 import { createMarketDataService } from "./market-data";
@@ -306,7 +307,7 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("keeps custom provider history and general-purpose sync explicitly deferred", async () => {
+  test("keeps custom provider history explicitly deferred", async () => {
     const db = createMarketDataDb();
     let sourceCalls = 0;
     const service = createMarketDataService(db, {
@@ -334,11 +335,6 @@ describe("TS market data domain", () => {
           custom_provider_code: "my-feed",
         }),
       });
-      insertAsset(db, {
-        id: "asset-general-custom",
-        instrument_symbol: "FUND2",
-        provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
-      });
 
       await expect(
         service.syncMarketData?.({
@@ -351,21 +347,186 @@ describe("TS market data domain", () => {
         skipped: 1,
         skippedReasons: [["asset-custom", "Custom provider history sync not implemented"]],
       });
-      await expect(
-        service.syncMarketData?.({
-          type: "incremental",
-          asset_ids: ["asset-general-custom"],
-        }),
-      ).resolves.toEqual({
-        ...emptySyncResult(),
-        skipped: 1,
-        skippedReasons: [
-          ["asset-general-custom", "General-purpose custom provider sync not implemented"],
-        ],
-      });
       expect(sourceCalls).toBe(0);
       expect(readSyncState(db, "asset-custom")).toBeNull();
-      expect(readSyncState(db, "asset-general-custom")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs general-purpose custom provider latest quotes by priority", async () => {
+    const db = createMarketDataDb();
+    const requests: Array<Pick<TestSourceRequest, "url" | "symbol">> = [];
+    const baseSource: CustomProviderSource = {
+      id: "source-base",
+      providerId: "base-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/base/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const disabledSource: CustomProviderSource = {
+      ...baseSource,
+      id: "source-disabled",
+      providerId: "disabled-feed",
+      url: "https://prices.example.test/disabled/{SYMBOL}",
+    };
+    const fixedUrlSource: CustomProviderSource = {
+      ...baseSource,
+      id: "source-fixed",
+      providerId: "fixed-feed",
+      url: "https://prices.example.test/fixed",
+    };
+    const failingSource: CustomProviderSource = {
+      ...baseSource,
+      id: "source-failing",
+      providerId: "failing-feed",
+      url: "https://prices.example.test/failing/{SYMBOL}",
+    };
+    const successfulSource: CustomProviderSource = {
+      ...baseSource,
+      id: "source-successful",
+      providerId: "successful-feed",
+      url: "https://prices.example.test/successful/{SYMBOL}",
+    };
+    const providers: CustomProviderWithSources[] = [
+      {
+        id: "disabled-feed",
+        name: "Disabled Feed",
+        description: "",
+        enabled: false,
+        priority: 1,
+        sources: [disabledSource],
+      },
+      {
+        id: "fixed-feed",
+        name: "Fixed Feed",
+        description: "",
+        enabled: true,
+        priority: 2,
+        sources: [fixedUrlSource],
+      },
+      {
+        id: "failing-feed",
+        name: "Failing Feed",
+        description: "",
+        enabled: true,
+        priority: 3,
+        sources: [failingSource],
+      },
+      {
+        id: "successful-feed",
+        name: "Successful Feed",
+        description: "",
+        enabled: true,
+        priority: 4,
+        sources: [successfulSource],
+      },
+    ];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      customProviderService: {
+        getAll() {
+          return providers;
+        },
+        getSourceByKind() {
+          throw new Error("getSourceByKind should not be called for general-purpose sync");
+        },
+        testSource(request) {
+          requests.push({ url: request.url, symbol: request.symbol });
+          if (request.url === failingSource.url) {
+            return {
+              success: false,
+              statusCode: 200,
+              price: null,
+              open: null,
+              high: null,
+              low: null,
+              volume: null,
+              currency: null,
+              date: null,
+              error: "missing price",
+              rawResponse: null,
+              detectedElements: null,
+              detectedTables: null,
+            };
+          }
+          return {
+            success: true,
+            statusCode: 200,
+            price: 27.5,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-10",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-general-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          overrides: {
+            "CUSTOM:successful-feed": { type: "equity_symbol", symbol: "FUND.TO" },
+          },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-general-custom"] }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
+
+      expect(requests).toEqual([
+        { url: "https://prices.example.test/failing/{SYMBOL}", symbol: "FUND" },
+        { url: "https://prices.example.test/successful/{SYMBOL}", symbol: "FUND.TO" },
+      ]);
+      expect(readQuoteByDay(db, "asset-general-custom", "2026-01-10")).toMatchObject({
+        id: "asset-general-custom_2026-01-10_CUSTOM_SCRAPER:successful-feed",
+        source: "CUSTOM_SCRAPER:successful-feed",
+        close: "27.5",
+        currency: "CAD",
+      });
+      expect(readSyncState(db, "asset-general-custom")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:successful-feed",
+        error_count: 0,
+        last_error: null,
+      });
     } finally {
       db.close();
     }

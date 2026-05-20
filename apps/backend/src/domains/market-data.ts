@@ -9,11 +9,18 @@ import {
 } from "./quote-sync";
 import type {
   CustomProviderService,
+  CustomProviderWithSources,
   CustomProviderSource,
   CustomProviderSourceKind,
   TestSourceRequest,
   TestSourceResult,
 } from "./custom-providers";
+
+type MarketDataCustomProviderService = Pick<
+  CustomProviderService,
+  "getSourceByKind" | "testSource"
+> &
+  Partial<Pick<CustomProviderService, "getAll">>;
 
 export interface ExchangeInfo {
   mic: string;
@@ -152,7 +159,7 @@ export interface MarketDataServiceOptions {
   fetch?: typeof fetch;
   now?: () => Date;
   queueQuoteSyncEvent?: (event: QuoteSyncEvent) => void;
-  customProviderService?: Pick<CustomProviderService, "getSourceByKind" | "testSource">;
+  customProviderService?: MarketDataCustomProviderService;
 }
 
 export class MarketDataNotImplementedError extends Error {
@@ -521,7 +528,7 @@ async function syncMarketDataExecution(
   },
   now: Date,
   quoteSyncStateExists: boolean,
-  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  customProviderService: MarketDataCustomProviderService | undefined,
 ): Promise<MarketDataSyncResult> {
   const result = emptyMarketDataSyncResult();
   if (marketSyncMode.type === "none") {
@@ -559,16 +566,16 @@ async function syncMarketDataExecution(
         addMarketSyncSkip(result, asset.id, "Custom provider history sync not implemented");
         continue;
       }
-      if (!customProviderCode) {
-        addMarketSyncSkip(result, asset.id, "General-purpose custom provider sync not implemented");
-        continue;
-      }
       if ((states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
       }
-      const quoteSource = `${CUSTOM_SCRAPER_PROVIDER}:${customProviderCode}`;
-      const customSymbol = customProviderSyncSymbol(asset, customProviderCode);
+      const quoteSource = customProviderCode
+        ? `${CUSTOM_SCRAPER_PROVIDER}:${customProviderCode}`
+        : CUSTOM_SCRAPER_PROVIDER;
+      const customSymbol = customProviderCode
+        ? customProviderSyncSymbol(asset, customProviderCode)
+        : optionalString(asset.instrument_symbol);
       if (customSymbol === null) {
         updateQuoteSyncStateAfterFailure(
           db,
@@ -1241,7 +1248,7 @@ async function resolveSymbolQuote(
     set: (crumb: YahooCrumbData) => void;
     clear: () => void;
   },
-  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  customProviderService: MarketDataCustomProviderService | undefined,
   now: Date,
 ): Promise<ResolvedQuote> {
   const trimmedSymbol = request.symbol.trim();
@@ -1319,7 +1326,7 @@ async function resolveCustomProviderSymbolQuote(
   providerCode: string,
   symbol: string,
   quoteCcy: string | null,
-  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  customProviderService: MarketDataCustomProviderService | undefined,
   now: Date,
 ): Promise<ResolvedQuote> {
   if (!customProviderService) {
@@ -1347,7 +1354,7 @@ async function fetchCustomProviderQuote(
   providerCode: string,
   symbol: string,
   quoteCcy: string | null,
-  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource">,
+  customProviderService: MarketDataCustomProviderService,
   now: Date,
 ): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
   for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
@@ -1355,18 +1362,15 @@ async function fetchCustomProviderQuote(
     if (!source) {
       continue;
     }
-    try {
-      const result = await Promise.resolve(
-        customProviderService.testSource(
-          customProviderTestSourceRequest(source, symbol, quoteCcy, now),
-        ),
-      );
-      if (!result.success || result.price === null || !Number.isFinite(result.price)) {
-        continue;
-      }
-      return { source, result };
-    } catch {
-      continue;
+    const quote = await fetchCustomProviderSourceQuote(
+      source,
+      symbol,
+      quoteCcy,
+      customProviderService,
+      now,
+    );
+    if (quote) {
+      return quote;
     }
   }
   return null;
@@ -1374,25 +1378,90 @@ async function fetchCustomProviderQuote(
 
 async function fetchCustomProviderSyncQuote(
   asset: AssetMarketSyncRow,
-  providerCode: string,
+  providerCode: string | null,
   symbol: string,
-  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  customProviderService: MarketDataCustomProviderService | undefined,
   now: Date,
 ): Promise<QuoteWrite> {
   if (!customProviderService) {
     throw new Error("Custom provider service is not available for market sync");
   }
-  const resolved = await fetchCustomProviderQuote(
-    providerCode,
-    symbol,
-    asset.quote_ccy || null,
-    customProviderService,
-    now,
-  );
+  const resolved = providerCode
+    ? await fetchCustomProviderQuote(
+        providerCode,
+        symbol,
+        asset.quote_ccy || null,
+        customProviderService,
+        now,
+      )
+    : await fetchGeneralPurposeCustomProviderQuote(asset, customProviderService, now);
   if (!resolved) {
     throw new Error(`No custom provider quote extracted for ${symbol}`);
   }
   return customProviderQuoteToQuoteWrite(asset, resolved.source, resolved.result, now);
+}
+
+async function fetchGeneralPurposeCustomProviderQuote(
+  asset: AssetMarketSyncRow,
+  customProviderService: MarketDataCustomProviderService,
+  now: Date,
+): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
+  const providers = customProviderService.getAll?.();
+  if (!providers) {
+    throw new Error("Custom provider service cannot list general-purpose sources for market sync");
+  }
+  for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
+    for (const source of generalPurposeCustomProviderSources(providers, kind)) {
+      const symbol = customProviderSourceSymbol(asset, source);
+      if (symbol === null) {
+        continue;
+      }
+      const quote = await fetchCustomProviderSourceQuote(
+        source,
+        symbol,
+        asset.quote_ccy || null,
+        customProviderService,
+        now,
+      );
+      if (quote) {
+        return quote;
+      }
+    }
+  }
+  return null;
+}
+
+function generalPurposeCustomProviderSources(
+  providers: CustomProviderWithSources[],
+  kind: CustomProviderSourceKind,
+): CustomProviderSource[] {
+  return providers
+    .filter((provider) => provider.enabled)
+    .flatMap((provider) =>
+      provider.sources.filter((source) => source.kind === kind && source.url.includes("{SYMBOL}")),
+    );
+}
+
+async function fetchCustomProviderSourceQuote(
+  source: CustomProviderSource,
+  symbol: string,
+  quoteCcy: string | null,
+  customProviderService: MarketDataCustomProviderService,
+  now: Date,
+): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
+  try {
+    const result = await Promise.resolve(
+      customProviderService.testSource(
+        customProviderTestSourceRequest(source, symbol, quoteCcy, now),
+      ),
+    );
+    if (!result.success || result.price === null || !Number.isFinite(result.price)) {
+      return null;
+    }
+    return { source, result };
+  } catch {
+    return null;
+  }
 }
 
 function customProviderTestSourceRequest(
@@ -1998,8 +2067,17 @@ function customProviderCodeFromProviderId(provider: string): string | null {
 function customProviderSyncSymbol(asset: AssetMarketSyncRow, providerCode: string): string | null {
   return (
     providerOverrideSymbol(asset.provider_config, `CUSTOM:${providerCode}`) ??
-    asset.instrument_symbol?.trim() ??
-    null
+    optionalString(asset.instrument_symbol)
+  );
+}
+
+function customProviderSourceSymbol(
+  asset: AssetMarketSyncRow,
+  source: CustomProviderSource,
+): string | null {
+  return (
+    providerOverrideSymbol(asset.provider_config, `CUSTOM:${source.providerId}`) ??
+    optionalString(asset.instrument_symbol)
   );
 }
 
