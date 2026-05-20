@@ -1945,6 +1945,14 @@ contract:
   after a `holdings_changed` portfolio recalculation, no refresh when portfolio
   jobs are only planned, and best-effort logging for valuation-load,
   active-goal-load, and per-goal refresh failures.
+- `pr5-domain-event-portfolio-failure-continuation`: targeted checks passed:
+  `bun test apps/backend/src/domain-events/processor.test.ts --test-name-pattern "Rust queue-worker order|continues goal refresh and broker sync when a portfolio job fails|logs portfolio job failures when no explicit error hook is provided|continues broker sync when goal summary refresh fails"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes portfolio job failures being reported through the explicit
+  domain-event error hook while goal-summary refresh and downstream broker-sync
+  planning continue, with a default warning fallback when no hook is provided,
+  and goal-summary refresh failures warning without preventing broker sync,
+  matching Rust queue-worker continuation semantics without silent failures.
 - `pr5-activity-derived-snapshot-rebuild`: targeted checks passed:
   `bun test apps/backend/src/domains/portfolio-jobs.test.ts apps/backend/src/runtime.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
@@ -2040,8 +2048,9 @@ contract:
   job side effects, exchange-rate mutation portfolio job side effects,
   alternative-asset mutation portfolio job side effects, and settings
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
-  portfolio-job market-sync health-cache/FX-reinitialize side effects
-  implemented; broader migration remains active.
+  portfolio-job market-sync health-cache/FX-reinitialize side effects, and
+  domain-event portfolio-failure continuation semantics implemented; broader
+  migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -347,6 +347,11 @@ function createServicesFromDatabase(
       ? {}
       : { debounceMs: runtimeOptions.domainEventDebounceMs }),
     portfolioJobService,
+    onPortfolioJobError(error, portfolioJob) {
+      console.warn(
+        `Domain event portfolio job failed for accounts ${portfolioJob.accountIds?.join(",") ?? "all"}: ${errorMessage(error)}`,
+      );
+    },
     refreshGoalSummaries: () => refreshRuntimeGoalSummaries(goalService, goalValuationProvider),
     timezone: () => settingsService.getSettings().timezone,
     onError(error, events) {
