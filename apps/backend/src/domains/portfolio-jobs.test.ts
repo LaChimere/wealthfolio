@@ -89,12 +89,37 @@ describe("TS portfolio job route config", () => {
       });
       seedQuote(db, "asset-1", "2026-05-14", "10", "USD");
       const events: BackendEvent[] = [];
+      const sideEffects: string[] = [];
       const synced: unknown[] = [];
+      const warnings: string[] = [];
       const service = createLocalPortfolioJobService(db, {
-        eventBus: recordingEventBus(events),
+        eventBus: {
+          publish(event) {
+            events.push(event);
+            sideEffects.push(event.name);
+          },
+          subscribe() {
+            return () => {};
+          },
+        },
+        exchangeRateService: {
+          getExchangeRateForDate() {
+            return "1";
+          },
+          initialize() {
+            sideEffects.push("fx-initialize");
+            throw new Error("fx init failed");
+          },
+        },
+        healthService: {
+          clearCache() {
+            sideEffects.push("health-cache-clear");
+          },
+        },
         marketDataService: {
           syncMarketData(mode) {
             synced.push(mode);
+            sideEffects.push("market-sync");
             return {
               synced: 1,
               failed: 1,
@@ -106,6 +131,7 @@ describe("TS portfolio job route config", () => {
           },
         },
         now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
       });
 
       await service.enqueuePortfolioJob(buildPortfolioUpdateConfig());
@@ -116,6 +142,18 @@ describe("TS portfolio job route config", () => {
         "market:sync-complete",
         "portfolio:update-start",
         "portfolio:update-complete",
+      ]);
+      expect(sideEffects).toEqual([
+        "market:sync-start",
+        "market-sync",
+        "market:sync-complete",
+        "health-cache-clear",
+        "fx-initialize",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+      expect(warnings).toEqual([
+        "Failed to initialize FxService after market data sync: fx init failed",
       ]);
       expect(events[1]?.payload).toEqual({
         failed_syncs: [["BAD", "timeout"]],
@@ -137,6 +175,111 @@ describe("TS portfolio job route config", () => {
       expect(readSnapshotPositions(db, "TOTAL", "2026-05-16")).toMatchObject({
         "asset-1": expect.objectContaining({ quantity: "2" }),
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("aborts portfolio update when market sync fails", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      const events: BackendEvent[] = [];
+      const sideEffects: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        eventBus: {
+          publish(event) {
+            events.push(event);
+            sideEffects.push(event.name);
+          },
+          subscribe() {
+            return () => {};
+          },
+        },
+        exchangeRateService: {
+          getExchangeRateForDate() {
+            return "1";
+          },
+          initialize() {
+            sideEffects.push("fx-initialize");
+          },
+        },
+        healthService: {
+          clearCache() {
+            sideEffects.push("health-cache-clear");
+          },
+        },
+        marketDataService: {
+          syncMarketData() {
+            sideEffects.push("market-sync");
+            throw new Error("market sync failed");
+          },
+        },
+      });
+
+      await expect(service.enqueuePortfolioJob(buildPortfolioUpdateConfig())).rejects.toThrow(
+        "market sync failed",
+      );
+
+      expect(events).toEqual([
+        { name: "market:sync-start" },
+        { name: "market:sync-error", payload: "market sync failed" },
+      ]);
+      expect(sideEffects).toEqual(["market:sync-start", "market-sync", "market:sync-error"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not publish market sync error when health cache clear fails", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      const events: BackendEvent[] = [];
+      const sideEffects: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        eventBus: {
+          publish(event) {
+            events.push(event);
+            sideEffects.push(event.name);
+          },
+          subscribe() {
+            return () => {};
+          },
+        },
+        exchangeRateService: {
+          getExchangeRateForDate() {
+            return "1";
+          },
+          initialize() {
+            sideEffects.push("fx-initialize");
+          },
+        },
+        healthService: {
+          clearCache() {
+            sideEffects.push("health-cache-clear");
+            throw new Error("cache clear failed");
+          },
+        },
+        marketDataService: {
+          syncMarketData() {
+            sideEffects.push("market-sync");
+          },
+        },
+      });
+
+      await expect(service.enqueuePortfolioJob(buildPortfolioUpdateConfig())).rejects.toThrow(
+        "cache clear failed",
+      );
+
+      expect(events).toEqual([
+        { name: "market:sync-start" },
+        { name: "market:sync-complete", payload: { failed_syncs: [], skipped_reasons: [] } },
+      ]);
+      expect(sideEffects).toEqual([
+        "market:sync-start",
+        "market-sync",
+        "market:sync-complete",
+        "health-cache-clear",
+      ]);
     } finally {
       db.close();
     }

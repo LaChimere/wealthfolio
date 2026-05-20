@@ -337,6 +337,7 @@ function createServicesFromDatabase(
     baseCurrency: () => settingsService.getSettings().baseCurrency || "USD",
     eventBus,
     exchangeRateService,
+    healthService,
     marketDataService,
     warn: (message) => console.warn(message),
   });

@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 
 import type { BackendEventBus } from "../events";
 import type { ExchangeRateService } from "./exchange-rates";
+import type { HealthService } from "./health";
 import type { MarketDataService, MarketDataSyncResult } from "./market-data";
 
 export type MarketSyncMode =
@@ -35,6 +36,7 @@ export interface PortfolioJobService {
 export interface LocalPortfolioJobServiceOptions {
   eventBus?: BackendEventBus;
   exchangeRateService?: Pick<ExchangeRateService, "getExchangeRateForDate" | "initialize">;
+  healthService?: Pick<HealthService, "clearCache">;
   marketDataService?: Pick<MarketDataService, "syncMarketData">;
   baseCurrency?: string | (() => string | undefined);
   now?: () => Date;
@@ -269,19 +271,27 @@ async function executePortfolioJob(
 ): Promise<void> {
   if (config.marketSyncMode.type !== "none" && options.marketDataService?.syncMarketData) {
     options.eventBus?.publish({ name: MARKET_SYNC_START });
+    let syncResult: MarketDataSyncResult | void;
     try {
-      const syncResult = await options.marketDataService.syncMarketData(config.marketSyncMode);
-      options.exchangeRateService?.initialize();
-      options.eventBus?.publish({
-        name: MARKET_SYNC_COMPLETE,
-        payload: marketSyncCompletePayload(syncResult),
-      });
+      syncResult = await options.marketDataService.syncMarketData(config.marketSyncMode);
     } catch (error) {
       options.eventBus?.publish({
         name: MARKET_SYNC_ERROR,
         payload: errorMessage(error),
       });
       throw error;
+    }
+    options.eventBus?.publish({
+      name: MARKET_SYNC_COMPLETE,
+      payload: marketSyncCompletePayload(syncResult),
+    });
+    await options.healthService?.clearCache();
+    try {
+      options.exchangeRateService?.initialize();
+    } catch (error) {
+      options.warn?.(
+        `Failed to initialize FxService after market data sync: ${errorMessage(error)}`,
+      );
     }
   }
 
