@@ -198,7 +198,15 @@ describe("TS backend HTTP skeleton", () => {
 
   test("routes migrated settings domain only when a service is provided", async () => {
     const db = new Database(":memory:");
+    const healthDb = createHealthDb();
     const enqueued: PortfolioJobConfig[] = [];
+    let healthCacheClears = 0;
+    const healthService = createHealthService(createHealthRepository(healthDb));
+    const clearHealthCache = healthService.clearCache;
+    healthService.clearCache = () => {
+      healthCacheClears += 1;
+      return clearHealthCache();
+    };
     db.exec(`
       CREATE TABLE app_settings (
         setting_key TEXT NOT NULL PRIMARY KEY,
@@ -207,6 +215,7 @@ describe("TS backend HTTP skeleton", () => {
     `);
     const handler = createBackendRequestHandler(config, {
       settingsService: createSettingsService(db),
+      healthService,
       portfolioJobService: {
         enqueuePortfolioJob(config) {
           enqueued.push(config);
@@ -233,6 +242,7 @@ describe("TS backend HTTP skeleton", () => {
         theme: "dark",
         timezone: "America/Toronto",
       });
+      expect(healthCacheClears).toBe(1);
       expect(enqueued).toEqual([
         {
           accountIds: null,
@@ -253,6 +263,7 @@ describe("TS backend HTTP skeleton", () => {
         }),
       );
       expect(themeOnlyResponse.status).toBe(200);
+      expect(healthCacheClears).toBe(2);
       expect(enqueued).toHaveLength(1);
       const baseCurrencyResponse = await handler(
         new Request("http://127.0.0.1/api/v1/settings", {
@@ -265,6 +276,7 @@ describe("TS backend HTTP skeleton", () => {
         }),
       );
       expect(baseCurrencyResponse.status).toBe(200);
+      expect(healthCacheClears).toBe(3);
       expect(enqueued).toEqual([
         {
           accountIds: null,
@@ -291,6 +303,7 @@ describe("TS backend HTTP skeleton", () => {
         ).json(),
       ).resolves.toBe(true);
     } finally {
+      healthDb.close();
       db.close();
     }
   });

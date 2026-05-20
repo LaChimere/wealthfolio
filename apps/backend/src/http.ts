@@ -446,6 +446,7 @@ async function routeRequest(
       url,
       config,
       options.settingsService,
+      options.healthService,
       options.portfolioJobService,
     );
   }
@@ -3090,6 +3091,7 @@ async function routeSettingsRequest(
   url: URL,
   config: BackendRuntimeConfig,
   settingsService: SettingsService,
+  healthService?: HealthService,
   portfolioJobService?: PortfolioJobService,
 ): Promise<Response> {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
@@ -3110,6 +3112,7 @@ async function routeSettingsRequest(
     try {
       const previous = settingsService.getSettings();
       const updated = settingsService.updateSettings(update);
+      await healthService?.clearCache();
       enqueueSettingsPortfolioRecalculation(portfolioJobService, previous, updated);
       return jsonResponse(updated);
     } catch (error) {

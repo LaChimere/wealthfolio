@@ -1907,7 +1907,8 @@ contract:
   Coverage includes timezone-only settings updates enqueuing no-market-sync full
   recalculation jobs, theme-only updates staying no-op for portfolio jobs, and
   base-currency updates taking precedence with a backfill-history full
-  recalculation job when timezone also changes.
+  recalculation job when timezone also changes. Milestone review follow-up also
+  confirmed each successful settings update clears the health cache like Rust.
 - `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
   and `bun run type-check`. Coverage includes service-level
@@ -2028,8 +2029,8 @@ contract:
   behavior, market-sync result/payload parity, market-data quote/sync portfolio
   job side effects, exchange-rate mutation portfolio job side effects,
   alternative-asset mutation portfolio job side effects, and settings
-  base-currency/timezone portfolio job side effects implemented; broader
-  migration remains active.
+  base-currency/timezone portfolio job plus health-cache-clear side effects
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

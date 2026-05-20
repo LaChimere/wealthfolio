@@ -127,6 +127,7 @@ export interface HealthService {
   getDismissedIds(): Promise<string[]>;
   getConfig(): Promise<HealthConfig>;
   updateConfig(config: HealthConfig): Promise<void>;
+  clearCache(): Promise<void> | void;
   getCachedHealthStatus?(clientTimezone?: string): HealthStatus | null;
   getHealthStatus?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
   runHealthChecks?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
@@ -248,6 +249,7 @@ export function createHealthService(
       config = { ...nextConfig };
       clearCache();
     },
+    clearCache,
     getCachedHealthStatus(clientTimezone) {
       const cached = cachedStatuses.get(clientTimezone?.trim() ?? "");
       if (!cached) {
