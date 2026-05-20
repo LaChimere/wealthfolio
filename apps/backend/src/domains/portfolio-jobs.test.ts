@@ -691,12 +691,23 @@ describe("TS portfolio job route config", () => {
     const db = createPortfolioJobTestDb();
     try {
       seedAccount(db, "archived-cad", true, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
       seedActivity(db, {
         id: "deposit-missing-fx",
         accountId: "archived-cad",
         type: "DEPOSIT",
         date: "2026-05-14T10:00:00Z",
         amount: "100",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-missing-fx",
+        accountId: "archived-cad",
+        assetId: "usd-asset",
+        type: "BUY",
+        date: "2026-05-14T12:00:00Z",
+        quantity: "1",
+        unitPrice: "40",
         currency: "USD",
       });
       const warnings: string[] = [];
@@ -712,9 +723,10 @@ describe("TS portfolio job route config", () => {
       });
 
       expect(readSnapshot(db, "archived-cad", "2026-05-14")).toMatchObject({
-        cash_balances: '{"USD":"100"}',
-        cash_total_account_currency: "100",
-        cash_total_base_currency: "100",
+        cash_balances: '{"USD":"60"}',
+        cash_total_account_currency: "60",
+        cash_total_base_currency: "60",
+        cost_basis: "40",
         net_contribution: "100",
         net_contribution_base: "0",
       });
@@ -773,7 +785,7 @@ describe("TS portfolio job route config", () => {
       expect(warnings).toEqual([]);
       expect(readSnapshot(db, "cad-account", "2026-05-14")).toMatchObject({
         cash_balances: '{"CAD":"-31.5"}',
-        cost_basis: "23.1",
+        cost_basis: "30.03",
         cash_total_account_currency: "-31.5",
       });
       expect(readSnapshotPositions(db, "cad-account", "2026-05-14")).toMatchObject({
@@ -853,7 +865,7 @@ describe("TS portfolio job route config", () => {
 
       expect(readSnapshot(db, "cad-account", "2026-05-12")).toMatchObject({
         cash_balances: '{"CAD":"13.5"}',
-        cost_basis: "10",
+        cost_basis: "13",
         cash_total_account_currency: "13.5",
       });
       expect(readSnapshotPositions(db, "cad-account", "2026-05-12")).toMatchObject({
@@ -1167,7 +1179,7 @@ describe("TS portfolio job route config", () => {
 
       expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
         cash_balances: '{"CAD":"-1"}',
-        cost_basis: "24.8",
+        cost_basis: "31",
         net_contribution: "31",
         net_contribution_base: "31",
       });
@@ -1234,6 +1246,7 @@ describe("TS portfolio job route config", () => {
 
       expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
         cash_balances: '{"USD":"-1"}',
+        cost_basis: "38.75",
         net_contribution: "40.3",
         net_contribution_base: "38.75",
       });
@@ -1374,7 +1387,7 @@ describe("TS portfolio job route config", () => {
         net_contribution_base: "0",
       });
       expect(readSnapshot(db, "dest-account", "2026-05-12")).toMatchObject({
-        cost_basis: "10",
+        cost_basis: "13",
         net_contribution: "13",
         net_contribution_base: "9",
       });

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 202
+turns_used: 203
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T15:06:39+08:00"
+updated_at: "2026-05-20T15:11:16+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1289,6 +1289,11 @@ updated_at: "2026-05-20T15:06:39+08:00"
   cash-total fields when FxService cannot provide a rate, while TOTAL snapshot
   recalculation keeps its strict FX gate. Focused portfolio-job tests and
   backend type-check passed.
+- Turn 203: Matched Rust generated snapshot cost-basis currency semantics:
+  activity-built transaction snapshots now convert each position's cost basis
+  from position currency into account currency at the snapshot date, falling
+  back to the unconverted amount if FxService cannot provide a rate. Full
+  portfolio-job tests and backend type-check passed.
 
 ## Deferred items
 

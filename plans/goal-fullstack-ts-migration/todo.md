@@ -199,16 +199,16 @@
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
     template/account-template callbacks, holdings snapshot callbacks, activity
-    snapshot cash contribution/cash-total FX parity, domain-event planning/batch
-    processing/worker helper, standalone runtime domain-event worker wiring to
-    local portfolio jobs, and post-portfolio active goal-summary refresh now
-    have TS runtime parity, while provider-backed asset resolution, remaining
-    quote sync outbox follow-ups outside migrated alternative-asset and
-    market-data quote paths, device-sync push/pull runtime wiring, and remaining
-    device-sync side effects are deferred to activities/import/device-sync
-    runtime parity slices; AI chat persistence, tag persistence, tool-result
-    mutation, local AI chat sync_outbox callbacks, native/fallback
-    text/reasoning provider streaming, generated thread titles,
+    snapshot cash contribution/cash-total/cost-basis FX parity, domain-event
+    planning/batch processing/worker helper, standalone runtime domain-event
+    worker wiring to local portfolio jobs, and post-portfolio active
+    goal-summary refresh now have TS runtime parity, while provider-backed asset
+    resolution, remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and remaining device-sync side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
+    native/fallback text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -2061,7 +2061,7 @@ contract:
   portfolio-job market-sync health-cache/FX-reinitialize side effects,
   best-effort health-cache clear failure handling, and domain-event
   portfolio-failure continuation semantics, activity snapshot cash
-  contribution/cash-total FX parity, and SQLite-backed local Connect
+  contribution/cash-total/cost-basis FX parity, and SQLite-backed local Connect
   synced-account/platform/sync-state/import-run reads implemented; broader
   migration remains active.
 - `pr5-connect-local-read-runtime`: targeted checks passed:
@@ -2089,6 +2089,13 @@ contract:
   Coverage includes Rust-compatible generated snapshot cash-total fallback when
   FxService is unavailable while preserving strict TOTAL recalculation rollback
   on required FX gaps.
+- `pr5-activity-snapshot-cost-basis-fx`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts` and
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`. Coverage
+  includes Rust-compatible generated snapshot `cost_basis` conversion from
+  position currency to account currency at the snapshot date, including BUY/SELL
+  and transfer replay paths plus missing-FX fallback to the unconverted cost
+  basis.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

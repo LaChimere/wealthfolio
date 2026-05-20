@@ -2095,10 +2095,7 @@ function upsertActivityCalculatedSnapshot(
     return;
   }
 
-  const costBasis = Array.from(state.positions.values()).reduce(
-    (total, position) => total.plus(position.totalCostBasis),
-    new Decimal(0),
-  );
+  const costBasis = costBasisInAccountCurrency(state.positions, state.currency, date, options);
   const cashTotalAccountCurrency = totalCashInCurrencyWithFallback(
     state.cashBalances,
     state.currency,
@@ -2190,6 +2187,30 @@ function serializeActivityPositions(positions: Map<string, ActivityRebuildPositi
             contractMultiplier: decimalToString(position.contractMultiplier),
           },
         ]),
+    ),
+  );
+}
+
+function costBasisInAccountCurrency(
+  positions: Map<string, ActivityRebuildPosition>,
+  accountCurrency: string,
+  date: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  return roundDecimal(
+    Array.from(positions.values()).reduce(
+      (total, position) =>
+        total.plus(
+          convertAmountWithFallback(
+            position.totalCostBasis,
+            position.currency,
+            accountCurrency,
+            date,
+            options,
+            position.totalCostBasis,
+          ),
+        ),
+      new Decimal(0),
     ),
   );
 }
