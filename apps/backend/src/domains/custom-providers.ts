@@ -137,6 +137,21 @@ export interface TestSourceResult {
   detectedTables: DetectedHtmlTable[] | null;
 }
 
+export interface CustomProviderQuoteRow {
+  price: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
+  date: string | null;
+}
+
+export interface CustomProviderRowsResult {
+  statusCode: number | null;
+  currency: string | null;
+  rows: CustomProviderQuoteRow[];
+}
+
 export interface CustomProviderServiceOptions {
   fetchImpl?: typeof fetch;
   now?: () => Date;
@@ -179,6 +194,7 @@ export interface CustomProviderService {
   update(providerCode: string, payload: UpdateCustomProvider): Promise<CustomProviderWithSources>;
   delete(providerCode: string): Promise<void>;
   testSource(payload: TestSourceRequest): Promise<TestSourceResult>;
+  fetchSourceRows(payload: TestSourceRequest): Promise<CustomProviderRowsResult>;
 }
 
 interface CustomProviderRow {
@@ -423,6 +439,14 @@ export function createCustomProviderService(
         secretService: options.secretService,
       });
     },
+    async fetchSourceRows(payload) {
+      return fetchCustomProviderSourceRows(payload, {
+        fetchImpl,
+        now,
+        responseSizeLimitBytes,
+        secretService: options.secretService,
+      });
+    },
   };
 }
 
@@ -433,6 +457,100 @@ async function testCustomProviderSource(
   > &
     Pick<CustomProviderServiceOptions, "secretService">,
 ): Promise<TestSourceResult> {
+  const fetched = await fetchCustomProviderSourceBody(payload, options);
+  if (isTestSourceResult(fetched)) {
+    return fetched;
+  }
+  const { context, statusCode, body } = fetched;
+
+  if (payload.format === "json") {
+    return testJsonSource(payload, context, options.now(), statusCode, body);
+  }
+  if (payload.format === "html") {
+    return testHtmlSource(payload, statusCode, body);
+  }
+  if (payload.format === "html_table") {
+    return testHtmlTableSource(payload, statusCode, body);
+  }
+  if (payload.format === "csv") {
+    return testCsvSource(payload, statusCode, body);
+  }
+  return testSourceResult({
+    success: false,
+    statusCode,
+    error: `Unsupported format: ${payload.format}`,
+  });
+}
+
+async function fetchCustomProviderSourceRows(
+  payload: TestSourceRequest,
+  options: Required<
+    Pick<CustomProviderServiceOptions, "fetchImpl" | "now" | "responseSizeLimitBytes">
+  > &
+    Pick<CustomProviderServiceOptions, "secretService">,
+): Promise<CustomProviderRowsResult> {
+  const fetched = await fetchCustomProviderSourceBody(payload, options);
+  if (isTestSourceResult(fetched)) {
+    throw new Error(fetched.error ?? "Custom provider source fetch failed");
+  }
+  const { context, statusCode, body } = fetched;
+  if (payload.format === "json") {
+    return {
+      statusCode,
+      currency: resolveJsonCurrency(payload, context, body, options.now()),
+      rows: extractJsonRows(payload, context, options.now(), body),
+    };
+  }
+  if (payload.format === "csv") {
+    return {
+      statusCode,
+      currency: payload.currency ?? null,
+      rows: extractCsvRows(body, payload),
+    };
+  }
+  if (payload.format === "html_table") {
+    return {
+      statusCode,
+      currency: payload.currency ?? null,
+      rows: extractHtmlTableRows(body, payload),
+    };
+  }
+  if (payload.format === "html") {
+    const result = testHtmlSource(payload, statusCode, body);
+    return {
+      statusCode,
+      currency: payload.currency ?? null,
+      rows:
+        result.success && result.price !== null
+          ? [
+              {
+                price: result.price,
+                open: result.open,
+                high: result.high,
+                low: result.low,
+                volume: result.volume,
+                date: result.date,
+              },
+            ]
+          : [],
+    };
+  }
+  throw new Error(`Unsupported format: ${payload.format}`);
+}
+
+interface CustomProviderFetchedBody {
+  context: TemplateContext;
+  statusCode: number;
+  body: string;
+}
+
+async function fetchCustomProviderSourceBody(
+  payload: TestSourceRequest,
+  options: Required<
+    Pick<CustomProviderServiceOptions, "fetchImpl" | "now" | "responseSizeLimitBytes">
+  > &
+    Pick<CustomProviderServiceOptions, "secretService">,
+): Promise<CustomProviderFetchedBody | TestSourceResult> {
   const context = {
     symbol: payload.symbol,
     currency: payload.currency ?? "usd",
@@ -492,23 +610,13 @@ async function testCustomProviderSource(
     });
   }
 
-  if (payload.format === "json") {
-    return testJsonSource(payload, context, options.now(), statusCode, body);
-  }
-  if (payload.format === "html") {
-    return testHtmlSource(payload, statusCode, body);
-  }
-  if (payload.format === "html_table") {
-    return testHtmlTableSource(payload, statusCode, body);
-  }
-  if (payload.format === "csv") {
-    return testCsvSource(payload, statusCode, body);
-  }
-  return testSourceResult({
-    success: false,
-    statusCode,
-    error: `Unsupported format: ${payload.format}`,
-  });
+  return { context, statusCode, body };
+}
+
+function isTestSourceResult(
+  value: CustomProviderFetchedBody | TestSourceResult,
+): value is TestSourceResult {
+  return "success" in value;
 }
 
 function testJsonSource(
@@ -636,6 +744,194 @@ function testCsvSource(
     date: payload.datePath ? extractCsvString(body, payload.datePath) : null,
     rawResponse: body,
   });
+}
+
+function extractJsonRows(
+  payload: TestSourceRequest,
+  context: TemplateContext,
+  now: Date,
+  body: string,
+): CustomProviderQuoteRow[] {
+  const expandPath = (path: string): string => expandTemplate(path, context, now);
+  const prices = extractJsonMatches(body, expandPath(payload.pricePath)).slice(0, 10_000);
+  const dates = payload.datePath
+    ? extractJsonMatches(body, expandPath(payload.datePath)).map(jsonValueToString)
+    : [];
+  const opens = extractJsonNumberArray(body, payload.openPath, expandPath, payload);
+  const highs = extractJsonNumberArray(body, payload.highPath, expandPath, payload);
+  const lows = extractJsonNumberArray(body, payload.lowPath, expandPath, payload);
+  const volumes = extractJsonNumberArray(body, payload.volumePath, expandPath);
+  const rows: CustomProviderQuoteRow[] = [];
+  for (const [index, priceValue] of prices.entries()) {
+    const price = jsonValueToNumber(priceValue, payload.locale ?? undefined);
+    if (price === null) {
+      continue;
+    }
+    rows.push({
+      price: applyTestFactorInvert(price, payload),
+      open: opens[index] ?? null,
+      high: highs[index] ?? null,
+      low: lows[index] ?? null,
+      volume: volumes[index] ?? null,
+      date: dates[index] ?? null,
+    });
+  }
+  return rows;
+}
+
+function resolveJsonCurrency(
+  payload: TestSourceRequest,
+  context: TemplateContext,
+  body: string,
+  now: Date,
+): string | null {
+  if (!payload.currencyPath) {
+    return payload.currency ?? null;
+  }
+  return (
+    extractJsonString(body, expandTemplate(payload.currencyPath, context, now)) ??
+    payload.currency ??
+    null
+  );
+}
+
+function extractJsonNumberArray(
+  body: string,
+  path: string | null | undefined,
+  expandPath: (path: string) => string,
+  payload?: TestSourceRequest,
+): Array<number | null> {
+  if (!path) {
+    return [];
+  }
+  return extractJsonMatches(body, expandPath(path)).map((value) => {
+    const parsed = jsonValueToNumber(value, payload?.locale ?? undefined);
+    if (parsed === null) {
+      return null;
+    }
+    return payload ? applyTestFactorInvert(parsed, payload) : parsed;
+  });
+}
+
+function extractJsonMatches(body: string, path: string): unknown[] {
+  let json: JsonPathInput;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!isJsonPathInput(parsed)) {
+      return [];
+    }
+    json = parsed;
+  } catch {
+    return [];
+  }
+  try {
+    const result = JSONPath({ path, json, wrap: true }) as unknown as unknown[];
+    return result.length === 1 && Array.isArray(result[0]) ? result[0] : result;
+  } catch {
+    return [];
+  }
+}
+
+function jsonValueToNumber(value: unknown, locale: string | undefined): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    return parseNumberString(value, locale);
+  }
+  return null;
+}
+
+function jsonValueToString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function extractCsvRows(body: string, payload: TestSourceRequest): CustomProviderQuoteRow[] {
+  const records = parseCsvRecords(body);
+  const [headers, ...dataRows] = records;
+  if (!headers || dataRows.length === 0) {
+    return [];
+  }
+  const closeColumn = resolveCsvColumn(headers, payload.pricePath);
+  if (closeColumn === null) {
+    return [];
+  }
+  const dateColumn = payload.datePath ? resolveCsvColumn(headers, payload.datePath) : null;
+  const openColumn = payload.openPath ? resolveCsvColumn(headers, payload.openPath) : null;
+  const highColumn = payload.highPath ? resolveCsvColumn(headers, payload.highPath) : null;
+  const lowColumn = payload.lowPath ? resolveCsvColumn(headers, payload.lowPath) : null;
+  const volumeColumn = payload.volumePath ? resolveCsvColumn(headers, payload.volumePath) : null;
+  return dataRows.flatMap((row) => {
+    const price = parseOptionalRowNumber(row, closeColumn, payload.locale ?? undefined);
+    if (price === null) {
+      return [];
+    }
+    return [
+      {
+        price: applyTestFactorInvert(price, payload),
+        open: parseOptionalRowNumber(row, openColumn, payload.locale ?? undefined, payload),
+        high: parseOptionalRowNumber(row, highColumn, payload.locale ?? undefined, payload),
+        low: parseOptionalRowNumber(row, lowColumn, payload.locale ?? undefined, payload),
+        volume: parseOptionalRowNumber(row, volumeColumn, payload.locale ?? undefined),
+        date: dateColumn === null ? null : row[dateColumn]?.trim() || null,
+      },
+    ];
+  });
+}
+
+function extractHtmlTableRows(body: string, payload: TestSourceRequest): CustomProviderQuoteRow[] {
+  const pricePath = parseTablePath(payload.pricePath);
+  if (!pricePath) {
+    return [];
+  }
+  const [tableIndex, closeColumn] = pricePath;
+  const rows = extractTableDataRows(body, tableIndex);
+  const dateColumn = payload.datePath ? (parseTablePath(payload.datePath)?.[1] ?? null) : null;
+  const openColumn = payload.openPath ? (parseTablePath(payload.openPath)?.[1] ?? null) : null;
+  const highColumn = payload.highPath ? (parseTablePath(payload.highPath)?.[1] ?? null) : null;
+  const lowColumn = payload.lowPath ? (parseTablePath(payload.lowPath)?.[1] ?? null) : null;
+  const volumeColumn = payload.volumePath
+    ? (parseTablePath(payload.volumePath)?.[1] ?? null)
+    : null;
+  return rows.flatMap((row) => {
+    const price = parseOptionalRowNumber(row, closeColumn, payload.locale ?? undefined);
+    if (price === null) {
+      return [];
+    }
+    return [
+      {
+        price: applyTestFactorInvert(price, payload),
+        open: parseOptionalRowNumber(row, openColumn, payload.locale ?? undefined, payload),
+        high: parseOptionalRowNumber(row, highColumn, payload.locale ?? undefined, payload),
+        low: parseOptionalRowNumber(row, lowColumn, payload.locale ?? undefined, payload),
+        volume: parseOptionalRowNumber(row, volumeColumn, payload.locale ?? undefined),
+        date: dateColumn === null ? null : row[dateColumn]?.trim() || null,
+      },
+    ];
+  });
+}
+
+function parseOptionalRowNumber(
+  row: string[],
+  column: number | null,
+  locale: string | undefined,
+  payload?: TestSourceRequest,
+): number | null {
+  if (column === null) {
+    return null;
+  }
+  const value = row[column];
+  if (value === undefined) {
+    return null;
+  }
+  const parsed = parseNumberString(value, locale);
+  if (parsed === null) {
+    return null;
+  }
+  return payload ? applyTestFactorInvert(parsed, payload) : parsed;
 }
 
 function testSourceResult(overrides: Partial<TestSourceResult>): TestSourceResult {

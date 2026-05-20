@@ -279,7 +279,7 @@ describe("TS custom providers domain", () => {
     });
 
     try {
-      const result = await service.testSource({
+      const request: TestSourceRequest = {
         format: "json",
         url: "https://api.example.test/{SYMBOL}?start={DATE:%Y-01-01}&end={TODAY}&from={FROM}&to={TO}&ccy={currency}&upper={CURRENCY}",
         pricePath: "$.body.fundPrice.content[-1:].price",
@@ -296,7 +296,8 @@ describe("TS custom providers domain", () => {
         currency: "gbp",
         from: "2026-05-01",
         to: "2026-05-04",
-      });
+      };
+      const result = await service.testSource(request);
 
       expect(result).toMatchObject({
         success: true,
@@ -317,6 +318,39 @@ describe("TS custom providers domain", () => {
       expect(calls[0]?.headers.get("x-num")).toBeNull();
       expect(calls[0]?.headers.get("referer")).toBe("https://api.example.test/");
       expect(calls[0]?.headers.get("user-agent")).toContain("Chrome/131.0.0.0");
+
+      const rows = await service.fetchSourceRows({
+        ...request,
+        pricePath: "$.body.fundPrice.content[*].price",
+        openPath: "$.body.fundPrice.content[*].open",
+        highPath: "$.body.fundPrice.content[*].high",
+        lowPath: "$.body.fundPrice.content[*].low",
+        volumePath: "$.body.fundPrice.content[*].volume",
+        datePath: "$.body.fundPrice.content[*].effectiveDate",
+        currencyPath: "$.body.fundPrice.content[*].currencyCode",
+      });
+      expect(rows).toEqual({
+        statusCode: 200,
+        currency: "GBP",
+        rows: [
+          {
+            price: 0.25,
+            open: 0.5,
+            high: 0.25,
+            low: 0,
+            volume: 10,
+            date: "2026-05-03",
+          },
+          {
+            price: 0.125,
+            open: 0.25,
+            high: 0.5,
+            low: 0,
+            volume: 20,
+            date: "2026-05-04",
+          },
+        ],
+      });
     } finally {
       db.close();
     }

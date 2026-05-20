@@ -10,6 +10,8 @@ import {
 import type {
   CustomProviderService,
   CustomProviderWithSources,
+  CustomProviderQuoteRow,
+  CustomProviderRowsResult,
   CustomProviderSource,
   CustomProviderSourceKind,
   TestSourceRequest,
@@ -20,7 +22,7 @@ type MarketDataCustomProviderService = Pick<
   CustomProviderService,
   "getSourceByKind" | "testSource"
 > &
-  Partial<Pick<CustomProviderService, "getAll">>;
+  Partial<Pick<CustomProviderService, "getAll" | "fetchSourceRows">>;
 
 export interface ExchangeInfo {
   mic: string;
@@ -562,20 +564,88 @@ async function syncMarketDataExecution(
     const provider = effectiveMarketDataProvider(state, asset);
     const customProviderCode = customProviderCodeForMarketSync(provider, asset.provider_config);
     if (isCustomProviderSync(provider)) {
-      if (marketSyncMode.type === "backfill_history") {
-        addMarketSyncSkip(result, asset.id, "Custom provider history sync not implemented");
-        continue;
-      }
-      if ((states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS) {
-        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
-        continue;
-      }
       const quoteSource = customProviderCode
         ? `${CUSTOM_SCRAPER_PROVIDER}:${customProviderCode}`
         : CUSTOM_SCRAPER_PROVIDER;
       const customSymbol = customProviderCode
         ? customProviderSyncSymbol(asset, customProviderCode)
         : optionalString(asset.instrument_symbol);
+      if (marketSyncMode.type === "backfill_history") {
+        if (!customProviderCode) {
+          addMarketSyncSkip(
+            result,
+            asset.id,
+            "General-purpose custom provider history sync not implemented",
+          );
+          continue;
+        }
+        if (customSymbol === null) {
+          updateQuoteSyncStateAfterFailure(
+            db,
+            quoteSyncStateExists,
+            asset.id,
+            quoteSource,
+            "Asset cannot be mapped to a custom provider symbol",
+          );
+          addMarketSyncFailure(
+            result,
+            marketSyncResultAssetLabel(asset),
+            "Asset cannot be mapped to a custom provider symbol",
+          );
+          continue;
+        }
+        const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+          db,
+          asset,
+          quoteSource,
+          marketSyncMode,
+          now,
+          exchangeCatalog,
+          { scope, state },
+        );
+        if (startDate > endDate) {
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, quoteSource);
+          addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+          continue;
+        }
+        try {
+          const quotes = await fetchCustomProviderHistoricalQuotes(
+            asset,
+            customProviderCode,
+            customSymbol,
+            customProviderService,
+            startDate,
+            endDate,
+            now,
+          );
+          db.transaction(() => {
+            if (purgeProviderQuotes && quotes.length > 0) {
+              deleteProviderQuotesForAsset(db, asset.id, quoteSource);
+            }
+            for (const quote of quotes) {
+              upsertQuoteWrite(db, quote, undefined);
+            }
+            updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, quoteSource);
+          })();
+          result.synced += 1;
+          result.quotesSynced += quotes.length;
+        } catch (error) {
+          const message = errorMessage(error);
+          updateQuoteSyncStateAfterFailure(
+            db,
+            quoteSyncStateExists,
+            asset.id,
+            quoteSource,
+            message,
+          );
+          addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        }
+        continue;
+      }
+      if ((states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
       if (customSymbol === null) {
         updateQuoteSyncStateAfterFailure(
           db,
@@ -1401,6 +1471,39 @@ async function fetchCustomProviderSyncQuote(
   return customProviderQuoteToQuoteWrite(asset, resolved.source, resolved.result, now);
 }
 
+async function fetchCustomProviderHistoricalQuotes(
+  asset: AssetMarketSyncRow,
+  providerCode: string,
+  symbol: string,
+  customProviderService: MarketDataCustomProviderService | undefined,
+  from: string,
+  to: string,
+  now: Date,
+): Promise<QuoteWrite[]> {
+  if (!customProviderService) {
+    throw new Error("Custom provider service is not available for market sync");
+  }
+  if (!customProviderService.fetchSourceRows) {
+    throw new Error("Custom provider service cannot fetch historical rows for market sync");
+  }
+  const source = await Promise.resolve(
+    customProviderService.getSourceByKind(providerCode, "historical"),
+  );
+  if (!source) {
+    throw new Error(`No historical custom provider source configured for ${providerCode}`);
+  }
+  const result = await Promise.resolve(
+    customProviderService.fetchSourceRows(
+      customProviderTestSourceRequest(source, symbol, asset.quote_ccy || null, now, { from, to }),
+    ),
+  );
+  const quotes = customProviderRowsToQuoteWrites(asset, source, result, now);
+  if (quotes.length === 0) {
+    throw new Error(`No historical custom provider quotes extracted for ${symbol}`);
+  }
+  return quotes;
+}
+
 async function fetchGeneralPurposeCustomProviderQuote(
   asset: AssetMarketSyncRow,
   customProviderService: MarketDataCustomProviderService,
@@ -1469,6 +1572,7 @@ function customProviderTestSourceRequest(
   symbol: string,
   quoteCcy: string | null,
   now: Date,
+  range?: { from: string; to: string },
 ): TestSourceRequest {
   const request: TestSourceRequest = {
     format: source.format,
@@ -1491,9 +1595,9 @@ function customProviderTestSourceRequest(
     dateTimezone: source.dateTimezone ?? undefined,
   };
   if (source.kind === "historical") {
-    const to = isoDate(now);
+    const to = range?.to ?? isoDate(now);
     request.to = to;
-    request.from = addDays(to, -90);
+    request.from = range?.from ?? addDays(to, -90);
   }
   return request;
 }
@@ -1523,6 +1627,47 @@ function customProviderQuoteToQuoteWrite(
     adjclose: null,
     volume: result.volume === null ? null : storedNumber(result.volume),
     currency: result.currency ?? asset.quote_ccy,
+    notes: null,
+    createdAt: timestampNow(),
+    timestamp,
+  };
+}
+
+function customProviderRowsToQuoteWrites(
+  asset: AssetMarketSyncRow,
+  source: CustomProviderSource,
+  result: CustomProviderRowsResult,
+  now: Date,
+): QuoteWrite[] {
+  return result.rows
+    .filter((row) => Number.isFinite(row.price))
+    .map((row) =>
+      customProviderRowToQuoteWrite(asset, source, row, result.currency ?? asset.quote_ccy, now),
+    );
+}
+
+function customProviderRowToQuoteWrite(
+  asset: AssetMarketSyncRow,
+  source: CustomProviderSource,
+  row: CustomProviderQuoteRow,
+  currency: string,
+  now: Date,
+): QuoteWrite {
+  const timestamp = customProviderQuoteTimestamp(row.date, source, now);
+  const day = timestamp.slice(0, 10);
+  const quoteSource = `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`;
+  return {
+    id: quoteId(asset.id, day, quoteSource),
+    assetId: asset.id,
+    day,
+    source: quoteSource,
+    open: row.open === null ? null : storedNumber(row.open),
+    high: row.high === null ? null : storedNumber(row.high),
+    low: row.low === null ? null : storedNumber(row.low),
+    close: storedNumber(row.price),
+    adjclose: null,
+    volume: row.volume === null ? null : storedNumber(row.volume),
+    currency,
     notes: null,
     createdAt: timestampNow(),
     timestamp,

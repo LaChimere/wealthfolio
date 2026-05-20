@@ -307,7 +307,157 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("keeps custom provider history explicitly deferred", async () => {
+  test("backfills explicit custom provider historical quotes", async () => {
+    const db = createMarketDataDb();
+    const requests: TestSourceRequest[] = [];
+    const historicalSource: CustomProviderSource = {
+      id: "source-historical",
+      providerId: "my-feed",
+      kind: "historical",
+      format: "json",
+      url: "https://prices.example.test/history/{SYMBOL}?from={FROM}&to={TO}",
+      pricePath: "$.prices[*].close",
+      datePath: "$.prices[*].date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: "$.prices[*].open",
+      highPath: "$.prices[*].high",
+      lowPath: "$.prices[*].low",
+      volumePath: "$.prices[*].volume",
+      defaultPrice: null,
+      dateTimezone: "America/Toronto",
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-15T23:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          expect(kind).toBe("historical");
+          return historicalSource;
+        },
+        testSource() {
+          throw new Error("testSource should not be called for historical backfill");
+        },
+        fetchSourceRows(request) {
+          requests.push(request);
+          return {
+            statusCode: 200,
+            currency: "CAD",
+            rows: [
+              {
+                price: 10.25,
+                open: 10,
+                high: 10.5,
+                low: 9.75,
+                volume: 1000,
+                date: "2026-01-13",
+              },
+              {
+                price: 11.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-14",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+          overrides: {
+            "CUSTOM:my-feed": { type: "equity_symbol", symbol: "FUND.TO" },
+          },
+        }),
+      });
+      insertQuote(db, {
+        id: "stale-custom-quote",
+        asset_id: "asset-custom",
+        day: "2025-12-31",
+        source: "CUSTOM_SCRAPER:my-feed",
+        close: "99",
+        currency: "CAD",
+      });
+      insertQuote(db, {
+        id: "manual-custom-quote",
+        asset_id: "asset-custom",
+        day: "2025-12-30",
+        source: "MANUAL",
+        close: "88",
+        currency: "CAD",
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: ["asset-custom"],
+          days: 3,
+        }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+        failures: [],
+        skippedReasons: [],
+      });
+
+      expect(requests).toEqual([
+        expect.objectContaining({
+          url: "https://prices.example.test/history/{SYMBOL}?from={FROM}&to={TO}",
+          symbol: "FUND.TO",
+          currency: "CAD",
+          from: "2026-01-12",
+          to: "2026-01-15",
+        }),
+      ]);
+      expect(readQuote(db, "stale-custom-quote")).toBeNull();
+      expect(readQuote(db, "manual-custom-quote")).toMatchObject({ close: "88" });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-13")).toMatchObject({
+        id: "asset-custom_2026-01-13_CUSTOM_SCRAPER:my-feed",
+        source: "CUSTOM_SCRAPER:my-feed",
+        open: "10",
+        high: "10.5",
+        low: "9.75",
+        close: "10.25",
+        volume: "1000",
+        currency: "CAD",
+        timestamp: "2026-01-13T17:00:00.000Z",
+      });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-14")).toMatchObject({
+        id: "asset-custom_2026-01-14_CUSTOM_SCRAPER:my-feed",
+        close: "11.5",
+      });
+      expect(readSyncState(db, "asset-custom")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:my-feed",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps general-purpose custom provider history explicitly deferred", async () => {
     const db = createMarketDataDb();
     let sourceCalls = 0;
     const service = createMarketDataService(db, {
@@ -323,6 +473,9 @@ describe("TS market data domain", () => {
         testSource() {
           throw new Error("testSource should not be called");
         },
+        fetchSourceRows() {
+          throw new Error("fetchSourceRows should not be called");
+        },
       },
     });
 
@@ -332,7 +485,6 @@ describe("TS market data domain", () => {
         instrument_symbol: "FUND",
         provider_config: JSON.stringify({
           preferred_provider: "CUSTOM_SCRAPER",
-          custom_provider_code: "my-feed",
         }),
       });
 
@@ -345,7 +497,9 @@ describe("TS market data domain", () => {
       ).resolves.toEqual({
         ...emptySyncResult(),
         skipped: 1,
-        skippedReasons: [["asset-custom", "Custom provider history sync not implemented"]],
+        skippedReasons: [
+          ["asset-custom", "General-purpose custom provider history sync not implemented"],
+        ],
       });
       expect(sourceCalls).toBe(0);
       expect(readSyncState(db, "asset-custom")).toBeNull();
