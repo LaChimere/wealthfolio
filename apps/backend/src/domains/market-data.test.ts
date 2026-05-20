@@ -2088,6 +2088,137 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs US Treasury calculated bond quotes from Treasury yield curves", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: usTreasuryTestFetch({
+        calls,
+        responses: {
+          "2026": treasuryCurveXml([
+            { date: "bad-date", yields: { BC_1YEAR: 4 } },
+            {
+              date: "2026-01-05",
+              yields: { BC_1YEAR: 4, BC_2YEAR: 4, BC_5YEAR: 4, BC_10YEAR: 4 },
+            },
+            {
+              date: "2026-01-06",
+              yields: { BC_1YEAR: 4.1, BC_2YEAR: 4.1, BC_5YEAR: 4.1, BC_10YEAR: 4.1 },
+            },
+          ]),
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "treasury-note",
+        display_code: "T 5%",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH12",
+        metadata: JSON.stringify({
+          bond: {
+            maturityDate: "2031-01-05",
+            couponRate: 0.05,
+            faceValue: 1000,
+            couponFrequency: "SEMI_ANNUAL",
+          },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "refetch_recent",
+          asset_ids: ["treasury-note"],
+          days: 2,
+        }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+      });
+
+      expect(calls).toEqual(["2026"]);
+      const quote = readQuoteByDay(db, "treasury-note", "2026-01-05");
+      expect(quote).toMatchObject({
+        id: "treasury-note_2026-01-05_US_TREASURY_CALC",
+        source: "US_TREASURY_CALC",
+        currency: "USD",
+        timestamp: "2026-01-05T16:00:00.000Z",
+      });
+      expect(Number(quote?.close)).toBeGreaterThan(1);
+      expect(quote).toMatchObject({
+        open: quote?.close,
+        high: quote?.close,
+        low: quote?.close,
+        adjclose: quote?.close,
+        volume: null,
+      });
+      expect(readSyncState(db, "treasury-note")).toMatchObject({
+        data_source: "US_TREASURY_CALC",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records US Treasury calculated pricing failures for invalid bond inputs", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      fetch: (() => Promise.reject(new Error("fetch should not be called"))) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "treasury-missing-metadata",
+        display_code: "US912 missing",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH12",
+      });
+      insertAsset(db, {
+        id: "corporate-explicit-provider",
+        display_code: "Corporate",
+        instrument_type: "BOND",
+        instrument_symbol: "US0378331005",
+        provider_config: JSON.stringify({ preferred_provider: "US_TREASURY_CALC" }),
+        metadata: JSON.stringify({ bond: { maturityDate: "2031-01-05" } }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["treasury-missing-metadata", "corporate-explicit-provider"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 2,
+        quotesSynced: 0,
+        failures: [
+          ["US912 missing", "Bond metadata (coupon, maturity) required for calculated pricing"],
+          ["Corporate", "US0378331005 is not a US Treasury ISIN"],
+        ],
+      });
+      expect(readSyncState(db, "treasury-missing-metadata")).toMatchObject({
+        data_source: "US_TREASURY_CALC",
+        error_count: 1,
+        last_error: "Bond metadata (coupon, maturity) required for calculated pricing",
+      });
+      expect(readSyncState(db, "corporate-explicit-provider")).toMatchObject({
+        data_source: "US_TREASURY_CALC",
+        error_count: 1,
+        last_error: "US0378331005 is not a US Treasury ISIN",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs Finnhub equity candles with token auth and exchange currency", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3558,6 +3689,105 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves US Treasury quote summaries from existing bond metadata", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      fetch: usTreasuryTestFetch({
+        calls,
+        responses: {
+          "2026": treasuryCurveXml([
+            {
+              date: "2026-01-05",
+              yields: { BC_1YEAR: 4, BC_2YEAR: 4, BC_5YEAR: 4, BC_10YEAR: 4 },
+            },
+            {
+              date: "2026-01-06",
+              yields: { BC_1YEAR: 4.1, BC_2YEAR: 4.1, BC_5YEAR: 4.1, BC_10YEAR: 4.1 },
+            },
+          ]),
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "treasury-note",
+        display_code: "US912810TH12",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH12",
+        metadata: JSON.stringify({
+          bond: {
+            maturityDate: "2031-01-05",
+            couponRate: 0.05,
+            faceValue: 1000,
+            couponFrequency: "SEMI_ANNUAL",
+          },
+        }),
+      });
+
+      const resolved = await Promise.resolve(
+        service.resolveSymbolQuote?.({
+          symbol: "US912810TH12",
+          instrumentType: "BOND",
+          quoteCcy: "USD",
+          providerId: "US_TREASURY_CALC",
+        }),
+      );
+
+      expect(resolved?.currency).toBe("USD");
+      expect(resolved?.resolvedProviderId).toBe("US_TREASURY_CALC");
+      expect(resolved?.price ?? 0).toBeGreaterThan(1);
+      expect(calls).toEqual(["2026"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not resolve US Treasury quotes across calendar years", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      fetch: usTreasuryTestFetch({
+        calls,
+        responses: {
+          "2026": treasuryCurveXml([
+            {
+              date: "2026-01-05",
+              yields: { BC_1YEAR: 4, BC_2YEAR: 4, BC_5YEAR: 4, BC_10YEAR: 4 },
+            },
+          ]),
+        },
+      }),
+      now: () => new Date("2026-01-01T12:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "treasury-note",
+        display_code: "US912810TH12",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH12",
+        metadata: JSON.stringify({
+          bond: { maturityDate: "2031-01-05", couponRate: 0.05 },
+        }),
+      });
+
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "US912810TH12",
+          instrumentType: "BOND",
+          providerId: "US_TREASURY_CALC",
+        }),
+      ).resolves.toEqual({ currency: null, price: null, resolvedProviderId: null });
+      expect(calls).toEqual(["2026"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves MarketData.app quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -4155,6 +4385,56 @@ function metalPriceApiTestFetch(options: {
     }
     return Promise.resolve(Response.json(response));
   }) as typeof fetch;
+}
+
+function usTreasuryTestFetch(options: {
+  calls?: string[];
+  responses: Record<string, string>;
+}): typeof fetch {
+  return ((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (
+      !url.startsWith(
+        "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+      )
+    ) {
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("data")).toBe("daily_treasury_yield_curve");
+    const year = parsed.searchParams.get("field_tdr_date_value") ?? "";
+    options.calls?.push(year);
+    const response = options.responses[year];
+    if (!response) {
+      throw new Error(`unexpected US Treasury year: ${year}`);
+    }
+    return Promise.resolve(new Response(response));
+  }) as typeof fetch;
+}
+
+function treasuryCurveXml(
+  entries: Array<{ date: string; yields: Partial<Record<string, number>> }>,
+): string {
+  return `<feed>${entries
+    .map(
+      ({ date, yields }) => `<entry><content><m:properties>
+        <d:NEW_DATE>${date}T00:00:00</d:NEW_DATE>
+        <d:BC_1MONTH>${yields.BC_1MONTH ?? 3.8}</d:BC_1MONTH>
+        <d:BC_2MONTH>${yields.BC_2MONTH ?? 3.85}</d:BC_2MONTH>
+        <d:BC_3MONTH>${yields.BC_3MONTH ?? 3.9}</d:BC_3MONTH>
+        <d:BC_4MONTH m:null="true" />
+        <d:BC_6MONTH>${yields.BC_6MONTH ?? 3.95}</d:BC_6MONTH>
+        <d:BC_1YEAR>${yields.BC_1YEAR ?? 4}</d:BC_1YEAR>
+        <d:BC_2YEAR>${yields.BC_2YEAR ?? 4.1}</d:BC_2YEAR>
+        <d:BC_3YEAR>${yields.BC_3YEAR ?? 4.2}</d:BC_3YEAR>
+        <d:BC_5YEAR>${yields.BC_5YEAR ?? 4.3}</d:BC_5YEAR>
+        <d:BC_7YEAR>${yields.BC_7YEAR ?? 4.4}</d:BC_7YEAR>
+        <d:BC_10YEAR>${yields.BC_10YEAR ?? 4.5}</d:BC_10YEAR>
+        <d:BC_20YEAR>${yields.BC_20YEAR ?? 4.6}</d:BC_20YEAR>
+        <d:BC_30YEAR>${yields.BC_30YEAR ?? 4.7}</d:BC_30YEAR>
+      </m:properties></content></entry>`,
+    )
+    .join("")}</feed>`;
 }
 
 function marketDataAppTestFetch(options: {

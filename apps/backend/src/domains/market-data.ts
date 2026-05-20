@@ -337,6 +337,20 @@ type AlphaVantageInstrument =
   | { kind: "fx"; from: string; to: string; currency: string }
   | { kind: "crypto"; symbol: string; market: string; currency: string };
 
+interface UsTreasuryBondInstrument {
+  isin: string;
+  maturityDate: string;
+  couponRate: number;
+  faceValue: number;
+  couponFrequency: string;
+  currency: string;
+}
+
+interface UsTreasuryYieldCurve {
+  date: string;
+  points: Array<{ tenorYears: number; yieldPercent: number }>;
+}
+
 class YahooUnauthorizedError extends Error {}
 
 const MAX_SYNC_ERRORS = 10;
@@ -363,6 +377,9 @@ const MARKETDATA_APP_PROVIDER = "MARKETDATA_APP";
 const MARKETDATA_APP_BASE_URL = "https://api.marketdata.app/v1";
 const FINNHUB_PROVIDER = "FINNHUB";
 const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
+const US_TREASURY_CALC_PROVIDER = "US_TREASURY_CALC";
+const US_TREASURY_YIELD_CURVE_URL =
+  "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml";
 const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
@@ -388,6 +405,7 @@ export function createMarketDataService(
   const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? (() => new Date());
   let yahooCrumb: YahooCrumbData | null = null;
+  const usTreasuryCurveCache = new Map<number, UsTreasuryYieldCurve[]>();
 
   return {
     getExchanges() {
@@ -400,6 +418,7 @@ export function createMarketDataService(
 
     resolveSymbolQuote(request) {
       return resolveSymbolQuote(
+        db,
         request,
         exchangeCatalog,
         fetchImpl,
@@ -414,6 +433,7 @@ export function createMarketDataService(
         },
         options.customProviderService,
         options.secretService,
+        usTreasuryCurveCache,
         now(),
       );
     },
@@ -504,6 +524,7 @@ export function createMarketDataService(
         quoteSyncStateExists,
         options.customProviderService,
         options.secretService,
+        usTreasuryCurveCache,
       );
     },
 
@@ -529,6 +550,7 @@ export function createMarketDataService(
         quoteSyncStateExists,
         options.customProviderService,
         options.secretService,
+        usTreasuryCurveCache,
       );
     },
   };
@@ -580,6 +602,7 @@ async function syncMarketDataExecution(
   quoteSyncStateExists: boolean,
   customProviderService: MarketDataCustomProviderService | undefined,
   secretService: SecretService | undefined,
+  usTreasuryCurveCache: Map<number, UsTreasuryYieldCurve[]>,
 ): Promise<MarketDataSyncResult> {
   const result = emptyMarketDataSyncResult();
   if (marketSyncMode.type === "none") {
@@ -739,6 +762,67 @@ async function syncMarketDataExecution(
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, quoteSource, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
+    if (provider === US_TREASURY_CALC_PROVIDER) {
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const instrument = usTreasuryInstrumentForAsset(asset, exchangeCatalog);
+      if (instrument === null) {
+        const message = usTreasuryInstrumentFailureMessage(asset);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        continue;
+      }
+
+      try {
+        const quotes = await fetchUsTreasuryHistoricalQuotes(
+          asset.id,
+          instrument,
+          startDate,
+          endDate,
+          fetchImpl,
+          usTreasuryCurveCache,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
         addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
       }
       continue;
@@ -1735,6 +1819,7 @@ function searchResultDedupKey(symbol: string, exchangeMic: string | null | undef
 }
 
 async function resolveSymbolQuote(
+  db: Database,
   request: ResolveSymbolQuoteRequest,
   exchangeCatalog: ExchangeCatalog,
   fetchImpl: typeof fetch,
@@ -1745,6 +1830,7 @@ async function resolveSymbolQuote(
   },
   customProviderService: MarketDataCustomProviderService | undefined,
   secretService: SecretService | undefined,
+  usTreasuryCurveCache: Map<number, UsTreasuryYieldCurve[]>,
   now: Date,
 ): Promise<ResolvedQuote> {
   const trimmedSymbol = request.symbol.trim();
@@ -1769,6 +1855,35 @@ async function resolveSymbolQuote(
   const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
   const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
   const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
+  if (preferredProvider === US_TREASURY_CALC_PROVIDER) {
+    if (instrumentType !== "BOND") {
+      return defaultResolvedQuote();
+    }
+    const asset = readUsTreasuryResolveAsset(db, trimmedSymbol);
+    if (asset === null) {
+      return defaultResolvedQuote();
+    }
+    const instrument = usTreasuryInstrumentForAsset(asset, exchangeCatalog);
+    if (instrument === null) {
+      return defaultResolvedQuote();
+    }
+    try {
+      const quote = await fetchUsTreasuryLatestQuote(
+        asset.id,
+        instrument,
+        fetchImpl,
+        usTreasuryCurveCache,
+        now,
+      );
+      return {
+        currency: quote.currency,
+        price: quote.close === "0" ? null : Number(quote.close),
+        resolvedProviderId: US_TREASURY_CALC_PROVIDER,
+      };
+    } catch {
+      return defaultResolvedQuote();
+    }
+  }
   if (preferredProvider === ALPHA_VANTAGE_PROVIDER) {
     const apiKey = await marketDataProviderApiKey(secretService, ALPHA_VANTAGE_PROVIDER);
     if (apiKey === null || instrumentType === "OPTION") {
@@ -2787,6 +2902,29 @@ function readAssetsForMarketSync(
   return new Map(rows.map((row) => [row.id, row]));
 }
 
+function readUsTreasuryResolveAsset(db: Database, symbol: string): AssetMarketSyncRow | null {
+  const normalized = symbol.trim().toUpperCase();
+  return db
+    .query<AssetMarketSyncRow, [string, string, string]>(
+      `
+        SELECT
+          id, kind, display_code, quote_ccy, quote_mode, is_active,
+          instrument_type, instrument_symbol, instrument_exchange_mic,
+          provider_config, metadata
+        FROM assets
+        WHERE UPPER(instrument_type) = 'BOND'
+          AND (
+            UPPER(instrument_symbol) = ?
+            OR UPPER(display_code) = ?
+            OR UPPER(instrument_key) = ?
+          )
+        ORDER BY id ASC
+        LIMIT 1
+      `,
+    )
+    .get(normalized, normalized, normalized);
+}
+
 function readBroadMarketSyncAssetIds(
   db: Database,
   marketSyncMode: Exclude<MarketSyncMode, { type: "none" }>,
@@ -2836,7 +2974,9 @@ function effectiveMarketDataProvider(
 ): string {
   const stateProvider = optionalString(state?.data_source);
   const provider =
-    stateProvider ?? preferredProvider(asset.provider_config) ?? DEFAULT_MARKET_DATA_PROVIDER;
+    stateProvider ??
+    preferredProvider(asset.provider_config) ??
+    (isUsTreasuryBondAsset(asset) ? US_TREASURY_CALC_PROVIDER : DEFAULT_MARKET_DATA_PROVIDER);
   const trimmed = provider.trim();
   if (isCustomProviderSync(trimmed)) {
     return trimmed;
@@ -3203,6 +3343,405 @@ async function marketDataProviderApiKey(
   }
   const trimmed = apiKey.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+async function fetchUsTreasuryHistoricalQuotes(
+  assetId: string,
+  instrument: UsTreasuryBondInstrument,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  curveCache: Map<number, UsTreasuryYieldCurve[]>,
+): Promise<YahooHistoricalQuote[]> {
+  for (let year = Number(startDate.slice(0, 4)); year <= Number(endDate.slice(0, 4)); year += 1) {
+    await ensureUsTreasuryCurves(year, fetchImpl, curveCache);
+  }
+
+  const quotes: YahooHistoricalQuote[] = [];
+  for (let year = Number(startDate.slice(0, 4)); year <= Number(endDate.slice(0, 4)); year += 1) {
+    for (const curve of curveCache.get(year) ?? []) {
+      if (curve.date < startDate || curve.date > endDate) {
+        continue;
+      }
+      const quote = usTreasuryQuoteForCurve(assetId, instrument, curve);
+      if (quote !== null) {
+        quotes.push(quote);
+      }
+    }
+  }
+
+  return quotes.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+async function fetchUsTreasuryLatestQuote(
+  assetId: string,
+  instrument: UsTreasuryBondInstrument,
+  fetchImpl: typeof fetch,
+  curveCache: Map<number, UsTreasuryYieldCurve[]>,
+  now: Date,
+): Promise<YahooHistoricalQuote> {
+  const quoteDate = today(now);
+  const curve = await usTreasuryCurveForDate(quoteDate, fetchImpl, curveCache);
+  const quote = usTreasuryQuoteForCurve(assetId, instrument, curve);
+  if (quote === null) {
+    throw new Error("Could not calculate US Treasury price");
+  }
+  return quote;
+}
+
+async function usTreasuryCurveForDate(
+  date: string,
+  fetchImpl: typeof fetch,
+  curveCache: Map<number, UsTreasuryYieldCurve[]>,
+): Promise<UsTreasuryYieldCurve> {
+  const year = Number(date.slice(0, 4));
+  await ensureUsTreasuryCurves(year, fetchImpl, curveCache);
+  let best: UsTreasuryYieldCurve | null = null;
+  for (const curve of curveCache.get(year) ?? []) {
+    if (curve.date <= date && (best === null || curve.date > best.date)) {
+      best = curve;
+    }
+  }
+  if (best === null) {
+    throw new Error("No data for date range");
+  }
+  return best;
+}
+
+async function ensureUsTreasuryCurves(
+  year: number,
+  fetchImpl: typeof fetch,
+  curveCache: Map<number, UsTreasuryYieldCurve[]>,
+): Promise<void> {
+  if (curveCache.has(year)) {
+    return;
+  }
+  const url = new URL(US_TREASURY_YIELD_CURVE_URL);
+  url.searchParams.set("data", "daily_treasury_yield_curve");
+  url.searchParams.set("field_tdr_date_value", String(year));
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url);
+  } catch (error) {
+    throw new Error(`${US_TREASURY_CALC_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${US_TREASURY_CALC_PROVIDER}: HTTP ${response.status}`);
+  }
+  let xml: string;
+  try {
+    xml = await response.text();
+  } catch (error) {
+    throw new Error(
+      `${US_TREASURY_CALC_PROVIDER}: Failed to read response: ${errorMessage(error)}`,
+    );
+  }
+  curveCache.set(year, parseUsTreasuryYieldCurveXml(xml));
+}
+
+function usTreasuryQuoteForCurve(
+  assetId: string,
+  instrument: UsTreasuryBondInstrument,
+  curve: UsTreasuryYieldCurve,
+): YahooHistoricalQuote | null {
+  const price = calculateUsTreasuryPrice(
+    curve,
+    curve.date,
+    instrument.maturityDate,
+    instrument.couponRate,
+    instrument.couponFrequency,
+    instrument.faceValue,
+  );
+  if (price === null) {
+    return null;
+  }
+  const close = decimalString(price);
+  if (close === null) {
+    return null;
+  }
+  const timestamp = `${curve.date}T16:00:00.000Z`;
+  return {
+    assetId,
+    day: curve.date,
+    timestamp,
+    source: US_TREASURY_CALC_PROVIDER,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    adjclose: close,
+    volume: "0",
+    currency: instrument.currency,
+  };
+}
+
+function calculateUsTreasuryPrice(
+  curve: UsTreasuryYieldCurve,
+  settlementDate: string,
+  maturityDate: string,
+  couponRate: number,
+  couponFrequency: string,
+  faceValue: number,
+): number | null {
+  const daysToMaturity = daysBetweenIsoDates(settlementDate, maturityDate);
+  if (daysToMaturity === null) {
+    return null;
+  }
+  const yearsToMaturity = daysToMaturity / 365.25;
+  if (yearsToMaturity <= 0) {
+    return 1;
+  }
+  const yieldPercent = interpolateUsTreasuryYield(curve, yearsToMaturity);
+  if (yieldPercent === null) {
+    return null;
+  }
+  const yieldDecimal = yieldPercent / 100;
+  let price: number;
+  if (couponFrequency === "ZERO" || couponRate === 0) {
+    price = faceValue / (1 + yieldDecimal * (daysToMaturity / 360));
+  } else {
+    const frequency = usTreasuryCouponFrequencyPerYear(couponFrequency);
+    const couponPayment = (faceValue * couponRate) / frequency;
+    const periods = Math.ceil(yearsToMaturity * frequency);
+    const periodYield = yieldDecimal / frequency;
+    let presentValue = 0;
+    for (let period = 1; period <= periods; period += 1) {
+      presentValue += couponPayment / (1 + periodYield) ** period;
+    }
+    presentValue += faceValue / (1 + periodYield) ** periods;
+    price = presentValue;
+  }
+  const fractionOfPar = price / faceValue;
+  return Number.isFinite(fractionOfPar) ? fractionOfPar : null;
+}
+
+function interpolateUsTreasuryYield(curve: UsTreasuryYieldCurve, years: number): number | null {
+  const points = curve.points;
+  if (points.length === 0) {
+    return null;
+  }
+  if (years <= (points[0]?.tenorYears ?? 0)) {
+    return points[0]?.yieldPercent ?? null;
+  }
+  const last = points.at(-1);
+  if (last && years >= last.tenorYears) {
+    return last.yieldPercent;
+  }
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const left = points[index];
+    const right = points[index + 1];
+    if (!left || !right) {
+      continue;
+    }
+    if (left.tenorYears <= years && years <= right.tenorYears) {
+      const ratio = (years - left.tenorYears) / (right.tenorYears - left.tenorYears);
+      return left.yieldPercent + ratio * (right.yieldPercent - left.yieldPercent);
+    }
+  }
+  return null;
+}
+
+function usTreasuryCouponFrequencyPerYear(couponFrequency: string): number {
+  if (couponFrequency === "ANNUAL") {
+    return 1;
+  }
+  if (couponFrequency === "QUARTERLY") {
+    return 4;
+  }
+  return 2;
+}
+
+function parseUsTreasuryYieldCurveXml(xml: string): UsTreasuryYieldCurve[] {
+  const curves: UsTreasuryYieldCurve[] = [];
+  for (const rawEntry of xml.split("<entry>").slice(1)) {
+    const entryEnd = rawEntry.indexOf("</entry>");
+    const entry = rawEntry.slice(0, entryEnd < 0 ? rawEntry.length : entryEnd);
+    const contentStart = entry.indexOf("<content");
+    if (contentStart < 0) {
+      continue;
+    }
+    const content = entry.slice(contentStart);
+    const dateValue = extractUsTreasuryXmlValue(content, "NEW_DATE");
+    const date = dateValue?.slice(0, 10) ?? null;
+    if (date === null || !isIsoDate(date)) {
+      continue;
+    }
+    const points: UsTreasuryYieldCurve["points"] = [];
+    for (const [label, tenorYears] of US_TREASURY_TENORS) {
+      const value = extractUsTreasuryXmlValue(content, label);
+      const yieldPercent = value === null ? null : Number(value);
+      if (yieldPercent !== null && Number.isFinite(yieldPercent)) {
+        points.push({ tenorYears, yieldPercent });
+      }
+    }
+    if (points.length > 0) {
+      points.sort((left, right) => left.tenorYears - right.tenorYears);
+      curves.push({ date, points });
+    }
+  }
+  if (curves.length === 0) {
+    throw new Error(`${US_TREASURY_CALC_PROVIDER}: No yield curve data found in XML`);
+  }
+  return curves;
+}
+
+const US_TREASURY_TENORS: ReadonlyArray<readonly [string, number]> = [
+  ["BC_1MONTH", 1 / 12],
+  ["BC_2MONTH", 2 / 12],
+  ["BC_3MONTH", 3 / 12],
+  ["BC_4MONTH", 4 / 12],
+  ["BC_6MONTH", 6 / 12],
+  ["BC_1YEAR", 1],
+  ["BC_2YEAR", 2],
+  ["BC_3YEAR", 3],
+  ["BC_5YEAR", 5],
+  ["BC_7YEAR", 7],
+  ["BC_10YEAR", 10],
+  ["BC_20YEAR", 20],
+  ["BC_30YEAR", 30],
+];
+
+function extractUsTreasuryXmlValue(xml: string, tag: string): string | null {
+  for (const pattern of [`d:${tag}`, tag]) {
+    const openPrefix = `<${pattern}`;
+    const tagStart = xml.indexOf(openPrefix);
+    if (tagStart < 0) {
+      continue;
+    }
+    const afterTag = xml.slice(tagStart + openPrefix.length);
+    const contentStart = afterTag.indexOf(">");
+    if (contentStart < 0) {
+      continue;
+    }
+    const afterOpen = afterTag.slice(contentStart + 1);
+    const close = `</${pattern}>`;
+    const end = afterOpen.indexOf(close);
+    if (end >= 0) {
+      return afterOpen.slice(0, end).trim();
+    }
+  }
+  return null;
+}
+
+function usTreasuryInstrumentForAsset(
+  asset: AssetMarketSyncRow,
+  exchangeCatalog: ExchangeCatalog,
+): UsTreasuryBondInstrument | null {
+  if (normalizeInstrumentType(asset.instrument_type ?? undefined) !== "BOND") {
+    return null;
+  }
+  const metadata = usTreasuryBondMetadata(asset.metadata);
+  const isin = (
+    providerOverrideSymbol(asset.provider_config, US_TREASURY_CALC_PROVIDER) ??
+    metadata?.isin ??
+    metadataIdentifier(asset.metadata, "isin") ??
+    optionalString(asset.instrument_symbol)
+  )?.toUpperCase();
+  if (!isin || !isUsTreasuryIsin(isin)) {
+    return null;
+  }
+  if (metadata?.maturityDate === undefined) {
+    return null;
+  }
+  return {
+    isin,
+    maturityDate: metadata.maturityDate,
+    couponRate: metadata.couponRate ?? 0,
+    faceValue: metadata.faceValue ?? 1000,
+    couponFrequency: metadata.couponFrequency ?? "SEMI_ANNUAL",
+    currency: providerCurrencyFromExchange(
+      asset.instrument_exchange_mic,
+      asset.quote_ccy,
+      exchangeCatalog,
+    ),
+  };
+}
+
+function usTreasuryInstrumentFailureMessage(asset: AssetMarketSyncRow): string {
+  if (normalizeInstrumentType(asset.instrument_type ?? undefined) !== "BOND") {
+    return "US_TREASURY_CALC only supports bonds";
+  }
+  const metadata = usTreasuryBondMetadata(asset.metadata);
+  const isin = (
+    providerOverrideSymbol(asset.provider_config, US_TREASURY_CALC_PROVIDER) ??
+    metadata?.isin ??
+    metadataIdentifier(asset.metadata, "isin") ??
+    optionalString(asset.instrument_symbol)
+  )?.toUpperCase();
+  if (!isin || !isUsTreasuryIsin(isin)) {
+    return `${isin ?? asset.instrument_symbol ?? asset.id} is not a US Treasury ISIN`;
+  }
+  return "Bond metadata (coupon, maturity) required for calculated pricing";
+}
+
+function isUsTreasuryBondAsset(asset: AssetMarketSyncRow): boolean {
+  if (normalizeInstrumentType(asset.instrument_type ?? undefined) !== "BOND") {
+    return false;
+  }
+  const metadata = usTreasuryBondMetadata(asset.metadata);
+  const isin =
+    metadata?.isin ??
+    metadataIdentifier(asset.metadata, "isin") ??
+    optionalString(asset.instrument_symbol);
+  return isin === null ? false : isUsTreasuryIsin(isin.toUpperCase());
+}
+
+function isUsTreasuryIsin(isin: string): boolean {
+  return isin.startsWith("US912");
+}
+
+function usTreasuryBondMetadata(metadata: string | null): {
+  maturityDate?: string;
+  couponRate?: number;
+  faceValue?: number;
+  couponFrequency?: string;
+  isin?: string;
+} | null {
+  const parsed = parseJsonValue(metadata);
+  if (!isRecord(parsed) || !isRecord(parsed.bond)) {
+    return null;
+  }
+  const maturityDate = optionalString(parsed.bond.maturityDate ?? parsed.bond.maturity_date);
+  const couponRate = decimalNumber(parsed.bond.couponRate ?? parsed.bond.coupon_rate);
+  const faceValue = decimalNumber(parsed.bond.faceValue ?? parsed.bond.face_value);
+  const couponFrequency = optionalString(
+    parsed.bond.couponFrequency ?? parsed.bond.coupon_frequency,
+  );
+  const isin = optionalString(parsed.bond.isin);
+  return {
+    ...(maturityDate && isIsoDate(maturityDate) ? { maturityDate } : {}),
+    ...(couponRate !== null ? { couponRate } : {}),
+    ...(faceValue !== null ? { faceValue } : {}),
+    ...(couponFrequency
+      ? { couponFrequency: normalizeUsTreasuryCouponFrequency(couponFrequency) }
+      : {}),
+    ...(isin ? { isin: isin.toUpperCase() } : {}),
+  };
+}
+
+function normalizeUsTreasuryCouponFrequency(couponFrequency: string): string {
+  const normalized = couponFrequency.trim().toUpperCase().replace("-", "_");
+  if (normalized === "SEMIANNUAL") {
+    return "SEMI_ANNUAL";
+  }
+  return normalized || "SEMI_ANNUAL";
+}
+
+function decimalNumber(value: unknown): number | null {
+  const decimal = decimalString(value);
+  if (decimal === null) {
+    return null;
+  }
+  const parsed = Number(decimal);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function daysBetweenIsoDates(start: string, end: string): number | null {
+  if (!isIsoDate(start) || !isIsoDate(end)) {
+    return null;
+  }
+  return Math.floor((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000);
 }
 
 async function fetchAlphaVantageHistoricalQuotes(
