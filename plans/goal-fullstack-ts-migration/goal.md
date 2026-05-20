@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 208
+turns_used: 209
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T21:39:10+08:00"
+updated_at: "2026-05-20T21:55:24+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1337,6 +1337,14 @@ updated_at: "2026-05-20T21:39:10+08:00"
   state stores the last successful source. Latest fallback during backfill
   remains explicitly deferred. Focused market-data tests, backend type-check,
   full `bun run check`, focused code review, and targeted re-review passed.
+- Turn 209: Added custom-provider latest fallback for historical backfill:
+  explicit and general-purpose custom-provider `backfill_history` now falls back
+  to latest sources only when no historical source candidates exist, writes a
+  single `CUSTOM_SCRAPER:<code>` quote row, and updates quote sync state without
+  purging existing historical provider quotes. Historical sources that exist but
+  fail or return no rows still fail the backfill instead of masking errors.
+  Focused market-data tests, backend type-check, full `bun run check`, focused
+  review, and purge-safety re-review passed.
 
 ## Deferred items
 
@@ -1391,18 +1399,19 @@ updated_at: "2026-05-20T21:39:10+08:00"
   snapshots, quote CSV check/import, addon-compatible Yahoo dividends, symbol
   search, Yahoo-backed symbol quote resolution, and bounded
   custom-provider-backed symbol quote resolution, targeted and general-purpose
-  custom-provider latest quote sync, and explicit plus general-purpose
-  custom-provider historical backfill now have TS runtime parity. reason=the
-  standalone backend reads the Rust exchange catalog, writes local quote rows
-  directly, can call Yahoo dividends/search/resolve through injectable HTTP
-  paths, can resolve `CUSTOM:<code>` quote previews through the runtime
-  custom-provider source/test-source service, can persist single latest custom
-  provider quotes through targeted/incremental market sync for both explicit and
-  general-purpose custom-provider assets, can backfill explicit and
-  general-purpose historical custom-provider rows, and can merge search results
-  against existing SQLite assets; latest fallback during backfill, broader
-  market sync, and portfolio recalculation side effects remain active
-  follow-ups.
+  custom-provider latest quote sync, explicit plus general-purpose
+  custom-provider historical backfill, and latest-source fallback during custom
+  backfill now have TS runtime parity. reason=the standalone backend reads the
+  Rust exchange catalog, writes local quote rows directly, can call Yahoo
+  dividends/search/resolve through injectable HTTP paths, can resolve
+  `CUSTOM:<code>` quote previews through the runtime custom-provider
+  source/test-source service, can persist single latest custom provider quotes
+  through targeted/incremental market sync for both explicit and general-purpose
+  custom-provider assets, can backfill explicit and general-purpose historical
+  custom-provider rows, can safely fall back to latest sources without purging
+  historical quote rows, and can merge search results against existing SQLite
+  assets; broader market sync and portfolio recalculation side effects remain
+  active follow-ups.
 - Actual portfolio job execution and broad domain-event worker behavior remain
   active follow-ups. reason=holdings snapshot mutation events now have bounded
   TS runtime parity and the Rust domain-event planner, injectable batch

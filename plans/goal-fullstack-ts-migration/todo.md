@@ -2147,6 +2147,15 @@ contract:
   `CUSTOM_SCRAPER:<code>` historical quote rows, provider-only quote purging on
   success, sync state updates to the actual source, and a second sync proving
   state-derived source IDs do not get misread as asset `custom_provider_code`.
+- `pr5-market-data-custom-provider-history-latest-fallback`: verification
+  passed: `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, focused code review, and purge-safety re-review. Coverage
+  includes explicit and general-purpose custom-provider backfill falling back to
+  latest sources only when no historical source candidates exist, latest
+  fallback requests without `{FROM}`/`{TO}` ranges, preserved existing
+  historical provider quotes during fallback, persisted single latest
+  `CUSTOM_SCRAPER:<code>` quote rows, and quote sync state updates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2161,21 +2170,21 @@ contract:
   runtime parity slices if Ollama documents non-image file inputs; asset
   quote-provider interactions, auto-classification, and portfolio recalculation
   side effects move with asset/market-data/portfolio parity slices; all-provider
-  market sync, latest fallback during custom-provider backfill, and background
-  orchestration move with market-data/portfolio parity slices; remaining
-  provider-backed symbol fetch/resolution and sync breadth moves with
-  market-data/provider parity slices; full portfolio snapshot rebuilding side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths, sync
-  engine push/pull, and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks
-  and real market sync fix execution move with health/calculation parity slices;
-  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  subscription entitlement checks, event production, E2EE enrollment, sync
-  engine, snapshot/upload runtime, feature-flag errors, background workers,
-  device-sync cloud clients, token lifecycle, team-key operations, key material
-  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
-  secret side effects move with Connect/device-sync parity slices.
+  market sync and background orchestration move with market-data/portfolio
+  parity slices; remaining provider-backed symbol fetch/resolution and sync
+  breadth moves with market-data/provider parity slices; full portfolio snapshot
+  rebuilding side effects move with holdings/portfolio parity slices; add-on
+  security scanning, full sandbox isolation, and query-cache hardening move with
+  add-on runtime parity slices; provider-backed asset resolution, remaining
+  quote sync-outbox emission outside migrated alternative-asset and market-data
+  quote paths, sync engine push/pull, and portfolio recalculation side effects
+  move with activities/import/device-sync runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; broader
+  health checks and real market sync fix execution move with health/calculation
+  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

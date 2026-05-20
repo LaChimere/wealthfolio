@@ -270,6 +270,7 @@ interface YahooHistoricalQuote {
 interface CustomProviderHistoricalQuotes {
   source: string;
   quotes: QuoteWrite[];
+  allowPurge: boolean;
 }
 
 interface QuoteImportAssetRow {
@@ -626,7 +627,11 @@ async function syncMarketDataExecution(
                 now,
               );
           db.transaction(() => {
-            if (purgeProviderQuotes && historicalQuotes.quotes.length > 0) {
+            if (
+              purgeProviderQuotes &&
+              historicalQuotes.allowPurge &&
+              historicalQuotes.quotes.length > 0
+            ) {
               deleteProviderQuotesForAsset(db, asset.id, historicalQuotes.source);
             }
             for (const quote of historicalQuotes.quotes) {
@@ -1495,14 +1500,20 @@ async function fetchCustomProviderHistoricalQuotes(
   if (!customProviderService) {
     throw new Error("Custom provider service is not available for market sync");
   }
-  if (!customProviderService.fetchSourceRows) {
-    throw new Error("Custom provider service cannot fetch historical rows for market sync");
-  }
   const source = await Promise.resolve(
     customProviderService.getSourceByKind(providerCode, "historical"),
   );
   if (!source) {
-    throw new Error(`No historical custom provider source configured for ${providerCode}`);
+    return fetchCustomProviderLatestFallbackQuote(
+      asset,
+      providerCode,
+      symbol,
+      customProviderService,
+      now,
+    );
+  }
+  if (!customProviderService.fetchSourceRows) {
+    throw new Error("Custom provider service cannot fetch historical rows for market sync");
   }
   const result = await Promise.resolve(
     customProviderService.fetchSourceRows(
@@ -1513,7 +1524,39 @@ async function fetchCustomProviderHistoricalQuotes(
   if (quotes.length === 0) {
     throw new Error(`No historical custom provider quotes extracted for ${symbol}`);
   }
-  return { source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`, quotes };
+  return { source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`, quotes, allowPurge: true };
+}
+
+async function fetchCustomProviderLatestFallbackQuote(
+  asset: AssetMarketSyncRow,
+  providerCode: string,
+  symbol: string,
+  customProviderService: MarketDataCustomProviderService,
+  now: Date,
+): Promise<CustomProviderHistoricalQuotes> {
+  const source = await Promise.resolve(
+    customProviderService.getSourceByKind(providerCode, "latest"),
+  );
+  if (!source) {
+    throw new Error(
+      `No historical or latest custom provider source configured for ${providerCode}`,
+    );
+  }
+  const quote = await fetchCustomProviderSourceQuote(
+    source,
+    symbol,
+    asset.quote_ccy || null,
+    customProviderService,
+    now,
+  );
+  if (!quote) {
+    throw new Error(`No latest custom provider quote extracted for ${symbol}`);
+  }
+  return {
+    source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`,
+    quotes: [customProviderQuoteToQuoteWrite(asset, source, quote.result, now)],
+    allowPurge: false,
+  };
 }
 
 async function fetchGeneralPurposeCustomProviderHistoricalQuotes(
@@ -1526,14 +1569,19 @@ async function fetchGeneralPurposeCustomProviderHistoricalQuotes(
   if (!customProviderService) {
     throw new Error("Custom provider service is not available for market sync");
   }
-  if (!customProviderService.getAll || !customProviderService.fetchSourceRows) {
-    throw new Error("Custom provider service cannot fetch historical rows for market sync");
+  if (!customProviderService.getAll) {
+    throw new Error("Custom provider service cannot list general-purpose sources for market sync");
   }
   let lastError: string | null = null;
-  for (const source of generalPurposeCustomProviderSources(
-    customProviderService.getAll(),
-    "historical",
-  )) {
+  const providers = customProviderService.getAll();
+  const historicalSources = generalPurposeCustomProviderSources(providers, "historical");
+  if (historicalSources.length === 0) {
+    return fetchGeneralPurposeCustomProviderLatestFallbackQuote(asset, customProviderService, now);
+  }
+  if (!customProviderService.fetchSourceRows) {
+    throw new Error("Custom provider service cannot fetch historical rows for market sync");
+  }
+  for (const source of historicalSources) {
     const symbol = customProviderSourceSymbol(asset, source);
     if (symbol === null) {
       continue;
@@ -1549,7 +1597,11 @@ async function fetchGeneralPurposeCustomProviderHistoricalQuotes(
       );
       const quotes = customProviderRowsToQuoteWrites(asset, source, result, now);
       if (quotes.length > 0) {
-        return { source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`, quotes };
+        return {
+          source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`,
+          quotes,
+          allowPurge: true,
+        };
       }
       lastError = `No historical custom provider quotes extracted for ${symbol}`;
     } catch (error) {
@@ -1557,6 +1609,22 @@ async function fetchGeneralPurposeCustomProviderHistoricalQuotes(
     }
   }
   throw new Error(lastError ?? `No historical custom provider quotes extracted for ${asset.id}`);
+}
+
+async function fetchGeneralPurposeCustomProviderLatestFallbackQuote(
+  asset: AssetMarketSyncRow,
+  customProviderService: MarketDataCustomProviderService,
+  now: Date,
+): Promise<CustomProviderHistoricalQuotes> {
+  const quote = await fetchGeneralPurposeCustomProviderQuote(asset, customProviderService, now);
+  if (!quote) {
+    throw new Error(`No latest custom provider quote extracted for ${asset.id}`);
+  }
+  return {
+    source: `${CUSTOM_SCRAPER_PROVIDER}:${quote.source.providerId}`,
+    quotes: [customProviderQuoteToQuoteWrite(asset, quote.source, quote.result, now)],
+    allowPurge: false,
+  };
 }
 
 async function fetchGeneralPurposeCustomProviderQuote(

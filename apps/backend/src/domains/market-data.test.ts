@@ -457,6 +457,116 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("falls back to latest custom provider sources during explicit historical backfill without purging history", async () => {
+    const db = createMarketDataDb();
+    const requests: TestSourceRequest[] = [];
+    const latestSource: CustomProviderSource = {
+      id: "source-latest",
+      providerId: "my-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-15T23:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          return kind === "latest" ? latestSource : null;
+        },
+        testSource(request) {
+          requests.push(request);
+          return {
+            success: true,
+            statusCode: 200,
+            price: 12.75,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-14",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+        }),
+      });
+      insertQuote(db, {
+        id: "old-custom-history",
+        asset_id: "asset-custom",
+        day: "2025-12-31",
+        source: "CUSTOM_SCRAPER:my-feed",
+        close: "99",
+        currency: "CAD",
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: ["asset-custom"],
+          days: 30,
+        }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        url: "https://prices.example.test/latest/{SYMBOL}",
+        symbol: "FUND",
+      });
+      expect(requests[0]?.from).toBeUndefined();
+      expect(requests[0]?.to).toBeUndefined();
+      expect(readQuote(db, "old-custom-history")).toMatchObject({ close: "99" });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-14")).toMatchObject({
+        id: "asset-custom_2026-01-14_CUSTOM_SCRAPER:my-feed",
+        source: "CUSTOM_SCRAPER:my-feed",
+        close: "12.75",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("backfills general-purpose custom provider historical quotes by priority", async () => {
     const db = createMarketDataDb();
     const requests: Array<Pick<TestSourceRequest, "url" | "symbol" | "from" | "to">> = [];
@@ -671,6 +781,122 @@ describe("TS market data domain", () => {
         data_source: "CUSTOM_SCRAPER:successful-feed",
         error_count: 0,
         last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to latest general-purpose custom provider sources during historical backfill", async () => {
+    const db = createMarketDataDb();
+    const requests: TestSourceRequest[] = [];
+    const latestSource: CustomProviderSource = {
+      id: "latest-general",
+      providerId: "general-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-15T23:00:00Z"),
+      customProviderService: {
+        getAll() {
+          return [
+            {
+              id: "general-feed",
+              name: "General Feed",
+              description: "",
+              enabled: true,
+              priority: 1,
+              sources: [latestSource],
+            },
+          ];
+        },
+        getSourceByKind() {
+          throw new Error("getSourceByKind should not be called for general fallback");
+        },
+        testSource(request) {
+          requests.push(request);
+          return {
+            success: true,
+            statusCode: 200,
+            price: 22.25,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-14",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
+      });
+      insertQuote(db, {
+        id: "old-general-history",
+        asset_id: "asset-custom",
+        day: "2025-12-31",
+        source: "CUSTOM_SCRAPER:general-feed",
+        close: "99",
+        currency: "CAD",
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: ["asset-custom"],
+          days: 30,
+        }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        url: "https://prices.example.test/latest/{SYMBOL}",
+        symbol: "FUND",
+      });
+      expect(requests[0]?.from).toBeUndefined();
+      expect(requests[0]?.to).toBeUndefined();
+      expect(readQuote(db, "old-general-history")).toMatchObject({ close: "99" });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-14")).toMatchObject({
+        id: "asset-custom_2026-01-14_CUSTOM_SCRAPER:general-feed",
+        source: "CUSTOM_SCRAPER:general-feed",
+        close: "22.25",
       });
     } finally {
       db.close();
