@@ -2070,8 +2070,9 @@ contract:
   broker sync-state, and import-run local reads; AccountService-backed
   synced-account filtering, Rust-compatible local route ordering, `SYNCING` and
   `NEEDS_REVIEW` status mapping, import-run enum fallback, malformed JSON
-  fallback, `runType` filtering, and empty `runType` defaulting while cloud
-  session/list/sync operations remain explicitly disabled.
+  fallback, optional invalid timestamp `null` fallback, `runType` filtering, and
+  empty `runType` defaulting while cloud session/list/sync operations remain
+  explicitly disabled.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

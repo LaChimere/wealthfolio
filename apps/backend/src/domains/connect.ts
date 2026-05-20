@@ -433,7 +433,14 @@ function readU32(record: Record<string, unknown>, field: string): number | null 
 }
 
 function optionalRustDateTime(value: string | null): string | null {
-  return value === null ? null : rustDateTime(value);
+  if (value === null) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return rustUtcString(date);
 }
 
 function rustDateTime(value: string): string {
