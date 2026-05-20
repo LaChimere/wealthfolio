@@ -198,47 +198,48 @@
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
-    template/account-template callbacks, holdings snapshot callbacks,
-    domain-event planning/batch processing/worker helper, standalone runtime
-    domain-event worker wiring to local portfolio jobs, and post-portfolio
-    active goal-summary refresh now have TS runtime parity, while
-    provider-backed asset resolution, remaining quote sync outbox follow-ups
-    outside migrated alternative-asset and market-data quote paths, device-sync
-    push/pull runtime wiring, and remaining device-sync side effects are
-    deferred to activities/import/device-sync runtime parity slices; AI chat
-    persistence, tag persistence, tool-result mutation, local AI chat
-    sync_outbox callbacks, native/fallback text/reasoning provider streaming,
-    generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
-    tool-call execution, built-in `get_accounts`, `get_holdings`,
-    `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
-    `get_income`, `get_valuation_history`, `get_asset_allocation`,
-    `get_health_status`, `record_activity`, `record_activities`, and
-    `import_csv`, text/CSV attachment prompt injection, Anthropic/Gemini
-    image/PDF native media payloads, OpenAI-compatible image/PDF media payloads,
-    and Ollama image media payloads now have TS runtime parity, while Ollama PDF
-    attachment payloads remain unsupported by the documented `/api/chat`
-    images-only API; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; bounded account/timezone health
-    status/checks, cache behavior, legacy-classification health issues and
-    affected items, classification migration health-fix dispatch,
-    `sync_prices`/`retry_sync` dispatch into the market-data sync seam,
-    `fetch_fx` dispatch into exchange-rate pair registration and targeted
-    market-data sync, targeted `migrate_classifications` dispatch into the
-    taxonomy migration seam, and service-level `migrate_legacy_classifications`
-    dispatch, bounded price-staleness Health Center checks, bounded quote-sync
-    error checks, and bounded FX integrity issue generation, bounded
-    negative-balance data-consistency checks, and Rust-compatible health
-    dismissal hash carryover now have TS runtime parity; market-data no-op sync
-    modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync
-    now execute in TS, including market-sync failure/skipped-reason payload
-    propagation, while all-provider sync, background orchestration,
-    automatic/background FX quote fetching, and portfolio recalculation remain
-    deferred; remaining calculation-heavy health checks are deferred to
-    health/calculation parity slices; disabled Connect feature-flag responses,
-    local Connect synced-account/platform/sync-state/import-run reads, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, subscription entitlement checks, event
+    template/account-template callbacks, holdings snapshot callbacks, activity
+    snapshot cash contribution FX parity, domain-event planning/batch
+    processing/worker helper, standalone runtime domain-event worker wiring to
+    local portfolio jobs, and post-portfolio active goal-summary refresh now
+    have TS runtime parity, while provider-backed asset resolution, remaining
+    quote sync outbox follow-ups outside migrated alternative-asset and
+    market-data quote paths, device-sync push/pull runtime wiring, and remaining
+    device-sync side effects are deferred to activities/import/device-sync
+    runtime parity slices; AI chat persistence, tag persistence, tool-result
+    mutation, local AI chat sync_outbox callbacks, native/fallback
+    text/reasoning provider streaming, generated thread titles,
+    OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
+    built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
+    `search_activities`, `get_performance`, `get_income`,
+    `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
+    `record_activity`, `record_activities`, and `import_csv`, text/CSV
+    attachment prompt injection, Anthropic/Gemini image/PDF native media
+    payloads, OpenAI-compatible image/PDF media payloads, and Ollama image media
+    payloads now have TS runtime parity, while Ollama PDF attachment payloads
+    remain unsupported by the documented `/api/chat` images-only API;
+    device-sync integration for sync crypto is deferred to device-sync runtime
+    parity slices; bounded account/timezone health status/checks, cache
+    behavior, legacy-classification health issues and affected items,
+    classification migration health-fix dispatch, `sync_prices`/`retry_sync`
+    dispatch into the market-data sync seam, `fetch_fx` dispatch into
+    exchange-rate pair registration and targeted market-data sync, targeted
+    `migrate_classifications` dispatch into the taxonomy migration seam, and
+    service-level `migrate_legacy_classifications` dispatch, bounded
+    price-staleness Health Center checks, bounded quote-sync error checks, and
+    bounded FX integrity issue generation, bounded negative-balance
+    data-consistency checks, and Rust-compatible health dismissal hash carryover
+    now have TS runtime parity; market-data no-op sync modes plus targeted and
+    bounded broad Yahoo provider-backed asset/FX sync now execute in TS,
+    including market-sync failure/skipped-reason payload propagation, while
+    all-provider sync, background orchestration, automatic/background FX quote
+    fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
+    synced-account/platform/sync-state/import-run reads, local broker sync
+    profile persistence, and disabled device-sync route responses now have TS
+    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
+    broker sync orchestration, subscription entitlement checks, event
     production, E2EE enrollment, sync engine, snapshot/upload runtime,
     background workers, device-sync cloud clients, token lifecycle, team-key
     operations, key material handling, pairing flows, freshness gate
@@ -2059,9 +2060,9 @@ contract:
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
   portfolio-job market-sync health-cache/FX-reinitialize side effects,
   best-effort health-cache clear failure handling, and domain-event
-  portfolio-failure continuation semantics, and SQLite-backed local Connect
-  synced-account/platform/sync-state/import-run reads implemented; broader
-  migration remains active.
+  portfolio-failure continuation semantics, activity snapshot cash contribution
+  FX parity, and SQLite-backed local Connect synced-account/platform/sync-state/
+  import-run reads implemented; broader migration remains active.
 - `pr5-connect-local-read-runtime`: targeted checks passed:
   `bun test apps/backend/src/runtime.test.ts --test-name-pattern "local Connect"`,
   `bun test apps/backend/src/http.test.ts --test-name-pattern "Connect"`, and
@@ -2073,6 +2074,14 @@ contract:
   fallback, optional invalid timestamp `null` fallback, `runType` filtering, and
   empty `runType` defaulting while cloud session/list/sync operations remain
   explicitly disabled.
+- `pr5-activity-snapshot-contribution-fx`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "cash contribution|transfer activity fx rate|portfolio valuation jobs|rolls back TOTAL"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible activity snapshot cash contribution FX
+  rules: account net contribution uses activity `fx_rate` when present, falls
+  back to FxService when absent, and base net contribution uses FxService rather
+  than the activity account-currency `fx_rate`, including position-currency
+  transfer contribution edges where base currency equals account currency.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

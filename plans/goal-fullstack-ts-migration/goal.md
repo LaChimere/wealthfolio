@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 200
+turns_used: 201
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T14:33:00+08:00"
+updated_at: "2026-05-20T14:47:16+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1277,6 +1277,13 @@ updated_at: "2026-05-20T14:33:00+08:00"
   sync-state/import-run timestamps now deserialize to `null` like Rust instead
   of falling back to the current time. Focused Connect runtime tests and backend
   type-check passed.
+- Turn 201: Tightened TS activity snapshot replay contribution FX parity: cash
+  contribution fields now use transaction `fx_rate` for account-currency net
+  contribution, fall back to FxService when `fx_rate` is absent, and compute
+  base contribution through FxService instead of reusing account-currency
+  `fx_rate`; position-currency transfer base contributions also avoid activity
+  `fx_rate` when base currency equals account currency. Focused portfolio-job
+  tests and backend type-check passed.
 
 ## Deferred items
 

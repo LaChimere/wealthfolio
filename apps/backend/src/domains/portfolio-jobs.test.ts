@@ -621,6 +621,72 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("uses Rust-compatible FX rules for cash contribution fields", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "cad-with-fx", false, "CAD", "TRANSACTIONS");
+      seedAccount(db, "cad-no-fx", false, "CAD", "TRANSACTIONS");
+      seedActivity(db, {
+        id: "deposit-with-fx",
+        accountId: "cad-with-fx",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+        fxRate: "1.3",
+      });
+      seedActivity(db, {
+        id: "deposit-no-fx",
+        accountId: "cad-no-fx",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "80",
+        currency: "USD",
+      });
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "EUR",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.25";
+            }
+            if (fromCurrency === "USD" && toCurrency === "EUR") {
+              return "0.9";
+            }
+            if (fromCurrency === "CAD" && toCurrency === "EUR") {
+              return "0.7";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig(),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "cad-with-fx", "2026-05-14")).toMatchObject({
+        cash_balances: '{"USD":"100"}',
+        cash_total_account_currency: "125",
+        cash_total_base_currency: "90",
+        net_contribution: "130",
+        net_contribution_base: "90",
+      });
+      expect(readSnapshot(db, "cad-no-fx", "2026-05-14")).toMatchObject({
+        cash_balances: '{"USD":"80"}',
+        cash_total_account_currency: "100",
+        cash_total_base_currency: "72",
+        net_contribution: "100",
+        net_contribution_base: "72",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("converts cross-currency buy lots to position currency", async () => {
     const db = createPortfolioJobTestDb();
     try {
@@ -1085,6 +1151,53 @@ describe("TS portfolio job route config", () => {
         investment_market_value: "30",
         cash_balance: "-1",
         total_value: "29",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not use transfer activity fx rate for base contribution conversion", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "CAD", "TRANSACTIONS");
+      seedAsset(db, "usd-asset", "USD");
+      seedActivity(db, {
+        id: "transfer-in-1",
+        accountId: "account-1",
+        assetId: "usd-asset",
+        type: "TRANSFER_IN",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "2",
+        unitPrice: "15",
+        fee: "1",
+        currency: "USD",
+        fxRate: "1.3",
+      });
+      seedQuote(db, "usd-asset", "2026-05-12", "12", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "CAD",
+        exchangeRateService: {
+          initialize() {},
+          getExchangeRateForDate(fromCurrency, toCurrency) {
+            if (fromCurrency === "USD" && toCurrency === "CAD") {
+              return "1.25";
+            }
+            throw new Error(`unexpected FX pair ${fromCurrency}/${toCurrency}`);
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"-1"}',
+        net_contribution: "40.3",
+        net_contribution_base: "38.75",
       });
     } finally {
       db.close();

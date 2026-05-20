@@ -1333,17 +1333,17 @@ function processActivityForSnapshot(
       applySellActivity(state, activity, options);
       break;
     case "DEPOSIT":
-      applyContributionActivity(state, activity, baseCurrency, 1);
+      applyContributionActivity(state, activity, baseCurrency, options, 1);
       break;
     case "WITHDRAWAL":
-      applyContributionActivity(state, activity, baseCurrency, -1);
+      applyContributionActivity(state, activity, baseCurrency, options, -1);
       break;
     case "DIVIDEND":
     case "INTEREST":
       addCash(state, activity.currency, activityAmount(activity).minus(activityFee(activity)));
       break;
     case "CREDIT":
-      applyCreditActivity(state, activity, baseCurrency);
+      applyCreditActivity(state, activity, baseCurrency, options);
       break;
     case "FEE":
     case "TAX":
@@ -1443,23 +1443,25 @@ function applyContributionActivity(
   state: ActivityRebuildState,
   activity: ActivityRebuildRow,
   baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
   direction: 1 | -1,
 ): void {
   const amount = activityAmount(activity).abs().mul(direction);
   const cashDelta = amount.minus(activityFee(activity));
   addCash(state, activity.currency, cashDelta);
-  addContribution(state, activity, amount, baseCurrency);
+  addContribution(state, activity, amount, baseCurrency, options);
 }
 
 function applyCreditActivity(
   state: ActivityRebuildState,
   activity: ActivityRebuildRow,
   baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
 ): void {
   const amount = activityAmount(activity);
   addCash(state, activity.currency, amount.minus(activityFee(activity)));
   if (activity.subtype === "BONUS") {
-    addContribution(state, activity, amount, baseCurrency);
+    addContribution(state, activity, amount, baseCurrency, options);
   }
 }
 
@@ -1484,6 +1486,7 @@ function applyTransferActivity(
       state,
       activity,
       baseCurrency,
+      options,
       activity.activity_type === "TRANSFER_IN" ? 1 : -1,
     );
     return;
@@ -1645,12 +1648,13 @@ function addContribution(
   activity: ActivityRebuildRow,
   amount: Decimal,
   baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
 ): void {
   state.netContribution = state.netContribution.plus(
-    convertActivityAmountForContribution(activity, amount, state.currency),
+    convertActivityAmountForAccountContribution(activity, amount, state.currency, options),
   );
   state.netContributionBase = state.netContributionBase.plus(
-    convertActivityAmountForContribution(activity, amount, baseCurrency),
+    convertActivityAmountForBaseContribution(activity, amount, baseCurrency, options),
   );
 }
 
@@ -1663,36 +1667,33 @@ function addPositionContribution(
   options: LocalPortfolioJobServiceOptions,
 ): void {
   state.netContribution = state.netContribution.plus(
-    convertPositionAmountForContribution(
+    convertPositionAmountForAccountContribution(
       activity,
       amount,
       positionCurrency,
-      state.currency,
       state.currency,
       options,
     ),
   );
   state.netContributionBase = state.netContributionBase.plus(
-    convertPositionAmountForContribution(
+    convertPositionAmountForBaseContribution(
       activity,
       amount,
       positionCurrency,
       baseCurrency,
-      state.currency,
       options,
     ),
   );
 }
 
-function convertPositionAmountForContribution(
+function convertPositionAmountForAccountContribution(
   activity: ActivityRebuildRow,
   amount: Decimal,
   positionCurrency: string,
-  targetCurrency: string,
   accountCurrency: string,
   options: LocalPortfolioJobServiceOptions,
 ): Decimal {
-  if (positionCurrency === targetCurrency) {
+  if (positionCurrency === accountCurrency) {
     return amount;
   }
   const activityFxRate = decimalOptionalOrDefault(
@@ -1700,26 +1701,44 @@ function convertPositionAmountForContribution(
     new Decimal(0),
     `Invalid activity FX rate for activity ${activity.id}`,
   );
-  if (
-    activity.currency === positionCurrency &&
-    targetCurrency === accountCurrency &&
-    !activityFxRate.isZero()
-  ) {
+  if (activity.currency === positionCurrency && !activityFxRate.isZero()) {
     return amount.mul(activityFxRate);
   }
-  return convertRequired(
+  return convertContributionWithFallback(
     amount,
     positionCurrency,
-    targetCurrency,
+    accountCurrency,
     activityLocalDate(activity),
     options,
+    amount,
   );
 }
 
-function convertActivityAmountForContribution(
+function convertPositionAmountForBaseContribution(
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  positionCurrency: string,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  if (positionCurrency === baseCurrency) {
+    return amount;
+  }
+  return convertContributionWithFallback(
+    amount,
+    positionCurrency,
+    baseCurrency,
+    activityLocalDate(activity),
+    options,
+    amount,
+  );
+}
+
+function convertActivityAmountForAccountContribution(
   activity: ActivityRebuildRow,
   amount: Decimal,
   targetCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
 ): Decimal {
   if (activity.currency === targetCurrency) {
     return amount;
@@ -1729,7 +1748,48 @@ function convertActivityAmountForContribution(
     new Decimal(0),
     "Invalid activity FX rate",
   );
-  return rate.isZero() ? amount : amount.mul(rate);
+  if (!rate.isZero()) {
+    return amount.mul(rate);
+  }
+  return convertContributionWithFallback(
+    amount,
+    activity.currency,
+    targetCurrency,
+    activityLocalDate(activity),
+    options,
+    amount,
+  );
+}
+
+function convertActivityAmountForBaseContribution(
+  activity: ActivityRebuildRow,
+  amount: Decimal,
+  baseCurrency: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  if (activity.currency === baseCurrency) {
+    return amount;
+  }
+  return convertContributionWithFallback(
+    amount,
+    activity.currency,
+    baseCurrency,
+    activityLocalDate(activity),
+    options,
+    new Decimal(0),
+  );
+}
+
+function convertContributionWithFallback(
+  amount: Decimal,
+  fromCurrency: string,
+  toCurrency: string,
+  date: string,
+  options: LocalPortfolioJobServiceOptions,
+  fallback: Decimal,
+): Decimal {
+  const rate = exchangeRateForDate(fromCurrency, toCurrency, date, options);
+  return rate ? amount.mul(rate) : fallback;
 }
 
 function getOrCreateActivityPosition(
