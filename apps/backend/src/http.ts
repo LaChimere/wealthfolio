@@ -91,6 +91,7 @@ import {
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
   type MarketSyncMode,
+  type PortfolioJobConfig,
   type PortfolioJobService,
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
@@ -272,7 +273,13 @@ async function routeRequest(
     (url.pathname.startsWith("/api/v1/alternative-assets") ||
       url.pathname === "/api/v1/alternative-holdings")
   ) {
-    return routeAlternativeAssetRequest(request, url, config, options.alternativeAssetService);
+    return routeAlternativeAssetRequest(
+      request,
+      url,
+      config,
+      options.alternativeAssetService,
+      options.portfolioJobService,
+    );
   }
 
   if (
@@ -1353,21 +1360,30 @@ function routeAlternativeAssetRequest(
   url: URL,
   config: BackendRuntimeConfig,
   alternativeAssetService: AlternativeAssetService,
+  portfolioJobService?: PortfolioJobService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/alternative-assets") {
-    return handleJsonMutation(request, parseCreateAlternativeAssetRequest, (input) =>
-      Promise.resolve(alternativeAssetService.createAlternativeAsset(input)),
-    );
+    return handleJsonMutation(request, parseCreateAlternativeAssetRequest, async (input) => {
+      const result = await alternativeAssetService.createAlternativeAsset(input);
+      enqueueIncrementalPortfolioRecalculation(portfolioJobService, "Alternative asset mutation");
+      return result;
+    });
   }
 
   const valuationAssetId = alternativeAssetValuationIdFromPath(url.pathname);
   if (request.method === "PUT" && valuationAssetId !== undefined) {
-    return handleJsonMutation(request, parseUpdateAlternativeAssetValuationRequest, (input) =>
-      Promise.resolve(alternativeAssetService.updateValuation(valuationAssetId, input)),
+    return handleJsonMutation(
+      request,
+      parseUpdateAlternativeAssetValuationRequest,
+      async (input) => {
+        const result = await alternativeAssetService.updateValuation(valuationAssetId, input);
+        enqueueIncrementalPortfolioRecalculation(portfolioJobService, "Alternative asset mutation");
+        return result;
+      },
     );
   }
 
@@ -1399,7 +1415,10 @@ function routeAlternativeAssetRequest(
   const assetId = alternativeAssetIdFromPath(url.pathname);
   if (request.method === "DELETE" && assetId !== undefined) {
     return Promise.resolve(alternativeAssetService.deleteAlternativeAsset(assetId))
-      .then(() => new Response(null, { status: 204 }))
+      .then(() => {
+        enqueueIncrementalPortfolioRecalculation(portfolioJobService, "Alternative asset mutation");
+        return new Response(null, { status: 204 });
+      })
       .catch(domainErrorResponse);
   }
 
@@ -2109,19 +2128,46 @@ function enqueueFullPortfolioRecalculation(
   portfolioJobService: PortfolioJobService | undefined,
   context: string,
 ): void {
+  enqueuePortfolioJobBestEffort(
+    portfolioJobService,
+    {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "full",
+      valuationMode: "full",
+      sinceDate: null,
+    },
+    context,
+  );
+}
+
+function enqueueIncrementalPortfolioRecalculation(
+  portfolioJobService: PortfolioJobService | undefined,
+  context: string,
+): void {
+  enqueuePortfolioJobBestEffort(
+    portfolioJobService,
+    {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "incremental_from_last",
+      valuationMode: "incremental_from_last",
+      sinceDate: null,
+    },
+    context,
+  );
+}
+
+function enqueuePortfolioJobBestEffort(
+  portfolioJobService: PortfolioJobService | undefined,
+  config: PortfolioJobConfig,
+  context: string,
+): void {
   if (!portfolioJobService) {
     return;
   }
   try {
-    void Promise.resolve(
-      portfolioJobService.enqueuePortfolioJob({
-        accountIds: null,
-        marketSyncMode: { type: "none" },
-        snapshotMode: "full",
-        valuationMode: "full",
-        sinceDate: null,
-      }),
-    ).catch((error) => {
+    void Promise.resolve(portfolioJobService.enqueuePortfolioJob(config)).catch((error) => {
       console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
     });
   } catch (error) {

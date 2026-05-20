@@ -3147,6 +3147,7 @@ describe("TS backend HTTP skeleton", () => {
 
   test("routes migrated alternative assets seam only when a service is provided", async () => {
     const calls: Array<[string, unknown]> = [];
+    const enqueued: PortfolioJobConfig[] = [];
     const alternativeAssetService: AlternativeAssetService = {
       createAlternativeAsset(request) {
         calls.push(["create", request]);
@@ -3185,7 +3186,14 @@ describe("TS backend HTTP skeleton", () => {
         ];
       },
     };
-    const handler = createBackendRequestHandler(config, { alternativeAssetService });
+    const handler = createBackendRequestHandler(config, {
+      alternativeAssetService,
+      portfolioJobService: {
+        enqueuePortfolioJob(config) {
+          enqueued.push(config);
+        },
+      },
+    });
 
     expect(
       (await handler(new Request("http://127.0.0.1/api/v1/alternative-holdings"))).status,
@@ -3336,6 +3344,18 @@ describe("TS backend HTTP skeleton", () => {
       ["metadata", { assetId: "asset/1", metadata: { city: null }, name: "Cabin 2" }],
       ["delete", "asset/1"],
       ["holdings", null],
+    ]);
+    const incrementalRecalculation: PortfolioJobConfig = {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "incremental_from_last",
+      valuationMode: "incremental_from_last",
+      sinceDate: null,
+    };
+    expect(enqueued).toEqual([
+      incrementalRecalculation,
+      incrementalRecalculation,
+      incrementalRecalculation,
     ]);
   });
 
