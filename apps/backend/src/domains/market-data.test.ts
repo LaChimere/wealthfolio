@@ -1678,6 +1678,123 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs MarketData.app history and current-day supplements with API key auth", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = marketDataAppTestFetch({
+      calls,
+      candles: {
+        AAPL: {
+          s: "ok",
+          t: [1767571200],
+          c: [10.5],
+        },
+      },
+      prices: {
+        AAPL: {
+          s: "ok",
+          mid: [11.25],
+          updated: [1767657600],
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("MARKETDATA_APP", "test-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-marketdata",
+        display_code: "AAPL",
+        quote_ccy: "EUR",
+        instrument_symbol: "WRONG",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({
+          preferred_provider: "MARKETDATA_APP",
+          overrides: { MARKETDATA_APP: { symbol: "AAPL" } },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-marketdata"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+      });
+
+      const candlesUrl = new URL(calls[0] ?? "");
+      const latestUrl = new URL(calls[1] ?? "");
+      expect(candlesUrl.pathname).toBe("/v1/stocks/candles/D/AAPL");
+      expect(candlesUrl.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(candlesUrl.searchParams.get("to")).toBe("2026-01-06");
+      expect(latestUrl.pathname).toBe("/v1/stocks/prices/AAPL/");
+      expect(readQuoteByDay(db, "asset-marketdata", "2026-01-05")).toMatchObject({
+        id: "asset-marketdata_2026-01-05_MARKETDATA_APP",
+        source: "MARKETDATA_APP",
+        open: "10.5",
+        high: "10.5",
+        low: "10.5",
+        close: "10.5",
+        adjclose: "10.5",
+        volume: null,
+        currency: "USD",
+      });
+      expect(readQuoteByDay(db, "asset-marketdata", "2026-01-06")).toMatchObject({
+        source: "MARKETDATA_APP",
+        close: "11.25",
+        currency: "USD",
+      });
+      expect(readSyncState(db, "asset-marketdata")).toMatchObject({
+        data_source: "MARKETDATA_APP",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records MarketData.app sync failures when the API key is missing", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => Promise.reject(new Error("fetch should not be called"))) as typeof fetch,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-marketdata",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "MARKETDATA_APP" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-marketdata"] }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        skipped: 0,
+        quotesSynced: 0,
+        failures: [["AAPL", "MARKETDATA_APP API key not configured"]],
+      });
+      expect(readSyncState(db, "asset-marketdata")).toMatchObject({
+        data_source: "MARKETDATA_APP",
+        error_count: 1,
+        last_error: "MARKETDATA_APP API key not configured",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("leaves manual and inactive assets untouched during targeted sync", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, {
@@ -2985,6 +3102,44 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves MarketData.app quote summaries through price information", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: marketDataAppTestFetch({
+        calls,
+        prices: {
+          SHOP: {
+            s: "ok",
+            mid: [25.5],
+            updated: [1767657600],
+          },
+        },
+      }),
+      secretService: testSecretService("MARKETDATA_APP", "test-key"),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "SHOP",
+          exchangeMic: "XTSE",
+          instrumentType: "EQUITY",
+          quoteCcy: "EUR",
+          providerId: "MARKETDATA_APP",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 25.5,
+        resolvedProviderId: "MARKETDATA_APP",
+      });
+      expect(calls).toEqual(["https://api.marketdata.app/v1/stocks/prices/SHOP/"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves Boerse Frankfurt quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3408,6 +3563,57 @@ function yahooHistoryFetchBySymbol(
           },
         }),
       );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+}
+
+function testSecretService(secretKey: string, secret: string) {
+  return {
+    setSecret() {},
+    getSecret(key: string) {
+      return key === secretKey ? secret : null;
+    },
+    deleteSecret() {},
+  };
+}
+
+function marketDataAppTestFetch(options: {
+  calls?: string[];
+  candles?: Record<string, unknown>;
+  prices?: Record<string, unknown>;
+  fallback?: typeof fetch;
+}): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith("https://api.marketdata.app/v1/")) {
+      if (options.fallback) {
+        return options.fallback(input, init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBe("Bearer test-key");
+    options.calls?.push(url);
+    const parsed = new URL(url);
+    if (parsed.pathname.startsWith("/v1/stocks/candles/D/")) {
+      const symbol = decodeURIComponent(parsed.pathname.slice("/v1/stocks/candles/D/".length));
+      const result = options.candles?.[symbol];
+      if (!result) {
+        throw new Error(`unexpected MarketData.app candles symbol: ${symbol}`);
+      }
+      return Promise.resolve(Response.json(result));
+    }
+    if (parsed.pathname.startsWith("/v1/stocks/prices/")) {
+      const symbol = decodeURIComponent(
+        parsed.pathname.slice("/v1/stocks/prices/".length).replace(/\/$/, ""),
+      );
+      const result = options.prices?.[symbol];
+      if (!result) {
+        throw new Error(`unexpected MarketData.app prices symbol: ${symbol}`);
+      }
+      return Promise.resolve(Response.json(result));
     }
     throw new Error(`unexpected fetch: ${url}`);
   }) as typeof fetch;

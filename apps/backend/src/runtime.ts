@@ -259,6 +259,7 @@ function createServicesFromDatabase(
   const marketDataService = createMarketDataService(db, {
     exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
     customProviderService,
+    secretService,
     fetch: runtimeOptions.marketDataFetch,
     queueQuoteSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent({

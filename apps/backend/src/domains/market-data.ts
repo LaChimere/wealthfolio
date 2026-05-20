@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import { parseCsvRecords } from "../csv";
 import { DEFAULT_HISTORY_DAYS, type MarketSyncMode } from "./portfolio-jobs";
+import type { SecretService } from "./secrets";
 import {
   type QuoteSyncEvent,
   type QuoteSyncOperation,
@@ -162,6 +163,7 @@ export interface MarketDataServiceOptions {
   now?: () => Date;
   queueQuoteSyncEvent?: (event: QuoteSyncEvent) => void;
   customProviderService?: MarketDataCustomProviderService;
+  secretService?: SecretService;
 }
 
 export class MarketDataNotImplementedError extends Error {
@@ -334,6 +336,8 @@ const MARKET_CLOSE_GRACE_MINUTES = 60;
 const QUOTE_HISTORY_BUFFER_DAYS = 45;
 const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
+const MARKETDATA_APP_PROVIDER = "MARKETDATA_APP";
+const MARKETDATA_APP_BASE_URL = "https://api.marketdata.app/v1";
 const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
@@ -384,6 +388,7 @@ export function createMarketDataService(
           },
         },
         options.customProviderService,
+        options.secretService,
         now(),
       );
     },
@@ -473,6 +478,7 @@ export function createMarketDataService(
         now(),
         quoteSyncStateExists,
         options.customProviderService,
+        options.secretService,
       );
     },
 
@@ -497,6 +503,7 @@ export function createMarketDataService(
         now(),
         quoteSyncStateExists,
         options.customProviderService,
+        options.secretService,
       );
     },
   };
@@ -547,6 +554,7 @@ async function syncMarketDataExecution(
   now: Date,
   quoteSyncStateExists: boolean,
   customProviderService: MarketDataCustomProviderService | undefined,
+  secretService: SecretService | undefined,
 ): Promise<MarketDataSyncResult> {
   const result = emptyMarketDataSyncResult();
   if (marketSyncMode.type === "none") {
@@ -706,6 +714,78 @@ async function syncMarketDataExecution(
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, quoteSource, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
+    if (provider === MARKETDATA_APP_PROVIDER) {
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const apiKey = await marketDataProviderApiKey(secretService, provider);
+      const symbol = marketDataAppSyncSymbol(asset);
+      const failureMessage =
+        apiKey === null
+          ? `${provider} API key not configured`
+          : asset.instrument_type?.toUpperCase() !== "EQUITY"
+            ? "MarketData.app only supports equities"
+            : symbol === null
+              ? "Asset cannot be mapped to a MarketData.app symbol"
+              : null;
+      if (failureMessage !== null || apiKey === null || symbol === null) {
+        const message = failureMessage ?? "Asset cannot be mapped to a MarketData.app symbol";
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        continue;
+      }
+
+      try {
+        const quotes = await fetchMarketDataAppHistoricalQuotes(
+          asset,
+          symbol,
+          marketDataAppCurrency(asset.instrument_exchange_mic, asset.quote_ccy, exchangeCatalog),
+          startDate,
+          endDate,
+          fetchImpl,
+          apiKey,
+          now,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
         addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
       }
       continue;
@@ -1402,6 +1482,7 @@ async function resolveSymbolQuote(
     clear: () => void;
   },
   customProviderService: MarketDataCustomProviderService | undefined,
+  secretService: SecretService | undefined,
   now: Date,
 ): Promise<ResolvedQuote> {
   const trimmedSymbol = request.symbol.trim();
@@ -1426,6 +1507,35 @@ async function resolveSymbolQuote(
   const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
   const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
   const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
+  if (preferredProvider === MARKETDATA_APP_PROVIDER) {
+    if (instrumentType !== "EQUITY") {
+      return defaultResolvedQuote();
+    }
+    const apiKey = await marketDataProviderApiKey(secretService, MARKETDATA_APP_PROVIDER);
+    if (apiKey === null) {
+      return defaultResolvedQuote();
+    }
+    const currency = marketDataAppCurrency(exchangeMic, requestedQuoteCcy, exchangeCatalog);
+    for (const candidate of symbolResolutionCandidates(trimmedSymbol)) {
+      try {
+        const quote = await fetchMarketDataAppLatestQuote(
+          `_QUOTE_RESOLVE_${candidate}`,
+          candidate,
+          currency,
+          fetchImpl,
+          apiKey,
+        );
+        return {
+          currency: quote.currency,
+          price: quote.close === "0" ? null : Number(quote.close),
+          resolvedProviderId: MARKETDATA_APP_PROVIDER,
+        };
+      } catch {
+        continue;
+      }
+    }
+    return defaultResolvedQuote();
+  }
   if (preferredProvider === BOERSE_FRANKFURT_PROVIDER) {
     if (instrumentType !== "EQUITY" && instrumentType !== "BOND") {
       return defaultResolvedQuote();
@@ -2721,6 +2831,212 @@ function noQuoteReason(
   }
 
   return { code: "NO_DATA", message: "No data available from provider yet" };
+}
+
+async function marketDataProviderApiKey(
+  secretService: SecretService | undefined,
+  provider: string,
+): Promise<string | null> {
+  const apiKey = (await secretService?.getSecret(provider)) ?? null;
+  if (apiKey === null) {
+    return null;
+  }
+  const trimmed = apiKey.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+async function fetchMarketDataAppHistoricalQuotes(
+  asset: AssetMarketSyncRow,
+  symbol: string,
+  currency: string,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+  now: Date,
+): Promise<YahooHistoricalQuote[]> {
+  const url = new URL(`${MARKETDATA_APP_BASE_URL}/stocks/candles/D/${encodeURIComponent(symbol)}`);
+  url.searchParams.set("from", startDate);
+  url.searchParams.set("to", endDate);
+  const payload = await fetchMarketDataAppJson(url, fetchImpl, apiKey);
+  const quotes = parseMarketDataAppHistoricalQuotes(payload, asset, currency);
+  const today = isoDate(now);
+  const lastCandleDate = quotes.at(-1)?.day ?? null;
+  if (endDate >= today && lastCandleDate !== null && lastCandleDate < today) {
+    try {
+      const latest = await fetchMarketDataAppLatestQuote(
+        asset.id,
+        symbol,
+        currency,
+        fetchImpl,
+        apiKey,
+      );
+      if (latest.day > lastCandleDate) {
+        quotes.push(latest);
+      }
+    } catch {
+      // Rust logs and preserves the successful candle response when the realtime supplement fails.
+    }
+  }
+  return quotes;
+}
+
+async function fetchMarketDataAppLatestQuote(
+  assetId: string,
+  symbol: string,
+  currency: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote> {
+  const url = new URL(`${MARKETDATA_APP_BASE_URL}/stocks/prices/${encodeURIComponent(symbol)}/`);
+  const payload = await fetchMarketDataAppJson(url, fetchImpl, apiKey);
+  if (!isRecord(payload)) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: Failed to parse response`);
+  }
+  const status = optionalString(payload.s);
+  if (status !== "ok") {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: API returned status: ${status ?? ""}`);
+  }
+  const price = numberValue(arrayValue(payload.mid, 0));
+  if (price === null) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: No price data in response`);
+  }
+  const timestampSeconds = numberValue(arrayValue(payload.updated, 0));
+  if (timestampSeconds === null) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: No timestamp in response`);
+  }
+  return marketDataAppQuoteFromValues(
+    assetId,
+    timestampSeconds,
+    price,
+    price,
+    price,
+    price,
+    0,
+    currency,
+  );
+}
+
+async function fetchMarketDataAppJson(
+  url: URL,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+  } catch (error) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: ${errorMessage(error)}`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: rate limited`);
+  }
+  if (!response.ok) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: HTTP error: ${response.status}`);
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
+  }
+}
+
+function parseMarketDataAppHistoricalQuotes(
+  payload: unknown,
+  asset: AssetMarketSyncRow,
+  currency: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: Failed to parse response`);
+  }
+  const status = optionalString(payload.s);
+  if (status !== "ok") {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: API returned status: ${status ?? ""}`);
+  }
+  if (!Array.isArray(payload.c)) {
+    throw new Error(`${MARKETDATA_APP_PROVIDER}: No close prices in response`);
+  }
+  if (payload.c.length === 0) {
+    throw new Error("No data for date range");
+  }
+  const quotes: YahooHistoricalQuote[] = [];
+  for (let index = 0; index < payload.c.length; index += 1) {
+    const close = numberValue(payload.c[index]);
+    const timestampSeconds = numberValue(arrayValue(payload.t, index));
+    if (close === null || timestampSeconds === null || timestampSeconds <= 0) {
+      continue;
+    }
+    quotes.push(
+      marketDataAppQuoteFromValues(
+        asset.id,
+        timestampSeconds,
+        numberValue(arrayValue(payload.o, index)) ?? close,
+        numberValue(arrayValue(payload.h, index)) ?? close,
+        numberValue(arrayValue(payload.l, index)) ?? close,
+        close,
+        numberValue(arrayValue(payload.v, index)) ?? 0,
+        currency,
+      ),
+    );
+  }
+  if (quotes.length === 0) {
+    throw new Error("No data for date range");
+  }
+  return quotes.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function marketDataAppQuoteFromValues(
+  assetId: string,
+  timestampSeconds: number,
+  open: number,
+  high: number,
+  low: number,
+  close: number,
+  volume: number,
+  currency: string,
+): YahooHistoricalQuote {
+  const timestamp = new Date(timestampSeconds * 1000).toISOString();
+  const closeDecimal = decimalString(close) ?? "0";
+  return {
+    assetId,
+    day: timestamp.slice(0, 10),
+    timestamp,
+    source: MARKETDATA_APP_PROVIDER,
+    open: decimalString(open) ?? closeDecimal,
+    high: decimalString(high) ?? closeDecimal,
+    low: decimalString(low) ?? closeDecimal,
+    close: closeDecimal,
+    adjclose: closeDecimal,
+    volume: decimalString(volume) ?? "0",
+    currency,
+  };
+}
+
+function marketDataAppSyncSymbol(asset: AssetMarketSyncRow): string | null {
+  return (
+    providerOverrideSymbol(asset.provider_config, MARKETDATA_APP_PROVIDER) ??
+    optionalString(asset.instrument_symbol)
+  );
+}
+
+function marketDataAppCurrency(
+  exchangeMic: string | null,
+  currencyHint: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): string {
+  const mic = optionalString(exchangeMic)?.toUpperCase() ?? null;
+  if (mic) {
+    const exchangeCurrency = exchangeCatalog.currencyByMic.get(mic);
+    if (exchangeCurrency) {
+      return exchangeCurrency;
+    }
+  }
+  return optionalString(currencyHint) ?? "USD";
 }
 
 async function fetchBoerseHistoricalQuotes(

@@ -188,12 +188,13 @@
     slices; targeted and bounded broad Yahoo market-data sync, bounded
     custom-provider-backed symbol quote resolution, targeted/general-purpose
     custom-provider latest and historical sync, custom latest fallback during
-    backfill, and Börse Frankfurt historical/latest sync and quote resolution
-    now have TS runtime parity, while remaining provider breadth and background
-    orchestration remain deferred to market-data/portfolio parity slices;
-    market-sync result accounting, portfolio `market:sync-complete`
-    failure/skipped-reason payloads, and market-data quote/sync portfolio job
-    side effects now have TS parity; activity mutation event production,
+    backfill, Börse Frankfurt historical/latest sync and quote resolution, and
+    MarketData.app history/latest sync and quote resolution now have TS runtime
+    parity, while remaining provider breadth and background orchestration remain
+    deferred to market-data/portfolio parity slices; market-sync result
+    accounting, portfolio `market:sync-complete` failure/skipped-reason
+    payloads, and market-data quote/sync portfolio job side effects now have TS
+    parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -234,16 +235,17 @@
     data-consistency checks, and Rust-compatible health dismissal hash carryover
     now have TS runtime parity; market-data no-op sync modes plus targeted and
     bounded broad Yahoo provider-backed asset/FX sync, custom-provider
-    latest/history/fallback sync, and Börse Frankfurt provider sync now execute
-    in TS, including market-sync failure/skipped-reason payload propagation,
-    while remaining provider breadth, background orchestration,
-    automatic/background FX quote fetching, and portfolio recalculation remain
-    deferred; remaining calculation-heavy health checks are deferred to
-    health/calculation parity slices; disabled Connect feature-flag responses,
-    local Connect synced-account/platform/sync-state/import-run reads, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, subscription entitlement checks, event
+    latest/history/fallback sync, Börse Frankfurt provider sync, and
+    MarketData.app provider sync now execute in TS, including market-sync
+    failure/skipped-reason payload propagation, while remaining provider
+    breadth, background orchestration, automatic/background FX quote fetching,
+    and portfolio recalculation remain deferred; remaining calculation-heavy
+    health checks are deferred to health/calculation parity slices; disabled
+    Connect feature-flag responses, local Connect
+    synced-account/platform/sync-state/import-run reads, local broker sync
+    profile persistence, and disabled device-sync route responses now have TS
+    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
+    broker sync orchestration, subscription entitlement checks, event
     production, E2EE enrollment, sync engine, snapshot/upload runtime,
     background workers, device-sync cloud clients, token lifecycle, team-key
     operations, key material handling, pairing flows, freshness gate
@@ -2167,6 +2169,16 @@ contract:
   epoch-second windows, clean `no_data` zero-quote syncs, deterministic bond
   percentage scaling, quote sync state source updates, and latest
   price-information quote resolution for equities and bonds.
+- `pr5-market-data-marketdata-app-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, and focused code review. Coverage includes targeted,
+  incremental, broad, and history sync for `MARKETDATA_APP` assets using the
+  runtime secret service, bearer-authenticated candle and latest endpoints with
+  trailing slash parity, current-day latest supplementation that preserves
+  successful history when realtime fetch fails, missing-key sync failures,
+  provider override symbols, exchange-MIC currency precedence, quote sync state
+  source updates, and latest price quote resolution.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
