@@ -212,6 +212,26 @@ function createServicesFromDatabase(
   const settingsService = createSettingsService(db);
   const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const syncOutboxQueue = createSyncOutboxQueue(db);
+  const appDataDir = runtimeOptions.appDataDir;
+  const secretService = createRuntimeSecretService({
+    appDataDir,
+    env: runtimeOptions.env,
+    secretKey: runtimeOptions.secretKey,
+  });
+  const customProviderRepository = createCustomProviderRepository(db, {
+    queueSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent({
+        entity: "market_data_custom_providers",
+        entityId: event.providerUuid,
+        operation: event.operation,
+        payload: event.payload,
+      });
+    },
+  });
+  const customProviderService = createCustomProviderService(customProviderRepository, {
+    fetchImpl: runtimeOptions.marketDataFetch,
+    secretService,
+  });
   const accountService = createRuntimeAccountService(db, eventBus, baseCurrency, (event) => {
     syncOutboxQueue.queueSyncEvent({
       entity: "accounts",
@@ -238,6 +258,7 @@ function createServicesFromDatabase(
   exchangeRateService.initialize();
   const marketDataService = createMarketDataService(db, {
     exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
+    customProviderService,
     fetch: runtimeOptions.marketDataFetch,
     queueQuoteSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent({
@@ -247,12 +268,6 @@ function createServicesFromDatabase(
         payload: event.payload,
       });
     },
-  });
-  const appDataDir = runtimeOptions.appDataDir;
-  const secretService = createRuntimeSecretService({
-    appDataDir,
-    env: runtimeOptions.env,
-    secretKey: runtimeOptions.secretKey,
   });
   const aiProviderService = secretService
     ? createAiProviderService({
@@ -468,21 +483,7 @@ function createServicesFromDatabase(
         ),
       },
     ),
-    customProviderService: createCustomProviderService(
-      createCustomProviderRepository(db, {
-        queueSyncEvent: (event) => {
-          syncOutboxQueue.queueSyncEvent({
-            entity: "market_data_custom_providers",
-            entityId: event.providerUuid,
-            operation: event.operation,
-            payload: event.payload,
-          });
-        },
-      }),
-      {
-        secretService,
-      },
-    ),
+    customProviderService,
     eventBus,
     deviceSyncService: createDisabledDeviceSyncService(),
     exchangeRateService,

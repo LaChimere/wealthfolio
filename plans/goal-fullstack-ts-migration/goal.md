@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 203
+turns_used: 204
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T15:11:16+08:00"
+updated_at: "2026-05-20T15:43:32+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1294,6 +1294,13 @@ updated_at: "2026-05-20T15:11:16+08:00"
   from position currency into account currency at the snapshot date, falling
   back to the unconverted amount if FxService cannot provide a rate. Full
   portfolio-job tests and backend type-check passed.
+- Turn 204: Added bounded custom-provider-backed symbol quote resolution:
+  `resolveSymbolQuote` now honors `CUSTOM:<code>` provider preferences by using
+  the runtime custom-provider source/test-source service before Yahoo fallback,
+  tries latest sources before historical fallback windows, returns
+  `CUSTOM_SCRAPER:<code>` provider IDs, and wires the standalone runtime to
+  share one custom provider service with market data. Focused market-data tests,
+  backend type-check, full repository check, and focused code review passed.
 
 ## Deferred items
 
@@ -1346,12 +1353,14 @@ updated_at: "2026-05-20T15:11:16+08:00"
   local health dismissal/config state.
 - Market-data exchange list, local quote history/update/delete, latest quote
   snapshots, quote CSV check/import, addon-compatible Yahoo dividends, symbol
-  search, and Yahoo-backed symbol quote resolution now have TS runtime parity.
+  search, Yahoo-backed symbol quote resolution, and bounded
+  custom-provider-backed symbol quote resolution now have TS runtime parity.
   reason=the standalone backend reads the Rust exchange catalog, writes local
   quote rows directly, can call Yahoo dividends/search/resolve through
-  injectable HTTP paths, and can merge search results against existing SQLite
-  assets; market sync and portfolio recalculation side effects remain active
-  follow-ups.
+  injectable HTTP paths, can resolve `CUSTOM:<code>` quote previews through the
+  runtime custom-provider source/test-source service, and can merge search
+  results against existing SQLite assets; market sync and portfolio
+  recalculation side effects remain active follow-ups.
 - Actual portfolio job execution and broad domain-event worker behavior remain
   active follow-ups. reason=holdings snapshot mutation events now have bounded
   TS runtime parity and the Rust domain-event planner, injectable batch
@@ -1513,12 +1522,13 @@ updated_at: "2026-05-20T15:11:16+08:00"
   Query cache access hardening still need dedicated add-on parity slices.
 - Market-data provider breadth and background orchestration remain active
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
-  dividends/search/resolve, targeted Yahoo sync, bounded broad Yahoo
-  sync/history, market-sync result payloads, quote-triggered portfolio jobs, and
-  bounded portfolio valuation/TOTAL recalculation have TS runtime coverage,
-  while all-provider sync, background orchestration, automatic/background FX
-  quote fetching, and remaining complex activity-derived snapshot behavior must
-  move with dedicated market-data and portfolio parity slices.
+  dividends/search/resolve, bounded custom-provider symbol quote resolution,
+  targeted Yahoo sync, bounded broad Yahoo sync/history, market-sync result
+  payloads, quote-triggered portfolio jobs, and bounded portfolio
+  valuation/TOTAL recalculation have TS runtime coverage, while all-provider
+  sync, background orchestration, automatic/background FX quote fetching, and
+  remaining complex activity-derived snapshot behavior must move with dedicated
+  market-data and portfolio parity slices.
 
 ## Blockers
 

@@ -1,6 +1,11 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
+import type {
+  CustomProviderSource,
+  CustomProviderSourceKind,
+  TestSourceRequest,
+} from "./custom-providers";
 import { createMarketDataService } from "./market-data";
 import type { QuoteSyncEvent } from "./quote-sync";
 
@@ -1669,6 +1674,205 @@ describe("TS market data domain", () => {
           url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/AZN.L?"),
         ),
       ).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("resolves custom provider quote summaries without falling back to Yahoo", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      fetch: (() => {
+        calls.push("yahoo");
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-10T00:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          expect(kind).toBe("latest");
+          return {
+            id: "source-1",
+            providerId: "my-feed",
+            kind: "latest",
+            format: "json",
+            url: "https://prices.example.test/{SYMBOL}",
+            pricePath: "$.price",
+            datePath: null,
+            dateFormat: null,
+            currencyPath: "$.currency",
+            factor: null,
+            invert: null,
+            locale: null,
+            headers: null,
+            openPath: null,
+            highPath: null,
+            lowPath: null,
+            volumePath: null,
+            defaultPrice: null,
+            dateTimezone: null,
+          };
+        },
+        testSource(request) {
+          expect(request).toMatchObject({
+            format: "json",
+            url: "https://prices.example.test/{SYMBOL}",
+            pricePath: "$.price",
+            currencyPath: "$.currency",
+            symbol: "FUND",
+            currency: "CAD",
+          });
+          return {
+            success: true,
+            statusCode: 200,
+            price: 42.25,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: null,
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "FUND",
+          instrumentType: "EQUITY",
+          quoteCcy: "cad",
+          providerId: "CUSTOM:my-feed",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 42.25,
+        resolvedProviderId: "CUSTOM_SCRAPER:my-feed",
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to historical custom provider sources for quote summaries", async () => {
+    const db = createMarketDataDb();
+    const yahooCalls: string[] = [];
+    const sourceKinds: CustomProviderSourceKind[] = [];
+    const requests: TestSourceRequest[] = [];
+    const latestSource: CustomProviderSource = {
+      id: "source-latest",
+      providerId: "my-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: null,
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const historicalSource: CustomProviderSource = {
+      ...latestSource,
+      id: "source-historical",
+      kind: "historical",
+      url: "https://prices.example.test/history/{SYMBOL}",
+      pricePath: "$.close",
+    };
+    const service = createMarketDataService(db, {
+      fetch: (() => {
+        yahooCalls.push("yahoo");
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-10T00:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          sourceKinds.push(kind);
+          return kind === "latest" ? latestSource : historicalSource;
+        },
+        testSource(request) {
+          requests.push(request);
+          if (request.url === latestSource.url) {
+            return {
+              success: false,
+              statusCode: 200,
+              price: null,
+              open: null,
+              high: null,
+              low: null,
+              volume: null,
+              currency: null,
+              date: null,
+              error: "missing price",
+              rawResponse: null,
+              detectedElements: null,
+              detectedTables: null,
+            };
+          }
+
+          expect(request).toMatchObject({
+            format: "json",
+            url: "https://prices.example.test/history/{SYMBOL}",
+            pricePath: "$.close",
+            symbol: "FUND",
+            currency: "CAD",
+            from: "2025-10-12",
+            to: "2026-01-10",
+          });
+          return {
+            success: true,
+            statusCode: 200,
+            price: 41.5,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-09",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "FUND",
+          instrumentType: "EQUITY",
+          quoteCcy: "cad",
+          providerId: "CUSTOM:my-feed",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 41.5,
+        resolvedProviderId: "CUSTOM_SCRAPER:my-feed",
+      });
+      expect(sourceKinds).toEqual(["latest", "historical"]);
+      expect(requests.map(({ from, to }) => ({ from: from ?? null, to: to ?? null }))).toEqual([
+        { from: null, to: null },
+        { from: "2025-10-12", to: "2026-01-10" },
+      ]);
+      expect(yahooCalls).toEqual([]);
     } finally {
       db.close();
     }

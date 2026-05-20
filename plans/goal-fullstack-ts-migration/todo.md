@@ -185,12 +185,13 @@
     enforcement for SDK domain APIs, UI registration, and scoped secrets now
     have TS runtime parity, while add-on security scanning, full sandbox
     isolation, and query-cache hardening are deferred to add-on runtime parity
-    slices; targeted and bounded broad Yahoo market-data sync now have TS
-    runtime parity, while all-provider sync and background orchestration remain
-    deferred to market-data/portfolio parity slices; market-sync result
-    accounting, portfolio `market:sync-complete` failure/skipped-reason
-    payloads, and market-data quote/sync portfolio job side effects now have TS
-    parity; activity mutation event production,
+    slices; targeted and bounded broad Yahoo market-data sync plus bounded
+    custom-provider-backed symbol quote resolution now have TS runtime parity,
+    while all-provider sync and background orchestration remain deferred to
+    market-data/portfolio parity slices; market-sync result accounting,
+    portfolio `market:sync-complete` failure/skipped-reason payloads, and
+    market-data quote/sync portfolio job side effects now have TS parity;
+    activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -2096,6 +2097,16 @@ contract:
   position currency to account currency at the snapshot date, including BUY/SELL
   and transfer replay paths plus missing-FX fallback to the unconverted cost
   basis.
+- `pr5-market-data-custom-provider-resolve`: targeted checks passed:
+  `bun test apps/backend/src/domains/market-data.test.ts` and
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`. Coverage
+  includes `resolveSymbolQuote` honoring `CUSTOM:<code>` provider preferences
+  through the runtime custom-provider source/test-source service, trying latest
+  sources before historical fallback windows, returning `CUSTOM_SCRAPER:<code>`
+  provider IDs, and avoiding Yahoo fallback when the requested custom provider
+  resolves a price. Full repository check passed with `bun run check`; focused
+  code review identified a historical fallback test gap, the implementation
+  covered it, and re-review found no remaining actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2111,19 +2122,20 @@ contract:
   quote-provider interactions, auto-classification, and portfolio recalculation
   side effects move with asset/market-data/portfolio parity slices; all-provider
   market sync and background orchestration move with market-data/portfolio
-  parity slices; provider-backed symbol fetch/resolution moves with
-  market-data/provider parity slices; full portfolio snapshot rebuilding side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths, sync
-  engine push/pull, and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks
-  and real market sync fix execution move with health/calculation parity slices;
-  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  subscription entitlement checks, event production, E2EE enrollment, sync
-  engine, snapshot/upload runtime, feature-flag errors, background workers,
-  device-sync cloud clients, token lifecycle, team-key operations, key material
-  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
-  secret side effects move with Connect/device-sync parity slices.
+  parity slices; remaining provider-backed symbol fetch/resolution and sync
+  breadth moves with market-data/provider parity slices; full portfolio snapshot
+  rebuilding side effects move with holdings/portfolio parity slices; add-on
+  security scanning, full sandbox isolation, and query-cache hardening move with
+  add-on runtime parity slices; provider-backed asset resolution, remaining
+  quote sync-outbox emission outside migrated alternative-asset and market-data
+  quote paths, sync engine push/pull, and portfolio recalculation side effects
+  move with activities/import/device-sync runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; broader
+  health checks and real market sync fix execution move with health/calculation
+  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, subscription entitlement checks, event production, E2EE
+  enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

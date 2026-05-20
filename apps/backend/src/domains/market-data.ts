@@ -7,6 +7,12 @@ import {
   type QuoteSyncOperation,
   queueUserQuoteSyncEvent,
 } from "./quote-sync";
+import type {
+  CustomProviderService,
+  CustomProviderSource,
+  CustomProviderSourceKind,
+  TestSourceRequest,
+} from "./custom-providers";
 
 export interface ExchangeInfo {
   mic: string;
@@ -145,6 +151,7 @@ export interface MarketDataServiceOptions {
   fetch?: typeof fetch;
   now?: () => Date;
   queueQuoteSyncEvent?: (event: QuoteSyncEvent) => void;
+  customProviderService?: Pick<CustomProviderService, "getSourceByKind" | "testSource">;
 }
 
 export class MarketDataNotImplementedError extends Error {
@@ -336,15 +343,22 @@ export function createMarketDataService(
     },
 
     resolveSymbolQuote(request) {
-      return resolveSymbolQuote(request, exchangeCatalog, fetchImpl, {
-        get: () => yahooCrumb,
-        set: (crumb) => {
-          yahooCrumb = crumb;
+      return resolveSymbolQuote(
+        request,
+        exchangeCatalog,
+        fetchImpl,
+        {
+          get: () => yahooCrumb,
+          set: (crumb) => {
+            yahooCrumb = crumb;
+          },
+          clear: () => {
+            yahooCrumb = null;
+          },
         },
-        clear: () => {
-          yahooCrumb = null;
-        },
-      });
+        options.customProviderService,
+        now(),
+      );
     },
 
     getQuoteHistory(symbol) {
@@ -1170,6 +1184,8 @@ async function resolveSymbolQuote(
     set: (crumb: YahooCrumbData) => void;
     clear: () => void;
   },
+  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  now: Date,
 ): Promise<ResolvedQuote> {
   const trimmedSymbol = request.symbol.trim();
   if (trimmedSymbol === "") {
@@ -1177,6 +1193,19 @@ async function resolveSymbolQuote(
   }
 
   const preferredProvider = normalizePreferredProvider(request.providerId);
+  if (preferredProvider?.startsWith("CUSTOM:")) {
+    const customProviderCode = preferredProvider.slice("CUSTOM:".length).trim();
+    if (!customProviderCode) {
+      return defaultResolvedQuote();
+    }
+    return resolveCustomProviderSymbolQuote(
+      customProviderCode,
+      trimmedSymbol,
+      optionalString(request.quoteCcy)?.toUpperCase() ?? null,
+      customProviderService,
+      now,
+    );
+  }
   if (preferredProvider !== null && preferredProvider !== "YAHOO") {
     return defaultResolvedQuote();
   }
@@ -1227,6 +1256,77 @@ async function resolveSymbolQuote(
   }
 
   return defaultResolvedQuote();
+}
+
+async function resolveCustomProviderSymbolQuote(
+  providerCode: string,
+  symbol: string,
+  quoteCcy: string | null,
+  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  now: Date,
+): Promise<ResolvedQuote> {
+  if (!customProviderService) {
+    return defaultResolvedQuote();
+  }
+
+  for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
+    const source = await Promise.resolve(customProviderService.getSourceByKind(providerCode, kind));
+    if (!source) {
+      continue;
+    }
+    try {
+      const result = await Promise.resolve(
+        customProviderService.testSource(
+          customProviderTestSourceRequest(source, symbol, quoteCcy, now),
+        ),
+      );
+      if (!result.success || result.price === null || !Number.isFinite(result.price)) {
+        continue;
+      }
+      return {
+        currency: result.currency ?? quoteCcy ?? "USD",
+        price: result.price === 0 ? null : result.price,
+        resolvedProviderId: `CUSTOM_SCRAPER:${source.providerId}`,
+      };
+    } catch {
+      continue;
+    }
+  }
+  return defaultResolvedQuote();
+}
+
+function customProviderTestSourceRequest(
+  source: CustomProviderSource,
+  symbol: string,
+  quoteCcy: string | null,
+  now: Date,
+): TestSourceRequest {
+  const request: TestSourceRequest = {
+    format: source.format,
+    url: source.url,
+    pricePath: source.pricePath,
+    symbol,
+    currency: quoteCcy ?? "USD",
+    datePath: source.datePath ?? undefined,
+    dateFormat: source.dateFormat ?? undefined,
+    currencyPath: source.currencyPath ?? undefined,
+    factor: source.factor ?? undefined,
+    invert: source.invert ?? undefined,
+    locale: source.locale ?? undefined,
+    headers: source.headers ?? undefined,
+    openPath: source.openPath ?? undefined,
+    highPath: source.highPath ?? undefined,
+    lowPath: source.lowPath ?? undefined,
+    volumePath: source.volumePath ?? undefined,
+    defaultPrice: source.defaultPrice ?? undefined,
+    dateTimezone: source.dateTimezone ?? undefined,
+  };
+  if (source.kind === "historical") {
+    const to = isoDate(now);
+    request.to = to;
+    request.from = addDays(to, -90);
+  }
+  return request;
 }
 
 async function fetchYahooResolvedQuote(
