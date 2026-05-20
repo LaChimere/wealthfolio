@@ -1,3 +1,6 @@
+import type { Database } from "bun:sqlite";
+
+import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
 
 export interface ConnectImportRunsRequest {
@@ -8,6 +11,12 @@ export interface ConnectImportRunsRequest {
 
 export interface ConnectDeviceSyncReconcileReadyRequest {
   allowOverwrite: boolean;
+}
+
+export interface LocalConnectServiceDependencies {
+  db: Database;
+  activityService: ActivityService;
+  accountService: Pick<AccountService, "getAllAccounts">;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -132,10 +141,28 @@ export function createDisabledConnectService(): ConnectService {
   };
 }
 
-export function createLocalConnectService(activityService: ActivityService): ConnectService {
+export function createLocalConnectService({
+  db,
+  activityService,
+  accountService,
+}: LocalConnectServiceDependencies): ConnectService {
   const disabledService = createDisabledConnectService();
   return {
     ...disabledService,
+    getSyncedAccounts() {
+      return accountService
+        .getAllAccounts()
+        .filter((account) => account.providerAccountId !== null);
+    },
+    getPlatforms() {
+      return getLocalConnectPlatforms(db);
+    },
+    getBrokerSyncStates() {
+      return getLocalBrokerSyncStates(db);
+    },
+    getImportRuns(request) {
+      return getLocalImportRuns(db, request);
+    },
     async getBrokerSyncProfile(accountId, sourceSystem) {
       if (!activityService.getBrokerSyncProfile) {
         throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
@@ -149,6 +176,276 @@ export function createLocalConnectService(activityService: ActivityService): Con
       return await activityService.saveBrokerSyncProfileRules(request);
     },
   };
+}
+
+interface ConnectPlatformRow {
+  id: string;
+  name: string | null;
+  url: string;
+  external_id: string | null;
+  kind: string;
+  website_url: string | null;
+  logo_url: string | null;
+}
+
+interface BrokerSyncStateRow {
+  account_id: string;
+  provider: string;
+  checkpoint_json: string | null;
+  last_attempted_at: string | null;
+  last_successful_at: string | null;
+  last_error: string | null;
+  last_run_id: string | null;
+  sync_status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ImportRunRow {
+  id: string;
+  account_id: string;
+  source_system: string;
+  run_type: string;
+  mode: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  review_mode: string;
+  applied_at: string | null;
+  checkpoint_in: string | null;
+  checkpoint_out: string | null;
+  summary: string | null;
+  warnings: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ImportRunSummary {
+  fetched: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  warnings: number;
+  errors: number;
+  removed: number;
+  assetsCreated: number;
+}
+
+type BrokerSyncStatus = "IDLE" | "RUNNING" | "NEEDS_REVIEW" | "FAILED";
+type ImportRunType = "SYNC" | "IMPORT";
+type ImportRunMode = "INITIAL" | "INCREMENTAL" | "BACKFILL" | "REPAIR";
+type ImportRunStatus = "RUNNING" | "APPLIED" | "NEEDS_REVIEW" | "FAILED" | "CANCELLED";
+type ImportRunReviewMode = "NEVER" | "ALWAYS" | "IF_WARNINGS";
+
+function getLocalConnectPlatforms(db: Database): unknown[] {
+  return db
+    .query<ConnectPlatformRow, []>(
+      `
+        SELECT id, name, url, external_id, kind, website_url, logo_url
+        FROM platforms
+        ORDER BY name ASC
+      `,
+    )
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      url: row.url,
+      externalId: row.external_id,
+      kind: row.kind,
+      websiteUrl: row.website_url,
+      logoUrl: row.logo_url,
+    }));
+}
+
+function getLocalBrokerSyncStates(db: Database): unknown[] {
+  return db
+    .query<BrokerSyncStateRow, []>(
+      `
+        SELECT
+          account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+          last_error, last_run_id, sync_status, created_at, updated_at
+        FROM brokers_sync_state
+        ORDER BY updated_at DESC
+      `,
+    )
+    .all()
+    .map((row) => ({
+      accountId: row.account_id,
+      provider: row.provider,
+      checkpointJson: parseJsonOrNull(row.checkpoint_json),
+      lastAttemptedAt: optionalRustDateTime(row.last_attempted_at),
+      lastSuccessfulAt: optionalRustDateTime(row.last_successful_at),
+      lastError: row.last_error,
+      lastRunId: row.last_run_id,
+      syncStatus: brokerSyncStatus(row.sync_status),
+      createdAt: rustDateTime(row.created_at),
+      updatedAt: rustDateTime(row.updated_at),
+    }));
+}
+
+function getLocalImportRuns(db: Database, request: ConnectImportRunsRequest): unknown[] {
+  const params: Array<string | number> = [];
+  const whereSql = request.runType ? "WHERE run_type = ?" : "";
+  if (request.runType) {
+    params.push(request.runType);
+  }
+  params.push(request.limit, request.offset);
+
+  return db
+    .query<ImportRunRow, Array<string | number>>(
+      `
+        SELECT
+          id, account_id, source_system, run_type, mode, status, started_at, finished_at,
+          review_mode, applied_at, checkpoint_in, checkpoint_out, summary, warnings, error,
+          created_at, updated_at
+        FROM import_runs
+        ${whereSql}
+        ORDER BY started_at DESC
+        LIMIT ? OFFSET ?
+      `,
+    )
+    .all(...params)
+    .map(importRunFromRow);
+}
+
+function importRunFromRow(row: ImportRunRow): unknown {
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    sourceSystem: row.source_system,
+    runType: enumValue<ImportRunType>(row.run_type, ["SYNC", "IMPORT"], "SYNC"),
+    mode: enumValue<ImportRunMode>(
+      row.mode,
+      ["INITIAL", "INCREMENTAL", "BACKFILL", "REPAIR"],
+      "INCREMENTAL",
+    ),
+    status: enumValue<ImportRunStatus>(
+      row.status,
+      ["RUNNING", "APPLIED", "NEEDS_REVIEW", "FAILED", "CANCELLED"],
+      "RUNNING",
+    ),
+    startedAt: rustDateTime(row.started_at),
+    finishedAt: optionalRustDateTime(row.finished_at),
+    reviewMode: enumValue<ImportRunReviewMode>(
+      row.review_mode,
+      ["NEVER", "ALWAYS", "IF_WARNINGS"],
+      "NEVER",
+    ),
+    appliedAt: optionalRustDateTime(row.applied_at),
+    checkpointIn: parseJsonOrNull(row.checkpoint_in),
+    checkpointOut: parseJsonOrNull(row.checkpoint_out),
+    summary: parseImportRunSummary(row.summary),
+    warnings: parseStringArrayOrNull(row.warnings),
+    error: row.error,
+    createdAt: rustDateTime(row.created_at),
+    updatedAt: rustDateTime(row.updated_at),
+  };
+}
+
+function brokerSyncStatus(value: string): BrokerSyncStatus {
+  switch (value) {
+    case "RUNNING":
+    case "SYNCING":
+      return "RUNNING";
+    case "NEEDS_REVIEW":
+      return "NEEDS_REVIEW";
+    case "FAILED":
+      return "FAILED";
+    case "IDLE":
+    default:
+      return "IDLE";
+  }
+}
+
+function enumValue<T extends string>(value: string, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function parseImportRunSummary(value: string | null): ImportRunSummary | null {
+  const parsed = parseJsonOrNull(value);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const fetched = readU32(parsed, "fetched");
+  const inserted = readU32(parsed, "inserted");
+  const updated = readU32(parsed, "updated");
+  const skipped = readU32(parsed, "skipped");
+  const warnings = readU32(parsed, "warnings");
+  const errors = readU32(parsed, "errors");
+  const removed = readU32(parsed, "removed");
+  const assetsCreated = readU32(parsed, "assetsCreated");
+  if (
+    fetched === null ||
+    inserted === null ||
+    updated === null ||
+    skipped === null ||
+    warnings === null ||
+    errors === null ||
+    removed === null ||
+    assetsCreated === null
+  ) {
+    return null;
+  }
+  return {
+    fetched,
+    inserted,
+    updated,
+    skipped,
+    warnings,
+    errors,
+    removed,
+    assetsCreated,
+  };
+}
+
+function parseStringArrayOrNull(value: string | null): string[] | null {
+  const parsed = parseJsonOrNull(value);
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseJsonOrNull(value: string | null): unknown | null {
+  if (value === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isU32(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+}
+
+function readU32(record: Record<string, unknown>, field: string): number | null {
+  const value = record[field];
+  return isU32(value) ? value : null;
+}
+
+function optionalRustDateTime(value: string | null): string | null {
+  return value === null ? null : rustDateTime(value);
+}
+
+function rustDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return rustUtcString(new Date());
+  }
+  return rustUtcString(date);
+}
+
+function rustUtcString(date: Date): string {
+  return date.toISOString().replace(".000Z", "Z");
 }
 
 function cloudSyncDisabled(): ConnectNotImplementedError {

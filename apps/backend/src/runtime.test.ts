@@ -1008,13 +1008,19 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires disabled Connect runtime behavior", async () => {
+  test("wires local Connect runtime behavior with disabled cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       repositoryRoot,
       secretKey: config.secretKey,
     });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeConnectData(db);
+    } finally {
+      db.close();
+    }
     const server = startBackendServer(config, runtime.options);
 
     try {
@@ -1046,16 +1052,115 @@ describe("TS backend runtime composition", () => {
       });
       expect(syncResponse.status).toBe(501);
 
-      for (const pathName of [
-        "/api/v1/connect/synced-accounts",
-        "/api/v1/connect/platforms",
-        "/api/v1/connect/sync-states",
-        "/api/v1/connect/import-runs?runType=broker&limit=10&offset=0",
-      ]) {
-        const response = await fetch(`${server.baseUrl}${pathName}`);
-        expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toEqual([]);
-      }
+      const syncedAccountsResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/synced-accounts`,
+      );
+      expect(syncedAccountsResponse.status).toBe(200);
+      await expect(syncedAccountsResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: "connect-account",
+          name: "Snap Account",
+          platformId: "SNAPTRADE",
+          provider: "SNAPTRADE",
+          providerAccountId: "provider-account-1",
+          trackingMode: "HOLDINGS",
+          isActive: true,
+          isArchived: false,
+        }),
+      ]);
+
+      const platformsResponse = await fetch(`${server.baseUrl}/api/v1/connect/platforms`);
+      expect(platformsResponse.status).toBe(200);
+      await expect(platformsResponse.json()).resolves.toEqual([
+        {
+          id: "SNAPTRADE",
+          name: "SnapTrade",
+          url: "https://snaptrade.com",
+          externalId: "snaptrade-external",
+          kind: "BROKERAGE",
+          websiteUrl: "https://snaptrade.com",
+          logoUrl: "https://cdn.example/snaptrade.png",
+        },
+      ]);
+
+      const syncStatesResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync-states`);
+      expect(syncStatesResponse.status).toBe(200);
+      await expect(syncStatesResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          accountId: "connect-account",
+          provider: "PLAID",
+          checkpointJson: null,
+          syncStatus: "NEEDS_REVIEW",
+          lastError: "mapping required",
+          updatedAt: "2026-05-15T10:00:00Z",
+        }),
+        expect.objectContaining({
+          accountId: "connect-account",
+          provider: "SNAPTRADE",
+          checkpointJson: { lastSyncedDate: "2026-05-14", lookbackDays: 30 },
+          lastAttemptedAt: "2026-05-14T09:00:00Z",
+          lastSuccessfulAt: "2026-05-14T10:00:00Z",
+          syncStatus: "RUNNING",
+          lastRunId: "import-run-1",
+          updatedAt: "2026-05-14T10:00:00Z",
+        }),
+      ]);
+
+      const importRunsResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/import-runs?limit=10&offset=0`,
+      );
+      expect(importRunsResponse.status).toBe(200);
+      await expect(importRunsResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: "import-run-invalid",
+          runType: "SYNC",
+          mode: "INCREMENTAL",
+          status: "RUNNING",
+          reviewMode: "NEVER",
+          summary: null,
+          warnings: null,
+          startedAt: "2026-05-15T10:00:00Z",
+        }),
+        expect.objectContaining({
+          id: "import-run-1",
+          accountId: "connect-account",
+          sourceSystem: "SNAPTRADE",
+          runType: "SYNC",
+          mode: "INCREMENTAL",
+          status: "APPLIED",
+          reviewMode: "NEVER",
+          checkpointIn: { cursor: "in" },
+          checkpointOut: { cursor: "out" },
+          summary: {
+            fetched: 2,
+            inserted: 1,
+            updated: 0,
+            skipped: 1,
+            warnings: 0,
+            errors: 0,
+            removed: 0,
+            assetsCreated: 1,
+          },
+          warnings: ["minor"],
+          error: null,
+          startedAt: "2026-05-14T09:00:00Z",
+          finishedAt: "2026-05-14T10:00:00Z",
+        }),
+      ]);
+
+      const filteredImportRunsResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/import-runs?runType=SYNC&limit=10&offset=0`,
+      );
+      expect(filteredImportRunsResponse.status).toBe(200);
+      await expect(filteredImportRunsResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: "import-run-1" }),
+      ]);
+
+      const emptyRunTypeImportRunsResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/import-runs?runType=&limit=10&offset=0`,
+      );
+      expect(emptyRunTypeImportRunsResponse.status).toBe(200);
+      await expect(emptyRunTypeImportRunsResponse.json()).resolves.toHaveLength(2);
 
       const defaultProfileResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,
@@ -2574,6 +2679,133 @@ function seedRuntimeTransactionActivityInput(db: ReturnType<typeof openSqliteDat
         ('tx-buy', 'tx-account', 'tx-asset', 'BUY', NULL, 'POSTED',
           '2026-05-14T12:00:00.000Z', '2', '10', NULL, '1', 'USD', NULL, NULL,
           NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-05-14T12:00:00.000Z', '2026-05-14T12:00:00.000Z')
+    `,
+  ).run();
+}
+
+function seedRuntimeConnectData(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    `
+      INSERT INTO platforms (
+        id, name, url, external_id, kind, website_url, logo_url
+      )
+      VALUES (
+        'SNAPTRADE',
+        'SnapTrade',
+        'https://snaptrade.com',
+        'snaptrade-external',
+        'BROKERAGE',
+        'https://snaptrade.com',
+        'https://cdn.example/snaptrade.png'
+      )
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        created_at, updated_at, platform_id, account_number, meta, provider,
+        provider_account_id, is_archived, tracking_mode
+      )
+      VALUES (
+        'connect-account',
+        'Snap Account',
+        'SECURITIES',
+        NULL,
+        'USD',
+        0,
+        1,
+        '2026-05-14 08:00:00',
+        '2026-05-14 08:30:00',
+        'SNAPTRADE',
+        '****1234',
+        '{"institution":"SnapTrade"}',
+        'SNAPTRADE',
+        'provider-account-1',
+        0,
+        'HOLDINGS'
+      )
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO import_runs (
+        id, account_id, source_system, run_type, mode, status, started_at, finished_at,
+        review_mode, applied_at, checkpoint_in, checkpoint_out, summary, warnings, error,
+        created_at, updated_at
+      )
+      VALUES
+        (
+          'import-run-1',
+          'connect-account',
+          'SNAPTRADE',
+          'SYNC',
+          'INCREMENTAL',
+          'APPLIED',
+          '2026-05-14T09:00:00+00:00',
+          '2026-05-14T10:00:00+00:00',
+          'NEVER',
+          '2026-05-14T10:00:00+00:00',
+          '{"cursor":"in"}',
+          '{"cursor":"out"}',
+          '{"fetched":2,"inserted":1,"updated":0,"skipped":1,"warnings":0,"errors":0,"removed":0,"assetsCreated":1}',
+          '["minor"]',
+          NULL,
+          '2026-05-14T09:00:00+00:00',
+          '2026-05-14T10:00:00+00:00'
+        ),
+        (
+          'import-run-invalid',
+          'connect-account',
+          'SNAPTRADE',
+          'BROKEN',
+          'BROKEN',
+          'BROKEN',
+          '2026-05-15T10:00:00+00:00',
+          NULL,
+          'BROKEN',
+          NULL,
+          'not-json',
+          NULL,
+          '{"fetched":1}',
+          '[1]',
+          'bad enum row',
+          '2026-05-15T10:00:00+00:00',
+          '2026-05-15T10:00:00+00:00'
+        )
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      )
+      VALUES
+        (
+          'connect-account',
+          'SNAPTRADE',
+          '{"lastSyncedDate":"2026-05-14","lookbackDays":30}',
+          '2026-05-14T09:00:00+00:00',
+          '2026-05-14T10:00:00+00:00',
+          NULL,
+          'import-run-1',
+          'SYNCING',
+          '2026-05-14T09:00:00+00:00',
+          '2026-05-14T10:00:00+00:00'
+        ),
+        (
+          'connect-account',
+          'PLAID',
+          NULL,
+          '2026-05-15T09:00:00+00:00',
+          NULL,
+          'mapping required',
+          NULL,
+          'NEEDS_REVIEW',
+          '2026-05-15T09:00:00+00:00',
+          '2026-05-15T10:00:00+00:00'
+        )
     `,
   ).run();
 }

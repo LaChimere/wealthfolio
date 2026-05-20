@@ -235,15 +235,15 @@
     automatic/background FX quote fetching, and portfolio recalculation remain
     deferred; remaining calculation-heavy health checks are deferred to
     health/calculation parity slices; disabled Connect feature-flag responses,
-    local empty-list routes, local broker sync profile persistence, and disabled
-    device-sync route responses now have TS runtime parity, while real Connect
-    token lifecycle, cloud HTTP clients, broker sync orchestration, local sync
-    repositories, subscription entitlement checks, event production, E2EE
-    enrollment, sync engine, snapshot/upload runtime, background workers,
-    device-sync cloud clients, token lifecycle, team-key operations, key
-    material handling, pairing flows, freshness gate persistence, bootstrap
-    transfer, and secret side effects are deferred to Connect/device-sync parity
-    slices.
+    local Connect synced-account/platform/sync-state/import-run reads, local
+    broker sync profile persistence, and disabled device-sync route responses
+    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, subscription entitlement checks, event
+    production, E2EE enrollment, sync engine, snapshot/upload runtime,
+    background workers, device-sync cloud clients, token lifecycle, team-key
+    operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -2059,8 +2059,19 @@ contract:
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
   portfolio-job market-sync health-cache/FX-reinitialize side effects,
   best-effort health-cache clear failure handling, and domain-event
-  portfolio-failure continuation semantics implemented; broader migration
-  remains active.
+  portfolio-failure continuation semantics, and SQLite-backed local Connect
+  synced-account/platform/sync-state/import-run reads implemented; broader
+  migration remains active.
+- `pr5-connect-local-read-runtime`: targeted checks passed:
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "local Connect"`,
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "Connect"`, and
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`. Coverage
+  includes standalone runtime SQLite-backed Connect synced-account, platform,
+  broker sync-state, and import-run local reads; AccountService-backed
+  synced-account filtering, Rust-compatible local route ordering, `SYNCING` and
+  `NEEDS_REVIEW` status mapping, import-run enum fallback, malformed JSON
+  fallback, `runType` filtering, and empty `runType` defaulting while cloud
+  session/list/sync operations remain explicitly disabled.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2087,9 +2098,8 @@ contract:
   for sync crypto moves with device-sync parity slices; broader health checks
   and real market sync fix execution move with health/calculation parity slices;
   real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  local sync repositories, subscription entitlement checks, event production,
-  E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  subscription entitlement checks, event production, E2EE enrollment, sync
+  engine, snapshot/upload runtime, feature-flag errors, background workers,
+  device-sync cloud clients, token lifecycle, team-key operations, key material
+  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
+  secret side effects move with Connect/device-sync parity slices.

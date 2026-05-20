@@ -448,7 +448,7 @@ function createServicesFromDatabase(
       prepareDatabaseRestore,
     }),
     connectDeviceSyncService: createDisabledConnectDeviceSyncService(),
-    connectService: createLocalConnectService(activityService),
+    connectService: createLocalConnectService({ db, activityService, accountService }),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
         queueSyncEvent: (event) =>
