@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 190
+turns_used: 191
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T00:51:39+08:00"
+updated_at: "2026-05-20T10:59:19+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1222,6 +1222,12 @@ updated_at: "2026-05-20T00:51:39+08:00"
   derive missing income/acquisition prices like Rust, and clear synthetic leg
   overrides. Focused portfolio/runtime tests, backend type-check, and focused
   code review passed.
+- Turn 191: Wired market-data mutation side effects into TS portfolio jobs:
+  manual quote update/delete/import routes now enqueue full recalculation jobs,
+  and `/api/v1/market-data/sync` now enqueues an incremental portfolio job with
+  the requested market-sync mode when a portfolio job service is present.
+  Focused HTTP tests, backend type-check, full `bun run check`, and focused code
+  review passed.
 
 ## Deferred items
 
@@ -1437,14 +1443,14 @@ updated_at: "2026-05-20T00:51:39+08:00"
   manifest permissions for SDK domain APIs, UI registration, and scoped secrets,
   while archive security scanning, complete browser sandbox isolation, and React
   Query cache access hardening still need dedicated add-on parity slices.
-- Market-data provider breadth and full recalculation side effects remain active
+- Market-data provider breadth and background orchestration remain active
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
   dividends/search/resolve, targeted Yahoo sync, bounded broad Yahoo
-  sync/history, market-sync result payloads, and bounded portfolio
-  valuation/TOTAL recalculation have TS runtime coverage, while all-provider
-  sync, background orchestration, quote-triggered worker orchestration, and
-  remaining complex activity-derived snapshot behavior must move with dedicated
-  market-data and portfolio parity slices.
+  sync/history, market-sync result payloads, quote-triggered portfolio jobs, and
+  bounded portfolio valuation/TOTAL recalculation have TS runtime coverage,
+  while all-provider sync, background orchestration, automatic/background FX
+  quote fetching, and remaining complex activity-derived snapshot behavior must
+  move with dedicated market-data and portfolio parity slices.
 
 ## Blockers
 

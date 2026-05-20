@@ -397,7 +397,13 @@ async function routeRequest(
     options.marketDataService &&
     (url.pathname === "/api/v1/exchanges" || url.pathname.startsWith("/api/v1/market-data"))
   ) {
-    return routeMarketDataRequest(request, url, config, options.marketDataService);
+    return routeMarketDataRequest(
+      request,
+      url,
+      config,
+      options.marketDataService,
+      options.portfolioJobService,
+    );
   }
 
   if (options.portfolioJobService && url.pathname.startsWith("/api/v1/portfolio")) {
@@ -1931,6 +1937,7 @@ function routeMarketDataRequest(
   url: URL,
   config: BackendRuntimeConfig,
   marketDataService: MarketDataService,
+  portfolioJobService?: PortfolioJobService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -2020,6 +2027,7 @@ function routeMarketDataRequest(
       },
       async (input) => {
         await updateQuote(input.symbol, input.quote);
+        enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
       },
     );
   }
@@ -2030,7 +2038,10 @@ function routeMarketDataRequest(
       return jsonResponse({ code: 404, message: "Not Found" }, 404);
     }
     return Promise.resolve(marketDataService.deleteQuote(deleteQuoteId))
-      .then(() => new Response(null, { status: 204 }))
+      .then(() => {
+        enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
+        return new Response(null, { status: 204 });
+      })
       .catch(domainErrorResponse);
   }
 
@@ -2049,9 +2060,11 @@ function routeMarketDataRequest(
     if (!importQuotesCsv) {
       return jsonResponse({ code: 404, message: "Not Found" }, 404);
     }
-    return handleJsonMutation(request, parseQuotesImportRequest, (input) =>
-      Promise.resolve(importQuotesCsv(input.quotes, input.overwriteExisting)),
-    );
+    return handleJsonMutation(request, parseQuotesImportRequest, async (input) => {
+      const result = await importQuotesCsv(input.quotes, input.overwriteExisting);
+      enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
+      return result;
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/market-data/sync/history") {
@@ -2065,15 +2078,48 @@ function routeMarketDataRequest(
 
   if (request.method === "POST" && url.pathname === "/api/v1/market-data/sync") {
     const syncMarketData = marketDataService.syncMarketData;
-    if (!syncMarketData) {
+    if (!portfolioJobService && !syncMarketData) {
       return jsonResponse({ code: 404, message: "Not Found" }, 404);
     }
     return handleJsonMutationNoContent(request, parseMarketDataSyncRequest, async (mode) => {
-      await syncMarketData(mode);
+      if (portfolioJobService) {
+        await portfolioJobService.enqueuePortfolioJob({
+          accountIds: null,
+          marketSyncMode: mode,
+          snapshotMode: "incremental_from_last",
+          valuationMode: "incremental_from_last",
+          sinceDate: null,
+        });
+        return;
+      }
+      await syncMarketData?.(mode);
     });
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function enqueueQuoteMutationPortfolioRecalculation(
+  portfolioJobService: PortfolioJobService | undefined,
+): void {
+  if (!portfolioJobService) {
+    return;
+  }
+  try {
+    void Promise.resolve(
+      portfolioJobService.enqueuePortfolioJob({
+        accountIds: null,
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: null,
+      }),
+    ).catch((error) => {
+      console.warn(`Quote mutation portfolio recalculation failed: ${errorMessage(error)}`);
+    });
+  } catch (error) {
+    console.warn(`Quote mutation portfolio recalculation failed: ${errorMessage(error)}`);
+  }
 }
 
 function routeMarketDataProviderRequest(

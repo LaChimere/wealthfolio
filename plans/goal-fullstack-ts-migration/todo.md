@@ -186,11 +186,11 @@
     have TS runtime parity, while add-on security scanning, full sandbox
     isolation, and query-cache hardening are deferred to add-on runtime parity
     slices; targeted and bounded broad Yahoo market-data sync now have TS
-    runtime parity, while all-provider sync, background orchestration, and
-    portfolio recalculation behavior remain deferred to market-data/portfolio
-    parity slices; market-sync result accounting and portfolio
-    `market:sync-complete` failure/skipped-reason payloads now have TS parity;
-    activity mutation event production,
+    runtime parity, while all-provider sync and background orchestration remain
+    deferred to market-data/portfolio parity slices; market-sync result
+    accounting, portfolio `market:sync-complete` failure/skipped-reason
+    payloads, and market-data quote/sync portfolio job side effects now have TS
+    parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -1882,6 +1882,13 @@ contract:
   sync counts, non-Yahoo skipped-reason reporting, targeted Yahoo failure
   tuples, and portfolio `market:sync-complete` payload forwarding. Focused code
   review found no significant issues.
+- `pr5-market-data-portfolio-job-side-effects`: targeted checks passed:
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "market data mutation side effects"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes manual quote update/delete/import routes enqueuing full
+  portfolio recalculation jobs, plus `/api/v1/market-data/sync` enqueuing an
+  incremental portfolio job with the requested market-sync mode when a portfolio
+  job service owns execution.
 - `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
   and `bun run type-check`. Coverage includes service-level
@@ -1999,8 +2006,8 @@ contract:
   transaction-account activity snapshot rebuilding, BUY/SELL broker FX handling,
   option contract multipliers, option-expiry adjustment replay, split
   preprocessing, lot-level asset-transfer replay, other adjustment no-op
-  behavior, and market-sync result/payload parity implemented; broader migration
-  remains active.
+  behavior, market-sync result/payload parity, and market-data quote/sync
+  portfolio job side effects implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2015,22 +2022,22 @@ contract:
   alternative asset portfolio job enqueue and recalculation side effects move
   with portfolio parity slices; asset quote-provider interactions,
   auto-classification, and portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; all-provider market sync,
-  background orchestration, and quote-triggered recalculation side effects move
-  with market-data/portfolio parity slices; provider-backed symbol
-  fetch/resolution moves with market-data/provider parity slices; full portfolio
-  snapshot rebuilding side effects move with holdings/portfolio parity slices;
-  add-on security scanning, full sandbox isolation, and query-cache hardening
-  move with add-on runtime parity slices; provider-backed asset resolution,
-  remaining quote sync-outbox emission outside migrated alternative-asset and
-  market-data quote paths, sync engine push/pull, and portfolio recalculation
-  side effects move with activities/import/device-sync runtime parity slices;
-  device-sync integration for sync crypto moves with device-sync parity slices;
-  broader health checks and real market sync fix execution move with
-  health/calculation parity slices; real Connect token lifecycle, cloud HTTP
-  clients, broker sync orchestration, local sync repositories, subscription
-  entitlement checks, event production, E2EE enrollment, sync engine,
-  snapshot/upload runtime, feature-flag errors, background workers, device-sync
-  cloud clients, token lifecycle, team-key operations, key material handling,
-  pairing flows, freshness gate persistence, bootstrap transfer, and secret side
-  effects move with Connect/device-sync parity slices.
+  asset/market-data/portfolio parity slices; all-provider market sync and
+  background orchestration move with market-data/portfolio parity slices;
+  provider-backed symbol fetch/resolution moves with market-data/provider parity
+  slices; full portfolio snapshot rebuilding side effects move with
+  holdings/portfolio parity slices; add-on security scanning, full sandbox
+  isolation, and query-cache hardening move with add-on runtime parity slices;
+  provider-backed asset resolution, remaining quote sync-outbox emission outside
+  migrated alternative-asset and market-data quote paths, sync engine push/pull,
+  and portfolio recalculation side effects move with
+  activities/import/device-sync runtime parity slices; device-sync integration
+  for sync crypto moves with device-sync parity slices; broader health checks
+  and real market sync fix execution move with health/calculation parity slices;
+  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
+  local sync repositories, subscription entitlement checks, event production,
+  E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and secret side effects move with Connect/device-sync
+  parity slices.

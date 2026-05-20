@@ -2053,6 +2053,98 @@ describe("TS backend HTTP skeleton", () => {
     ]);
   });
 
+  test("enqueues portfolio jobs for market data mutation side effects", async () => {
+    const calls: string[] = [];
+    const enqueued: PortfolioJobConfig[] = [];
+    const marketDataService: MarketDataService = {
+      updateQuote() {
+        calls.push("update-quote");
+      },
+      deleteQuote() {
+        calls.push("delete-quote");
+      },
+      importQuotesCsv() {
+        calls.push("import-quotes");
+        return [];
+      },
+    };
+    const handler = createBackendRequestHandler(config, {
+      marketDataService,
+      portfolioJobService: {
+        enqueuePortfolioJob(config) {
+          enqueued.push(config);
+        },
+      },
+    });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/asset-1", {
+            method: "PUT",
+            headers: jsonHeaders,
+            body: JSON.stringify({ close: "12.34" }),
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/id/quote-1", {
+            method: "DELETE",
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/quotes/import", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ quotes: [{ assetId: "asset-1" }], overwriteExisting: false }),
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/sync", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ assetIds: ["asset-1"], refetchAll: false }),
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    const quoteMutationRecalculation: PortfolioJobConfig = {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "full",
+      valuationMode: "full",
+      sinceDate: null,
+    };
+    expect(calls).toEqual(["update-quote", "delete-quote", "import-quotes"]);
+    expect(enqueued).toEqual([
+      quoteMutationRecalculation,
+      quoteMutationRecalculation,
+      quoteMutationRecalculation,
+      {
+        accountIds: null,
+        marketSyncMode: { type: "incremental", asset_ids: ["asset-1"] },
+        snapshotMode: "incremental_from_last",
+        valuationMode: "incremental_from_last",
+        sinceDate: null,
+      },
+    ]);
+  });
+
   test("routes migrated portfolio job triggers only when a service is provided", async () => {
     const enqueued: PortfolioJobConfig[] = [];
     const handler = createBackendRequestHandler(config, {
