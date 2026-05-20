@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 213
+turns_used: 214
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T23:42:32+08:00"
+updated_at: "2026-05-20T23:54:41+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1377,6 +1377,14 @@ updated_at: "2026-05-20T23:42:32+08:00"
   Focused market-data tests, backend type-check, full `bun run check`,
   rubber-duck plan review, and focused code review passed after tightening
   crypto market-currency coverage.
+- Turn 214: Added Metal Price API provider sync/resolve parity: targeted,
+  incremental, broad, and history sync now use the runtime provider API key,
+  token-authenticated timeframe/latest endpoints, supported metal symbols and
+  weight suffix multipliers, Decimal-backed rate inversion, noon-UTC historical
+  timestamps, empty-rate failure handling, quote sync state updates, and latest
+  quote resolution for metal instruments. Focused market-data tests, backend
+  type-check, full `bun run check`, and focused code review passed after adding
+  empty timeframe response coverage.
 
 ## Deferred items
 

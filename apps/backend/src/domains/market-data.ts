@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import Decimal from "decimal.js";
 
 import { parseCsvRecords } from "../csv";
 import { DEFAULT_HISTORY_DAYS, type MarketSyncMode } from "./portfolio-jobs";
@@ -345,6 +346,19 @@ const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
 const ALPHA_VANTAGE_PROVIDER = "ALPHA_VANTAGE";
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
+const METAL_PRICE_API_PROVIDER = "METAL_PRICE_API";
+const METAL_PRICE_API_BASE_URL = "https://api.metalpriceapi.com/v1";
+const METAL_PRICE_API_SUPPORTED_METALS = new Set([
+  "XAU",
+  "XAG",
+  "XPT",
+  "XPD",
+  "XRH",
+  "XRU",
+  "XIR",
+  "XOS",
+]);
+const TROY_OZ_GRAMS = new Decimal("31.1034768");
 const MARKETDATA_APP_PROVIDER = "MARKETDATA_APP";
 const MARKETDATA_APP_BASE_URL = "https://api.marketdata.app/v1";
 const FINNHUB_PROVIDER = "FINNHUB";
@@ -774,6 +788,74 @@ async function syncMarketDataExecution(
 
       try {
         const quotes = await fetchAlphaVantageHistoricalQuotes(
+          asset.id,
+          instrument,
+          startDate,
+          endDate,
+          fetchImpl,
+          apiKey,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
+    if (provider === METAL_PRICE_API_PROVIDER) {
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const apiKey = await marketDataProviderApiKey(secretService, provider);
+      const instrument = metalPriceApiInstrumentForAsset(asset);
+      const failureMessage =
+        apiKey === null
+          ? `${provider} API key not configured`
+          : instrument === null
+            ? "Asset cannot be mapped to a Metal Price API symbol"
+            : null;
+      if (failureMessage !== null || apiKey === null || instrument === null) {
+        const message = failureMessage ?? "Asset cannot be mapped to a Metal Price API symbol";
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        continue;
+      }
+
+      try {
+        const quotes = await fetchMetalPriceApiHistoricalQuotes(
           asset.id,
           instrument,
           startDate,
@@ -1713,6 +1795,32 @@ async function resolveSymbolQuote(
         currency: quote.currency,
         price: quote.close === "0" ? null : Number(quote.close),
         resolvedProviderId: ALPHA_VANTAGE_PROVIDER,
+      };
+    } catch {
+      return defaultResolvedQuote();
+    }
+  }
+  if (preferredProvider === METAL_PRICE_API_PROVIDER) {
+    if (instrumentType !== "METAL") {
+      return defaultResolvedQuote();
+    }
+    const apiKey = await marketDataProviderApiKey(secretService, METAL_PRICE_API_PROVIDER);
+    const instrument = metalPriceApiInstrumentForSymbol(trimmedSymbol, requestedQuoteCcy);
+    if (apiKey === null || instrument === null) {
+      return defaultResolvedQuote();
+    }
+    try {
+      const quote = await fetchMetalPriceApiLatestQuote(
+        `_QUOTE_RESOLVE_${trimmedSymbol}`,
+        instrument,
+        fetchImpl,
+        apiKey,
+        now,
+      );
+      return {
+        currency: quote.currency,
+        price: quote.close === "0" ? null : Number(quote.close),
+        resolvedProviderId: METAL_PRICE_API_PROVIDER,
       };
     } catch {
       return defaultResolvedQuote();
@@ -3547,6 +3655,235 @@ function alphaVantageCryptoPair(
   const symbol = optionalString(override.symbol)?.toUpperCase();
   const market = optionalString(override.market)?.toUpperCase();
   return symbol && market ? { symbol, market } : null;
+}
+
+async function fetchMetalPriceApiHistoricalQuotes(
+  assetId: string,
+  instrument: { symbol: string; quote: string },
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote[]> {
+  const parsed = parseMetalPriceApiSymbol(instrument.symbol);
+  if (parsed === null) {
+    throw new Error(`Symbol not found: ${instrument.symbol}`);
+  }
+  const payload = await fetchMetalPriceApiJson(
+    "/timeframe",
+    [
+      ["base", instrument.quote],
+      ["currencies", parsed.base],
+      ["start_date", startDate],
+      ["end_date", endDate],
+    ],
+    fetchImpl,
+    apiKey,
+  );
+  return parseMetalPriceApiTimeframeQuotes(payload, assetId, instrument, parsed);
+}
+
+async function fetchMetalPriceApiLatestQuote(
+  assetId: string,
+  instrument: { symbol: string; quote: string },
+  fetchImpl: typeof fetch,
+  apiKey: string,
+  now: Date,
+): Promise<YahooHistoricalQuote> {
+  const parsed = parseMetalPriceApiSymbol(instrument.symbol);
+  if (parsed === null) {
+    throw new Error(`Symbol not found: ${instrument.symbol}`);
+  }
+  const payload = await fetchMetalPriceApiJson(
+    "/latest",
+    [
+      ["base", instrument.quote],
+      ["currencies", parsed.base],
+    ],
+    fetchImpl,
+    apiKey,
+  );
+  return parseMetalPriceApiLatestQuote(payload, assetId, instrument, parsed, now);
+}
+
+async function fetchMetalPriceApiJson(
+  endpoint: string,
+  params: Array<[string, string]>,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  const url = new URL(`${METAL_PRICE_API_BASE_URL}${endpoint}`);
+  for (const [key, value] of params) {
+    url.searchParams.set(key, value);
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { headers: { "X-API-KEY": apiKey } });
+  } catch (error) {
+    throw new Error(`${METAL_PRICE_API_PROVIDER}: Request failed: ${errorMessage(error)}`);
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `${METAL_PRICE_API_PROVIDER}: Failed to parse response: ${errorMessage(error)}`,
+    );
+  }
+}
+
+function parseMetalPriceApiLatestQuote(
+  payload: unknown,
+  assetId: string,
+  instrument: { symbol: string; quote: string },
+  parsed: { base: string; multiplier: Decimal },
+  now: Date,
+): YahooHistoricalQuote {
+  if (
+    !isRecord(payload) ||
+    payload.success !== true ||
+    !isRecord(payload.rates) ||
+    Object.keys(payload.rates).length === 0
+  ) {
+    throw new Error(`${METAL_PRICE_API_PROVIDER}: API request failed`);
+  }
+  const rate = numberValue(payload.rates[parsed.base]);
+  if (rate === null) {
+    throw new Error(`Symbol not found: ${instrument.symbol}`);
+  }
+  return metalPriceApiQuoteFromRate(
+    assetId,
+    now.toISOString(),
+    rate,
+    parsed.multiplier,
+    instrument.quote,
+  );
+}
+
+function parseMetalPriceApiTimeframeQuotes(
+  payload: unknown,
+  assetId: string,
+  instrument: { symbol: string; quote: string },
+  parsed: { base: string; multiplier: Decimal },
+): YahooHistoricalQuote[] {
+  if (
+    !isRecord(payload) ||
+    payload.success !== true ||
+    !isRecord(payload.rates) ||
+    Object.keys(payload.rates).length === 0
+  ) {
+    throw new Error(
+      `${METAL_PRICE_API_PROVIDER}: Timeframe API request failed (body: ${JSON.stringify(payload).slice(0, 300)})`,
+    );
+  }
+  const quotes: YahooHistoricalQuote[] = [];
+  for (const [date, rates] of Object.entries(payload.rates)) {
+    if (!isRecord(rates)) {
+      continue;
+    }
+    const timestamp = metalPriceApiDateTimestamp(date);
+    if (timestamp === null) {
+      throw new Error(`${METAL_PRICE_API_PROVIDER}: Invalid date '${date}'`);
+    }
+    const rate = numberValue(rates[parsed.base]);
+    if (rate === null) {
+      continue;
+    }
+    quotes.push(
+      metalPriceApiQuoteFromRate(assetId, timestamp, rate, parsed.multiplier, instrument.quote),
+    );
+  }
+  return quotes.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function metalPriceApiQuoteFromRate(
+  assetId: string,
+  timestamp: string,
+  rate: number,
+  multiplier: Decimal,
+  currency: string,
+): YahooHistoricalQuote {
+  const close = metalPriceApiRateToPrice(rate, multiplier);
+  return {
+    assetId,
+    day: timestamp.slice(0, 10),
+    timestamp,
+    source: METAL_PRICE_API_PROVIDER,
+    open: null,
+    high: null,
+    low: null,
+    close,
+    adjclose: close,
+    volume: null,
+    currency,
+  };
+}
+
+function metalPriceApiRateToPrice(rate: number, multiplier: Decimal): string {
+  if (!Number.isFinite(rate)) {
+    throw new Error(`${METAL_PRICE_API_PROVIDER}: Failed to convert rate to decimal`);
+  }
+  const rateDecimal = new Decimal(rate);
+  if (rateDecimal.isZero()) {
+    throw new Error(`${METAL_PRICE_API_PROVIDER}: Invalid rate (zero)`);
+  }
+  return new Decimal(1).div(rateDecimal).times(multiplier).toString();
+}
+
+function metalPriceApiDateTimestamp(date: string): string | null {
+  const timestamp = alphaVantageDateTimestamp(date);
+  return timestamp === null ? null : `${timestamp.slice(0, 11)}12:00:00.000Z`;
+}
+
+function metalPriceApiInstrumentForAsset(
+  asset: AssetMarketSyncRow,
+): { symbol: string; quote: string } | null {
+  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined);
+  if (instrumentType !== "METAL") {
+    return null;
+  }
+  return metalPriceApiInstrumentForSymbol(
+    providerOverrideSymbol(asset.provider_config, METAL_PRICE_API_PROVIDER) ??
+      asset.instrument_symbol ??
+      "",
+    asset.quote_ccy,
+  );
+}
+
+function metalPriceApiInstrumentForSymbol(
+  symbol: string,
+  quoteCurrency: string | null,
+): { symbol: string; quote: string } | null {
+  const normalizedSymbol = optionalString(symbol)?.toUpperCase();
+  const quote = optionalString(quoteCurrency)?.toUpperCase() ?? "USD";
+  return normalizedSymbol ? { symbol: normalizedSymbol, quote } : null;
+}
+
+function parseMetalPriceApiSymbol(symbol: string): { base: string; multiplier: Decimal } | null {
+  const [base, suffix] = symbol.toUpperCase().split("-", 2);
+  if (!base || !METAL_PRICE_API_SUPPORTED_METALS.has(base)) {
+    return null;
+  }
+  if (!suffix) {
+    return { base, multiplier: new Decimal(1) };
+  }
+  const grams =
+    suffix === "1KG"
+      ? new Decimal(1000)
+      : suffix === "500G"
+        ? new Decimal(500)
+        : suffix === "250G"
+          ? new Decimal(250)
+          : suffix === "100G"
+            ? new Decimal(100)
+            : suffix === "50G"
+              ? new Decimal(50)
+              : suffix === "10G"
+                ? new Decimal(10)
+                : suffix === "1OZ"
+                  ? TROY_OZ_GRAMS
+                  : null;
+  return grams === null ? null : { base, multiplier: grams.div(TROY_OZ_GRAMS) };
 }
 
 async function fetchMarketDataAppHistoricalQuotes(

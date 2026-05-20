@@ -190,7 +190,8 @@
     custom-provider latest and historical sync, custom latest fallback during
     backfill, Börse Frankfurt historical/latest sync and quote resolution,
     MarketData.app history/latest sync and quote resolution, Finnhub equity
-    history/latest sync and quote resolution, and Alpha Vantage equity/FX/crypto
+    history/latest sync and quote resolution, Alpha Vantage equity/FX/crypto
+    history/latest sync and quote resolution, and Metal Price API metal
     history/latest sync and quote resolution now have TS runtime parity, while
     remaining provider breadth and background orchestration remain deferred to
     market-data/portfolio parity slices; market-sync result accounting,
@@ -238,13 +239,13 @@
     now have TS runtime parity; market-data no-op sync modes plus targeted and
     bounded broad Yahoo provider-backed asset/FX sync, custom-provider
     latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
-    provider sync, Finnhub equity provider sync, and Alpha Vantage
-    equity/FX/crypto provider sync now execute in TS, including market-sync
-    failure/skipped-reason payload propagation, while remaining provider
-    breadth, background orchestration, automatic/background FX quote fetching,
-    and portfolio recalculation remain deferred; remaining calculation-heavy
-    health checks are deferred to health/calculation parity slices; disabled
-    Connect feature-flag responses, local Connect
+    provider sync, Finnhub equity provider sync, Alpha Vantage equity/FX/crypto
+    provider sync, and Metal Price API metal provider sync now execute in TS,
+    including market-sync failure/skipped-reason payload propagation, while
+    remaining provider breadth, background orchestration, automatic/background
+    FX quote fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
     synced-account/platform/sync-state/import-run reads, local broker sync
     profile persistence, and disabled device-sync route responses now have TS
     runtime parity, while real Connect token lifecycle, cloud HTTP clients,
@@ -2203,6 +2204,16 @@ contract:
   unsupported option sync failures without provider calls, quote sync state
   source updates, and latest price quote resolution through daily time-series
   endpoints.
+- `pr5-market-data-metal-price-api-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, and focused code review. Coverage includes targeted,
+  incremental, broad, and history sync for `METAL_PRICE_API` metal assets using
+  the runtime secret service, `X-API-KEY` timeframe/latest endpoint requests,
+  supported metal symbols, weight suffix multipliers, Decimal-backed rate
+  inversion from base-currency rates to metal prices, noon-UTC historical
+  timestamps, empty timeframe response failures, quote sync state source
+  updates, and latest price quote resolution.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

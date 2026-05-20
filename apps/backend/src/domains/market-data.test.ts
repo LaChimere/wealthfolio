@@ -1986,6 +1986,108 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs Metal Price API timeframe quotes with API key auth", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: metalPriceApiTestFetch({
+        calls,
+        responses: {
+          "timeframe:USD:XAU": {
+            success: true,
+            rates: {
+              "2026-01-05": { XAU: 0.0005 },
+            },
+          },
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("METAL_PRICE_API", "metal-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "metal-gold",
+        display_code: "XAU",
+        quote_ccy: "USD",
+        instrument_type: "METAL",
+        instrument_symbol: "XAU",
+        provider_config: JSON.stringify({ preferred_provider: "METAL_PRICE_API" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["metal-gold"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+      });
+
+      expect(calls).toEqual(["timeframe:USD:XAU:2025-11-22:2026-01-06"]);
+      expect(readQuoteByDay(db, "metal-gold", "2026-01-05")).toMatchObject({
+        id: "metal-gold_2026-01-05_METAL_PRICE_API",
+        source: "METAL_PRICE_API",
+        open: null,
+        high: null,
+        low: null,
+        close: "2000",
+        adjclose: "2000",
+        volume: null,
+        currency: "USD",
+      });
+      expect(readSyncState(db, "metal-gold")).toMatchObject({
+        data_source: "METAL_PRICE_API",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records Metal Price API empty timeframe responses as failures", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: metalPriceApiTestFetch({
+        responses: {
+          "timeframe:USD:XAU": {
+            success: true,
+            rates: {},
+          },
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("METAL_PRICE_API", "metal-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "metal-empty",
+        display_code: "XAU",
+        quote_ccy: "USD",
+        instrument_type: "METAL",
+        instrument_symbol: "XAU",
+        provider_config: JSON.stringify({ preferred_provider: "METAL_PRICE_API" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["metal-empty"] }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        quotesSynced: 0,
+      });
+      expect(readSyncState(db, "metal-empty")?.last_error).toContain(
+        "Timeframe API request failed",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs Finnhub equity candles with token auth and exchange currency", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3417,6 +3519,45 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves Metal Price API quote summaries through latest endpoint", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: metalPriceApiTestFetch({
+        calls,
+        responses: {
+          "latest:USD:XAG": {
+            success: true,
+            base: "USD",
+            timestamp: 1767657600,
+            rates: { XAG: 0.05 },
+          },
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("METAL_PRICE_API", "metal-key"),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "XAG",
+          instrumentType: "METAL",
+          quoteCcy: "USD",
+          providerId: "METAL_PRICE_API",
+        }),
+      ).resolves.toEqual({
+        currency: "USD",
+        price: 20,
+        resolvedProviderId: "METAL_PRICE_API",
+      });
+      expect(calls).toEqual(["latest:USD:XAG"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves MarketData.app quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3974,6 +4115,43 @@ function alphaVantageTestFetch(options: {
     const response = options.responses[key];
     if (!response) {
       throw new Error(`unexpected Alpha Vantage request: ${key}`);
+    }
+    return Promise.resolve(Response.json(response));
+  }) as typeof fetch;
+}
+
+function metalPriceApiTestFetch(options: {
+  calls?: string[];
+  responses: Record<string, unknown>;
+  fallback?: typeof fetch;
+}): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith("https://api.metalpriceapi.com/v1/")) {
+      if (options.fallback) {
+        return options.fallback(input, init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.["X-API-KEY"]).toBe("metal-key");
+    const parsed = new URL(url);
+    const endpoint = parsed.pathname.replace("/v1/", "");
+    const base = parsed.searchParams.get("base") ?? "";
+    const currencies = parsed.searchParams.get("currencies") ?? "";
+    const key = `${endpoint}:${base}:${currencies}`;
+    if (endpoint === "timeframe") {
+      options.calls?.push(
+        `${key}:${parsed.searchParams.get("start_date") ?? ""}:${
+          parsed.searchParams.get("end_date") ?? ""
+        }`,
+      );
+    } else {
+      options.calls?.push(key);
+    }
+    const response = options.responses[key];
+    if (!response) {
+      throw new Error(`unexpected Metal Price API request: ${key}`);
     }
     return Promise.resolve(Response.json(response));
   }) as typeof fetch;
