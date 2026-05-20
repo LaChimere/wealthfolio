@@ -12,6 +12,7 @@ import type {
   CustomProviderSource,
   CustomProviderSourceKind,
   TestSourceRequest,
+  TestSourceResult,
 } from "./custom-providers";
 
 export interface ExchangeInfo {
@@ -312,6 +313,7 @@ const MARKET_CLOSE_GRACE_MINUTES = 60;
 const QUOTE_HISTORY_BUFFER_DAYS = 45;
 const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
+const CUSTOM_SCRAPER_PROVIDER = "CUSTOM_SCRAPER";
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
   GBp: "GBP",
   GBX: "GBP",
@@ -445,6 +447,7 @@ export function createMarketDataService(
         },
         now(),
         quoteSyncStateExists,
+        options.customProviderService,
       );
     },
 
@@ -468,6 +471,7 @@ export function createMarketDataService(
         },
         now(),
         quoteSyncStateExists,
+        options.customProviderService,
       );
     },
   };
@@ -517,6 +521,7 @@ async function syncMarketDataExecution(
   },
   now: Date,
   quoteSyncStateExists: boolean,
+  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
 ): Promise<MarketDataSyncResult> {
   const result = emptyMarketDataSyncResult();
   if (marketSyncMode.type === "none") {
@@ -548,6 +553,58 @@ async function syncMarketDataExecution(
 
     const state = states.get(asset.id) ?? null;
     const provider = effectiveMarketDataProvider(state, asset);
+    const customProviderCode = customProviderCodeForMarketSync(provider, asset.provider_config);
+    if (isCustomProviderSync(provider)) {
+      if (marketSyncMode.type === "backfill_history") {
+        addMarketSyncSkip(result, asset.id, "Custom provider history sync not implemented");
+        continue;
+      }
+      if (!customProviderCode) {
+        addMarketSyncSkip(result, asset.id, "General-purpose custom provider sync not implemented");
+        continue;
+      }
+      if ((states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+      const quoteSource = `${CUSTOM_SCRAPER_PROVIDER}:${customProviderCode}`;
+      const customSymbol = customProviderSyncSymbol(asset, customProviderCode);
+      if (customSymbol === null) {
+        updateQuoteSyncStateAfterFailure(
+          db,
+          quoteSyncStateExists,
+          asset.id,
+          quoteSource,
+          "Asset cannot be mapped to a custom provider symbol",
+        );
+        addMarketSyncFailure(
+          result,
+          marketSyncResultAssetLabel(asset),
+          "Asset cannot be mapped to a custom provider symbol",
+        );
+        continue;
+      }
+      try {
+        const quote = await fetchCustomProviderSyncQuote(
+          asset,
+          customProviderCode,
+          customSymbol,
+          customProviderService,
+          now,
+        );
+        db.transaction(() => {
+          upsertQuoteWrite(db, quote, undefined);
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, quote.source);
+        })();
+        result.synced += 1;
+        result.quotesSynced += 1;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, quoteSource, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
     if (provider !== DEFAULT_MARKET_DATA_PROVIDER) {
       addMarketSyncSkip(result, asset.id, `Provider not implemented: ${provider}`);
       continue;
@@ -1269,6 +1326,30 @@ async function resolveCustomProviderSymbolQuote(
     return defaultResolvedQuote();
   }
 
+  const resolved = await fetchCustomProviderQuote(
+    providerCode,
+    symbol,
+    quoteCcy,
+    customProviderService,
+    now,
+  );
+  if (!resolved) {
+    return defaultResolvedQuote();
+  }
+  return {
+    currency: resolved.result.currency ?? quoteCcy ?? "USD",
+    price: resolved.result.price === 0 ? null : resolved.result.price,
+    resolvedProviderId: `CUSTOM_SCRAPER:${resolved.source.providerId}`,
+  };
+}
+
+async function fetchCustomProviderQuote(
+  providerCode: string,
+  symbol: string,
+  quoteCcy: string | null,
+  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource">,
+  now: Date,
+): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
   for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
     const source = await Promise.resolve(customProviderService.getSourceByKind(providerCode, kind));
     if (!source) {
@@ -1283,16 +1364,35 @@ async function resolveCustomProviderSymbolQuote(
       if (!result.success || result.price === null || !Number.isFinite(result.price)) {
         continue;
       }
-      return {
-        currency: result.currency ?? quoteCcy ?? "USD",
-        price: result.price === 0 ? null : result.price,
-        resolvedProviderId: `CUSTOM_SCRAPER:${source.providerId}`,
-      };
+      return { source, result };
     } catch {
       continue;
     }
   }
-  return defaultResolvedQuote();
+  return null;
+}
+
+async function fetchCustomProviderSyncQuote(
+  asset: AssetMarketSyncRow,
+  providerCode: string,
+  symbol: string,
+  customProviderService: Pick<CustomProviderService, "getSourceByKind" | "testSource"> | undefined,
+  now: Date,
+): Promise<QuoteWrite> {
+  if (!customProviderService) {
+    throw new Error("Custom provider service is not available for market sync");
+  }
+  const resolved = await fetchCustomProviderQuote(
+    providerCode,
+    symbol,
+    asset.quote_ccy || null,
+    customProviderService,
+    now,
+  );
+  if (!resolved) {
+    throw new Error(`No custom provider quote extracted for ${symbol}`);
+  }
+  return customProviderQuoteToQuoteWrite(asset, resolved.source, resolved.result, now);
 }
 
 function customProviderTestSourceRequest(
@@ -1327,6 +1427,209 @@ function customProviderTestSourceRequest(
     request.from = addDays(to, -90);
   }
   return request;
+}
+
+function customProviderQuoteToQuoteWrite(
+  asset: AssetMarketSyncRow,
+  source: CustomProviderSource,
+  result: TestSourceResult,
+  now: Date,
+): QuoteWrite {
+  if (result.price === null || !Number.isFinite(result.price)) {
+    throw new Error(`No custom provider quote extracted for ${asset.display_code ?? asset.id}`);
+  }
+  const timestamp = customProviderQuoteTimestamp(result.date, source, now);
+  const day = timestamp.slice(0, 10);
+  const close = storedNumber(result.price);
+  const quoteSource = `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`;
+  return {
+    id: quoteId(asset.id, day, quoteSource),
+    assetId: asset.id,
+    day,
+    source: quoteSource,
+    open: result.open === null ? null : storedNumber(result.open),
+    high: result.high === null ? null : storedNumber(result.high),
+    low: result.low === null ? null : storedNumber(result.low),
+    close,
+    adjclose: null,
+    volume: result.volume === null ? null : storedNumber(result.volume),
+    currency: result.currency ?? asset.quote_ccy,
+    notes: null,
+    createdAt: timestampNow(),
+    timestamp,
+  };
+}
+
+function storedNumber(value: number): string {
+  return String(value);
+}
+
+function customProviderQuoteTimestamp(
+  value: string | null,
+  source: CustomProviderSource,
+  now: Date,
+): string {
+  const parsed = value ? parseCustomProviderDate(value, source.dateFormat) : null;
+  if (!parsed) {
+    return now.toISOString();
+  }
+  return localNoonToUtc(parsed, source.dateTimezone).toISOString();
+}
+
+function parseCustomProviderDate(value: string, explicitFormat: string | null): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (explicitFormat) {
+    return parseCustomProviderDateFormat(trimmed, explicitFormat);
+  }
+  const numericDate = parseCustomProviderNumericDate(trimmed);
+  if (numericDate) {
+    return numericDate;
+  }
+  const isoDateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(trimmed);
+  if (isoDateMatch?.[1] && isIsoDate(isoDateMatch[1])) {
+    return isoDateMatch[1];
+  }
+  for (const format of [
+    "%d/%m/%Y",
+    "%m/%d/%Y",
+    "%d.%m.%Y",
+    "%d-%m-%Y",
+    "%B %d, %Y",
+    "%A, %B %d, %Y",
+    "%b %d, %Y",
+    "%a, %b %d, %Y",
+    "%d %b %Y",
+    "%d %B %Y",
+    "%Y%m%d",
+  ]) {
+    const parsed = parseCustomProviderDateFormat(trimmed, format);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseCustomProviderNumericDate(value: string): string | null {
+  if (!/^-?\d+$/.test(value)) {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric)) {
+    return null;
+  }
+  if (numeric > 0 && numeric < 100_000) {
+    const date = new Date("1899-12-30T00:00:00Z");
+    date.setUTCDate(date.getUTCDate() + numeric);
+    return isoDate(date);
+  }
+  const seconds = numeric > 9_999_999_999 ? Math.trunc(numeric / 1000) : numeric;
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : isoDate(date);
+}
+
+function parseCustomProviderDateFormat(value: string, format: string): string | null {
+  if (format === "%Y-%m-%d") {
+    return isIsoDate(value) ? value : null;
+  }
+  if (format === "%Y%m%d") {
+    const match = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+    return match ? isoDateFromParts(match[1], match[2], match[3]) : null;
+  }
+  const numericFormats: Record<string, RegExp> = {
+    "%d/%m/%Y": /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+    "%m/%d/%Y": /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+    "%d.%m.%Y": /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/,
+    "%d-%m-%Y": /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
+  };
+  const numericMatch = numericFormats[format]?.exec(value);
+  if (numericMatch) {
+    const [, first, second, year] = numericMatch;
+    const dayFirst = format !== "%m/%d/%Y";
+    return dayFirst ? isoDateFromParts(year, second, first) : isoDateFromParts(year, first, second);
+  }
+  return parseNamedMonthDate(value, format);
+}
+
+function parseNamedMonthDate(value: string, format: string): string | null {
+  const monthNames = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+  ];
+  const monthLookup = new Map<string, number>();
+  monthNames.forEach((name, index) => {
+    monthLookup.set(name, index + 1);
+    monthLookup.set(name.slice(0, 3), index + 1);
+  });
+  const withoutWeekday = value.replace(/^[A-Za-z]+,\s*/, "").trim();
+  let match: RegExpExecArray | null = null;
+  if (["%B %d, %Y", "%A, %B %d, %Y", "%b %d, %Y", "%a, %b %d, %Y"].includes(format)) {
+    match = /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/.exec(withoutWeekday);
+    if (match) {
+      const month = monthLookup.get(match[1].toLowerCase());
+      return month ? isoDateFromParts(match[3], String(month), match[2]) : null;
+    }
+  }
+  if (["%d %b %Y", "%d %B %Y"].includes(format)) {
+    match = /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/.exec(value);
+    if (match) {
+      const month = monthLookup.get(match[2].toLowerCase());
+      return month ? isoDateFromParts(match[3], String(month), match[1]) : null;
+    }
+  }
+  return null;
+}
+
+function isoDateFromParts(
+  yearValue: string | undefined,
+  monthValue: string | undefined,
+  dayValue: string | undefined,
+): string | null {
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+  const day = Number(dayValue);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+  const candidate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return isIsoDate(candidate) ? candidate : null;
+}
+
+function localNoonToUtc(date: string, timeZone: string | null): Date {
+  const targetUtcMs = Date.parse(`${date}T12:00:00Z`);
+  if (!timeZone) {
+    return new Date(targetUtcMs);
+  }
+  try {
+    const local = localTimeParts(new Date(targetUtcMs), timeZone);
+    const localAsUtcMs = Date.parse(
+      `${local.date}T${String(local.hour).padStart(2, "0")}:${String(local.minute).padStart(2, "0")}:00Z`,
+    );
+    return new Date(targetUtcMs - (localAsUtcMs - targetUtcMs));
+  } catch {
+    return new Date(targetUtcMs);
+  }
 }
 
 async function fetchYahooResolvedQuote(
@@ -1650,9 +1953,54 @@ function effectiveMarketDataProvider(
   asset: AssetMarketSyncRow,
 ): string {
   const stateProvider = optionalString(state?.data_source);
-  return (stateProvider ?? preferredProvider(asset.provider_config) ?? DEFAULT_MARKET_DATA_PROVIDER)
-    .trim()
-    .toUpperCase();
+  const provider =
+    stateProvider ?? preferredProvider(asset.provider_config) ?? DEFAULT_MARKET_DATA_PROVIDER;
+  const trimmed = provider.trim();
+  if (isCustomProviderSync(trimmed)) {
+    return trimmed;
+  }
+  return trimmed.toUpperCase();
+}
+
+function isCustomProviderSync(provider: string): boolean {
+  return (
+    provider === CUSTOM_SCRAPER_PROVIDER ||
+    provider.startsWith(`${CUSTOM_SCRAPER_PROVIDER}:`) ||
+    provider.startsWith("CUSTOM:")
+  );
+}
+
+function customProviderCodeForMarketSync(
+  provider: string,
+  providerConfig: string | null,
+): string | null {
+  const codeFromProvider = customProviderCodeFromProviderId(provider);
+  if (codeFromProvider) {
+    return codeFromProvider;
+  }
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  return optionalString(parsed.custom_provider_code)?.trim() || null;
+}
+
+function customProviderCodeFromProviderId(provider: string): string | null {
+  for (const prefix of [`${CUSTOM_SCRAPER_PROVIDER}:`, "CUSTOM:"]) {
+    if (provider.startsWith(prefix)) {
+      const code = provider.slice(prefix.length).trim();
+      return code || null;
+    }
+  }
+  return null;
+}
+
+function customProviderSyncSymbol(asset: AssetMarketSyncRow, providerCode: string): string | null {
+  return (
+    providerOverrideSymbol(asset.provider_config, `CUSTOM:${providerCode}`) ??
+    asset.instrument_symbol?.trim() ??
+    null
+  );
 }
 
 function yahooSyncSymbol(

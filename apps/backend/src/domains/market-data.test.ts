@@ -191,6 +191,186 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs targeted custom provider latest quotes with source overrides", async () => {
+    const db = createMarketDataDb();
+    const yahooCalls: string[] = [];
+    const requests: TestSourceRequest[] = [];
+    const latestSource: CustomProviderSource = {
+      id: "source-latest",
+      providerId: "my-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: "Pacific/Kiritimati",
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        yahooCalls.push("yahoo");
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-11T00:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          expect(kind).toBe("latest");
+          return latestSource;
+        },
+        testSource(request) {
+          requests.push(request);
+          expect(request).toMatchObject({
+            symbol: "FUND.TO",
+            currency: "CAD",
+            url: "https://prices.example.test/latest/{SYMBOL}",
+          });
+          return {
+            success: true,
+            statusCode: 200,
+            price: 0,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-10",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+          overrides: {
+            "CUSTOM:my-feed": { type: "equity_symbol", symbol: "FUND.TO" },
+          },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-custom"] }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(yahooCalls).toEqual([]);
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-09")).toMatchObject({
+        id: "asset-custom_2026-01-09_CUSTOM_SCRAPER:my-feed",
+        source: "CUSTOM_SCRAPER:my-feed",
+        close: "0",
+        open: null,
+        high: null,
+        low: null,
+        adjclose: null,
+        volume: null,
+        currency: "CAD",
+        timestamp: "2026-01-09T22:00:00.000Z",
+      });
+      expect(readSyncState(db, "asset-custom")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:my-feed",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps custom provider history and general-purpose sync explicitly deferred", async () => {
+    const db = createMarketDataDb();
+    let sourceCalls = 0;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("fetch should not be called");
+      }) as typeof fetch,
+      customProviderService: {
+        getSourceByKind() {
+          sourceCalls += 1;
+          return null;
+        },
+        testSource() {
+          throw new Error("testSource should not be called");
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        instrument_symbol: "FUND",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+        }),
+      });
+      insertAsset(db, {
+        id: "asset-general-custom",
+        instrument_symbol: "FUND2",
+        provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: ["asset-custom"],
+          days: 30,
+        }),
+      ).resolves.toEqual({
+        ...emptySyncResult(),
+        skipped: 1,
+        skippedReasons: [["asset-custom", "Custom provider history sync not implemented"]],
+      });
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["asset-general-custom"],
+        }),
+      ).resolves.toEqual({
+        ...emptySyncResult(),
+        skipped: 1,
+        skippedReasons: [
+          ["asset-general-custom", "General-purpose custom provider sync not implemented"],
+        ],
+      });
+      expect(sourceCalls).toBe(0);
+      expect(readSyncState(db, "asset-custom")).toBeNull();
+      expect(readSyncState(db, "asset-general-custom")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs broad history for inactive referenced assets without catalog quote purges", async () => {
     const db = createMarketDataDb();
     const fetchImpl = yahooHistoryFetchBySymbol({
