@@ -321,6 +321,12 @@ interface YahooSearchQuoteRaw {
   currency?: unknown;
 }
 
+interface BoerseInstrumentIdentity {
+  mic: string;
+  symbol: string;
+  isBond: boolean;
+}
+
 class YahooUnauthorizedError extends Error {}
 
 const MAX_SYNC_ERRORS = 10;
@@ -328,6 +334,10 @@ const MARKET_CLOSE_GRACE_MINUTES = 60;
 const QUOTE_HISTORY_BUFFER_DAYS = 45;
 const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
+const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
+const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
+const BOERSE_FRANKFURT_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const CUSTOM_SCRAPER_PROVIDER = "CUSTOM_SCRAPER";
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
   GBp: "GBP",
@@ -553,6 +563,7 @@ async function syncMarketDataExecution(
 
   const assets = readAssetsForMarketSync(db, assetIds);
   const states = quoteSyncStateExists ? readQuoteSyncStates(db, assetIds) : new Map();
+  const boerseIsinCache = new Map<string, string>();
 
   for (const assetId of assetIds) {
     const asset = assets.get(assetId);
@@ -695,6 +706,61 @@ async function syncMarketDataExecution(
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, quoteSource, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
+    if (provider === BOERSE_FRANKFURT_PROVIDER) {
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+
+      try {
+        const identity = boerseInstrumentIdentity(asset);
+        const quotes = await fetchBoerseHistoricalQuotes(
+          asset,
+          identity,
+          startDate,
+          endDate,
+          fetchImpl,
+          boerseIsinCache,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
         addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
       }
       continue;
@@ -1357,17 +1423,37 @@ async function resolveSymbolQuote(
       now,
     );
   }
+  const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
+  const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
+  const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
+  if (preferredProvider === BOERSE_FRANKFURT_PROVIDER) {
+    if (instrumentType !== "EQUITY" && instrumentType !== "BOND") {
+      return defaultResolvedQuote();
+    }
+    const cleanSymbol = stripMatchingYahooSuffix(trimmedSymbol, exchangeMic, exchangeCatalog);
+    const boerseIsinCache = new Map<string, string>();
+    for (const candidate of symbolResolutionCandidates(cleanSymbol)) {
+      try {
+        return await fetchBoerseResolvedQuote(
+          boerseInstrumentIdentityFromSymbol(candidate, exchangeMic, instrumentType),
+          requestedQuoteCcy,
+          fetchImpl,
+          boerseIsinCache,
+        );
+      } catch {
+        continue;
+      }
+    }
+    return defaultResolvedQuote();
+  }
   if (preferredProvider !== null && preferredProvider !== "YAHOO") {
     return defaultResolvedQuote();
   }
 
-  const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
   if (instrumentType === "BOND") {
     return defaultResolvedQuote();
   }
 
-  const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
-  const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
   const cleanSymbol = stripMatchingYahooSuffix(trimmedSymbol, exchangeMic, exchangeCatalog);
 
   for (const candidate of symbolResolutionCandidates(cleanSymbol)) {
@@ -2635,6 +2721,278 @@ function noQuoteReason(
   }
 
   return { code: "NO_DATA", message: "No data available from provider yet" };
+}
+
+async function fetchBoerseHistoricalQuotes(
+  asset: AssetMarketSyncRow,
+  identity: BoerseInstrumentIdentity,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  isinCache: Map<string, string>,
+): Promise<YahooHistoricalQuote[]> {
+  const isin = await resolveBoerseIsin(identity.symbol, identity.mic, fetchImpl, isinCache);
+  const tvSymbol = `${identity.mic}:${isin}`;
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/history`);
+  url.searchParams.set("symbol", tvSymbol);
+  url.searchParams.set("resolution", "1D");
+  url.searchParams.set("from", String(epochSeconds(startDate, "start")));
+  url.searchParams.set("to", String(epochSeconds(endDate, "end")));
+
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  return parseBoerseHistoricalQuotes(payload, asset, identity, tvSymbol);
+}
+
+async function fetchBoerseResolvedQuote(
+  identity: BoerseInstrumentIdentity,
+  fallbackCurrency: string | null,
+  fetchImpl: typeof fetch,
+  isinCache: Map<string, string>,
+): Promise<ResolvedQuote> {
+  const isin = await resolveBoerseIsin(identity.symbol, identity.mic, fetchImpl, isinCache);
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/data/price_information/single`);
+  url.searchParams.set("isin", isin);
+  url.searchParams.set("mic", identity.mic);
+
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  if (!isRecord(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: invalid price response`);
+  }
+  const rawPrice = numberValue(payload.lastPrice);
+  if (rawPrice === null) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: No lastPrice in response`);
+  }
+  const price = boersePrice(rawPrice, payload.tradedInPercent === true);
+  const currency =
+    isRecord(payload.currency) && typeof payload.currency.originalValue === "string"
+      ? payload.currency.originalValue.trim() || fallbackCurrency || "EUR"
+      : (fallbackCurrency ?? "EUR");
+  return {
+    currency,
+    price: price === 0 ? null : price,
+    resolvedProviderId: BOERSE_FRANKFURT_PROVIDER,
+  };
+}
+
+async function resolveBoerseIsin(
+  symbol: string,
+  mic: string,
+  fetchImpl: typeof fetch,
+  cache: Map<string, string>,
+): Promise<string> {
+  const trimmedSymbol = symbol.trim();
+  if (looksLikeIsin(trimmedSymbol)) {
+    return trimmedSymbol;
+  }
+
+  const cacheKey = `${mic}:${trimmedSymbol.toUpperCase()}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/search`);
+  url.searchParams.set("query", trimmedSymbol);
+  url.searchParams.set("limit", "5");
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  if (!Array.isArray(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: Search JSON parse error`);
+  }
+
+  for (const item of payload) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const instrumentType = optionalString(item.type);
+    const rawResultSymbol = optionalString(item.symbol);
+    if (!instrumentType || !rawResultSymbol || !boerseSupportedGermanType(instrumentType)) {
+      continue;
+    }
+    const [resultMic, resultIsin] = splitBoerseMicSymbol(rawResultSymbol);
+    if (resultMic === mic && resultIsin) {
+      cache.set(cacheKey, resultIsin);
+      return resultIsin;
+    }
+  }
+
+  throw new Error(`Symbol not found: ${trimmedSymbol}@${mic}`);
+}
+
+async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: { "User-Agent": BOERSE_FRANKFURT_USER_AGENT },
+    });
+  } catch (error) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${response.status}`);
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: JSON parse error: ${errorMessage(error)}`);
+  }
+}
+
+function parseBoerseHistoricalQuotes(
+  payload: unknown,
+  asset: AssetMarketSyncRow,
+  identity: BoerseInstrumentIdentity,
+  tvSymbol: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: invalid history response`);
+  }
+  const status = optionalString(payload.s);
+  if (status === "no_data") {
+    return [];
+  }
+  if (status !== "ok") {
+    throw new Error(`Symbol not found: ${tvSymbol}`);
+  }
+
+  const timestamps = Array.isArray(payload.t) ? payload.t : [];
+  const divisor = identity.isBond ? 100 : 1;
+  const currency = asset.quote_ccy || "EUR";
+  const quotes: YahooHistoricalQuote[] = [];
+
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestampSeconds = timestamps[index];
+    if (typeof timestampSeconds !== "number" || !Number.isFinite(timestampSeconds)) {
+      continue;
+    }
+    const rawClose = numberValue(arrayValue(payload.c, index)) ?? 0;
+    const close = boerseDecimal(rawClose, divisor) ?? "0";
+    const timestamp = new Date(timestampSeconds * 1000).toISOString();
+    quotes.push({
+      assetId: asset.id,
+      day: timestamp.slice(0, 10),
+      timestamp,
+      source: BOERSE_FRANKFURT_PROVIDER,
+      open: boerseDecimal(numberValue(arrayValue(payload.o, index)) ?? rawClose, divisor),
+      high: boerseDecimal(numberValue(arrayValue(payload.h, index)) ?? rawClose, divisor),
+      low: boerseDecimal(numberValue(arrayValue(payload.l, index)) ?? rawClose, divisor),
+      close,
+      adjclose: close,
+      volume: decimalString(arrayValue(payload.v, index)),
+      currency,
+    });
+  }
+
+  return quotes.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function boerseInstrumentIdentity(asset: AssetMarketSyncRow): BoerseInstrumentIdentity {
+  const instrumentType = asset.instrument_type?.toUpperCase() ?? "";
+  if (instrumentType === "BOND") {
+    const override = providerOverrideSymbol(asset.provider_config, BOERSE_FRANKFURT_PROVIDER);
+    const symbol =
+      override ?? metadataIdentifier(asset.metadata, "isin") ?? asset.instrument_symbol;
+    if (!symbol || !looksLikeIsin(symbol.trim())) {
+      throw new Error("Bond has no ISIN");
+    }
+    const parsed = parseBoerseMicSymbol(symbol, "XFRA");
+    return { ...parsed, isBond: true };
+  }
+  if (instrumentType === "EQUITY") {
+    const override = providerOverrideSymbol(asset.provider_config, BOERSE_FRANKFURT_PROVIDER);
+    const symbol = override ?? asset.instrument_symbol;
+    if (!symbol) {
+      throw new Error("Asset cannot be mapped to a Boerse Frankfurt symbol");
+    }
+    return {
+      ...parseBoerseMicSymbol(symbol, asset.instrument_exchange_mic ?? "XETR"),
+      isBond: false,
+    };
+  }
+  throw new Error(`Boerse Frankfurt does not support ${asset.instrument_type ?? "unknown"} assets`);
+}
+
+function boerseInstrumentIdentityFromSymbol(
+  symbol: string,
+  exchangeMic: string | null,
+  instrumentType: string,
+): BoerseInstrumentIdentity {
+  if (instrumentType === "BOND") {
+    const parsed = parseBoerseMicSymbol(symbol.toUpperCase(), "XFRA");
+    return { ...parsed, isBond: true };
+  }
+  return { ...parseBoerseMicSymbol(symbol, exchangeMic ?? "XETR"), isBond: false };
+}
+
+function parseBoerseMicSymbol(
+  value: string,
+  fallbackMic: string,
+): Pick<BoerseInstrumentIdentity, "mic" | "symbol"> {
+  const trimmed = value.trim();
+  const [mic, symbol] = splitBoerseMicSymbol(trimmed);
+  if (mic && symbol) {
+    return { mic, symbol };
+  }
+  return { mic: fallbackMic.trim().toUpperCase() || "XETR", symbol: trimmed };
+}
+
+function splitBoerseMicSymbol(value: string): [string | null, string | null] {
+  const separator = value.indexOf(":");
+  if (separator <= 0 || separator === value.length - 1) {
+    return [null, null];
+  }
+  return [value.slice(0, separator).trim().toUpperCase(), value.slice(separator + 1).trim()];
+}
+
+function boerseSupportedGermanType(value: string): boolean {
+  return value === "Aktie" || value === "ETP" || value === "Anleihe" || value === "Fonds";
+}
+
+function metadataIdentifier(metadata: string | null, key: string): string | null {
+  const parsed = parseJsonValue(metadata);
+  if (!isRecord(parsed) || !isRecord(parsed.identifiers)) {
+    return null;
+  }
+  return optionalString(parsed.identifiers[key]);
+}
+
+function looksLikeIsin(value: string): boolean {
+  return /^[A-Z]{2}[A-Z0-9]{10}$/.test(value);
+}
+
+function boerseDecimal(value: number | null, divisor: number): string | null {
+  if (value === null) {
+    return null;
+  }
+  const decimal = decimalString(value);
+  if (decimal === null || divisor === 1) {
+    return decimal;
+  }
+  if (divisor === 100) {
+    return shiftDecimalLeft(decimal, 2);
+  }
+  return decimalString(value / divisor);
+}
+
+function boersePrice(value: number, tradedInPercent: boolean): number {
+  const decimal = boerseDecimal(value, tradedInPercent ? 100 : 1);
+  return decimal === null ? value : Number(decimal);
+}
+
+function shiftDecimalLeft(value: string, places: number): string {
+  const parts = decimalParts(value);
+  const digits = `${parts.integer}${parts.fraction}`;
+  const splitIndex = parts.integer.length - places;
+  const integer =
+    splitIndex > 0 ? digits.slice(0, splitIndex).replace(/^0+(?=\d)/, "") || "0" : "0";
+  const fraction =
+    splitIndex > 0 ? digits.slice(splitIndex) : `${"0".repeat(Math.abs(splitIndex))}${digits}`;
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  const shifted = `${parts.sign < 0 ? "-" : ""}${integer}${trimmedFraction ? `.${trimmedFraction}` : ""}`;
+  return shifted === "-0" ? "0" : shifted;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function fetchYahooHistoricalQuotes(

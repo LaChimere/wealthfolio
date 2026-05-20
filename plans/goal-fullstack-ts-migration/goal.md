@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 209
+turns_used: 210
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-20T21:55:24+08:00"
+updated_at: "2026-05-20T22:26:41+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1345,6 +1345,14 @@ updated_at: "2026-05-20T21:55:24+08:00"
   fail or return no rows still fail the backfill instead of masking errors.
   Focused market-data tests, backend type-check, full `bun run check`, focused
   review, and purge-safety re-review passed.
+- Turn 210: Added Börse Frankfurt provider sync parity: targeted, incremental,
+  broad, and history market-data sync now resolve exact-MIC ISINs, fetch
+  historical quotes with browser headers and epoch-second ranges, persist
+  `BOERSE_FRANKFURT` quote rows/state, treat provider `no_data` as clean
+  zero-quote syncs, divide bond percentage prices deterministically, and resolve
+  latest quote summaries through the price-information endpoint. Focused
+  market-data tests, backend type-check, full `bun run check`, and focused code
+  review passed after sharing the per-resolve ISIN cache.
 
 ## Deferred items
 
@@ -1400,18 +1408,20 @@ updated_at: "2026-05-20T21:55:24+08:00"
   search, Yahoo-backed symbol quote resolution, and bounded
   custom-provider-backed symbol quote resolution, targeted and general-purpose
   custom-provider latest quote sync, explicit plus general-purpose
-  custom-provider historical backfill, and latest-source fallback during custom
-  backfill now have TS runtime parity. reason=the standalone backend reads the
-  Rust exchange catalog, writes local quote rows directly, can call Yahoo
+  custom-provider historical backfill, latest-source fallback during custom
+  backfill, and Börse Frankfurt historical/latest sync and quote resolution now
+  have TS runtime parity. reason=the standalone backend reads the Rust exchange
+  catalog, writes local quote rows directly, can call Yahoo
   dividends/search/resolve through injectable HTTP paths, can resolve
   `CUSTOM:<code>` quote previews through the runtime custom-provider
   source/test-source service, can persist single latest custom provider quotes
   through targeted/incremental market sync for both explicit and general-purpose
   custom-provider assets, can backfill explicit and general-purpose historical
   custom-provider rows, can safely fall back to latest sources without purging
-  historical quote rows, and can merge search results against existing SQLite
-  assets; broader market sync and portfolio recalculation side effects remain
-  active follow-ups.
+  historical quote rows, can resolve/fetch Börse Frankfurt `MIC:ISIN` history
+  and latest price-information responses with bond percentage scaling, and can
+  merge search results against existing SQLite assets; remaining provider
+  breadth and portfolio recalculation side effects remain active follow-ups.
 - Actual portfolio job execution and broad domain-event worker behavior remain
   active follow-ups. reason=holdings snapshot mutation events now have bounded
   TS runtime parity and the Rust domain-event planner, injectable batch
@@ -1575,12 +1585,13 @@ updated_at: "2026-05-20T21:55:24+08:00"
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
   dividends/search/resolve, bounded custom-provider symbol quote resolution,
   targeted custom-provider latest sync, targeted Yahoo sync, bounded broad Yahoo
-  sync/history, market-sync result payloads, quote-triggered portfolio jobs, and
-  bounded portfolio valuation/TOTAL recalculation have TS runtime coverage,
-  while all-provider sync, historical/general-purpose custom provider sync,
-  background orchestration, automatic/background FX quote fetching, and
-  remaining complex activity-derived snapshot behavior must move with dedicated
-  market-data and portfolio parity slices.
+  sync/history, explicit/general-purpose custom-provider history and latest
+  fallback sync, Börse Frankfurt historical/latest sync and quote resolution,
+  market-sync result payloads, quote-triggered portfolio jobs, and bounded
+  portfolio valuation/TOTAL recalculation have TS runtime coverage, while
+  remaining provider breadth, background orchestration, automatic/background FX
+  quote fetching, and remaining complex activity-derived snapshot behavior must
+  move with dedicated market-data and portfolio parity slices.
 
 ## Blockers
 

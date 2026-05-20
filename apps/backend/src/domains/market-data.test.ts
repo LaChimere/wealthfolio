@@ -122,21 +122,40 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("syncs broad Yahoo market assets while skipping non-Yahoo providers", async () => {
+  test("syncs broad Yahoo and Boerse Frankfurt market assets", async () => {
     const db = createMarketDataDb();
     const chartSymbols: string[] = [];
-    const fetchImpl = yahooHistoryFetchBySymbol(
-      {
-        AAPL: {
-          result: {
-            meta: { currency: "USD" },
-            timestamp: [1767571200],
-            indicators: { quote: [{ close: [10.5] }] },
+    const fetchImpl = boerseTestFetch({
+      fallback: yahooHistoryFetchBySymbol(
+        {
+          AAPL: {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [10.5] }] },
+            },
           },
         },
+        (symbol) => chartSymbols.push(symbol),
+      ),
+      search: {
+        SAP: [
+          {
+            symbol: "XETR:DE0007164600",
+            description: "SAP SE",
+            exchange: "Xetra",
+            type: "Aktie",
+          },
+        ],
       },
-      (symbol) => chartSymbols.push(symbol),
-    );
+      history: {
+        "XETR:DE0007164600": {
+          s: "ok",
+          t: [1767571200],
+          c: [70.02],
+        },
+      },
+    });
     const service = createMarketDataService(db, {
       exchangeCatalogJson: testExchangeCatalogJson(),
       fetch: fetchImpl,
@@ -151,10 +170,11 @@ describe("TS market data domain", () => {
         instrument_exchange_mic: "XNAS",
       });
       insertAsset(db, {
-        id: "asset-msft",
-        display_code: "MSFT",
-        instrument_symbol: "MSFT",
-        instrument_exchange_mic: "XNAS",
+        id: "asset-sap",
+        display_code: "SAP",
+        quote_ccy: "EUR",
+        instrument_symbol: "SAP",
+        instrument_exchange_mic: "XETR",
         provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
       });
       insertAsset(db, {
@@ -167,12 +187,12 @@ describe("TS market data domain", () => {
       await expect(
         service.syncMarketData?.({ type: "incremental", asset_ids: null }),
       ).resolves.toMatchObject({
-        synced: 1,
+        synced: 2,
         failed: 0,
-        skipped: 1,
-        quotesSynced: 1,
+        skipped: 0,
+        quotesSynced: 2,
         failures: [],
-        skippedReasons: [["asset-msft", "Provider not implemented: BOERSE_FRANKFURT"]],
+        skippedReasons: [],
       });
 
       expect(chartSymbols).toEqual(["AAPL"]);
@@ -180,12 +200,21 @@ describe("TS market data domain", () => {
         source: "YAHOO",
         close: "10.5",
       });
+      expect(readQuoteByDay(db, "asset-sap", "2026-01-05")).toMatchObject({
+        source: "BOERSE_FRANKFURT",
+        close: "70.02",
+        currency: "EUR",
+      });
       expect(readSyncState(db, "asset-aapl")).toMatchObject({
         data_source: "YAHOO",
         error_count: 0,
         last_error: null,
       });
-      expect(readSyncState(db, "asset-msft")).toBeNull();
+      expect(readSyncState(db, "asset-sap")).toMatchObject({
+        data_source: "BOERSE_FRANKFURT",
+        error_count: 0,
+        last_error: null,
+      });
       expect(readSyncState(db, "manual-asset")).toBeNull();
     } finally {
       db.close();
@@ -1455,6 +1484,194 @@ describe("TS market data domain", () => {
       expect(chartCalls).toBe(2);
       expect(readQuoteByDay(db, "asset-1", "2026-01-05")).toMatchObject({
         close: "10",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs targeted Boerse Frankfurt quotes through exact-MIC ISIN search", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = boerseTestFetch({
+      calls,
+      search: {
+        SAP: [
+          {
+            symbol: "XFRA:WRONG0000001",
+            description: "Wrong venue",
+            exchange: "Frankfurt",
+            type: "Aktie",
+          },
+          {
+            symbol: "XETR:DE0007164600",
+            description: "SAP SE",
+            exchange: "Xetra",
+            type: "Aktie",
+          },
+        ],
+      },
+      history: {
+        "XETR:DE0007164600": {
+          s: "ok",
+          t: [1767571200],
+          o: [68.45],
+          h: [70.2],
+          l: [68.38],
+          c: [70.02],
+          v: [11292866.27],
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-sap",
+        display_code: "SAP",
+        quote_ccy: "EUR",
+        instrument_symbol: "SAP",
+        instrument_exchange_mic: "XETR",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-sap"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+      });
+
+      const historyUrl = new URL(calls[1] ?? "");
+      expect(calls[0]).toBe(
+        "https://api.live.deutsche-boerse.com/v1/tradingview/search?query=SAP&limit=5",
+      );
+      expect(historyUrl.pathname).toBe("/v1/tradingview/history");
+      expect(historyUrl.searchParams.get("symbol")).toBe("XETR:DE0007164600");
+      expect(historyUrl.searchParams.get("resolution")).toBe("1D");
+      expect(historyUrl.searchParams.get("from")).toMatch(/^\d{10}$/);
+      expect(historyUrl.searchParams.get("to")).toMatch(/^\d{10}$/);
+      expect(readQuoteByDay(db, "asset-sap", "2026-01-05")).toMatchObject({
+        id: "asset-sap_2026-01-05_BOERSE_FRANKFURT",
+        source: "BOERSE_FRANKFURT",
+        open: "68.45",
+        high: "70.2",
+        low: "68.38",
+        close: "70.02",
+        adjclose: "70.02",
+        volume: "11292866.27",
+        currency: "EUR",
+      });
+      expect(readSyncState(db, "asset-sap")).toMatchObject({
+        data_source: "BOERSE_FRANKFURT",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats Boerse Frankfurt no-data history as a clean zero-quote sync", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = boerseTestFetch({
+      history: {
+        "XETR:DE0007164600": {
+          s: "no_data",
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-sap",
+        display_code: "SAP",
+        quote_ccy: "EUR",
+        instrument_symbol: "DE0007164600",
+        instrument_exchange_mic: "XETR",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-sap"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 0,
+        failures: [],
+        skippedReasons: [],
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()?.count,
+      ).toBe(0);
+      expect(readSyncState(db, "asset-sap")).toMatchObject({
+        data_source: "BOERSE_FRANKFURT",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("scales Boerse Frankfurt bond percentages during historical sync", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = boerseTestFetch({
+      calls,
+      history: {
+        "XFRA:XS2530331413": {
+          s: "ok",
+          t: [1767571200],
+          o: [97],
+          h: [98],
+          l: [96],
+          c: [97.025],
+          v: [1000],
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-1",
+        display_code: "XS2530331413",
+        quote_ccy: "EUR",
+        instrument_type: "BOND",
+        instrument_symbol: "XS2530331413",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+
+      await service.syncMarketData?.({ type: "incremental", asset_ids: ["bond-1"] });
+
+      expect(calls).toHaveLength(1);
+      expect(new URL(calls[0] ?? "").searchParams.get("symbol")).toBe("XFRA:XS2530331413");
+      expect(readQuoteByDay(db, "bond-1", "2026-01-05")).toMatchObject({
+        source: "BOERSE_FRANKFURT",
+        open: "0.97",
+        high: "0.98",
+        low: "0.96",
+        close: "0.97025",
+        adjclose: "0.97025",
+        volume: "1000",
+        currency: "EUR",
       });
     } finally {
       db.close();
@@ -2768,6 +2985,73 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves Boerse Frankfurt quote summaries through price information", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: boerseTestFetch({
+        calls,
+        search: {
+          SAP: [
+            {
+              symbol: "XETR:DE0007164600",
+              description: "SAP SE",
+              exchange: "Xetra",
+              type: "Aktie",
+            },
+          ],
+        },
+        price: {
+          "XETR:DE0007164600": {
+            lastPrice: 70.02,
+            timestampLastPrice: "2026-03-14T15:42:00+01:00",
+            tradedInPercent: false,
+            currency: { originalValue: "EUR" },
+          },
+          "XFRA:XS2530331413": {
+            lastPrice: 97.025,
+            timestampLastPrice: "2026-03-14T15:42:00+01:00",
+            tradedInPercent: true,
+            currency: { originalValue: "EUR" },
+          },
+        },
+      }),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "SAP",
+          exchangeMic: "XETR",
+          instrumentType: "EQUITY",
+          providerId: "BOERSE_FRANKFURT",
+        }),
+      ).resolves.toEqual({
+        currency: "EUR",
+        price: 70.02,
+        resolvedProviderId: "BOERSE_FRANKFURT",
+      });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "XS2530331413",
+          instrumentType: "BOND",
+          providerId: "BOERSE_FRANKFURT",
+        }),
+      ).resolves.toEqual({
+        currency: "EUR",
+        price: 0.97025,
+        resolvedProviderId: "BOERSE_FRANKFURT",
+      });
+      expect(calls.filter((url) => url.includes("/tradingview/search?"))).toHaveLength(1);
+      expect(calls.filter((url) => url.includes("/data/price_information/single?"))).toHaveLength(
+        2,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves Yahoo crypto pairs and respects non-Yahoo provider preferences", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3124,6 +3408,55 @@ function yahooHistoryFetchBySymbol(
           },
         }),
       );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+}
+
+function boerseTestFetch(options: {
+  calls?: string[];
+  fallback?: typeof fetch;
+  search?: Record<string, unknown[]>;
+  history?: Record<string, unknown>;
+  price?: Record<string, unknown>;
+}): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith("https://api.live.deutsche-boerse.com/v1/")) {
+      if (options.fallback) {
+        return options.fallback(input, init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+
+    options.calls?.push(url);
+    expect((init?.headers as Record<string, string>)["User-Agent"]).toContain("Chrome/131.0.0.0");
+    const parsed = new URL(url);
+    if (parsed.pathname === "/v1/tradingview/search") {
+      const query = parsed.searchParams.get("query") ?? "";
+      expect(parsed.searchParams.get("limit")).toBe("5");
+      const result = options.search?.[query];
+      if (!result) {
+        throw new Error(`unexpected Boerse search query: ${query}`);
+      }
+      return Promise.resolve(Response.json(result));
+    }
+    if (parsed.pathname === "/v1/tradingview/history") {
+      const symbol = parsed.searchParams.get("symbol") ?? "";
+      expect(parsed.searchParams.get("resolution")).toBe("1D");
+      const result = options.history?.[symbol];
+      if (!result) {
+        throw new Error(`unexpected Boerse history symbol: ${symbol}`);
+      }
+      return Promise.resolve(Response.json(result));
+    }
+    if (parsed.pathname === "/v1/data/price_information/single") {
+      const key = `${parsed.searchParams.get("mic")}:${parsed.searchParams.get("isin")}`;
+      const result = options.price?.[key];
+      if (!result) {
+        throw new Error(`unexpected Boerse price key: ${key}`);
+      }
+      return Promise.resolve(Response.json(result));
     }
     throw new Error(`unexpected fetch: ${url}`);
   }) as typeof fetch;

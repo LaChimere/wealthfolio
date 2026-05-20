@@ -186,9 +186,10 @@
     have TS runtime parity, while add-on security scanning, full sandbox
     isolation, and query-cache hardening are deferred to add-on runtime parity
     slices; targeted and bounded broad Yahoo market-data sync, bounded
-    custom-provider-backed symbol quote resolution, and targeted custom-provider
-    latest quote sync now have TS runtime parity, while all-provider sync,
-    historical/general-purpose custom provider sync, and background
+    custom-provider-backed symbol quote resolution, targeted/general-purpose
+    custom-provider latest and historical sync, custom latest fallback during
+    backfill, and Börse Frankfurt historical/latest sync and quote resolution
+    now have TS runtime parity, while remaining provider breadth and background
     orchestration remain deferred to market-data/portfolio parity slices;
     market-sync result accounting, portfolio `market:sync-complete`
     failure/skipped-reason payloads, and market-data quote/sync portfolio job
@@ -232,16 +233,17 @@
     bounded FX integrity issue generation, bounded negative-balance
     data-consistency checks, and Rust-compatible health dismissal hash carryover
     now have TS runtime parity; market-data no-op sync modes plus targeted and
-    bounded broad Yahoo provider-backed asset/FX sync now execute in TS,
-    including market-sync failure/skipped-reason payload propagation, while
-    all-provider sync, background orchestration, automatic/background FX quote
-    fetching, and portfolio recalculation remain deferred; remaining
-    calculation-heavy health checks are deferred to health/calculation parity
-    slices; disabled Connect feature-flag responses, local Connect
-    synced-account/platform/sync-state/import-run reads, local broker sync
-    profile persistence, and disabled device-sync route responses now have TS
-    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
-    broker sync orchestration, subscription entitlement checks, event
+    bounded broad Yahoo provider-backed asset/FX sync, custom-provider
+    latest/history/fallback sync, and Börse Frankfurt provider sync now execute
+    in TS, including market-sync failure/skipped-reason payload propagation,
+    while remaining provider breadth, background orchestration,
+    automatic/background FX quote fetching, and portfolio recalculation remain
+    deferred; remaining calculation-heavy health checks are deferred to
+    health/calculation parity slices; disabled Connect feature-flag responses,
+    local Connect synced-account/platform/sync-state/import-run reads, local
+    broker sync profile persistence, and disabled device-sync route responses
+    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, subscription entitlement checks, event
     production, E2EE enrollment, sync engine, snapshot/upload runtime,
     background workers, device-sync cloud clients, token lifecycle, team-key
     operations, key material handling, pairing flows, freshness gate
@@ -2156,6 +2158,15 @@ contract:
   fallback requests without `{FROM}`/`{TO}` ranges, preserved existing
   historical provider quotes during fallback, persisted single latest
   `CUSTOM_SCRAPER:<code>` quote rows, and quote sync state updates.
+- `pr5-market-data-boerse-frankfurt-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, and focused code review. Coverage includes targeted,
+  incremental, broad, and history sync for `BOERSE_FRANKFURT` assets, exact-MIC
+  ISIN search resolution, `MIC:ISIN` history requests with browser headers and
+  epoch-second windows, clean `no_data` zero-quote syncs, deterministic bond
+  percentage scaling, quote sync state source updates, and latest
+  price-information quote resolution for equities and bonds.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2169,8 +2180,8 @@ contract:
   provider/tool orchestration and any future Ollama PDF support move with AI
   runtime parity slices if Ollama documents non-image file inputs; asset
   quote-provider interactions, auto-classification, and portfolio recalculation
-  side effects move with asset/market-data/portfolio parity slices; all-provider
-  market sync and background orchestration move with market-data/portfolio
+  side effects move with asset/market-data/portfolio parity slices; remaining
+  provider breadth and background orchestration move with market-data/portfolio
   parity slices; remaining provider-backed symbol fetch/resolution and sync
   breadth moves with market-data/provider parity slices; full portfolio snapshot
   rebuilding side effects move with holdings/portfolio parity slices; add-on
