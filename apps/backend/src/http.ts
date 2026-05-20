@@ -3112,7 +3112,7 @@ async function routeSettingsRequest(
     try {
       const previous = settingsService.getSettings();
       const updated = settingsService.updateSettings(update);
-      await healthService?.clearCache();
+      clearHealthCacheBestEffort(healthService, "Settings update");
       enqueueSettingsPortfolioRecalculation(portfolioJobService, previous, updated);
       return jsonResponse(updated);
     } catch (error) {
@@ -3150,6 +3150,20 @@ function enqueueSettingsPortfolioRecalculation(
 
   if (updated.timezone !== previous.timezone) {
     enqueueFullPortfolioRecalculation(portfolioJobService, "Timezone change");
+  }
+}
+
+function clearHealthCacheBestEffort(
+  healthService: HealthService | undefined,
+  context: string,
+): void {
+  if (!healthService) {
+    return;
+  }
+  try {
+    healthService.clearCache();
+  } catch (error) {
+    console.warn(`${context} health cache clear failed: ${errorMessage(error)}`);
   }
 }
 

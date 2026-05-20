@@ -200,12 +200,22 @@ describe("TS backend HTTP skeleton", () => {
     const db = new Database(":memory:");
     const healthDb = createHealthDb();
     const enqueued: PortfolioJobConfig[] = [];
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
     let healthCacheClears = 0;
+    let failNextHealthCacheClear = false;
     const healthService = createHealthService(createHealthRepository(healthDb));
     const clearHealthCache = healthService.clearCache;
     healthService.clearCache = () => {
       healthCacheClears += 1;
-      return clearHealthCache();
+      if (failNextHealthCacheClear) {
+        failNextHealthCacheClear = false;
+        throw new Error("cache clear failed");
+      }
+      clearHealthCache();
+    };
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
     };
     db.exec(`
       CREATE TABLE app_settings (
@@ -252,6 +262,7 @@ describe("TS backend HTTP skeleton", () => {
           sinceDate: null,
         },
       ]);
+      failNextHealthCacheClear = true;
       const themeOnlyResponse = await handler(
         new Request("http://127.0.0.1/api/v1/settings", {
           method: "PUT",
@@ -265,6 +276,7 @@ describe("TS backend HTTP skeleton", () => {
       expect(themeOnlyResponse.status).toBe(200);
       expect(healthCacheClears).toBe(2);
       expect(enqueued).toHaveLength(1);
+      expect(warnings).toEqual([["Settings update health cache clear failed: cache clear failed"]]);
       const baseCurrencyResponse = await handler(
         new Request("http://127.0.0.1/api/v1/settings", {
           method: "PUT",
@@ -303,6 +315,7 @@ describe("TS backend HTTP skeleton", () => {
         ).json(),
       ).resolves.toBe(true);
     } finally {
+      console.warn = originalWarn;
       healthDb.close();
       db.close();
     }

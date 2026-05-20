@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 197
+turns_used: 198
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -1260,6 +1260,12 @@ updated_at: "2026-05-20T12:18:44+08:00"
   downstream broker-sync planning; goal-summary refresh failures also warn
   without preventing broker sync. Focused domain-event processor tests, backend
   type-check, full `bun run check`, and focused code review passed.
+- Turn 198: Tightened health-cache clear parity: TS health cache clearing is now
+  modeled as an infallible synchronous service operation, and settings/portfolio
+  callers warn without aborting committed settings changes or portfolio
+  recalculation if a cache-clear callback unexpectedly throws. Focused HTTP and
+  portfolio-job tests, backend type-check, full `bun run check`, and milestone
+  review passed.
 
 ## Deferred items
 

@@ -230,11 +230,12 @@ describe("TS portfolio job route config", () => {
     }
   });
 
-  test("does not publish market sync error when health cache clear fails", async () => {
+  test("continues portfolio update when health cache clear fails", async () => {
     const db = createPortfolioJobTestDb();
     try {
       const events: BackendEvent[] = [];
       const sideEffects: string[] = [];
+      const warnings: string[] = [];
       const service = createLocalPortfolioJobService(db, {
         eventBus: {
           publish(event) {
@@ -264,21 +265,28 @@ describe("TS portfolio job route config", () => {
             sideEffects.push("market-sync");
           },
         },
+        warn: (message) => warnings.push(message),
       });
 
-      await expect(service.enqueuePortfolioJob(buildPortfolioUpdateConfig())).rejects.toThrow(
-        "cache clear failed",
-      );
+      await service.enqueuePortfolioJob(buildPortfolioUpdateConfig());
 
       expect(events).toEqual([
         { name: "market:sync-start" },
         { name: "market:sync-complete", payload: { failed_syncs: [], skipped_reasons: [] } },
+        { name: "portfolio:update-start" },
+        { name: "portfolio:update-complete" },
       ]);
       expect(sideEffects).toEqual([
         "market:sync-start",
         "market-sync",
         "market:sync-complete",
         "health-cache-clear",
+        "fx-initialize",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+      expect(warnings).toEqual([
+        "Failed to clear health cache after market data sync: cache clear failed",
       ]);
     } finally {
       db.close();

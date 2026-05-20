@@ -1910,15 +1910,24 @@ contract:
   recalculation job when timezone also changes. Milestone review follow-up also
   confirmed each successful settings update clears the health cache like Rust.
 - `pr5-portfolio-job-market-sync-side-effects`: targeted checks passed:
-  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "bounded portfolio valuation jobs|aborts portfolio update when market sync fails|does not publish market sync error when health cache clear fails"`
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "bounded portfolio valuation jobs|aborts portfolio update when market sync fails|continues portfolio update when health cache clear fails"`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
   Coverage includes successful portfolio-job market sync clearing the health
   cache before recalculation and FX service reinitialization failures warning
   without aborting the portfolio update, while market sync failures publish
   `market:sync-error` and abort before health-cache clear, FX reinitialization,
-  or portfolio recalculation. Post-sync health-cache clear failures propagate
-  without publishing a misleading market-sync error, matching Rust
-  `process_portfolio_job`.
+  or portfolio recalculation. Unexpected post-sync health-cache clear failures
+  warn without publishing a misleading market-sync error or aborting portfolio
+  recalculation, matching Rust `process_portfolio_job`.
+- `pr5-health-cache-clear-best-effort`: targeted checks passed:
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "settings domain"`
+  and
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "continues portfolio update when health cache clear fails"`,
+  plus `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes health cache clearing modeled as an infallible synchronous
+  service operation, settings updates preserving successful responses when an
+  unexpected cache-clear callback throws, and portfolio jobs warning without
+  aborting recalculation after a successful market sync.
 - `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
   and `bun run type-check`. Coverage includes service-level
@@ -2048,9 +2057,10 @@ contract:
   job side effects, exchange-rate mutation portfolio job side effects,
   alternative-asset mutation portfolio job side effects, and settings
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
-  portfolio-job market-sync health-cache/FX-reinitialize side effects, and
-  domain-event portfolio-failure continuation semantics implemented; broader
-  migration remains active.
+  portfolio-job market-sync health-cache/FX-reinitialize side effects,
+  best-effort health-cache clear failure handling, and domain-event
+  portfolio-failure continuation semantics implemented; broader migration
+  remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

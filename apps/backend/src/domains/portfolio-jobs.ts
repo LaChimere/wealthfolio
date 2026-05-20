@@ -285,7 +285,7 @@ async function executePortfolioJob(
       name: MARKET_SYNC_COMPLETE,
       payload: marketSyncCompletePayload(syncResult),
     });
-    await options.healthService?.clearCache();
+    clearHealthCacheAfterMarketSync(options);
     try {
       options.exchangeRateService?.initialize();
     } catch (error) {
@@ -305,6 +305,14 @@ async function executePortfolioJob(
       payload: errorMessage(error),
     });
     throw error;
+  }
+}
+
+function clearHealthCacheAfterMarketSync(options: LocalPortfolioJobServiceOptions): void {
+  try {
+    options.healthService?.clearCache();
+  } catch (error) {
+    options.warn?.(`Failed to clear health cache after market data sync: ${errorMessage(error)}`);
   }
 }
 
