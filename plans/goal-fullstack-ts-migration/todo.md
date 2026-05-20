@@ -188,13 +188,14 @@
     slices; targeted and bounded broad Yahoo market-data sync, bounded
     custom-provider-backed symbol quote resolution, targeted/general-purpose
     custom-provider latest and historical sync, custom latest fallback during
-    backfill, Börse Frankfurt historical/latest sync and quote resolution, and
-    MarketData.app history/latest sync and quote resolution now have TS runtime
-    parity, while remaining provider breadth and background orchestration remain
-    deferred to market-data/portfolio parity slices; market-sync result
-    accounting, portfolio `market:sync-complete` failure/skipped-reason
-    payloads, and market-data quote/sync portfolio job side effects now have TS
-    parity; activity mutation event production,
+    backfill, Börse Frankfurt historical/latest sync and quote resolution,
+    MarketData.app history/latest sync and quote resolution, and Finnhub equity
+    history/latest sync and quote resolution now have TS runtime parity, while
+    remaining provider breadth and background orchestration remain deferred to
+    market-data/portfolio parity slices; market-sync result accounting,
+    portfolio `market:sync-complete` failure/skipped-reason payloads, and
+    market-data quote/sync portfolio job side effects now have TS parity;
+    activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -235,13 +236,13 @@
     data-consistency checks, and Rust-compatible health dismissal hash carryover
     now have TS runtime parity; market-data no-op sync modes plus targeted and
     bounded broad Yahoo provider-backed asset/FX sync, custom-provider
-    latest/history/fallback sync, Börse Frankfurt provider sync, and
-    MarketData.app provider sync now execute in TS, including market-sync
-    failure/skipped-reason payload propagation, while remaining provider
-    breadth, background orchestration, automatic/background FX quote fetching,
-    and portfolio recalculation remain deferred; remaining calculation-heavy
-    health checks are deferred to health/calculation parity slices; disabled
-    Connect feature-flag responses, local Connect
+    latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
+    provider sync, and Finnhub equity provider sync now execute in TS, including
+    market-sync failure/skipped-reason payload propagation, while remaining
+    provider breadth, background orchestration, automatic/background FX quote
+    fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
     synced-account/platform/sync-state/import-run reads, local broker sync
     profile persistence, and disabled device-sync route responses now have TS
     runtime parity, while real Connect token lifecycle, cloud HTTP clients,
@@ -2179,6 +2180,15 @@ contract:
   successful history when realtime fetch fails, missing-key sync failures,
   provider override symbols, exchange-MIC currency precedence, quote sync state
   source updates, and latest price quote resolution.
+- `pr5-market-data-finnhub-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, and focused code review. Coverage includes targeted,
+  incremental, broad, and history sync for `FINNHUB` equity assets using the
+  runtime secret service, `X-Finnhub-Token` daily candle and quote endpoint
+  requests, provider override symbols, exchange-MIC currency precedence, invalid
+  historical timestamp skipping, quote sync state source updates, missing-key
+  sync failures, and latest price quote resolution.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

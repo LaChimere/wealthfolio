@@ -1795,6 +1795,79 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs Finnhub equity candles with token auth and exchange currency", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = finnhubTestFetch({
+      calls,
+      candles: {
+        AAPL: {
+          s: "ok",
+          t: [8640000000001, 1767571200],
+          o: [1, 10],
+          h: [2, 12],
+          l: [0.5, 9],
+          c: [1.5, 11],
+          v: [100, 123456],
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("FINNHUB", "finnhub-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-finnhub",
+        display_code: "AAPL",
+        quote_ccy: "EUR",
+        instrument_symbol: "WRONG",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({
+          preferred_provider: "FINNHUB",
+          overrides: { FINNHUB: { symbol: "AAPL" } },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-finnhub"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+      });
+
+      const candleUrl = new URL(calls[0] ?? "");
+      expect(candleUrl.pathname).toBe("/api/v1/stock/candle");
+      expect(candleUrl.searchParams.get("symbol")).toBe("AAPL");
+      expect(candleUrl.searchParams.get("resolution")).toBe("D");
+      expect(candleUrl.searchParams.get("from")).toMatch(/^\d{10}$/);
+      expect(candleUrl.searchParams.get("to")).toMatch(/^\d{10}$/);
+      expect(readQuoteByDay(db, "asset-finnhub", "2026-01-05")).toMatchObject({
+        id: "asset-finnhub_2026-01-05_FINNHUB",
+        source: "FINNHUB",
+        open: "10",
+        high: "12",
+        low: "9",
+        close: "11",
+        adjclose: "11",
+        volume: "123456",
+        currency: "USD",
+      });
+      expect(readSyncState(db, "asset-finnhub")).toMatchObject({
+        data_source: "FINNHUB",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("leaves manual and inactive assets untouched during targeted sync", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, {
@@ -3140,6 +3213,46 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves Finnhub quote summaries through quote endpoint", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: finnhubTestFetch({
+        calls,
+        quotes: {
+          SHOP: {
+            c: 25.5,
+            o: 25,
+            h: 26,
+            l: 24.5,
+            t: 1767657600,
+          },
+        },
+      }),
+      secretService: testSecretService("FINNHUB", "finnhub-key"),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "SHOP",
+          exchangeMic: "XTSE",
+          instrumentType: "EQUITY",
+          quoteCcy: "EUR",
+          providerId: "FINNHUB",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 25.5,
+        resolvedProviderId: "FINNHUB",
+      });
+      expect(calls).toEqual(["https://finnhub.io/api/v1/quote?symbol=SHOP"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves Boerse Frankfurt quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3612,6 +3725,46 @@ function marketDataAppTestFetch(options: {
       const result = options.prices?.[symbol];
       if (!result) {
         throw new Error(`unexpected MarketData.app prices symbol: ${symbol}`);
+      }
+      return Promise.resolve(Response.json(result));
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+}
+
+function finnhubTestFetch(options: {
+  calls?: string[];
+  candles?: Record<string, unknown>;
+  quotes?: Record<string, unknown>;
+  fallback?: typeof fetch;
+}): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith("https://finnhub.io/api/v1/")) {
+      if (options.fallback) {
+        return options.fallback(input, init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.["X-Finnhub-Token"]).toBe("finnhub-key");
+    options.calls?.push(url);
+    const parsed = new URL(url);
+    if (parsed.pathname === "/api/v1/stock/candle") {
+      const symbol = parsed.searchParams.get("symbol") ?? "";
+      expect(parsed.searchParams.get("resolution")).toBe("D");
+      const result = options.candles?.[symbol];
+      if (!result) {
+        throw new Error(`unexpected Finnhub candle symbol: ${symbol}`);
+      }
+      return Promise.resolve(Response.json(result));
+    }
+    if (parsed.pathname === "/api/v1/quote") {
+      const symbol = parsed.searchParams.get("symbol") ?? "";
+      const result = options.quotes?.[symbol];
+      if (!result) {
+        throw new Error(`unexpected Finnhub quote symbol: ${symbol}`);
       }
       return Promise.resolve(Response.json(result));
     }

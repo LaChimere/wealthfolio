@@ -338,6 +338,8 @@ const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
 const MARKETDATA_APP_PROVIDER = "MARKETDATA_APP";
 const MARKETDATA_APP_BASE_URL = "https://api.marketdata.app/v1";
+const FINNHUB_PROVIDER = "FINNHUB";
+const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
 const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
@@ -765,12 +767,91 @@ async function syncMarketDataExecution(
         const quotes = await fetchMarketDataAppHistoricalQuotes(
           asset,
           symbol,
-          marketDataAppCurrency(asset.instrument_exchange_mic, asset.quote_ccy, exchangeCatalog),
+          providerCurrencyFromExchange(
+            asset.instrument_exchange_mic,
+            asset.quote_ccy,
+            exchangeCatalog,
+          ),
           startDate,
           endDate,
           fetchImpl,
           apiKey,
           now,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
+    if (provider === FINNHUB_PROVIDER) {
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const apiKey = await marketDataProviderApiKey(secretService, provider);
+      const symbol = finnhubSyncSymbol(asset);
+      const failureMessage =
+        apiKey === null
+          ? `${provider} API key not configured`
+          : asset.instrument_type?.toUpperCase() !== "EQUITY"
+            ? "Finnhub only supports equities in the TS sync runtime"
+            : symbol === null
+              ? "Asset cannot be mapped to a Finnhub symbol"
+              : null;
+      if (failureMessage !== null || apiKey === null || symbol === null) {
+        const message = failureMessage ?? "Asset cannot be mapped to a Finnhub symbol";
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        continue;
+      }
+
+      try {
+        const quotes = await fetchFinnhubHistoricalQuotes(
+          asset,
+          symbol,
+          providerCurrencyFromExchange(
+            asset.instrument_exchange_mic,
+            asset.quote_ccy,
+            exchangeCatalog,
+          ),
+          startDate,
+          endDate,
+          fetchImpl,
+          apiKey,
         );
         db.transaction(() => {
           if (purgeProviderQuotes && quotes.length > 0) {
@@ -1515,7 +1596,7 @@ async function resolveSymbolQuote(
     if (apiKey === null) {
       return defaultResolvedQuote();
     }
-    const currency = marketDataAppCurrency(exchangeMic, requestedQuoteCcy, exchangeCatalog);
+    const currency = providerCurrencyFromExchange(exchangeMic, requestedQuoteCcy, exchangeCatalog);
     for (const candidate of symbolResolutionCandidates(trimmedSymbol)) {
       try {
         const quote = await fetchMarketDataAppLatestQuote(
@@ -1529,6 +1610,36 @@ async function resolveSymbolQuote(
           currency: quote.currency,
           price: quote.close === "0" ? null : Number(quote.close),
           resolvedProviderId: MARKETDATA_APP_PROVIDER,
+        };
+      } catch {
+        continue;
+      }
+    }
+    return defaultResolvedQuote();
+  }
+  if (preferredProvider === FINNHUB_PROVIDER) {
+    if (instrumentType !== "EQUITY") {
+      return defaultResolvedQuote();
+    }
+    const apiKey = await marketDataProviderApiKey(secretService, FINNHUB_PROVIDER);
+    if (apiKey === null) {
+      return defaultResolvedQuote();
+    }
+    const currency = providerCurrencyFromExchange(exchangeMic, requestedQuoteCcy, exchangeCatalog);
+    for (const candidate of symbolResolutionCandidates(trimmedSymbol)) {
+      try {
+        const quote = await fetchFinnhubLatestQuote(
+          `_QUOTE_RESOLVE_${candidate}`,
+          candidate,
+          currency,
+          fetchImpl,
+          apiKey,
+          now,
+        );
+        return {
+          currency: quote.currency,
+          price: quote.close === "0" ? null : Number(quote.close),
+          resolvedProviderId: FINNHUB_PROVIDER,
         };
       } catch {
         continue;
@@ -3024,7 +3135,7 @@ function marketDataAppSyncSymbol(asset: AssetMarketSyncRow): string | null {
   );
 }
 
-function marketDataAppCurrency(
+function providerCurrencyFromExchange(
   exchangeMic: string | null,
   currencyHint: string | null,
   exchangeCatalog: ExchangeCatalog,
@@ -3037,6 +3148,223 @@ function marketDataAppCurrency(
     }
   }
   return optionalString(currencyHint) ?? "USD";
+}
+
+async function fetchFinnhubHistoricalQuotes(
+  asset: AssetMarketSyncRow,
+  symbol: string,
+  currency: string,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote[]> {
+  const payload = await fetchFinnhubJson(
+    "/stock/candle",
+    [
+      ["symbol", symbol],
+      ["resolution", "D"],
+      ["from", String(epochSeconds(startDate, "start"))],
+      ["to", String(epochSeconds(endDate, "end"))],
+    ],
+    fetchImpl,
+    apiKey,
+  );
+  return parseFinnhubHistoricalQuotes(payload, asset, currency);
+}
+
+async function fetchFinnhubLatestQuote(
+  assetId: string,
+  symbol: string,
+  currency: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+  now: Date,
+): Promise<YahooHistoricalQuote> {
+  const payload = await fetchFinnhubJson("/quote", [["symbol", symbol]], fetchImpl, apiKey);
+  if (!isRecord(payload)) {
+    throw new Error(`${FINNHUB_PROVIDER}: Failed to parse quote response`);
+  }
+  const close = numberValue(payload.c);
+  if (close === null || (close === 0 && (numberValue(payload.o) ?? 0) === 0)) {
+    throw new Error(`Symbol not found or no trading data: ${symbol}`);
+  }
+  const timestampSeconds = numberValue(payload.t);
+  const timestamp =
+    (timestampSeconds === null ? null : finnhubTimestampFromSeconds(timestampSeconds)) ??
+    finnhubTimestampFromSeconds(Math.floor(now.getTime() / 1000)) ??
+    timestampNow();
+  return finnhubQuoteFromValues(
+    assetId,
+    timestamp,
+    numberValue(payload.o),
+    numberValue(payload.h),
+    numberValue(payload.l),
+    close,
+    null,
+    currency,
+  );
+}
+
+async function fetchFinnhubJson(
+  endpoint: string,
+  params: Array<[string, string]>,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  const url = new URL(`${FINNHUB_BASE_URL}${endpoint}`);
+  for (const [key, value] of params) {
+    url.searchParams.set(key, value);
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { headers: { "X-Finnhub-Token": apiKey } });
+  } catch (error) {
+    throw new Error(`${FINNHUB_PROVIDER}: Request failed: ${errorMessage(error)}`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${FINNHUB_PROVIDER}: rate limited`);
+  }
+  if (response.status === 401) {
+    throw new Error(`${FINNHUB_PROVIDER}: Invalid or missing API key`);
+  }
+  const text = await response.text();
+  if (response.status === 403) {
+    throw new Error(`${FINNHUB_PROVIDER}: Access forbidden - check API key: ${text}`);
+  }
+  if (!response.ok) {
+    const parsedError = parseFinnhubError(text);
+    throw new Error(`${FINNHUB_PROVIDER}: ${parsedError ?? `HTTP ${response.status} - ${text}`}`);
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${FINNHUB_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
+  }
+}
+
+function parseFinnhubHistoricalQuotes(
+  payload: unknown,
+  asset: AssetMarketSyncRow,
+  currency: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${FINNHUB_PROVIDER}: Failed to parse candle response`);
+  }
+  const status = optionalString(payload.s);
+  if (status === "no_data") {
+    throw new Error("No data for date range");
+  }
+  if (status !== "ok") {
+    throw new Error(`${FINNHUB_PROVIDER}: Unexpected candle status: ${status ?? ""}`);
+  }
+  const timestamps = numericArray(payload.t);
+  const closes = numericArray(payload.c);
+  const opens = numericArray(payload.o);
+  const highs = numericArray(payload.h);
+  const lows = numericArray(payload.l);
+  if (
+    timestamps === null ||
+    closes === null ||
+    opens === null ||
+    highs === null ||
+    lows === null ||
+    closes.length !== timestamps.length ||
+    opens.length !== timestamps.length ||
+    highs.length !== timestamps.length ||
+    lows.length !== timestamps.length
+  ) {
+    throw new Error(`${FINNHUB_PROVIDER}: Mismatched array lengths in candle response`);
+  }
+  if (timestamps.length === 0) {
+    throw new Error("No data for date range");
+  }
+  const volumes = numericArray(payload.v);
+  const quotes: YahooHistoricalQuote[] = [];
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestamp = finnhubTimestampFromSeconds(timestamps[index] ?? 0);
+    if (timestamp === null) {
+      continue;
+    }
+    quotes.push(
+      finnhubQuoteFromValues(
+        asset.id,
+        timestamp,
+        opens[index] ?? null,
+        highs[index] ?? null,
+        lows[index] ?? null,
+        closes[index] ?? 0,
+        volumes?.[index] ?? null,
+        currency,
+      ),
+    );
+  }
+  return quotes
+    .filter((quote) => isIsoDate(quote.day))
+    .sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function finnhubQuoteFromValues(
+  assetId: string,
+  timestamp: string,
+  open: number | null,
+  high: number | null,
+  low: number | null,
+  close: number,
+  volume: number | null,
+  currency: string,
+): YahooHistoricalQuote {
+  const closeDecimal = decimalString(close) ?? "0";
+  return {
+    assetId,
+    day: timestamp.slice(0, 10),
+    timestamp,
+    source: FINNHUB_PROVIDER,
+    open: decimalString(open) ?? closeDecimal,
+    high: decimalString(high) ?? closeDecimal,
+    low: decimalString(low) ?? closeDecimal,
+    close: closeDecimal,
+    adjclose: closeDecimal,
+    volume: decimalString(volume),
+    currency,
+  };
+}
+
+function finnhubTimestampFromSeconds(timestampSeconds: number): string | null {
+  const date = new Date(timestampSeconds * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function finnhubSyncSymbol(asset: AssetMarketSyncRow): string | null {
+  return (
+    providerOverrideSymbol(asset.provider_config, FINNHUB_PROVIDER) ??
+    optionalString(asset.instrument_symbol)
+  );
+}
+
+function parseFinnhubError(text: string): string | null {
+  const parsed = parseJsonValue(text);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  return optionalString(parsed.error);
+}
+
+function numericArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const numbers: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item)) {
+      return null;
+    }
+    numbers.push(item);
+  }
+  return numbers;
 }
 
 async function fetchBoerseHistoricalQuotes(
