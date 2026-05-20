@@ -457,24 +457,128 @@ describe("TS market data domain", () => {
     }
   });
 
-  test("keeps general-purpose custom provider history explicitly deferred", async () => {
+  test("backfills general-purpose custom provider historical quotes by priority", async () => {
     const db = createMarketDataDb();
-    let sourceCalls = 0;
+    const requests: Array<Pick<TestSourceRequest, "url" | "symbol" | "from" | "to">> = [];
+    const baseSource: CustomProviderSource = {
+      id: "history-base",
+      providerId: "base-feed",
+      kind: "historical",
+      format: "json",
+      url: "https://prices.example.test/history/base/{SYMBOL}?from={FROM}&to={TO}",
+      pricePath: "$.prices[*].close",
+      datePath: "$.prices[*].date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const disabledSource: CustomProviderSource = {
+      ...baseSource,
+      id: "history-disabled",
+      providerId: "disabled-feed",
+      url: "https://prices.example.test/history/disabled/{SYMBOL}",
+    };
+    const fixedUrlSource: CustomProviderSource = {
+      ...baseSource,
+      id: "history-fixed",
+      providerId: "fixed-feed",
+      url: "https://prices.example.test/history/fixed",
+    };
+    const failingSource: CustomProviderSource = {
+      ...baseSource,
+      id: "history-failing",
+      providerId: "failing-feed",
+      url: "https://prices.example.test/history/failing/{SYMBOL}",
+    };
+    const successfulSource: CustomProviderSource = {
+      ...baseSource,
+      id: "history-successful",
+      providerId: "successful-feed",
+      url: "https://prices.example.test/history/successful/{SYMBOL}?from={FROM}&to={TO}",
+    };
+    const providers = [
+      {
+        id: "disabled-feed",
+        name: "Disabled Feed",
+        description: "",
+        enabled: false,
+        priority: 1,
+        sources: [disabledSource],
+      },
+      {
+        id: "fixed-feed",
+        name: "Fixed Feed",
+        description: "",
+        enabled: true,
+        priority: 2,
+        sources: [fixedUrlSource],
+      },
+      {
+        id: "failing-feed",
+        name: "Failing Feed",
+        description: "",
+        enabled: true,
+        priority: 3,
+        sources: [failingSource],
+      },
+      {
+        id: "successful-feed",
+        name: "Successful Feed",
+        description: "",
+        enabled: true,
+        priority: 4,
+        sources: [successfulSource],
+      },
+    ];
     const service = createMarketDataService(db, {
       exchangeCatalogJson: testExchangeCatalogJson(),
       fetch: (() => {
         throw new Error("fetch should not be called");
       }) as typeof fetch,
+      now: () => new Date("2026-01-15T23:00:00Z"),
       customProviderService: {
+        getAll() {
+          return providers;
+        },
         getSourceByKind() {
-          sourceCalls += 1;
-          return null;
+          throw new Error("getSourceByKind should not be called for general history");
         },
         testSource() {
           throw new Error("testSource should not be called");
         },
-        fetchSourceRows() {
-          throw new Error("fetchSourceRows should not be called");
+        fetchSourceRows(request) {
+          requests.push({
+            url: request.url,
+            symbol: request.symbol,
+            from: request.from,
+            to: request.to,
+          });
+          if (request.url === failingSource.url) {
+            return { statusCode: 200, currency: "CAD", rows: [] };
+          }
+          return {
+            statusCode: 200,
+            currency: "CAD",
+            rows: [
+              {
+                price: 20.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-14",
+              },
+            ],
+          };
         },
       },
     });
@@ -482,10 +586,24 @@ describe("TS market data domain", () => {
     try {
       insertAsset(db, {
         id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
         instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
         provider_config: JSON.stringify({
           preferred_provider: "CUSTOM_SCRAPER",
+          overrides: {
+            "CUSTOM:successful-feed": { type: "equity_symbol", symbol: "FUND.TO" },
+          },
         }),
+      });
+      insertQuote(db, {
+        id: "stale-successful-quote",
+        asset_id: "asset-custom",
+        day: "2025-12-31",
+        source: "CUSTOM_SCRAPER:successful-feed",
+        close: "99",
+        currency: "CAD",
       });
 
       await expect(
@@ -495,14 +613,65 @@ describe("TS market data domain", () => {
           days: 30,
         }),
       ).resolves.toEqual({
-        ...emptySyncResult(),
-        skipped: 1,
-        skippedReasons: [
-          ["asset-custom", "General-purpose custom provider history sync not implemented"],
-        ],
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
       });
-      expect(sourceCalls).toBe(0);
-      expect(readSyncState(db, "asset-custom")).toBeNull();
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: ["asset-custom"],
+          days: 30,
+        }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://prices.example.test/history/failing/{SYMBOL}",
+          symbol: "FUND",
+          from: "2025-12-16",
+          to: "2026-01-15",
+        },
+        {
+          url: "https://prices.example.test/history/successful/{SYMBOL}?from={FROM}&to={TO}",
+          symbol: "FUND.TO",
+          from: "2025-12-16",
+          to: "2026-01-15",
+        },
+        {
+          url: "https://prices.example.test/history/failing/{SYMBOL}",
+          symbol: "FUND",
+          from: "2025-12-16",
+          to: "2026-01-15",
+        },
+        {
+          url: "https://prices.example.test/history/successful/{SYMBOL}?from={FROM}&to={TO}",
+          symbol: "FUND.TO",
+          from: "2025-12-16",
+          to: "2026-01-15",
+        },
+      ]);
+      expect(readQuote(db, "stale-successful-quote")).toBeNull();
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-14")).toMatchObject({
+        id: "asset-custom_2026-01-14_CUSTOM_SCRAPER:successful-feed",
+        source: "CUSTOM_SCRAPER:successful-feed",
+        close: "20.5",
+        currency: "CAD",
+      });
+      expect(readSyncState(db, "asset-custom")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:successful-feed",
+        error_count: 0,
+        last_error: null,
+      });
     } finally {
       db.close();
     }

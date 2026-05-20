@@ -267,6 +267,11 @@ interface YahooHistoricalQuote {
   currency: string;
 }
 
+interface CustomProviderHistoricalQuotes {
+  source: string;
+  quotes: QuoteWrite[];
+}
+
 interface QuoteImportAssetRow {
   id: string;
   display_code: string | null;
@@ -562,23 +567,17 @@ async function syncMarketDataExecution(
 
     const state = states.get(asset.id) ?? null;
     const provider = effectiveMarketDataProvider(state, asset);
-    const customProviderCode = customProviderCodeForMarketSync(provider, asset.provider_config);
+    const customProviderCode = customProviderCodeForMarketSync(asset.provider_config);
     if (isCustomProviderSync(provider)) {
       const quoteSource = customProviderCode
         ? `${CUSTOM_SCRAPER_PROVIDER}:${customProviderCode}`
-        : CUSTOM_SCRAPER_PROVIDER;
+        : provider.startsWith(`${CUSTOM_SCRAPER_PROVIDER}:`)
+          ? provider
+          : CUSTOM_SCRAPER_PROVIDER;
       const customSymbol = customProviderCode
         ? customProviderSyncSymbol(asset, customProviderCode)
         : optionalString(asset.instrument_symbol);
       if (marketSyncMode.type === "backfill_history") {
-        if (!customProviderCode) {
-          addMarketSyncSkip(
-            result,
-            asset.id,
-            "General-purpose custom provider history sync not implemented",
-          );
-          continue;
-        }
         if (customSymbol === null) {
           updateQuoteSyncStateAfterFailure(
             db,
@@ -609,26 +608,39 @@ async function syncMarketDataExecution(
           continue;
         }
         try {
-          const quotes = await fetchCustomProviderHistoricalQuotes(
-            asset,
-            customProviderCode,
-            customSymbol,
-            customProviderService,
-            startDate,
-            endDate,
-            now,
-          );
+          const historicalQuotes = customProviderCode
+            ? await fetchCustomProviderHistoricalQuotes(
+                asset,
+                customProviderCode,
+                customSymbol,
+                customProviderService,
+                startDate,
+                endDate,
+                now,
+              )
+            : await fetchGeneralPurposeCustomProviderHistoricalQuotes(
+                asset,
+                customProviderService,
+                startDate,
+                endDate,
+                now,
+              );
           db.transaction(() => {
-            if (purgeProviderQuotes && quotes.length > 0) {
-              deleteProviderQuotesForAsset(db, asset.id, quoteSource);
+            if (purgeProviderQuotes && historicalQuotes.quotes.length > 0) {
+              deleteProviderQuotesForAsset(db, asset.id, historicalQuotes.source);
             }
-            for (const quote of quotes) {
+            for (const quote of historicalQuotes.quotes) {
               upsertQuoteWrite(db, quote, undefined);
             }
-            updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, quoteSource);
+            updateQuoteSyncStateAfterSync(
+              db,
+              quoteSyncStateExists,
+              asset.id,
+              historicalQuotes.source,
+            );
           })();
           result.synced += 1;
-          result.quotesSynced += quotes.length;
+          result.quotesSynced += historicalQuotes.quotes.length;
         } catch (error) {
           const message = errorMessage(error);
           updateQuoteSyncStateAfterFailure(
@@ -1479,7 +1491,7 @@ async function fetchCustomProviderHistoricalQuotes(
   from: string,
   to: string,
   now: Date,
-): Promise<QuoteWrite[]> {
+): Promise<CustomProviderHistoricalQuotes> {
   if (!customProviderService) {
     throw new Error("Custom provider service is not available for market sync");
   }
@@ -1501,7 +1513,50 @@ async function fetchCustomProviderHistoricalQuotes(
   if (quotes.length === 0) {
     throw new Error(`No historical custom provider quotes extracted for ${symbol}`);
   }
-  return quotes;
+  return { source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`, quotes };
+}
+
+async function fetchGeneralPurposeCustomProviderHistoricalQuotes(
+  asset: AssetMarketSyncRow,
+  customProviderService: MarketDataCustomProviderService | undefined,
+  from: string,
+  to: string,
+  now: Date,
+): Promise<CustomProviderHistoricalQuotes> {
+  if (!customProviderService) {
+    throw new Error("Custom provider service is not available for market sync");
+  }
+  if (!customProviderService.getAll || !customProviderService.fetchSourceRows) {
+    throw new Error("Custom provider service cannot fetch historical rows for market sync");
+  }
+  let lastError: string | null = null;
+  for (const source of generalPurposeCustomProviderSources(
+    customProviderService.getAll(),
+    "historical",
+  )) {
+    const symbol = customProviderSourceSymbol(asset, source);
+    if (symbol === null) {
+      continue;
+    }
+    try {
+      const result = await Promise.resolve(
+        customProviderService.fetchSourceRows(
+          customProviderTestSourceRequest(source, symbol, asset.quote_ccy || null, now, {
+            from,
+            to,
+          }),
+        ),
+      );
+      const quotes = customProviderRowsToQuoteWrites(asset, source, result, now);
+      if (quotes.length > 0) {
+        return { source: `${CUSTOM_SCRAPER_PROVIDER}:${source.providerId}`, quotes };
+      }
+      lastError = `No historical custom provider quotes extracted for ${symbol}`;
+    } catch (error) {
+      lastError = errorMessage(error);
+    }
+  }
+  throw new Error(lastError ?? `No historical custom provider quotes extracted for ${asset.id}`);
 }
 
 async function fetchGeneralPurposeCustomProviderQuote(
@@ -2184,19 +2239,17 @@ function isCustomProviderSync(provider: string): boolean {
   );
 }
 
-function customProviderCodeForMarketSync(
-  provider: string,
-  providerConfig: string | null,
-): string | null {
-  const codeFromProvider = customProviderCodeFromProviderId(provider);
-  if (codeFromProvider) {
-    return codeFromProvider;
-  }
+function customProviderCodeForMarketSync(providerConfig: string | null): string | null {
   const parsed = parseJsonValue(providerConfig);
   if (!isRecord(parsed)) {
     return null;
   }
-  return optionalString(parsed.custom_provider_code)?.trim() || null;
+  const codeFromConfig = optionalString(parsed.custom_provider_code);
+  if (codeFromConfig) {
+    return codeFromConfig;
+  }
+  const configuredProvider = preferredProvider(providerConfig);
+  return configuredProvider ? customProviderCodeFromProviderId(configuredProvider) : null;
 }
 
 function customProviderCodeFromProviderId(provider: string): string | null {
