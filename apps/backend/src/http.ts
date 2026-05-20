@@ -355,7 +355,13 @@ async function routeRequest(
   }
 
   if (options.exchangeRateService && url.pathname.startsWith("/api/v1/exchange-rates")) {
-    return routeExchangeRateRequest(request, url, config, options.exchangeRateService);
+    return routeExchangeRateRequest(
+      request,
+      url,
+      config,
+      options.exchangeRateService,
+      options.portfolioJobService,
+    );
   }
 
   if (options.goalService && url.pathname.startsWith("/api/v1/goals")) {
@@ -2027,7 +2033,7 @@ function routeMarketDataRequest(
       },
       async (input) => {
         await updateQuote(input.symbol, input.quote);
-        enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
+        enqueueFullPortfolioRecalculation(portfolioJobService, "Quote mutation");
       },
     );
   }
@@ -2039,7 +2045,7 @@ function routeMarketDataRequest(
     }
     return Promise.resolve(marketDataService.deleteQuote(deleteQuoteId))
       .then(() => {
-        enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
+        enqueueFullPortfolioRecalculation(portfolioJobService, "Quote mutation");
         return new Response(null, { status: 204 });
       })
       .catch(domainErrorResponse);
@@ -2062,7 +2068,7 @@ function routeMarketDataRequest(
     }
     return handleJsonMutation(request, parseQuotesImportRequest, async (input) => {
       const result = await importQuotesCsv(input.quotes, input.overwriteExisting);
-      enqueueQuoteMutationPortfolioRecalculation(portfolioJobService);
+      enqueueFullPortfolioRecalculation(portfolioJobService, "Quote mutation");
       return result;
     });
   }
@@ -2099,8 +2105,9 @@ function routeMarketDataRequest(
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
-function enqueueQuoteMutationPortfolioRecalculation(
+function enqueueFullPortfolioRecalculation(
   portfolioJobService: PortfolioJobService | undefined,
+  context: string,
 ): void {
   if (!portfolioJobService) {
     return;
@@ -2115,10 +2122,10 @@ function enqueueQuoteMutationPortfolioRecalculation(
         sinceDate: null,
       }),
     ).catch((error) => {
-      console.warn(`Quote mutation portfolio recalculation failed: ${errorMessage(error)}`);
+      console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
     });
   } catch (error) {
-    console.warn(`Quote mutation portfolio recalculation failed: ${errorMessage(error)}`);
+    console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
   }
 }
 
@@ -2256,6 +2263,7 @@ function routeExchangeRateRequest(
   url: URL,
   config: BackendRuntimeConfig,
   exchangeRateService: ExchangeRateService,
+  portfolioJobService?: PortfolioJobService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -2266,22 +2274,33 @@ function routeExchangeRateRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/exchange-rates") {
-    return handleJsonMutation(request, parseNewExchangeRate, (newRate) =>
-      exchangeRateService.addExchangeRate(newRate),
-    );
+    return handleJsonMutation(request, parseNewExchangeRate, async (newRate) => {
+      const result = await exchangeRateService.addExchangeRate(newRate);
+      enqueueFullPortfolioRecalculation(portfolioJobService, "Exchange-rate mutation");
+      return result;
+    });
   }
 
   if (request.method === "PUT" && url.pathname === "/api/v1/exchange-rates") {
-    return handleJsonMutation(request, parseExchangeRate, (rate) =>
-      exchangeRateService.updateExchangeRate(rate.fromCurrency, rate.toCurrency, rate.rate),
-    );
+    return handleJsonMutation(request, parseExchangeRate, async (rate) => {
+      const result = await exchangeRateService.updateExchangeRate(
+        rate.fromCurrency,
+        rate.toCurrency,
+        rate.rate,
+      );
+      enqueueFullPortfolioRecalculation(portfolioJobService, "Exchange-rate mutation");
+      return result;
+    });
   }
 
   const rateId = exchangeRateIdFromPath(url.pathname);
   if (rateId && request.method === "DELETE") {
     return exchangeRateService
       .deleteExchangeRate(rateId)
-      .then(() => new Response(null, { status: 204 }))
+      .then(() => {
+        enqueueFullPortfolioRecalculation(portfolioJobService, "Exchange-rate mutation");
+        return new Response(null, { status: 204 });
+      })
       .catch(domainErrorResponse);
   }
 

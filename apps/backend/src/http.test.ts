@@ -1405,8 +1405,14 @@ describe("TS backend HTTP skeleton", () => {
 
   test("routes migrated exchange rate CRUD only when a service is provided", async () => {
     const db = createExchangeRatesDb();
+    const enqueued: PortfolioJobConfig[] = [];
     const handler = createBackendRequestHandler(config, {
       exchangeRateService: createExchangeRateService(createExchangeRateRepository(db)),
+      portfolioJobService: {
+        enqueuePortfolioJob(config) {
+          enqueued.push(config);
+        },
+      },
     });
 
     try {
@@ -1468,6 +1474,15 @@ describe("TS backend HTTP skeleton", () => {
         }),
       );
       expect(deleteResponse.status).toBe(204);
+
+      const fullRecalculation: PortfolioJobConfig = {
+        accountIds: null,
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: null,
+      };
+      expect(enqueued).toEqual([fullRecalculation, fullRecalculation, fullRecalculation]);
     } finally {
       db.close();
     }

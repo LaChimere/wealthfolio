@@ -1889,6 +1889,11 @@ contract:
   portfolio recalculation jobs, plus `/api/v1/market-data/sync` enqueuing an
   incremental portfolio job with the requested market-sync mode when a portfolio
   job service owns execution.
+- `pr5-exchange-rate-portfolio-job-side-effects`: targeted checks passed:
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "exchange rate CRUD"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes exchange-rate add/update/delete routes enqueuing full
+  portfolio recalculation jobs after successful FX mutations.
 - `pr5-health-legacy-fix-service-dispatch`: targeted checks passed:
   `bun test apps/backend/src/domains/health.test.ts apps/backend/src/http.test.ts --test-name-pattern "classification migration fixes|unsupported or malformed|routes migrated health runtime"`
   and `bun run type-check`. Coverage includes service-level
@@ -2006,38 +2011,39 @@ contract:
   transaction-account activity snapshot rebuilding, BUY/SELL broker FX handling,
   option contract multipliers, option-expiry adjustment replay, split
   preprocessing, lot-level asset-transfer replay, other adjustment no-op
-  behavior, market-sync result/payload parity, and market-data quote/sync
-  portfolio job side effects implemented; broader migration remains active.
+  behavior, market-sync result/payload parity, market-data quote/sync portfolio
+  job side effects, and exchange-rate mutation portfolio job side effects
+  implemented; broader migration remains active.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
   sync/provider HTTP behavior plus broader market-data provider resolution/sync
   behavior move with calculation/market-data slices after the current FX
-  registration/no-op parity and explicit runtime 501 gates; background portfolio
-  worker orchestration moves with portfolio/calculation slices after the current
-  bounded portfolio valuation/activity-replay runtime; packaged keyring cutover
-  and cross-platform keyring CI move with a dedicated runtime parity slice; AI
-  chat richer provider/tool orchestration and any future Ollama PDF support move
-  with AI runtime parity slices if Ollama documents non-image file inputs;
-  alternative asset portfolio job enqueue and recalculation side effects move
-  with portfolio parity slices; asset quote-provider interactions,
-  auto-classification, and portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; all-provider market sync and
-  background orchestration move with market-data/portfolio parity slices;
-  provider-backed symbol fetch/resolution moves with market-data/provider parity
-  slices; full portfolio snapshot rebuilding side effects move with
-  holdings/portfolio parity slices; add-on security scanning, full sandbox
-  isolation, and query-cache hardening move with add-on runtime parity slices;
-  provider-backed asset resolution, remaining quote sync-outbox emission outside
-  migrated alternative-asset and market-data quote paths, sync engine push/pull,
-  and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks
-  and real market sync fix execution move with health/calculation parity slices;
-  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  local sync repositories, subscription entitlement checks, event production,
-  E2EE enrollment, sync engine, snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and secret side effects move with Connect/device-sync
-  parity slices.
+  registration/no-op/portfolio-recalculation parity and explicit runtime 501
+  gates; background portfolio worker orchestration moves with
+  portfolio/calculation slices after the current bounded portfolio
+  valuation/activity-replay runtime; packaged keyring cutover and cross-platform
+  keyring CI move with a dedicated runtime parity slice; AI chat richer
+  provider/tool orchestration and any future Ollama PDF support move with AI
+  runtime parity slices if Ollama documents non-image file inputs; alternative
+  asset portfolio job enqueue and recalculation side effects move with portfolio
+  parity slices; asset quote-provider interactions, auto-classification, and
+  portfolio recalculation side effects move with asset/market-data/portfolio
+  parity slices; all-provider market sync and background orchestration move with
+  market-data/portfolio parity slices; provider-backed symbol fetch/resolution
+  moves with market-data/provider parity slices; full portfolio snapshot
+  rebuilding side effects move with holdings/portfolio parity slices; add-on
+  security scanning, full sandbox isolation, and query-cache hardening move with
+  add-on runtime parity slices; provider-backed asset resolution, remaining
+  quote sync-outbox emission outside migrated alternative-asset and market-data
+  quote paths, sync engine push/pull, and portfolio recalculation side effects
+  move with activities/import/device-sync runtime parity slices; device-sync
+  integration for sync crypto moves with device-sync parity slices; broader
+  health checks and real market sync fix execution move with health/calculation
+  parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
+  orchestration, local sync repositories, subscription entitlement checks, event
+  production, E2EE enrollment, sync engine, snapshot/upload runtime,
+  feature-flag errors, background workers, device-sync cloud clients, token
+  lifecycle, team-key operations, key material handling, pairing flows,
+  freshness gate persistence, bootstrap transfer, and secret side effects move
+  with Connect/device-sync parity slices.
