@@ -687,6 +687,44 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("uses unconverted cash totals for activity snapshots when FX is unavailable", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "archived-cad", true, "CAD", "TRANSACTIONS");
+      seedActivity(db, {
+        id: "deposit-missing-fx",
+        accountId: "archived-cad",
+        type: "DEPOSIT",
+        date: "2026-05-14T10:00:00Z",
+        amount: "100",
+        currency: "USD",
+      });
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        baseCurrency: "EUR",
+        now: () => new Date("2026-05-17T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["archived-cad"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshot(db, "archived-cad", "2026-05-14")).toMatchObject({
+        cash_balances: '{"USD":"100"}',
+        cash_total_account_currency: "100",
+        cash_total_base_currency: "100",
+        net_contribution: "100",
+        net_contribution_base: "0",
+      });
+      expect(warnings).toContain("Missing exchange rate service for USD/CAD on 2026-05-14");
+      expect(warnings).toContain("Missing exchange rate service for USD/EUR on 2026-05-14");
+    } finally {
+      db.close();
+    }
+  });
+
   test("converts cross-currency buy lots to position currency", async () => {
     const db = createPortfolioJobTestDb();
     try {

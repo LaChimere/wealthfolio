@@ -199,7 +199,7 @@
     update/delete/import callbacks, and local AI chat thread/message/tag
     callbacks, contribution-limit callbacks, account callbacks, import
     template/account-template callbacks, holdings snapshot callbacks, activity
-    snapshot cash contribution FX parity, domain-event planning/batch
+    snapshot cash contribution/cash-total FX parity, domain-event planning/batch
     processing/worker helper, standalone runtime domain-event worker wiring to
     local portfolio jobs, and post-portfolio active goal-summary refresh now
     have TS runtime parity, while provider-backed asset resolution, remaining
@@ -2060,9 +2060,10 @@ contract:
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
   portfolio-job market-sync health-cache/FX-reinitialize side effects,
   best-effort health-cache clear failure handling, and domain-event
-  portfolio-failure continuation semantics, activity snapshot cash contribution
-  FX parity, and SQLite-backed local Connect synced-account/platform/sync-state/
-  import-run reads implemented; broader migration remains active.
+  portfolio-failure continuation semantics, activity snapshot cash
+  contribution/cash-total FX parity, and SQLite-backed local Connect
+  synced-account/platform/sync-state/import-run reads implemented; broader
+  migration remains active.
 - `pr5-connect-local-read-runtime`: targeted checks passed:
   `bun test apps/backend/src/runtime.test.ts --test-name-pattern "local Connect"`,
   `bun test apps/backend/src/http.test.ts --test-name-pattern "Connect"`, and
@@ -2082,6 +2083,12 @@ contract:
   back to FxService when absent, and base net contribution uses FxService rather
   than the activity account-currency `fx_rate`, including position-currency
   transfer contribution edges where base currency equals account currency.
+- `pr5-activity-snapshot-cash-total-fx`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "cash contribution|unconverted cash totals|rolls back TOTAL"`
+  and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
+  Coverage includes Rust-compatible generated snapshot cash-total fallback when
+  FxService is unavailable while preserving strict TOTAL recalculation rollback
+  on required FX gaps.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

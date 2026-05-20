@@ -1704,7 +1704,7 @@ function convertPositionAmountForAccountContribution(
   if (activity.currency === positionCurrency && !activityFxRate.isZero()) {
     return amount.mul(activityFxRate);
   }
-  return convertContributionWithFallback(
+  return convertAmountWithFallback(
     amount,
     positionCurrency,
     accountCurrency,
@@ -1724,7 +1724,7 @@ function convertPositionAmountForBaseContribution(
   if (positionCurrency === baseCurrency) {
     return amount;
   }
-  return convertContributionWithFallback(
+  return convertAmountWithFallback(
     amount,
     positionCurrency,
     baseCurrency,
@@ -1751,7 +1751,7 @@ function convertActivityAmountForAccountContribution(
   if (!rate.isZero()) {
     return amount.mul(rate);
   }
-  return convertContributionWithFallback(
+  return convertAmountWithFallback(
     amount,
     activity.currency,
     targetCurrency,
@@ -1770,7 +1770,7 @@ function convertActivityAmountForBaseContribution(
   if (activity.currency === baseCurrency) {
     return amount;
   }
-  return convertContributionWithFallback(
+  return convertAmountWithFallback(
     amount,
     activity.currency,
     baseCurrency,
@@ -1780,7 +1780,7 @@ function convertActivityAmountForBaseContribution(
   );
 }
 
-function convertContributionWithFallback(
+function convertAmountWithFallback(
   amount: Decimal,
   fromCurrency: string,
   toCurrency: string,
@@ -2099,13 +2099,13 @@ function upsertActivityCalculatedSnapshot(
     (total, position) => total.plus(position.totalCostBasis),
     new Decimal(0),
   );
-  const cashTotalAccountCurrency = totalCashInCurrency(
+  const cashTotalAccountCurrency = totalCashInCurrencyWithFallback(
     state.cashBalances,
     state.currency,
     date,
     options,
   );
-  const cashTotalBaseCurrency = totalCashInCurrency(
+  const cashTotalBaseCurrency = totalCashInCurrencyWithFallback(
     state.cashBalances,
     baseCurrency,
     date,
@@ -2342,6 +2342,21 @@ function totalCashInCurrency(
   let total = new Decimal(0);
   for (const [currency, amount] of cashBalances) {
     total = total.plus(convertRequired(amount, currency, targetCurrency, date, options));
+  }
+  return roundDecimal(total);
+}
+
+function totalCashInCurrencyWithFallback(
+  cashBalances: Map<string, Decimal>,
+  targetCurrency: string,
+  date: string,
+  options: LocalPortfolioJobServiceOptions,
+): Decimal {
+  let total = new Decimal(0);
+  for (const [currency, amount] of cashBalances) {
+    total = total.plus(
+      convertAmountWithFallback(amount, currency, targetCurrency, date, options, amount),
+    );
   }
   return roundDecimal(total);
 }
