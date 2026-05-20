@@ -219,6 +219,8 @@ interface ExchangeCatalog {
   yahooCodeToMic: ReadonlyMap<string, string>;
   yahooSuffixByMic: ReadonlyMap<string, string>;
   yahooSuffixToMic: ReadonlyMap<string, string>;
+  alphaVantageSuffixByMic: ReadonlyMap<string, string>;
+  alphaVantageCurrencyByMic: ReadonlyMap<string, string>;
 }
 
 interface AssetQuoteStateRow {
@@ -329,6 +331,11 @@ interface BoerseInstrumentIdentity {
   isBond: boolean;
 }
 
+type AlphaVantageInstrument =
+  | { kind: "equity"; symbol: string; currency: string }
+  | { kind: "fx"; from: string; to: string; currency: string }
+  | { kind: "crypto"; symbol: string; market: string; currency: string };
+
 class YahooUnauthorizedError extends Error {}
 
 const MAX_SYNC_ERRORS = 10;
@@ -336,6 +343,8 @@ const MARKET_CLOSE_GRACE_MINUTES = 60;
 const QUOTE_HISTORY_BUFFER_DAYS = 45;
 const MIN_SYNC_LOOKBACK_DAYS = 5;
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
+const ALPHA_VANTAGE_PROVIDER = "ALPHA_VANTAGE";
+const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 const MARKETDATA_APP_PROVIDER = "MARKETDATA_APP";
 const MARKETDATA_APP_BASE_URL = "https://api.marketdata.app/v1";
 const FINNHUB_PROVIDER = "FINNHUB";
@@ -720,6 +729,76 @@ async function syncMarketDataExecution(
       }
       continue;
     }
+    if (provider === ALPHA_VANTAGE_PROVIDER) {
+      const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
+        db,
+        asset,
+        provider,
+        marketSyncMode,
+        now,
+        exchangeCatalog,
+        {
+          scope,
+          state,
+        },
+      );
+      if (startDate > endDate) {
+        updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        addMarketSyncSkip(result, asset.id, "No quote refresh needed");
+        continue;
+      }
+      if (
+        marketSyncMode.type !== "backfill_history" &&
+        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      ) {
+        addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
+        continue;
+      }
+
+      const apiKey = await marketDataProviderApiKey(secretService, provider);
+      const instrument = alphaVantageInstrumentForAsset(asset, exchangeCatalog);
+      const failureMessage =
+        apiKey === null
+          ? `${provider} API key not configured`
+          : asset.instrument_type?.toUpperCase() === "OPTION"
+            ? "Alpha Vantage options not supported in the TS sync runtime"
+            : instrument === null
+              ? "Asset cannot be mapped to an Alpha Vantage symbol"
+              : null;
+      if (failureMessage !== null || apiKey === null || instrument === null) {
+        const message = failureMessage ?? "Asset cannot be mapped to an Alpha Vantage symbol";
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+        continue;
+      }
+
+      try {
+        const quotes = await fetchAlphaVantageHistoricalQuotes(
+          asset.id,
+          instrument,
+          startDate,
+          endDate,
+          fetchImpl,
+          apiKey,
+        );
+        db.transaction(() => {
+          if (purgeProviderQuotes && quotes.length > 0) {
+            deleteProviderQuotesForAsset(db, asset.id, provider);
+          }
+          for (const quote of quotes) {
+            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          }
+          updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
+        })();
+        result.synced += 1;
+        result.quotesSynced += quotes.length;
+      } catch (error) {
+        const message = errorMessage(error);
+        updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
+        addMarketSyncFailure(result, marketSyncResultAssetLabel(asset), message);
+      }
+      continue;
+    }
     if (provider === MARKETDATA_APP_PROVIDER) {
       const { startDate, endDate, purgeProviderQuotes } = marketSyncWindow(
         db,
@@ -1022,6 +1101,8 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
   const yahooSuffixByMic = new Map<string, string>();
   const suffixToMicCandidates = new Map<string, string>();
   const ambiguousSuffixes = new Set<string>();
+  const alphaVantageSuffixByMic = new Map<string, string>();
+  const alphaVantageCurrencyByMic = new Map<string, string>();
   for (const entry of parsed.exchanges) {
     if (!isRecord(entry) || typeof entry.mic !== "string") {
       continue;
@@ -1074,6 +1155,20 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
         }
       }
     }
+    if (isRecord(entry.alpha_vantage)) {
+      if (typeof entry.alpha_vantage.suffix === "string") {
+        alphaVantageSuffixByMic.set(mic, entry.alpha_vantage.suffix.trim());
+      }
+      const alphaCurrency =
+        typeof entry.alpha_vantage.currency === "string"
+          ? entry.alpha_vantage.currency.trim()
+          : typeof entry.currency === "string"
+            ? entry.currency.trim()
+            : "";
+      if (alphaCurrency) {
+        alphaVantageCurrencyByMic.set(mic, alphaCurrency);
+      }
+    }
   }
   return {
     exchanges,
@@ -1084,6 +1179,8 @@ function parseExchangeCatalog(json: string): ExchangeCatalog {
     yahooCodeToMic,
     yahooSuffixByMic,
     yahooSuffixToMic: suffixToMicCandidates,
+    alphaVantageSuffixByMic,
+    alphaVantageCurrencyByMic,
   };
 }
 
@@ -1097,6 +1194,8 @@ function emptyExchangeCatalog(): ExchangeCatalog {
     yahooCodeToMic: new Map(),
     yahooSuffixByMic: new Map(),
     yahooSuffixToMic: new Map(),
+    alphaVantageSuffixByMic: new Map(),
+    alphaVantageCurrencyByMic: new Map(),
   };
 }
 
@@ -1588,6 +1687,37 @@ async function resolveSymbolQuote(
   const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
   const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
   const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
+  if (preferredProvider === ALPHA_VANTAGE_PROVIDER) {
+    const apiKey = await marketDataProviderApiKey(secretService, ALPHA_VANTAGE_PROVIDER);
+    if (apiKey === null || instrumentType === "OPTION") {
+      return defaultResolvedQuote();
+    }
+    const instrument = alphaVantageInstrumentForResolve(
+      trimmedSymbol,
+      instrumentType,
+      exchangeMic,
+      requestedQuoteCcy,
+      exchangeCatalog,
+    );
+    if (instrument === null) {
+      return defaultResolvedQuote();
+    }
+    try {
+      const quote = await fetchAlphaVantageLatestQuote(
+        `_QUOTE_RESOLVE_${trimmedSymbol}`,
+        instrument,
+        fetchImpl,
+        apiKey,
+      );
+      return {
+        currency: quote.currency,
+        price: quote.close === "0" ? null : Number(quote.close),
+        resolvedProviderId: ALPHA_VANTAGE_PROVIDER,
+      };
+    } catch {
+      return defaultResolvedQuote();
+    }
+  }
   if (preferredProvider === MARKETDATA_APP_PROVIDER) {
     if (instrumentType !== "EQUITY") {
       return defaultResolvedQuote();
@@ -2674,12 +2804,8 @@ function yahooSyncSymbol(
 }
 
 function providerOverrideSymbol(providerConfig: string | null, provider: string): string | null {
-  const parsed = parseJsonValue(providerConfig);
-  if (!isRecord(parsed) || !isRecord(parsed.overrides)) {
-    return null;
-  }
-  const override = parsed.overrides[provider];
-  if (!isRecord(override)) {
+  const override = providerOverrideRecord(providerConfig, provider);
+  if (!override) {
     return null;
   }
   const type = optionalString(override.type);
@@ -2697,6 +2823,21 @@ function providerOverrideSymbol(providerConfig: string | null, provider: string)
     return `${symbol}-${market}`;
   }
   return null;
+}
+
+function providerOverrideRecord(
+  providerConfig: string | null,
+  provider: string,
+): Record<string, unknown> | null {
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed) || !isRecord(parsed.overrides)) {
+    return null;
+  }
+  const override = parsed.overrides[provider];
+  if (!isRecord(override)) {
+    return null;
+  }
+  return override;
 }
 
 function marketSyncWindow(
@@ -2954,6 +3095,458 @@ async function marketDataProviderApiKey(
   }
   const trimmed = apiKey.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+async function fetchAlphaVantageHistoricalQuotes(
+  assetId: string,
+  instrument: AlphaVantageInstrument,
+  startDate: string,
+  endDate: string,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote[]> {
+  const quotes = await fetchAlphaVantageQuotes(assetId, instrument, fetchImpl, apiKey);
+  const filtered = quotes.filter((quote) => quote.day >= startDate && quote.day <= endDate);
+  if (filtered.length === 0) {
+    throw new Error("No data for date range");
+  }
+  return filtered;
+}
+
+async function fetchAlphaVantageLatestQuote(
+  assetId: string,
+  instrument: AlphaVantageInstrument,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote> {
+  const quotes = await fetchAlphaVantageQuotes(assetId, instrument, fetchImpl, apiKey);
+  const quote = quotes.at(-1);
+  if (!quote) {
+    throw new Error("No data for date range");
+  }
+  return quote;
+}
+
+async function fetchAlphaVantageQuotes(
+  assetId: string,
+  instrument: AlphaVantageInstrument,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<YahooHistoricalQuote[]> {
+  if (instrument.kind === "equity") {
+    const payload = await fetchAlphaVantageJson(
+      [
+        ["function", "TIME_SERIES_DAILY"],
+        ["symbol", instrument.symbol],
+        ["outputsize", "compact"],
+      ],
+      fetchImpl,
+      apiKey,
+    );
+    return parseAlphaVantageEquityQuotes(payload, assetId, instrument.symbol, instrument.currency);
+  }
+  if (instrument.kind === "fx") {
+    const payload = await fetchAlphaVantageJson(
+      [
+        ["function", "FX_DAILY"],
+        ["from_symbol", instrument.from],
+        ["to_symbol", instrument.to],
+        ["outputsize", "full"],
+      ],
+      fetchImpl,
+      apiKey,
+    );
+    return parseAlphaVantageFxQuotes(payload, assetId, instrument.from, instrument.to);
+  }
+  const payload = await fetchAlphaVantageJson(
+    [
+      ["function", "DIGITAL_CURRENCY_DAILY"],
+      ["symbol", instrument.symbol],
+      ["market", instrument.market],
+    ],
+    fetchImpl,
+    apiKey,
+  );
+  return parseAlphaVantageCryptoQuotes(payload, assetId, instrument.symbol, instrument.market);
+}
+
+async function fetchAlphaVantageJson(
+  params: Array<[string, string]>,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  const url = new URL(ALPHA_VANTAGE_BASE_URL);
+  for (const [key, value] of params) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("apikey", apiKey);
+  let response: Response;
+  try {
+    response = await fetchImpl(url);
+  } catch (error) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Request failed: ${errorMessage(error)}`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
+  }
+  if (!response.ok) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
+  }
+}
+
+function parseAlphaVantageEquityQuotes(
+  payload: unknown,
+  assetId: string,
+  symbol: string,
+  currency: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const timeSeries = payload["Time Series (Daily)"];
+  if (!isRecord(timeSeries)) {
+    throw new Error(`No data for symbol: ${symbol}`);
+  }
+  const quotes: YahooHistoricalQuote[] = [];
+  for (const [date, value] of Object.entries(timeSeries)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const timestamp = alphaVantageDateTimestamp(date);
+    const open = decimalString(value["1. open"]);
+    const high = decimalString(value["2. high"]);
+    const low = decimalString(value["3. low"]);
+    const close = decimalString(value["4. close"]);
+    const volume = decimalString(value["5. volume"]);
+    if (
+      timestamp === null ||
+      open === null ||
+      high === null ||
+      low === null ||
+      close === null ||
+      volume === null
+    ) {
+      continue;
+    }
+    quotes.push(
+      alphaVantageQuoteFromDecimals(assetId, timestamp, open, high, low, close, volume, currency),
+    );
+  }
+  return alphaVantageSortedQuotes(quotes);
+}
+
+function parseAlphaVantageFxQuotes(
+  payload: unknown,
+  assetId: string,
+  from: string,
+  to: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const timeSeries = payload["Time Series FX (Daily)"];
+  if (!isRecord(timeSeries)) {
+    throw new Error(`No data for FX pair: ${from}/${to}`);
+  }
+  const quotes: YahooHistoricalQuote[] = [];
+  for (const [date, value] of Object.entries(timeSeries)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const timestamp = alphaVantageDateTimestamp(date);
+    const open = decimalString(value["1. open"]);
+    const high = decimalString(value["2. high"]);
+    const low = decimalString(value["3. low"]);
+    const close = decimalString(value["4. close"]);
+    if (timestamp === null || open === null || high === null || low === null || close === null) {
+      continue;
+    }
+    quotes.push(
+      alphaVantageQuoteFromDecimals(assetId, timestamp, open, high, low, close, null, to),
+    );
+  }
+  return alphaVantageSortedQuotes(quotes);
+}
+
+function parseAlphaVantageCryptoQuotes(
+  payload: unknown,
+  assetId: string,
+  symbol: string,
+  market: string,
+): YahooHistoricalQuote[] {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const timeSeries = payload["Time Series (Digital Currency Daily)"];
+  if (!isRecord(timeSeries)) {
+    throw new Error(`No data for crypto: ${symbol}/${market}`);
+  }
+  const quotes: YahooHistoricalQuote[] = [];
+  for (const [date, value] of Object.entries(timeSeries)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const timestamp = alphaVantageDateTimestamp(date);
+    const close = alphaVantageDynamicDecimal(value, ["4a. close", "4b. close"]);
+    if (timestamp === null || close === null) {
+      continue;
+    }
+    quotes.push(
+      alphaVantageQuoteFromDecimals(
+        assetId,
+        timestamp,
+        alphaVantageDynamicDecimal(value, ["1a. open", "1b. open"]),
+        alphaVantageDynamicDecimal(value, ["2a. high", "2b. high"]),
+        alphaVantageDynamicDecimal(value, ["3a. low", "3b. low"]),
+        close,
+        alphaVantageDynamicDecimal(value, ["5. volume"]),
+        market,
+      ),
+    );
+  }
+  return alphaVantageSortedQuotes(quotes);
+}
+
+function alphaVantageQuoteFromDecimals(
+  assetId: string,
+  timestamp: string,
+  open: string | null,
+  high: string | null,
+  low: string | null,
+  close: string,
+  volume: string | null,
+  currency: string,
+): YahooHistoricalQuote {
+  return {
+    assetId,
+    day: timestamp.slice(0, 10),
+    timestamp,
+    source: ALPHA_VANTAGE_PROVIDER,
+    open: open ?? close,
+    high: high ?? close,
+    low: low ?? close,
+    close,
+    adjclose: close,
+    volume,
+    currency,
+  };
+}
+
+function alphaVantageSortedQuotes(quotes: YahooHistoricalQuote[]): YahooHistoricalQuote[] {
+  return quotes.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+function alphaVantageDateTimestamp(date: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return null;
+  }
+  const [year, month, day] = date.split("-").map((part) => Number(part));
+  const timestamp = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day ?? 0));
+  if (
+    Number.isNaN(timestamp.getTime()) ||
+    timestamp.getUTCFullYear() !== year ||
+    timestamp.getUTCMonth() + 1 !== month ||
+    timestamp.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return timestamp.toISOString();
+}
+
+function checkAlphaVantageApiError(payload: Record<string, unknown>): void {
+  const apiError = optionalString(payload["Error Message"]);
+  if (apiError) {
+    if (apiError.includes("Invalid API call") || apiError.includes("not found")) {
+      throw new Error(`Symbol not found: ${apiError}`);
+    }
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: ${apiError}`);
+  }
+  for (const key of ["Note", "Information"]) {
+    const message = optionalString(payload[key]);
+    if (message && alphaVantageRateLimitedMessage(message)) {
+      throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
+    }
+  }
+}
+
+function alphaVantageRateLimitedMessage(message: string): boolean {
+  return message.includes("API call frequency") || message.includes("rate limit");
+}
+
+function alphaVantageDynamicDecimal(
+  record: Record<string, unknown>,
+  prefixes: string[],
+): string | null {
+  for (const prefix of prefixes) {
+    for (const [key, value] of Object.entries(record)) {
+      if (key.startsWith(prefix)) {
+        const parsed = decimalString(value);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function alphaVantageInstrumentForAsset(
+  asset: AssetMarketSyncRow,
+  exchangeCatalog: ExchangeCatalog,
+): AlphaVantageInstrument | null {
+  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined);
+  if (instrumentType === "EQUITY") {
+    const symbol = alphaVantageEquitySymbol(
+      asset.instrument_symbol,
+      asset.instrument_exchange_mic,
+      asset.provider_config,
+      exchangeCatalog,
+    );
+    return symbol
+      ? {
+          kind: "equity",
+          symbol,
+          currency: alphaVantageCurrency(
+            asset.instrument_exchange_mic,
+            asset.quote_ccy,
+            exchangeCatalog,
+          ),
+        }
+      : null;
+  }
+  if (instrumentType === "FX") {
+    const pair = alphaVantageFxPair(asset.provider_config) ?? {
+      from: optionalString(asset.instrument_symbol)?.toUpperCase() ?? "",
+      to: asset.quote_ccy.toUpperCase(),
+    };
+    return pair.from && pair.to ? { kind: "fx", ...pair, currency: pair.to } : null;
+  }
+  if (instrumentType === "CRYPTO") {
+    const pair = alphaVantageCryptoPair(asset.provider_config) ?? {
+      symbol: optionalString(asset.instrument_symbol)?.toUpperCase() ?? "",
+      market: asset.quote_ccy.toUpperCase(),
+    };
+    return pair.symbol && pair.market ? { kind: "crypto", ...pair, currency: pair.market } : null;
+  }
+  return null;
+}
+
+function alphaVantageInstrumentForResolve(
+  symbol: string,
+  instrumentType: string,
+  exchangeMic: string | null,
+  quoteCcy: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): AlphaVantageInstrument | null {
+  const canonical = canonicalizeSearchIdentity(
+    instrumentType,
+    symbol,
+    exchangeMic,
+    quoteCcy,
+    exchangeCatalog,
+  );
+  const instrumentSymbol = optionalString(canonical.instrumentSymbol);
+  if (instrumentType === "EQUITY") {
+    const alphaSymbol = alphaVantageEquitySymbol(
+      instrumentSymbol,
+      canonical.instrumentExchangeMic,
+      null,
+      exchangeCatalog,
+    );
+    return alphaSymbol
+      ? {
+          kind: "equity",
+          symbol: alphaSymbol,
+          currency: alphaVantageCurrency(
+            canonical.instrumentExchangeMic,
+            canonical.quoteCcy,
+            exchangeCatalog,
+          ),
+        }
+      : null;
+  }
+  if (instrumentType === "FX") {
+    const from = instrumentSymbol?.toUpperCase() ?? "";
+    const to = optionalString(canonical.quoteCcy)?.toUpperCase() ?? "";
+    return from && to ? { kind: "fx", from, to, currency: to } : null;
+  }
+  if (instrumentType === "CRYPTO") {
+    const cryptoSymbol = instrumentSymbol?.toUpperCase() ?? "";
+    const market = optionalString(canonical.quoteCcy)?.toUpperCase() ?? "";
+    return cryptoSymbol && market
+      ? { kind: "crypto", symbol: cryptoSymbol, market, currency: market }
+      : null;
+  }
+  return null;
+}
+
+function alphaVantageEquitySymbol(
+  instrumentSymbol: string | null,
+  exchangeMic: string | null,
+  providerConfig: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): string | null {
+  const override = providerOverrideSymbol(providerConfig, ALPHA_VANTAGE_PROVIDER);
+  if (override) {
+    return override;
+  }
+  const symbol = optionalString(instrumentSymbol)?.toUpperCase();
+  if (!symbol) {
+    return null;
+  }
+  const mic = optionalString(exchangeMic)?.toUpperCase();
+  const suffix = mic ? exchangeCatalog.alphaVantageSuffixByMic.get(mic) : undefined;
+  return suffix === undefined ? symbol : `${symbol}${suffix}`;
+}
+
+function alphaVantageCurrency(
+  exchangeMic: string | null,
+  currencyHint: string | null,
+  exchangeCatalog: ExchangeCatalog,
+): string {
+  const mic = optionalString(exchangeMic)?.toUpperCase();
+  if (mic) {
+    const alphaCurrency = exchangeCatalog.alphaVantageCurrencyByMic.get(mic);
+    if (alphaCurrency) {
+      return alphaCurrency;
+    }
+    const exchangeCurrency = exchangeCatalog.currencyByMic.get(mic);
+    if (exchangeCurrency) {
+      return exchangeCurrency;
+    }
+  }
+  return optionalString(currencyHint)?.toUpperCase() ?? "USD";
+}
+
+function alphaVantageFxPair(providerConfig: string | null): { from: string; to: string } | null {
+  const override = providerOverrideRecord(providerConfig, ALPHA_VANTAGE_PROVIDER);
+  if (!override || optionalString(override.type) !== "fx_pair") {
+    return null;
+  }
+  const from = optionalString(override.from)?.toUpperCase();
+  const to = optionalString(override.to)?.toUpperCase();
+  return from && to ? { from, to } : null;
+}
+
+function alphaVantageCryptoPair(
+  providerConfig: string | null,
+): { symbol: string; market: string } | null {
+  const override = providerOverrideRecord(providerConfig, ALPHA_VANTAGE_PROVIDER);
+  if (!override || optionalString(override.type) !== "crypto_pair") {
+    return null;
+  }
+  const symbol = optionalString(override.symbol)?.toUpperCase();
+  const market = optionalString(override.market)?.toUpperCase();
+  return symbol && market ? { symbol, market } : null;
 }
 
 async function fetchMarketDataAppHistoricalQuotes(

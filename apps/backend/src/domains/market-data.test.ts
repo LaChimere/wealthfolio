@@ -1795,6 +1795,197 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs Alpha Vantage equity, FX, and crypto quotes with API key auth", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: alphaVantageTestFetch({
+        calls,
+        responses: {
+          "TIME_SERIES_DAILY:AAPL.TRT": {
+            Information: "non-rate informational message",
+            "Time Series (Daily)": {
+              "not-a-date": {
+                "1. open": "1",
+                "2. high": "2",
+                "3. low": "0.5",
+                "4. close": "1.5",
+                "5. volume": "100",
+              },
+              "2026-01-05": {
+                "1. open": "10",
+                "2. high": "12",
+                "3. low": "9",
+                "4. close": "11",
+                "5. volume": "123456",
+              },
+            },
+          },
+          "FX_DAILY:EUR:USD": {
+            "Time Series FX (Daily)": {
+              "2026-01-05": {
+                "1. open": "1.1",
+                "2. high": "1.3",
+                "3. low": "1.0",
+                "4. close": "1.2",
+              },
+            },
+          },
+          "DIGITAL_CURRENCY_DAILY:BTC:CAD": {
+            "Time Series (Digital Currency Daily)": {
+              "2026-01-05": {
+                "1a. open (CAD)": "140",
+                "1b. open (USD)": "100",
+                "2a. high (CAD)": "168",
+                "2b. high (USD)": "120",
+                "3a. low (CAD)": "126",
+                "3b. low (USD)": "90",
+                "4a. close (CAD)": "154",
+                "4b. close (USD)": "110",
+                "5. volume": "7",
+              },
+            },
+          },
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "alpha-equity",
+        display_code: "AAPL",
+        quote_ccy: "USD",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+      insertAsset(db, {
+        id: "alpha-fx",
+        kind: "FX",
+        display_code: "EUR/USD",
+        quote_ccy: "USD",
+        instrument_type: "FX",
+        instrument_symbol: "EUR",
+        provider_config: JSON.stringify({
+          preferred_provider: "ALPHA_VANTAGE",
+          overrides: { ALPHA_VANTAGE: { type: "fx_pair", from: "EUR", to: "USD" } },
+        }),
+      });
+      insertAsset(db, {
+        id: "alpha-crypto",
+        display_code: "BTC-CAD",
+        quote_ccy: "CAD",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "BTC",
+        provider_config: JSON.stringify({
+          preferred_provider: "ALPHA_VANTAGE",
+          overrides: { ALPHA_VANTAGE: { type: "crypto_pair", symbol: "BTC", market: "CAD" } },
+        }),
+      });
+      insertAsset(db, {
+        id: "alpha-option",
+        display_code: "AAPL option",
+        instrument_type: "OPTION",
+        instrument_symbol: "AAPL260117C00100000",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["alpha-equity", "alpha-fx", "alpha-crypto", "alpha-option"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 3,
+        failed: 1,
+        skipped: 0,
+        quotesSynced: 3,
+        failures: [["AAPL option", "Alpha Vantage options not supported in the TS sync runtime"]],
+      });
+
+      expect(calls).toEqual([
+        "TIME_SERIES_DAILY:AAPL.TRT:compact",
+        "FX_DAILY:EUR:USD:full",
+        "DIGITAL_CURRENCY_DAILY:BTC:CAD",
+      ]);
+      expect(readQuoteByDay(db, "alpha-equity", "2026-01-05")).toMatchObject({
+        id: "alpha-equity_2026-01-05_ALPHA_VANTAGE",
+        source: "ALPHA_VANTAGE",
+        open: "10",
+        high: "12",
+        low: "9",
+        close: "11",
+        volume: "123456",
+        currency: "CAD",
+      });
+      expect(readQuoteByDay(db, "alpha-fx", "2026-01-05")).toMatchObject({
+        source: "ALPHA_VANTAGE",
+        close: "1.2",
+        volume: null,
+        currency: "USD",
+      });
+      expect(readQuoteByDay(db, "alpha-crypto", "2026-01-05")).toMatchObject({
+        source: "ALPHA_VANTAGE",
+        open: "140",
+        high: "168",
+        low: "126",
+        close: "154",
+        volume: "7",
+        currency: "CAD",
+      });
+      expect(readSyncState(db, "alpha-option")).toMatchObject({
+        data_source: "ALPHA_VANTAGE",
+        error_count: 1,
+        last_error: "Alpha Vantage options not supported in the TS sync runtime",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records Alpha Vantage rate-limit sync failures", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: alphaVantageTestFetch({
+        responses: {
+          "TIME_SERIES_DAILY:AAPL": {
+            Information: "API call frequency is 5 calls per minute and 25 calls per day.",
+          },
+        },
+      }),
+      secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "alpha-rate-limit",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["alpha-rate-limit"] }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        quotesSynced: 0,
+        failures: [["AAPL", "ALPHA_VANTAGE: rate limited"]],
+      });
+      expect(readSyncState(db, "alpha-rate-limit")).toMatchObject({
+        data_source: "ALPHA_VANTAGE",
+        error_count: 1,
+        last_error: "ALPHA_VANTAGE: rate limited",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs Finnhub equity candles with token auth and exchange currency", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3175,6 +3366,57 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves Alpha Vantage quote summaries through daily time series", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: alphaVantageTestFetch({
+        calls,
+        responses: {
+          "TIME_SERIES_DAILY:SHOP.TRT": {
+            "Time Series (Daily)": {
+              "2026-01-05": {
+                "1. open": "25",
+                "2. high": "26",
+                "3. low": "24",
+                "4. close": "25.5",
+                "5. volume": "1000",
+              },
+              "2026-01-06": {
+                "1. open": "26",
+                "2. high": "27",
+                "3. low": "25",
+                "4. close": "26.5",
+                "5. volume": "2000",
+              },
+            },
+          },
+        },
+      }),
+      secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "SHOP",
+          exchangeMic: "XTSE",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          providerId: "ALPHA_VANTAGE",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 26.5,
+        resolvedProviderId: "ALPHA_VANTAGE",
+      });
+      expect(calls).toEqual(["TIME_SERIES_DAILY:SHOP.TRT:compact"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves MarketData.app quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -3691,6 +3933,52 @@ function testSecretService(secretKey: string, secret: string) {
   };
 }
 
+function alphaVantageTestFetch(options: {
+  calls?: string[];
+  responses: Record<string, unknown>;
+  fallback?: typeof fetch;
+}): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith("https://www.alphavantage.co/query")) {
+      if (options.fallback) {
+        return options.fallback(input, init);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+    expect(init).toBeUndefined();
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+    const fn = parsed.searchParams.get("function");
+    let key: string | null = null;
+    if (fn === "TIME_SERIES_DAILY") {
+      expect(parsed.searchParams.get("outputsize")).toBe("compact");
+      key = `${fn}:${parsed.searchParams.get("symbol") ?? ""}`;
+      options.calls?.push(`${key}:compact`);
+    } else if (fn === "FX_DAILY") {
+      expect(parsed.searchParams.get("outputsize")).toBe("full");
+      key = `${fn}:${parsed.searchParams.get("from_symbol") ?? ""}:${
+        parsed.searchParams.get("to_symbol") ?? ""
+      }`;
+      options.calls?.push(`${key}:full`);
+    } else if (fn === "DIGITAL_CURRENCY_DAILY") {
+      expect(parsed.searchParams.has("outputsize")).toBe(false);
+      key = `${fn}:${parsed.searchParams.get("symbol") ?? ""}:${
+        parsed.searchParams.get("market") ?? ""
+      }`;
+      options.calls?.push(key);
+    }
+    if (key === null) {
+      throw new Error(`unexpected Alpha Vantage function: ${fn ?? ""}`);
+    }
+    const response = options.responses[key];
+    if (!response) {
+      throw new Error(`unexpected Alpha Vantage request: ${key}`);
+    }
+    return Promise.resolve(Response.json(response));
+  }) as typeof fetch;
+}
+
 function marketDataAppTestFetch(options: {
   calls?: string[];
   candles?: Record<string, unknown>;
@@ -3836,6 +4124,7 @@ function testExchangeCatalogJson(): string {
         timezone: "America/New_York",
         close: [16, 0],
         yahoo: { suffix: "", codes: ["NMS", "NGM", "NCM"] },
+        alpha_vantage: { suffix: "", currency: "USD" },
       },
       {
         mic: "XTSE",
@@ -3844,6 +4133,7 @@ function testExchangeCatalogJson(): string {
         timezone: "America/Toronto",
         close: [16, 0],
         yahoo: { suffix: "TO", codes: ["TOR"] },
+        alpha_vantage: { suffix: ".TRT", currency: "CAD" },
       },
       {
         mic: "XLON",
@@ -3852,6 +4142,7 @@ function testExchangeCatalogJson(): string {
         timezone: "Europe/London",
         close: [16, 30],
         yahoo: { suffix: "L", codes: ["LSE"] },
+        alpha_vantage: { suffix: ".LON", currency: "GBP" },
       },
       {
         mic: "NOCCY",

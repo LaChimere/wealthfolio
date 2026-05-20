@@ -189,7 +189,8 @@
     custom-provider-backed symbol quote resolution, targeted/general-purpose
     custom-provider latest and historical sync, custom latest fallback during
     backfill, Börse Frankfurt historical/latest sync and quote resolution,
-    MarketData.app history/latest sync and quote resolution, and Finnhub equity
+    MarketData.app history/latest sync and quote resolution, Finnhub equity
+    history/latest sync and quote resolution, and Alpha Vantage equity/FX/crypto
     history/latest sync and quote resolution now have TS runtime parity, while
     remaining provider breadth and background orchestration remain deferred to
     market-data/portfolio parity slices; market-sync result accounting,
@@ -237,12 +238,13 @@
     now have TS runtime parity; market-data no-op sync modes plus targeted and
     bounded broad Yahoo provider-backed asset/FX sync, custom-provider
     latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
-    provider sync, and Finnhub equity provider sync now execute in TS, including
-    market-sync failure/skipped-reason payload propagation, while remaining
-    provider breadth, background orchestration, automatic/background FX quote
-    fetching, and portfolio recalculation remain deferred; remaining
-    calculation-heavy health checks are deferred to health/calculation parity
-    slices; disabled Connect feature-flag responses, local Connect
+    provider sync, Finnhub equity provider sync, and Alpha Vantage
+    equity/FX/crypto provider sync now execute in TS, including market-sync
+    failure/skipped-reason payload propagation, while remaining provider
+    breadth, background orchestration, automatic/background FX quote fetching,
+    and portfolio recalculation remain deferred; remaining calculation-heavy
+    health checks are deferred to health/calculation parity slices; disabled
+    Connect feature-flag responses, local Connect
     synced-account/platform/sync-state/import-run reads, local broker sync
     profile persistence, and disabled device-sync route responses now have TS
     runtime parity, while real Connect token lifecycle, cloud HTTP clients,
@@ -2189,6 +2191,18 @@ contract:
   requests, provider override symbols, exchange-MIC currency precedence, invalid
   historical timestamp skipping, quote sync state source updates, missing-key
   sync failures, and latest price quote resolution.
+- `pr5-market-data-alpha-vantage-sync`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --filter @wealthfolio/backend type-check -- --pretty false`, full
+  `bun run check`, rubber-duck plan review, and focused code review. Coverage
+  includes targeted, incremental, broad, and history sync for `ALPHA_VANTAGE`
+  equity, FX, and crypto assets using the runtime secret service,
+  provider-specific MIC suffix/currency metadata, endpoint-specific outputsize
+  parameters, API-level error/rate-limit handling, non-rate informational
+  message tolerance, inclusive date filtering, market-currency crypto fields,
+  unsupported option sync failures without provider calls, quote sync state
+  source updates, and latest price quote resolution through daily time-series
+  endpoints.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
