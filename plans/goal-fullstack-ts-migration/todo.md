@@ -2376,6 +2376,12 @@ contract:
   cash placeholders, never-asset cash movements, asset transfers with quantity
   or price, and ambiguous transfer symbols that must be reviewed instead of
   being silently imported as cash.
+- `pr5-holdings-occ-expiration-parity`: verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes live-holdings
+  expired-option filtering accepting lowercase OCC option type markers while
+  preserving Rust's rejection of malformed OCC symbols with no underlying before
+  the date/type/strike suffix.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

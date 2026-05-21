@@ -3178,10 +3178,18 @@ function parseOccExpiration(symbol: string): string | null {
   if (trimmed.length < 15 || trimmed.length > 21) {
     return null;
   }
+  const strike = trimmed.slice(-8);
+  if (!/^\d{8}$/.test(strike)) {
+    return null;
+  }
   const dateStart = trimmed.length - 15;
   const dateEnd = trimmed.length - 9;
+  const underlying = trimmed.slice(0, dateStart).trim();
+  if (!underlying) {
+    return null;
+  }
   const datePart = trimmed.slice(dateStart, dateEnd);
-  const optionType = trimmed[dateEnd];
+  const optionType = trimmed[dateEnd]?.toUpperCase();
   if (!/^\d{6}$/.test(datePart) || (optionType !== "C" && optionType !== "P")) {
     return null;
   }

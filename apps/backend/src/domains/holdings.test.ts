@@ -1250,6 +1250,24 @@ describe("TS holdings domain", () => {
         instrumentType: "OPTION",
         instrumentSymbol: "AAPL250117C00100000",
       });
+      insertAsset(db, {
+        id: "option-expired-lowercase",
+        kind: "INVESTMENT",
+        name: "Expired Lowercase Option",
+        displayCode: "aapl250117c00100000",
+        quoteMode: "MARKET",
+        instrumentType: "OPTION",
+        instrumentSymbol: "aapl250117c00100000",
+      });
+      insertAsset(db, {
+        id: "option-malformed",
+        kind: "INVESTMENT",
+        name: "Malformed Option",
+        displayCode: "250117C00100000",
+        quoteMode: "MARKET",
+        instrumentType: "OPTION",
+        instrumentSymbol: "250117C00100000",
+      });
       insertSnapshot(db, {
         id: "a1-2026-01-05",
         accountId: "a1",
@@ -1260,6 +1278,14 @@ describe("TS holdings domain", () => {
           property: snapshotPosition("property", "0.5", "40000", "USD", "1"),
           "option-live": snapshotPosition("option-live", "1", "50", "USD", "100"),
           "option-expired": snapshotPosition("option-expired", "1", "30", "USD", "100"),
+          "option-expired-lowercase": snapshotPosition(
+            "option-expired-lowercase",
+            "1",
+            "30",
+            "USD",
+            "100",
+          ),
+          "option-malformed": snapshotPosition("option-malformed", "1", "30", "USD", "100"),
           missing: snapshotPosition("missing", "1", "10", "USD", "1"),
         },
         cashBalances: { CAD: "10", USD: "0" },
@@ -1317,6 +1343,10 @@ describe("TS holdings domain", () => {
       const holdings = (await service.getHoldings("a1")) as Holding[];
 
       expect(holdings.map((holding) => holding.id)).not.toContain("SEC-a1-option-expired");
+      expect(holdings.map((holding) => holding.id)).not.toContain(
+        "SEC-a1-option-expired-lowercase",
+      );
+      expect(holdings.map((holding) => holding.id)).toContain("SEC-a1-option-malformed");
       expect(holdings.map((holding) => holding.id)).not.toContain("SEC-a1-missing");
 
       const lse = holdingById(holdings, "SEC-a1-lse-share");
