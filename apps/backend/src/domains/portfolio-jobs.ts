@@ -1201,9 +1201,7 @@ function parsePositions(serialized: string, accountId: string): Map<string, Norm
       throw new Error(`Invalid holdings snapshot position for ${accountId}: ${key}`);
     }
     const position = normalizePosition(rawPosition, key, accountId);
-    if (!position.quantity.isZero()) {
-      positions.set(position.assetId, position);
-    }
+    positions.set(position.assetId, position);
   }
   return positions;
 }
@@ -1289,7 +1287,7 @@ function calculateValuationForSnapshot(
   let missingQuotePositions = 0;
   for (const position of snapshot.positions.values()) {
     const quote = latestQuoteAsOf(db, position.assetId, snapshot.row.snapshot_date);
-    if (assetsWithQuotes.has(position.assetId)) {
+    if (!position.quantity.isZero() && assetsWithQuotes.has(position.assetId)) {
       quotablePositions += 1;
       if (!quote) {
         missingQuotePositions += 1;
@@ -2191,33 +2189,31 @@ function upsertActivityCalculatedSnapshot(
 function serializeActivityPositions(positions: Map<string, ActivityRebuildPosition>): string {
   return JSON.stringify(
     Object.fromEntries(
-      Array.from(positions.entries())
-        .filter(([, position]) => !position.quantity.isZero())
-        .map(([assetId, position]) => [
-          assetId,
-          {
-            id: position.id,
-            accountId: position.accountId,
-            assetId: position.assetId,
-            quantity: decimalToString(position.quantity),
-            averageCost: decimalToString(position.averageCost),
-            totalCostBasis: decimalToString(position.totalCostBasis),
-            currency: position.currency,
-            inceptionDate: position.inceptionDate,
-            lots: position.lots.map((lot) => ({
-              id: lot.id,
-              quantity: decimalToString(lot.quantity),
-              costBasis: decimalToString(lot.costBasis),
-              acquisitionPrice: decimalToString(lot.acquisitionPrice),
-              acquisitionFees: decimalToString(lot.acquisitionFees),
-              acquisitionDate: lot.acquisitionDate,
-            })),
-            createdAt: position.createdAt,
-            lastUpdated: position.lastUpdated,
-            isAlternative: position.isAlternative,
-            contractMultiplier: decimalToString(position.contractMultiplier),
-          },
-        ]),
+      Array.from(positions.entries()).map(([assetId, position]) => [
+        assetId,
+        {
+          id: position.id,
+          accountId: position.accountId,
+          assetId: position.assetId,
+          quantity: decimalToString(position.quantity),
+          averageCost: decimalToString(position.averageCost),
+          totalCostBasis: decimalToString(position.totalCostBasis),
+          currency: position.currency,
+          inceptionDate: position.inceptionDate,
+          lots: position.lots.map((lot) => ({
+            id: lot.id,
+            quantity: decimalToString(lot.quantity),
+            costBasis: decimalToString(lot.costBasis),
+            acquisitionPrice: decimalToString(lot.acquisitionPrice),
+            acquisitionFees: decimalToString(lot.acquisitionFees),
+            acquisitionDate: lot.acquisitionDate,
+          })),
+          createdAt: position.createdAt,
+          lastUpdated: position.lastUpdated,
+          isAlternative: position.isAlternative,
+          contractMultiplier: decimalToString(position.contractMultiplier),
+        },
+      ]),
     ),
   );
 }

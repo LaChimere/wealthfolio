@@ -2029,6 +2029,12 @@ contract:
   `bun run --cwd apps/backend type-check`, and `bun run check`. Coverage
   includes Rust-compatible carry-forward calculated snapshots and valuations for
   non-activity days through the portfolio calculation day.
+- `pr5-activity-zero-position-snapshot-parity`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --timeout 30000` and
+  `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
+  includes Rust-compatible preservation of zero-quantity positions when reading
+  seed snapshots and writing calculated activity-derived snapshots, without
+  treating zero-quantity seed positions as quote-gap valuation blockers.
 
 ## Result
 
