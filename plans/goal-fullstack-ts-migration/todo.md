@@ -193,12 +193,14 @@
     history/latest sync and quote resolution, Alpha Vantage equity/FX/crypto
     history/latest sync and quote resolution, Metal Price API metal
     history/latest sync and quote resolution, US Treasury calculated bond
-    history/latest sync and quote resolution, and OpenFIGI bond search fallback
-    now have TS runtime parity, while remaining provider breadth and background
-    orchestration remain deferred to market-data/portfolio parity slices;
-    market-sync result accounting, portfolio `market:sync-complete`
-    failure/skipped-reason payloads, and market-data quote/sync portfolio job
-    side effects now have TS parity; activity mutation event production,
+    history/latest sync and quote resolution, OpenFIGI bond search fallback,
+    Finnhub/Alpha Vantage search fallbacks, and provider-backed activity import
+    asset preview symbol resolution now have TS runtime parity, while remaining
+    provider breadth and background orchestration remain deferred to
+    market-data/portfolio parity slices; market-sync result accounting,
+    portfolio `market:sync-complete` failure/skipped-reason payloads, and
+    market-data quote/sync portfolio job side effects now have TS parity;
+    activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -2245,6 +2247,15 @@ contract:
   `SYMBOL_SEARCH` request/API error handling, type/currency/score/region
   mapping, and continued OpenFIGI fallback after provider API fallbacks are
   empty.
+- `pr5-activities-import-preview-provider-resolution`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, rubber-duck
+  plan review, and focused code review. Coverage includes runtime wiring from
+  activity previews to market-data symbol search, exchange metadata reuse,
+  Rust-compatible bare-symbol-first then currency-suffix search candidates,
+  preferred-currency MIC selection, provider-name propagation into new-asset
+  drafts, per-preview search caching, and unresolved/missing-exchange fallback
+  when provider search returns no MIC or fails.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

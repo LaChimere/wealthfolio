@@ -3,6 +3,8 @@ import type { Database } from "bun:sqlite";
 import Decimal from "decimal.js";
 
 import type { BackendEventBus } from "../events";
+import type { ExchangeMetadata } from "./assets";
+import type { SymbolSearchResult } from "./market-data";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
@@ -223,6 +225,8 @@ export interface ActivityServiceOptions {
   eventBus?: BackendEventBus;
   ensureFxPairs?: (pairs: Array<[string, string]>) => Promise<void> | void;
   queueSyncEvent?: (event: ActivitySyncEvent) => void;
+  symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
+  exchangeMetadata?: Pick<ExchangeMetadata, "currencyByMic" | "yahooSuffixToMic">;
 }
 
 export type ActivitySyncOperation = "Create" | "Update" | "Delete";
@@ -854,7 +858,7 @@ export function createActivityService(
     },
 
     previewImportAssets(candidates) {
-      return candidates.map((candidate, index) => previewImportAsset(db, candidate, index));
+      return previewImportAssets(db, candidates, options);
     },
 
     checkActivitiesImport(activities) {
@@ -1842,7 +1846,26 @@ function countCharacter(input: string, character: string): number {
   return count;
 }
 
-function previewImportAsset(db: Database, input: unknown, index: number): Record<string, unknown> {
+async function previewImportAssets(
+  db: Database,
+  candidates: unknown[],
+  options: ActivityServiceOptions,
+): Promise<Record<string, unknown>[]> {
+  const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
+  return Promise.all(
+    candidates.map((candidate, index) =>
+      previewImportAsset(db, candidate, index, options, searchCache),
+    ),
+  );
+}
+
+async function previewImportAsset(
+  db: Database,
+  input: unknown,
+  index: number,
+  options: ActivityServiceOptions,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown>> {
   const candidate = isRecord(input) ? input : {};
   const key = optionalTrimmedString(candidate.key) ?? `candidate-${index + 1}`;
   const accountId = optionalTrimmedString(candidate.accountId);
@@ -1854,12 +1877,13 @@ function previewImportAsset(db: Database, input: unknown, index: number): Record
     optionalTrimmedString(candidate.quoteCcy) ?? optionalTrimmedString(candidate.currency),
   );
   const errors: Record<string, string[]> = {};
+  let accountCurrency: string | undefined;
 
   if (!accountId) {
     addFieldMessage(errors, "accountId", "Account is required before running backend validation.");
   } else {
     try {
-      readAccountRow(db, accountId);
+      accountCurrency = normalizeImportQuoteCurrency(readAccountRow(db, accountId).currency);
     } catch (error) {
       addFieldMessage(errors, "general", `Validation failed: ${errorMessage(error)}`);
     }
@@ -1904,14 +1928,28 @@ function previewImportAsset(db: Database, input: unknown, index: number): Record
     return importAssetPreviewItem(key, "NEEDS_FIXING", "validation_error", { errors });
   }
 
+  let resolvedExchangeMic = exchangeMic;
+  let resolvedName: string | undefined;
+  if (instrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
+    const resolution = await resolveImportAssetSymbol(
+      symbol,
+      quoteCcy ?? accountCurrency,
+      options,
+      searchCache,
+    );
+    resolvedExchangeMic = resolution?.exchangeMic ?? resolvedExchangeMic;
+    resolvedName = resolution?.name;
+  }
+
   const draft = newAssetDraftFromImport({
     symbol,
     quoteCcy,
     instrumentType,
-    exchangeMic,
+    exchangeMic: resolvedExchangeMic,
     quoteMode: quoteMode ?? "MARKET",
+    name: resolvedName,
   });
-  if (instrumentType === "EQUITY" && !exchangeMic && quoteMode !== "MANUAL") {
+  if (instrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
     addFieldMessage(
       errors,
       "symbol",
@@ -1947,6 +1985,114 @@ function importAssetPreviewItem(
   };
 }
 
+interface ImportAssetSymbolResolution {
+  exchangeMic: string;
+  name?: string;
+}
+
+async function resolveImportAssetSymbol(
+  symbol: string,
+  preferredCurrency: string | undefined,
+  options: ActivityServiceOptions,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<ImportAssetSymbolResolution | null> {
+  if (!options.symbolSearch) {
+    return null;
+  }
+  const candidates = importAssetSymbolSearchCandidates(
+    symbol,
+    preferredCurrency,
+    options.exchangeMetadata,
+  );
+  let fallback: ImportAssetSymbolResolution | null = null;
+  const preferred = normalizeCurrencyForComparison(preferredCurrency);
+
+  for (const candidate of candidates) {
+    const results = await cachedSymbolSearch(candidate, options.symbolSearch, searchCache);
+    const first = results[0];
+    const exchangeMic = first?.exchangeMic?.trim().toUpperCase();
+    if (!exchangeMic) {
+      continue;
+    }
+    const resolution = {
+      exchangeMic,
+      name: providerSymbolName(first, symbol),
+    };
+    if (preferred && resultMatchesCurrency(first, preferred, options.exchangeMetadata)) {
+      return resolution;
+    }
+    fallback ??= resolution;
+  }
+
+  return fallback;
+}
+
+function importAssetSymbolSearchCandidates(
+  symbol: string,
+  preferredCurrency: string | undefined,
+  exchangeMetadata: Pick<ExchangeMetadata, "currencyByMic" | "yahooSuffixToMic"> | undefined,
+): string[] {
+  const trimmed = symbol.trim();
+  const candidates = [trimmed];
+  const preferred = normalizeCurrencyForComparison(preferredCurrency);
+  if (!preferred || trimmed.includes(".") || !exchangeMetadata) {
+    return candidates;
+  }
+
+  for (const [suffix, mic] of exchangeMetadata.yahooSuffixToMic) {
+    const micCurrency = normalizeCurrencyForComparison(exchangeMetadata.currencyByMic.get(mic));
+    if (micCurrency !== preferred) {
+      continue;
+    }
+    const suffixed = `${trimmed}.${suffix}`;
+    if (!candidates.some((candidate) => candidate.toUpperCase() === suffixed.toUpperCase())) {
+      candidates.push(suffixed);
+    }
+  }
+  return candidates;
+}
+
+async function cachedSymbolSearch(
+  query: string,
+  symbolSearch: NonNullable<ActivityServiceOptions["symbolSearch"]>,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<SymbolSearchResult[]> {
+  const key = query.trim().toUpperCase();
+  let cached = searchCache.get(key);
+  if (!cached) {
+    cached = Promise.resolve(symbolSearch(query)).catch(() => []);
+    searchCache.set(key, cached);
+  }
+  return cached;
+}
+
+function resultMatchesCurrency(
+  result: SymbolSearchResult,
+  preferredCurrency: string,
+  exchangeMetadata: Pick<ExchangeMetadata, "currencyByMic"> | undefined,
+): boolean {
+  const micCurrency = result.exchangeMic
+    ? exchangeMetadata?.currencyByMic.get(result.exchangeMic.toUpperCase())
+    : undefined;
+  return (
+    normalizeCurrencyForComparison(micCurrency) === preferredCurrency ||
+    normalizeCurrencyForComparison(result.currency ?? undefined) === preferredCurrency
+  );
+}
+
+function providerSymbolName(result: SymbolSearchResult, symbol: string): string | undefined {
+  const name = result.longName?.trim() || result.shortName?.trim();
+  if (!name || name.toUpperCase() === symbol.trim().toUpperCase()) {
+    return undefined;
+  }
+  return name;
+}
+
+function normalizeCurrencyForComparison(currency: string | undefined): string | undefined {
+  const trimmed = currency?.trim();
+  return trimmed ? normalizedCurrencyCode(trimmed).toUpperCase() : undefined;
+}
+
 function newAssetDraftFromAssetRow(asset: AssetRow): Record<string, unknown> {
   return {
     id: asset.id,
@@ -1969,9 +2115,11 @@ function newAssetDraftFromImport(input: {
   instrumentType: string;
   exchangeMic?: string;
   quoteMode: string;
+  name?: string;
 }): Record<string, unknown> {
   return {
     kind: input.instrumentType === "FX" ? "FX" : "INVESTMENT",
+    name: input.name,
     displayCode: input.symbol,
     isActive: true,
     quoteMode: input.quoteMode,

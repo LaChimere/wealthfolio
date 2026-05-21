@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 217
+turns_used: 218
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T12:24:16+08:00"
+updated_at: "2026-05-21T12:54:12+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1411,6 +1411,15 @@ updated_at: "2026-05-21T12:24:16+08:00"
   normal search merge/existing-asset de-duplication path. Focused market-data
   tests, backend type-check, full `bun run check`, and focused code review
   passed.
+- Turn 218: Added provider-backed activity import asset preview resolution:
+  runtime activity previews now use market-data symbol search plus exchange
+  metadata to resolve missing equity exchange MICs before falling back to manual
+  review, preserve Rust's bare-symbol-first then currency-suffix fallback
+  behavior, prefer currency-matching MICs, retain provider names in new-asset
+  drafts, cache searches per preview batch, and keep provider failures
+  success-shaped as unresolved preview rows. Focused activities tests, backend
+  type-check, full `bun run check`, rubber-duck plan review, and focused code
+  review passed.
 
 ## Deferred items
 

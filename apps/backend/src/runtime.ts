@@ -256,8 +256,10 @@ function createServicesFromDatabase(
     },
   );
   exchangeRateService.initialize();
+  const exchangeCatalogJson = readExchangeCatalogJson(runtimeOptions.repositoryRoot);
+  const exchangeMetadata = parseExchangeMetadataLookup(exchangeCatalogJson);
   const marketDataService = createMarketDataService(db, {
-    exchangeCatalogJson: readExchangeCatalogJson(runtimeOptions.repositoryRoot),
+    exchangeCatalogJson,
     customProviderService,
     secretService,
     fetch: runtimeOptions.marketDataFetch,
@@ -308,6 +310,8 @@ function createServicesFromDatabase(
     queueSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent(event);
     },
+    symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
+    exchangeMetadata,
   });
   const holdingsService = createHoldingsService(db, {
     baseCurrency,
@@ -405,7 +409,7 @@ function createServicesFromDatabase(
     }),
     assetService: createAssetService(db, {
       eventBus,
-      exchangeMetadata: readExchangeMetadataLookup(runtimeOptions.repositoryRoot),
+      exchangeMetadata,
       queueSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "assets",
@@ -771,10 +775,6 @@ function readPackageVersion(repositoryRoot: string): string {
   } catch {
     return "0.0.0";
   }
-}
-
-function readExchangeMetadataLookup(repositoryRoot: string) {
-  return parseExchangeMetadataLookup(readExchangeCatalogJson(repositoryRoot));
 }
 
 function readExchangeCatalogJson(repositoryRoot: string): string {

@@ -241,7 +241,7 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("previews import assets with existing matches and bounded new-asset drafts", () => {
+  test("previews import assets with existing matches and bounded new-asset drafts", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -260,7 +260,7 @@ describe("TS activities import domain", () => {
       insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
 
       expect(
-        service.previewImportAssets?.([
+        await service.previewImportAssets?.([
           {
             key: "existing",
             accountId: "account-1",
@@ -351,6 +351,158 @@ describe("TS activities import domain", () => {
           resolutionSource: "validation_error",
           errors: {
             accountId: ["Account is required before running backend validation."],
+          },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("previews import assets with provider-backed exchange resolution", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([
+          ["XNYS", "USD"],
+          ["XTSE", "CAD"],
+        ]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify US",
+              longName: "Shopify US",
+              exchange: "NYSE",
+              exchangeMic: "XNYS",
+              exchangeName: "NYSE",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "USD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        if (query === "SHOP.TO") {
+          return [
+            {
+              symbol: "SHOP.TO",
+              shortName: "Shopify Canada",
+              longName: "Shopify Canada",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "shop",
+            accountId: "account-cad",
+            symbol: "SHOP",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "shop",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            name: "Shopify Canada",
+            displayCode: "SHOP",
+            instrumentSymbol: "SHOP",
+            instrumentExchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+        },
+      ]);
+      expect(calls).toEqual(["SHOP", "SHOP.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("previews import assets as missing exchange when provider returns no MIC", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XTSE", "CAD"]]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch() {
+        return [
+          {
+            symbol: "MISSING",
+            shortName: "Missing MIC",
+            longName: "Missing MIC",
+            exchange: "",
+            exchangeMic: null,
+            exchangeName: null,
+            quoteType: "EQUITY",
+            typeDisplay: "",
+            currency: null,
+            dataSource: "YAHOO",
+            isExisting: false,
+            index: "",
+            score: 0,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "missing",
+            accountId: "account-cad",
+            symbol: "MISSING",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "missing",
+          status: "NEEDS_FIXING",
+          resolutionSource: "missing_exchange",
+          draft: expect.objectContaining({
+            displayCode: "MISSING",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+          errors: {
+            symbol: [
+              "Could not determine the exchange for 'MISSING'. Please search for the correct ticker.",
+            ],
           },
         },
       ]);
