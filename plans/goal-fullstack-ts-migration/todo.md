@@ -2330,6 +2330,11 @@ contract:
   fallback quotes persisting deterministic non-UUID manual quote IDs, full
   OHLC/adjclose values, null volume, currency, and noon UTC timestamps matching
   the Rust quote-service path.
+- `pr5-holdings-provider-name-fallback`: focused verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes provider
+  exact-match enrichment falling back from blank long names to short names for
+  import checks and snapshot asset creation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

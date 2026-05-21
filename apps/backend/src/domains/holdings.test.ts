@@ -789,7 +789,7 @@ describe("TS holdings domain", () => {
           {
             symbol: symbol === "FUZZY" ? "FUZZY.TO" : symbol,
             shortName: `${symbol} short`,
-            longName: `${symbol} long`,
+            longName: symbol === "SHORT" ? "" : `${symbol} long`,
             exchange: "TOR",
             exchangeMic: "XTSE",
             exchangeName: "Toronto Stock Exchange",
@@ -818,6 +818,7 @@ describe("TS holdings domain", () => {
               date: "2026-03-01",
               positions: [
                 { symbol: "SHOP", quantity: "1", currency: "CAD" },
+                { symbol: "SHORT", quantity: "1", currency: "CAD" },
                 { symbol: "FUZZY", quantity: "1", currency: "CAD" },
                 { symbol: "FAIL", quantity: "1", currency: "CAD" },
                 { symbol: "", quantity: "1", currency: "CAD" },
@@ -834,6 +835,14 @@ describe("TS holdings domain", () => {
             symbol: "SHOP",
             found: true,
             assetName: "SHOP long",
+            assetId: null,
+            currency: "CAD",
+            exchangeMic: "XTSE",
+          },
+          {
+            symbol: "SHORT",
+            found: true,
+            assetName: "SHORT short",
             assetId: null,
             currency: "CAD",
             exchangeMic: "XTSE",
@@ -864,7 +873,7 @@ describe("TS holdings domain", () => {
           },
         ],
       });
-      expect(searchedSymbols).toEqual(["SHOP", "FUZZY", "FAIL"]);
+      expect(searchedSymbols).toEqual(["SHOP", "SHORT", "FUZZY", "FAIL"]);
     } finally {
       db.close();
     }

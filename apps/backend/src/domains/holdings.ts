@@ -792,7 +792,7 @@ async function holdingInputWithProviderResolution(
     );
     if (providerResult) {
       resolvedHolding.exchangeMic = providerResult.exchangeMic ?? undefined;
-      resolvedHolding.name = providerResult.longName ?? providerResult.shortName ?? undefined;
+      resolvedHolding.name = providerDisplayName(providerResult) ?? undefined;
       if (resolvedHolding.currency.trim() === "" && providerResult.currency) {
         resolvedHolding.currency = providerResult.currency;
       }
@@ -2930,7 +2930,7 @@ async function symbolCheckResult(
     return {
       symbol,
       found: true,
-      assetName: providerResult.longName,
+      assetName: providerDisplayName(providerResult),
       assetId: providerResult.existingAssetId ?? null,
       currency: providerResult.currency ?? null,
       exchangeMic: providerResult.exchangeMic ?? null,
@@ -2960,6 +2960,15 @@ async function exactProviderSymbolResult(
   } catch {
     return null;
   }
+}
+
+function providerDisplayName(result: SymbolSearchResult): string | null {
+  return nonEmptyString(result.longName) ?? nonEmptyString(result.shortName);
+}
+
+function nonEmptyString(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function cachedExactProviderSymbolResult(
