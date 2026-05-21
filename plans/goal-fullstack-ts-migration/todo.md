@@ -2357,6 +2357,12 @@ contract:
   `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
   includes direct activity manual fallback quotes using raw date-only inputs for
   noon UTC quote timestamps while stored activity dates remain normalized.
+- `pr5-activities-import-manual-quote-timestamp`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes import validation/apply preserving raw date-only quote inputs for
+  manual fallback quotes so imported quotes use Rust-compatible noon UTC
+  timestamps while imported activity dates remain normalized.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

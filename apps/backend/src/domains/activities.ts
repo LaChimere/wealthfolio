@@ -2437,7 +2437,7 @@ function checkActivityImportRow(
     accountId,
     activityType,
     subtype,
-    activityDate: activity.date ?? activity.activityDate,
+    activityDate: activity.quoteActivityDate ?? activity.date ?? activity.activityDate,
     quantity: activity.quantity,
     unitPrice: activity.unitPrice,
     amount: activity.amount,
@@ -2457,6 +2457,7 @@ function checkActivityImportRow(
     activity.id = optionalTrimmedString(activity.id) ?? normalized.id;
     activity.accountId = normalized.accountId;
     activity.date = normalized.activityDate;
+    activity.quoteActivityDate = normalized.quoteActivityDate;
     activity.currency = normalized.currency;
     activity.amount = normalized.amount?.toString() ?? null;
     activity.quantity = normalized.quantity?.toString() ?? null;
@@ -2802,7 +2803,7 @@ function importActivityCreateInput(activity: Record<string, unknown>): Record<st
     accountId: optionalTrimmedString(activity.accountId),
     activityType,
     subtype,
-    activityDate: activity.date ?? activity.activityDate,
+    activityDate: activity.quoteActivityDate ?? activity.date ?? activity.activityDate,
     quantity: activity.quantity,
     unitPrice: activity.unitPrice,
     amount: activity.amount,
@@ -2947,6 +2948,7 @@ function copyNormalizedImportFields(
   activity.accountId = create.accountId;
   activity.assetId = create.assetId ?? undefined;
   activity.date = create.activityDate;
+  activity.quoteActivityDate = activity.quoteActivityDate ?? create.quoteActivityDate;
   activity.currency = create.currency;
   activity.amount = create.amount?.toString() ?? null;
   activity.quantity = create.quantity?.toString() ?? null;

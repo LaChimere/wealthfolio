@@ -1437,6 +1437,7 @@ describe("TS activities import domain", () => {
       >;
       const checkedAssetId = checked[0]?.assetId as string;
       expect(checkedAssetId).toBeString();
+      expect(checked[0]?.quoteActivityDate).toBe("2025-01-15");
       expect(readAssetCount(db)).toBe(0);
 
       const result = (await service.importActivities?.(checked)) as {
@@ -1466,6 +1467,7 @@ describe("TS activities import domain", () => {
       expect(readQuoteByAssetDay(db, assetId, "2025-01-15", "MANUAL")).toMatchObject({
         close: "100",
         currency: "USD",
+        timestamp: "2025-01-15T12:00:00.000Z",
       });
       expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
         inserted: 1,
