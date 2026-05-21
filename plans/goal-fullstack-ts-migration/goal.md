@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 224
+turns_used: 225
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T14:22:53+08:00"
+updated_at: "2026-05-21T14:31:22+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -692,9 +692,10 @@ updated_at: "2026-05-21T14:22:53+08:00"
   `/api/v1/snapshots/import/check` can now use the migrated market-data search
   runtime after local exact-symbol lookup, accepts only exact provider symbol
   matches, maps provider currency/exchange/asset metadata to Rust-shaped symbol
-  check results, and keeps provider failures non-fatal. Device-sync outbox and
-  portfolio recalculation side effects remain deferred. Targeted
-  holdings/runtime tests and backend type-check passed.
+  check results, keeps provider failures non-fatal, and direct import writes now
+  reuse exact provider matches before creating new local market assets.
+  Device-sync outbox and portfolio recalculation side effects remain deferred.
+  Targeted holdings/runtime tests and backend type-check passed.
 - Turn 105: Added holdings snapshot mutation event production: manual/imported
   snapshot saves now publish Rust-shaped `holdings_changed` followed by
   `manual_snapshot_saved`, manual/imported snapshot deletes publish
@@ -1460,6 +1461,11 @@ updated_at: "2026-05-21T14:22:53+08:00"
   rows can create provider-enriched assets even without a prior check
   round-trip. Focused activities tests, backend type-check, and full
   `bun run check` passed.
+- Turn 225: Added provider-backed direct holdings import write resolution:
+  imported holdings snapshots now reuse exact provider symbol matches before
+  creating new local market assets, preserving local exact-symbol precedence and
+  ignoring non-exact provider matches. Focused holdings tests and backend
+  type-check, and full `bun run check` passed.
 
 ## Deferred items
 
@@ -1681,8 +1687,8 @@ updated_at: "2026-05-21T14:22:53+08:00"
   including broker FX cash/lot conversion and option contract multipliers,
   option-expiry adjustments, other adjustment no-op behavior, split
   preprocessing, and lot-level asset transfers now have TS runtime parity, while
-  provider-driven enrichment and background worker orchestration must move with
-  dedicated holdings/portfolio parity slices.
+  broader provider-driven enrichment and background worker orchestration must
+  move with dedicated holdings/portfolio parity slices.
 - Add-on security scanning, full sandbox isolation, and query-cache hardening
   remain active follow-ups. reason=the standalone TS backend now supports local
   installed add-on listing, Rust-compatible manifest normalization, toggles,

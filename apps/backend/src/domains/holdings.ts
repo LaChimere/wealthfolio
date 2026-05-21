@@ -685,16 +685,22 @@ async function importHoldingsCsv(
     snapshotsFailed: 0,
     errors: [],
   };
+  const providerSymbolCache = new Map<string, Promise<SymbolSearchResult | null>>();
 
   for (const snapshot of request.snapshots) {
     try {
+      const holdings = await Promise.all(
+        snapshot.positions.map((position) =>
+          importPositionToHoldingInput(db, position, options, providerSymbolCache),
+        ),
+      );
       await persistHoldingsSnapshot(
         db,
         {
           accountId: request.accountId,
           accountCurrency,
           snapshotDate: snapshot.date,
-          holdings: snapshot.positions.map(importPositionToHoldingInput),
+          holdings,
           cashBalances: snapshot.cashBalances,
           source: "CSV_IMPORT",
         },
@@ -710,7 +716,12 @@ async function importHoldingsCsv(
   return result;
 }
 
-function importPositionToHoldingInput(position: HoldingsPositionInput): HoldingInput {
+async function importPositionToHoldingInput(
+  db: Database,
+  position: HoldingsPositionInput,
+  options: HoldingsServiceOptions,
+  providerSymbolCache: Map<string, Promise<SymbolSearchResult | null>>,
+): Promise<HoldingInput> {
   const holding: HoldingInput = {
     symbol: position.symbol,
     quantity: position.quantity,
@@ -724,6 +735,24 @@ function importPositionToHoldingInput(position: HoldingsPositionInput): HoldingI
   }
   if (position.avgCost !== undefined && isValidFiniteDecimalString(position.avgCost)) {
     holding.averageCost = position.avgCost;
+  }
+  if (
+    !holding.assetId &&
+    !holding.exchangeMic &&
+    !readExactAssetSymbol(db, holding.symbol.trim().toUpperCase())
+  ) {
+    const providerResult = await cachedExactProviderSymbolResult(
+      holding.symbol,
+      options,
+      providerSymbolCache,
+    );
+    if (providerResult) {
+      holding.exchangeMic = providerResult.exchangeMic ?? undefined;
+      holding.name = providerResult.longName ?? providerResult.shortName ?? undefined;
+      if (holding.currency.trim() === "" && providerResult.currency) {
+        holding.currency = providerResult.currency;
+      }
+    }
   }
   return holding;
 }
@@ -2789,6 +2818,20 @@ async function exactProviderSymbolResult(
   } catch {
     return null;
   }
+}
+
+function cachedExactProviderSymbolResult(
+  symbol: string,
+  options: HoldingsServiceOptions,
+  providerSymbolCache: Map<string, Promise<SymbolSearchResult | null>>,
+): Promise<SymbolSearchResult | null> {
+  const key = symbol.trim().toUpperCase();
+  let cached = providerSymbolCache.get(key);
+  if (!cached) {
+    cached = exactProviderSymbolResult(symbol, options);
+    providerSymbolCache.set(key, cached);
+  }
+  return cached;
 }
 
 function readExactAssetSymbol(db: Database, symbol: string): AssetRow | null {

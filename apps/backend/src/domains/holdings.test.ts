@@ -648,6 +648,115 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("imports holdings snapshots with provider-backed exact symbol matches", async () => {
+    const db = createHoldingsDb();
+    const searchedSymbols: string[] = [];
+    const service = createHoldingsService(db, {
+      symbolSearch(symbol) {
+        searchedSymbols.push(symbol);
+        if (symbol === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify",
+              longName: "Shopify Inc.",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "Toronto Stock Exchange",
+              quoteType: "EQUITY",
+              typeDisplay: "Equity",
+              currency: "CAD",
+              currencySource: "provider",
+              dataSource: "YAHOO",
+              isExisting: false,
+              existingAssetId: null,
+              index: "quotes",
+              score: 100,
+            },
+          ];
+        }
+        if (symbol === "FUZZY") {
+          return [
+            {
+              symbol: "FUZZY.TO",
+              shortName: "Fuzzy",
+              longName: "Fuzzy Corp.",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "Toronto Stock Exchange",
+              quoteType: "EQUITY",
+              typeDisplay: "Equity",
+              currency: "CAD",
+              currencySource: "provider",
+              dataSource: "YAHOO",
+              isExisting: false,
+              existingAssetId: null,
+              index: "quotes",
+              score: 100,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+
+      await expect(
+        service.importHoldingsCsv({
+          accountId: "a1",
+          snapshots: [
+            {
+              date: "2026-03-01",
+              positions: [
+                { symbol: "SHOP", quantity: "2", avgCost: "100", currency: "" },
+                { symbol: "FUZZY", quantity: "1", avgCost: "50", currency: "CAD" },
+              ],
+              cashBalances: {},
+            },
+          ],
+        }),
+      ).resolves.toEqual({ snapshotsImported: 1, snapshotsFailed: 0, errors: [] });
+
+      const importedAssets = db
+        .query<
+          {
+            display_code: string;
+            name: string | null;
+            quote_ccy: string;
+            instrument_exchange_mic: string | null;
+          },
+          []
+        >(
+          `
+            SELECT display_code, name, quote_ccy, instrument_exchange_mic
+            FROM assets
+            WHERE display_code IN ('SHOP', 'FUZZY')
+            ORDER BY display_code
+          `,
+        )
+        .all();
+      expect(importedAssets).toEqual([
+        {
+          display_code: "FUZZY",
+          name: null,
+          quote_ccy: "CAD",
+          instrument_exchange_mic: null,
+        },
+        {
+          display_code: "SHOP",
+          name: "Shopify Inc.",
+          quote_ccy: "CAD",
+          instrument_exchange_mic: "XTSE",
+        },
+      ]);
+      expect(searchedSymbols).toEqual(["SHOP", "FUZZY"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures FX pairs before persisting manual and imported snapshots", async () => {
     const db = createHoldingsDb();
     const ensuredPairs: Array<[string, string]> = [];

@@ -2302,6 +2302,13 @@ contract:
   includes direct import apply using provider search and currency-aware Yahoo
   suffix fallback to enrich symbol-only market rows with MIC, name, instrument
   type, and quote currency before creating assets.
+- `pr5-holdings-import-write-provider-resolution`: focused verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts` and
+  `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
+  includes direct imported snapshot writes reusing exact provider symbol matches
+  to set name, exchange MIC, and missing quote currency before creating local
+  market assets, while preserving local exact-symbol precedence and ignoring
+  non-exact provider matches.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
