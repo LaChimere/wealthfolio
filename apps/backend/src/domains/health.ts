@@ -1402,8 +1402,18 @@ async function analyzeLegacyClassificationMigration(
   timestamp: Date,
 ): Promise<HealthIssue[]> {
   if (options.classificationMigrationProvider?.getLegacyClassificationMigrationDetails) {
-    const details =
-      await options.classificationMigrationProvider.getLegacyClassificationMigrationDetails();
+    let details: Awaited<
+      ReturnType<NonNullable<TaxonomyService["getLegacyClassificationMigrationDetails"]>>
+    >;
+    try {
+      details =
+        await options.classificationMigrationProvider.getLegacyClassificationMigrationDetails();
+    } catch (error) {
+      options.warn?.(
+        `Failed to load legacy classification migration details: ${formatErrorMessage(error)}`,
+      );
+      return [];
+    }
     if (details.assetsNeedingMigration.length === 0) {
       return [];
     }
@@ -1430,7 +1440,15 @@ async function analyzeLegacyClassificationMigration(
     return [];
   }
 
-  const status = await options.classificationMigrationProvider.getMigrationStatus();
+  let status: Awaited<ReturnType<NonNullable<TaxonomyService["getMigrationStatus"]>>>;
+  try {
+    status = await options.classificationMigrationProvider.getMigrationStatus();
+  } catch (error) {
+    options.warn?.(
+      `Failed to load legacy classification migration status: ${formatErrorMessage(error)}`,
+    );
+    return [];
+  }
   if (!status.needed || status.assetsWithLegacyData <= 0) {
     return [];
   }

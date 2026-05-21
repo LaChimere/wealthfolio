@@ -248,6 +248,60 @@ describe("TS health domain", () => {
     }
   });
 
+  test("continues health checks when legacy classification migration reads fail", async () => {
+    const scenarios = [
+      {
+        provider: {
+          getMigrationStatus: () => {
+            throw new Error("status provider should not run after details failure");
+          },
+          getLegacyClassificationMigrationDetails: () => {
+            throw new Error("details unavailable");
+          },
+        },
+        warning: "Failed to load legacy classification migration details: details unavailable",
+      },
+      {
+        provider: {
+          getMigrationStatus: () => {
+            throw new Error("status unavailable");
+          },
+        },
+        warning: "Failed to load legacy classification migration status: status unavailable",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const db = createHealthDb();
+      const warnings: string[] = [];
+      const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+        accountProvider: {
+          getActiveNonArchivedAccounts: () => [
+            account({ id: "account-a", name: "Investments", trackingMode: "NOT_SET" }),
+          ],
+        },
+        classificationMigrationProvider: scenario.provider,
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-14T12:00:00.000Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      try {
+        const status = await service.runHealthChecks?.("UTC");
+
+        expect(warnings).toEqual([scenario.warning]);
+        expect(status?.issues).toEqual([
+          expect.objectContaining({
+            category: "ACCOUNT_CONFIGURATION",
+            title: "1 account needs setup",
+          }),
+        ]);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
   test("adds bounded price staleness health issues from holdings and latest quotes", async () => {
     const db = createHealthDb();
     const service = createHealthService(
