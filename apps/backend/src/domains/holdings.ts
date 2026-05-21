@@ -687,13 +687,19 @@ async function saveManualHoldings(
 ): Promise<void> {
   const accountCurrency = readAccountCurrency(db, request.accountId);
   const snapshotDate = request.snapshotDate ?? resolveToday(options);
+  const providerSymbolCache = new Map<string, Promise<SymbolSearchResult | null>>();
+  const holdings = await Promise.all(
+    request.holdings.map((holding) =>
+      holdingInputWithProviderResolution(db, holding, options, providerSymbolCache),
+    ),
+  );
   return persistHoldingsSnapshot(
     db,
     {
       accountId: request.accountId,
       accountCurrency,
       snapshotDate,
-      holdings: request.holdings,
+      holdings,
       cashBalances: request.cashBalances,
       source: "MANUAL_ENTRY",
     },
@@ -763,25 +769,36 @@ async function importPositionToHoldingInput(
   if (position.avgCost !== undefined && isValidFiniteDecimalString(position.avgCost)) {
     holding.averageCost = position.avgCost;
   }
+  return holdingInputWithProviderResolution(db, holding, options, providerSymbolCache);
+}
+
+async function holdingInputWithProviderResolution(
+  db: Database,
+  holding: HoldingInput,
+  options: HoldingsServiceOptions,
+  providerSymbolCache: Map<string, Promise<SymbolSearchResult | null>>,
+): Promise<HoldingInput> {
+  const resolvedHolding = { ...holding };
   if (
-    !holding.assetId &&
-    !holding.exchangeMic &&
-    !readExactAssetSymbol(db, holding.symbol.trim().toUpperCase())
+    resolvedHolding.dataSource !== "MANUAL" &&
+    !resolvedHolding.assetId &&
+    !resolvedHolding.exchangeMic &&
+    !readExactAssetSymbol(db, resolvedHolding.symbol.trim().toUpperCase())
   ) {
     const providerResult = await cachedExactProviderSymbolResult(
-      holding.symbol,
+      resolvedHolding.symbol,
       options,
       providerSymbolCache,
     );
     if (providerResult) {
-      holding.exchangeMic = providerResult.exchangeMic ?? undefined;
-      holding.name = providerResult.longName ?? providerResult.shortName ?? undefined;
-      if (holding.currency.trim() === "" && providerResult.currency) {
-        holding.currency = providerResult.currency;
+      resolvedHolding.exchangeMic = providerResult.exchangeMic ?? undefined;
+      resolvedHolding.name = providerResult.longName ?? providerResult.shortName ?? undefined;
+      if (resolvedHolding.currency.trim() === "" && providerResult.currency) {
+        resolvedHolding.currency = providerResult.currency;
       }
     }
   }
-  return holding;
+  return resolvedHolding;
 }
 
 async function ensureSnapshotFxPairs(

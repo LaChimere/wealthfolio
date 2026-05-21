@@ -506,6 +506,126 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("saves manual holdings with provider-backed exact symbol matches", async () => {
+    const db = createHoldingsDb();
+    const searchedSymbols: string[] = [];
+    const service = createHoldingsService(db, {
+      symbolSearch(symbol) {
+        searchedSymbols.push(symbol);
+        if (symbol === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify",
+              longName: "Shopify Inc.",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "Toronto Stock Exchange",
+              quoteType: "EQUITY",
+              typeDisplay: "Equity",
+              currency: "CAD",
+              currencySource: "provider",
+              dataSource: "YAHOO",
+              isExisting: false,
+              existingAssetId: null,
+              index: "quotes",
+              score: 100,
+            },
+          ];
+        }
+        if (symbol === "FUZZY") {
+          return [
+            {
+              symbol: "FUZZY.TO",
+              shortName: "Fuzzy",
+              longName: "Fuzzy Corp.",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "Toronto Stock Exchange",
+              quoteType: "EQUITY",
+              typeDisplay: "Equity",
+              currency: "CAD",
+              currencySource: "provider",
+              dataSource: "YAHOO",
+              isExisting: false,
+              existingAssetId: null,
+              index: "quotes",
+              score: 100,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-02-16",
+        holdings: [
+          { symbol: "SHOP", quantity: "2", currency: "", averageCost: "100" },
+          { symbol: "FUZZY", quantity: "1", currency: "CAD", averageCost: "50" },
+          {
+            symbol: "MANUAL",
+            quantity: "3",
+            currency: "CAD",
+            averageCost: "10",
+            dataSource: "MANUAL",
+          },
+        ],
+        cashBalances: {},
+      });
+
+      const savedAssets = db
+        .query<
+          {
+            display_code: string;
+            name: string | null;
+            quote_ccy: string;
+            quote_mode: string;
+            instrument_exchange_mic: string | null;
+          },
+          []
+        >(
+          `
+            SELECT display_code, name, quote_ccy, quote_mode, instrument_exchange_mic
+            FROM assets
+            WHERE display_code IN ('SHOP', 'FUZZY', 'MANUAL')
+            ORDER BY display_code
+          `,
+        )
+        .all();
+      expect(savedAssets).toEqual([
+        {
+          display_code: "FUZZY",
+          name: null,
+          quote_ccy: "CAD",
+          quote_mode: "MARKET",
+          instrument_exchange_mic: null,
+        },
+        {
+          display_code: "MANUAL",
+          name: null,
+          quote_ccy: "CAD",
+          quote_mode: "MANUAL",
+          instrument_exchange_mic: null,
+        },
+        {
+          display_code: "SHOP",
+          name: "Shopify Inc.",
+          quote_ccy: "CAD",
+          quote_mode: "MARKET",
+          instrument_exchange_mic: "XTSE",
+        },
+      ]);
+      expect(searchedSymbols).toEqual(["SHOP", "FUZZY"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("imports holdings snapshots with per-date failures", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db, { today: () => "2026-03-15" });

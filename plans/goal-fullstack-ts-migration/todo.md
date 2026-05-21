@@ -196,14 +196,14 @@
     history/latest sync and quote resolution, OpenFIGI bond search fallback,
     Finnhub/Alpha Vantage search fallbacks, provider-backed activity import
     asset preview symbol resolution, provider-backed activity import check
-    resolution, ISIN-first activity import check resolution, ISIN-first activity
-    import asset preview resolution, and provider-backed preview
-    type/quote-currency inference now have TS runtime parity, while remaining
-    provider breadth and background orchestration remain deferred to
-    market-data/portfolio parity slices; market-sync result accounting,
-    portfolio `market:sync-complete` failure/skipped-reason payloads, and
-    market-data quote/sync portfolio job side effects now have TS parity;
-    activity mutation event production,
+    resolution, provider-backed direct holdings snapshot write resolution,
+    ISIN-first activity import check resolution, ISIN-first activity import
+    asset preview resolution, and provider-backed preview type/quote-currency
+    inference now have TS runtime parity, while remaining provider breadth and
+    background orchestration remain deferred to market-data/portfolio parity
+    slices; market-sync result accounting, portfolio `market:sync-complete`
+    failure/skipped-reason payloads, and market-data quote/sync portfolio job
+    side effects now have TS parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -2318,6 +2318,12 @@ contract:
   quote-mode-updated assets before snapshot callbacks, clearing stale quote sync
   state when switching to MANUAL, persisting runtime `asset` sync_outbox rows,
   and omitting generated `instrument_key` from asset payloads.
+- `pr5-holdings-manual-save-provider-resolution`: focused verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes manual holdings
+  saves reusing exact provider symbol matches to fill exchange MIC, name, and
+  missing quote currency before creating market assets, while ignoring non-exact
+  provider matches and skipping provider calls for MANUAL data-source assets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
