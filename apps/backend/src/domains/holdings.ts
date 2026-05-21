@@ -1082,18 +1082,23 @@ function upsertManualQuote(
   db.prepare(
     `
       INSERT OR REPLACE INTO quotes (
-        id, asset_id, day, source, close, currency, created_at, timestamp
+        id, asset_id, day, source, open, high, low, close, adjclose, volume,
+        currency, notes, created_at, timestamp
       )
-      VALUES (?, ?, ?, 'MANUAL', ?, ?, ?, ?)
+      VALUES (?, ?, ?, 'MANUAL', ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
     `,
   ).run(
     `${assetId}_${day}_MANUAL`,
     assetId,
     day,
     close.toString(),
+    close.toString(),
+    close.toString(),
+    close.toString(),
+    close.toString(),
     currency,
     now,
-    `${day}T00:00:00Z`,
+    `${day}T12:00:00.000Z`,
   );
 }
 

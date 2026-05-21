@@ -294,11 +294,37 @@ describe("TS holdings domain", () => {
       expect(
         db
           .query<
-            { close: string; currency: string },
+            {
+              id: string;
+              open: string | null;
+              high: string | null;
+              low: string | null;
+              close: string;
+              adjclose: string | null;
+              volume: string | null;
+              currency: string;
+              timestamp: string;
+            },
             [string]
-          >("SELECT close, currency FROM quotes WHERE asset_id = ?")
+          >(
+            `
+              SELECT id, open, high, low, close, adjclose, volume, currency, timestamp
+              FROM quotes
+              WHERE asset_id = ?
+            `,
+          )
           .get(asset?.id ?? ""),
-      ).toEqual({ close: "6", currency: "USD" });
+      ).toEqual({
+        id: `${asset?.id}_2026-02-15_MANUAL`,
+        open: "6",
+        high: "6",
+        low: "6",
+        close: "6",
+        adjclose: "6",
+        volume: null,
+        currency: "USD",
+        timestamp: "2026-02-15T12:00:00.000Z",
+      });
 
       expect(service.getSnapshotByDate("a1", "2026-02-15")).toEqual([
         expect.objectContaining({
@@ -1667,8 +1693,14 @@ function createHoldingsDb(): Database {
       asset_id TEXT NOT NULL,
       day TEXT NOT NULL,
       source TEXT NOT NULL,
+      open TEXT,
+      high TEXT,
+      low TEXT,
       close TEXT NOT NULL,
+      adjclose TEXT,
+      volume TEXT,
       currency TEXT NOT NULL,
+      notes TEXT,
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       timestamp TEXT NOT NULL
     );

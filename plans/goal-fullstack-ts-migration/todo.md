@@ -2324,6 +2324,12 @@ contract:
   saves reusing exact provider symbol matches to fill exchange MIC, name, and
   missing quote currency before creating market assets, while ignoring non-exact
   provider matches and skipping provider calls for MANUAL data-source assets.
+- `pr5-holdings-manual-quote-row-parity`: focused verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes manual snapshot
+  fallback quotes persisting deterministic non-UUID manual quote IDs, full
+  OHLC/adjclose values, null volume, currency, and noon UTC timestamps matching
+  the Rust quote-service path.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
