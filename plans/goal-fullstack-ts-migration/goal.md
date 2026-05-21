@@ -1503,6 +1503,11 @@ updated_at: "2026-05-21T15:01:47+08:00"
   activity-currency and asset-currency pairs once for the batch, and preserves
   atomic no-write behavior when FX registration fails. Focused activity tests,
   backend type-check, and full `bun run check` passed.
+- Turn 233: Tightened direct activity manual quote timestamp parity: manual
+  fallback quotes now preserve raw date-only activity inputs for quote creation,
+  producing noon UTC timestamps like Rust while keeping stored activities
+  normalized. Focused activity tests, backend type-check, and full
+  `bun run check` passed.
 
 ## Deferred items
 

@@ -2011,7 +2011,7 @@ describe("TS activities import domain", () => {
         adjclose: "10.5",
         volume: null,
         currency: "USD",
-        timestamp: "2025-01-15T00:00:00.000Z",
+        timestamp: "2025-01-15T12:00:00.000Z",
       });
 
       service.updateActivity?.({
@@ -2025,6 +2025,7 @@ describe("TS activities import domain", () => {
       });
       expect(readQuoteByAssetDay(db, "AAPL", "2025-01-15", "MANUAL")).toMatchObject({
         close: "12.25",
+        timestamp: "2025-01-15T12:00:00.000Z",
       });
 
       service.createActivity?.({

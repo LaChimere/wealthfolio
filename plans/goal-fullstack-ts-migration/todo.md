@@ -2352,6 +2352,11 @@ contract:
   includes bulk activity create/update paths deduplicating and ensuring
   activity-currency and asset-currency FX pairs before writes while preserving
   batch atomicity on FX registration failure.
+- `pr5-activities-manual-quote-timestamp`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes direct activity manual fallback quotes using raw date-only inputs for
+  noon UTC quote timestamps while stored activity dates remain normalized.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

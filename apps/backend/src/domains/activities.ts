@@ -527,6 +527,7 @@ interface ActivityCreateRowInput {
   subtype: string | null;
   status: string;
   activityDate: string;
+  quoteActivityDate: string;
   quantity: Decimal | null;
   unitPrice: Decimal | null;
   amount: Decimal | null;
@@ -552,9 +553,13 @@ interface PreparedActivityCreateMutation {
 }
 
 interface PreparedActivityUpdateMutation {
-  activity: ActivityRow;
+  activity: ActivityRow & ActivityQuoteDateInput;
   assetQuoteMode: string | null;
   shouldWriteQuote: boolean;
+}
+
+interface ActivityQuoteDateInput {
+  quoteActivityDate?: string;
 }
 
 interface PreparedBulkActivityMutation {
@@ -3221,7 +3226,7 @@ function persistPreparedActivityCreate(
 function persistPreparedActivityUpdate(
   db: Database,
   existing: ActivityRow,
-  update: ActivityRow,
+  update: ActivityRow & ActivityQuoteDateInput,
   assetContext: ActivityAssetResolutionContext,
   assetQuoteMode: string | null,
   shouldWriteQuote: boolean,
@@ -3408,6 +3413,7 @@ function normalizeActivityCreateInput(
   const activityType = requiredNonEmptyString(input.activityType, "activityType");
   const subtype = normalizeCreateSubtype(input.subtype);
   const activityDate = normalizeActivityDateInput(input.activityDate);
+  const quoteActivityDate = activityQuoteDateInput(input.activityDate, activityDate);
   let quantity = parseOptionalDecimal(input.quantity, "quantity")?.abs() ?? null;
   let unitPrice = parseOptionalDecimal(input.unitPrice, "unitPrice")?.abs() ?? null;
   let amount = parseOptionalDecimal(input.amount, "amount")?.abs() ?? null;
@@ -3465,6 +3471,7 @@ function normalizeActivityCreateInput(
     subtype,
     status: parseActivityStatus(input.status, "POSTED"),
     activityDate,
+    quoteActivityDate,
     quantity,
     unitPrice,
     amount,
@@ -3490,11 +3497,12 @@ function normalizeActivityUpdateInput(
   input: Record<string, unknown>,
   existing: ActivityRow,
   assetContext?: ActivityAssetResolutionContext,
-): ActivityRow {
+): ActivityRow & ActivityQuoteDateInput {
   const accountId = requiredNonEmptyString(input.accountId, "accountId");
   const account = readAccountRow(db, accountId);
   const activityType = requiredNonEmptyString(input.activityType, "activityType");
   const activityDate = normalizeActivityDateInput(input.activityDate);
+  const quoteActivityDate = activityQuoteDateInput(input.activityDate, activityDate);
   const subtypePatch = parseSubtypePatch(input);
   const effectiveSubtype =
     subtypePatch.kind === "omit"
@@ -3555,6 +3563,7 @@ function normalizeActivityUpdateInput(
           : subtypePatch.value,
     status: parseActivityStatus(input.status, "POSTED"),
     activity_date: activityDate,
+    quoteActivityDate,
     quantity: applyDecimalPatchForStorage(existing.quantity, quantityPatch),
     unit_price: applyDecimalPatchForStorage(existing.unit_price, unitPricePatch),
     amount: applyDecimalPatchForStorage(existing.amount, amountPatch),
@@ -3800,9 +3809,11 @@ function shouldWriteManualQuoteForUpdate(input: Record<string, unknown>): boolea
   return parseDecimalPatch(input, "unitPrice").kind === "set";
 }
 
+type ActivityQuoteInput = ActivityCreateRowInput | (ActivityRow & ActivityQuoteDateInput);
+
 function applyActivityQuoteSideEffects(
   db: Database,
-  activity: ActivityCreateRowInput | ActivityRow,
+  activity: ActivityQuoteInput,
   requestedQuoteMode: string | null,
   shouldWriteQuote: boolean,
   quoteModeUpdatedAssetIds?: Set<string>,
@@ -3836,19 +3847,22 @@ function applyActivityQuoteSideEffects(
   });
 }
 
-function activityQuoteAssetId(activity: ActivityCreateRowInput | ActivityRow): string | null {
+function activityQuoteAssetId(activity: ActivityQuoteInput): string | null {
   return "assetId" in activity ? activity.assetId : activity.asset_id;
 }
 
-function activityQuoteType(activity: ActivityCreateRowInput | ActivityRow): string {
+function activityQuoteType(activity: ActivityQuoteInput): string {
   return "activityType" in activity ? activity.activityType : activity.activity_type;
 }
 
-function activityQuoteDate(activity: ActivityCreateRowInput | ActivityRow): string {
-  return "activityDate" in activity ? activity.activityDate : activity.activity_date;
+function activityQuoteDate(activity: ActivityQuoteInput): string {
+  return (
+    activity.quoteActivityDate ??
+    ("activityDate" in activity ? activity.activityDate : activity.activity_date)
+  );
 }
 
-function activityQuoteUnitPrice(activity: ActivityCreateRowInput | ActivityRow): Decimal | null {
+function activityQuoteUnitPrice(activity: ActivityQuoteInput): Decimal | null {
   if ("unitPrice" in activity) {
     return activity.unitPrice;
   }
@@ -3945,6 +3959,16 @@ function activityQuoteTimestamp(activityDate: string): string {
     return `${activityDate}T12:00:00.000Z`;
   }
   return new Date(activityDate).toISOString();
+}
+
+function activityQuoteDateInput(value: unknown, normalizedActivityDate: string): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return normalizedActivityDate;
 }
 
 function parseActivityCryptoPairSymbol(symbol: string): { base: string; quote: string } | null {
