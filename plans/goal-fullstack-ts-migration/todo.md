@@ -192,13 +192,13 @@
     MarketData.app history/latest sync and quote resolution, Finnhub equity
     history/latest sync and quote resolution, Alpha Vantage equity/FX/crypto
     history/latest sync and quote resolution, Metal Price API metal
-    history/latest sync and quote resolution, and US Treasury calculated bond
-    history/latest sync and quote resolution now have TS runtime parity, while
-    remaining provider breadth and background orchestration remain deferred to
-    market-data/portfolio parity slices; market-sync result accounting,
-    portfolio `market:sync-complete` failure/skipped-reason payloads, and
-    market-data quote/sync portfolio job side effects now have TS parity;
-    activity mutation event production,
+    history/latest sync and quote resolution, US Treasury calculated bond
+    history/latest sync and quote resolution, and OpenFIGI bond search fallback
+    now have TS runtime parity, while remaining provider breadth and background
+    orchestration remain deferred to market-data/portfolio parity slices;
+    market-sync result accounting, portfolio `market:sync-complete`
+    failure/skipped-reason payloads, and market-data quote/sync portfolio job
+    side effects now have TS parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -241,13 +241,13 @@
     bounded broad Yahoo provider-backed asset/FX sync, custom-provider
     latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
     provider sync, Finnhub equity provider sync, Alpha Vantage equity/FX/crypto
-    provider sync, Metal Price API metal provider sync, and US Treasury
-    calculated bond provider sync now execute in TS, including market-sync
-    failure/skipped-reason payload propagation, while remaining provider
-    breadth, background orchestration, automatic/background FX quote fetching,
-    and portfolio recalculation remain deferred; remaining calculation-heavy
-    health checks are deferred to health/calculation parity slices; disabled
-    Connect feature-flag responses, local Connect
+    provider sync, Metal Price API metal provider sync, US Treasury calculated
+    bond provider sync, and OpenFIGI bond search fallback now execute in TS,
+    including market-sync failure/skipped-reason payload propagation, while
+    remaining provider breadth, background orchestration, automatic/background
+    FX quote fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
     synced-account/platform/sync-state/import-run reads, local broker sync
     profile persistence, and disabled device-sync route responses now have TS
     runtime parity, while real Connect token lifecycle, cloud HTTP clients,
@@ -2226,6 +2226,15 @@ contract:
   pricing formulas, single-year latest curve fallback, quote sync state
   source/error updates, and latest quote resolution for existing bond assets
   with metadata.
+- `pr5-market-data-openfigi-search`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and focused
+  code review. Coverage includes OpenFIGI fallback after empty or non-MIC Yahoo
+  search results, exact identifier mapping for ISIN/FIGI/CUSIP with Rust-ordered
+  id types, free-text `/v3/search` requests, bond-sector filtering,
+  display-name/exchange de-duplication, Rust-compatible uppercased-query result
+  symbols, `OPENFIGI` data-source tagging, and existing-asset de-duplication
+  through the normal market-data search merge path.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

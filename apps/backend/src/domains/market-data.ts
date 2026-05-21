@@ -326,6 +326,14 @@ interface YahooSearchQuoteRaw {
   currency?: unknown;
 }
 
+interface OpenFigiRecord {
+  name?: unknown;
+  ticker?: unknown;
+  exchCode?: unknown;
+  securityType?: unknown;
+  marketSector?: unknown;
+}
+
 interface BoerseInstrumentIdentity {
   mic: string;
   symbol: string;
@@ -380,6 +388,10 @@ const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
 const US_TREASURY_CALC_PROVIDER = "US_TREASURY_CALC";
 const US_TREASURY_YIELD_CURVE_URL =
   "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml";
+const OPENFIGI_PROVIDER = "OPENFIGI";
+const OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping";
+const OPENFIGI_SEARCH_URL = "https://api.openfigi.com/v3/search";
+const OPENFIGI_BOND_MARKET_SECTORS = new Set(["Corp", "Govt", "Mtge", "Muni", "Pfd"]);
 const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
@@ -1382,6 +1394,14 @@ async function searchSymbols(
   } catch {
     providerResults = [];
   }
+  if (providerResults.length === 0 || !providerResults.some((result) => result.exchangeMic)) {
+    const openFigiResults = await searchOpenFigiSymbols(query, exchangeCatalog, fetchImpl).catch(
+      () => [],
+    );
+    if (openFigiResults.length > 0) {
+      providerResults = openFigiResults;
+    }
+  }
 
   const providerKeys = dedupe(
     providerResults
@@ -1587,6 +1607,160 @@ function yahooSearchQuoteToResult(
     index: "",
     score: typeof item.score === "number" && Number.isFinite(item.score) ? item.score : 0,
   };
+}
+
+async function searchOpenFigiSymbols(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Promise<SymbolSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+  const symbol = trimmed.toUpperCase();
+  const idTypes = openFigiDetectIdTypes(trimmed);
+  if (idTypes !== null) {
+    for (const idType of idTypes) {
+      try {
+        const records = await fetchOpenFigiMapping(idType, trimmed, fetchImpl);
+        if (records.length > 0) {
+          return openFigiRecordsToSearchResults(records, symbol, exchangeCatalog);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  const records = await fetchOpenFigiSearch(trimmed, fetchImpl);
+  return openFigiRecordsToSearchResults(
+    records.filter(openFigiIsBondRecord),
+    symbol,
+    exchangeCatalog,
+  );
+}
+
+async function fetchOpenFigiMapping(
+  idType: string,
+  idValue: string,
+  fetchImpl: typeof fetch,
+): Promise<OpenFigiRecord[]> {
+  const payload = await fetchOpenFigiJson(OPENFIGI_MAPPING_URL, [{ idType, idValue }], fetchImpl);
+  if (!Array.isArray(payload)) {
+    throw new Error(`${OPENFIGI_PROVIDER}: JSON parse error`);
+  }
+  const first = payload[0];
+  if (!isRecord(first) || !Array.isArray(first.data)) {
+    return [];
+  }
+  return first.data.filter(isRecord);
+}
+
+async function fetchOpenFigiSearch(
+  query: string,
+  fetchImpl: typeof fetch,
+): Promise<OpenFigiRecord[]> {
+  const payload = await fetchOpenFigiJson(OPENFIGI_SEARCH_URL, { query }, fetchImpl);
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return [];
+  }
+  return payload.data.filter(isRecord);
+}
+
+async function fetchOpenFigiJson(
+  url: string,
+  body: unknown,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${response.status}`);
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    throw new Error(`${OPENFIGI_PROVIDER}: JSON parse error: ${errorMessage(error)}`);
+  }
+}
+
+function openFigiDetectIdTypes(query: string): string[] | null {
+  const trimmed = query.trim();
+  if (
+    trimmed.length === 12 &&
+    trimmed.startsWith("BBG") &&
+    [...trimmed].every((char) => /[A-Za-z0-9]/.test(char))
+  ) {
+    return ["COMPOSITE_FIGI", "ID_BB_GLOBAL"];
+  }
+  if (
+    trimmed.length === 12 &&
+    /^[A-Za-z]{2}/.test(trimmed) &&
+    [...trimmed.slice(2)].every((char) => /[A-Za-z0-9]/.test(char))
+  ) {
+    return ["ID_ISIN"];
+  }
+  if (trimmed.length === 9 && [...trimmed].every((char) => /[A-Za-z0-9]/.test(char))) {
+    return ["ID_CUSIP"];
+  }
+  return null;
+}
+
+function openFigiIsBondRecord(record: OpenFigiRecord): boolean {
+  const marketSector = optionalString(record.marketSector);
+  return marketSector === null ? false : OPENFIGI_BOND_MARKET_SECTORS.has(marketSector);
+}
+
+function openFigiRecordsToSearchResults(
+  records: OpenFigiRecord[],
+  symbol: string,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult[] {
+  const seen = new Set<string>();
+  const results: SymbolSearchResult[] = [];
+  for (const record of records) {
+    const name = optionalString(record.name);
+    if (!name) {
+      continue;
+    }
+    const ticker = optionalString(record.ticker);
+    const displayName = ticker ? `${name} - ${ticker}` : name;
+    const exchange = optionalString(record.exchCode) ?? "";
+    const key = `${displayName}\u0000${exchange}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const exchangeMic = yahooCodeToMic(exchange, exchangeCatalog);
+    const exchangeName = exchangeMic ? (exchangeCatalog.nameByMic.get(exchangeMic) ?? null) : null;
+    const currency = exchangeMic ? (exchangeCatalog.currencyByMic.get(exchangeMic) ?? null) : null;
+    results.push({
+      symbol,
+      shortName: displayName,
+      longName: displayName,
+      exchange,
+      exchangeMic,
+      exchangeName,
+      quoteType: "BOND",
+      typeDisplay: "",
+      currency,
+      currencySource: currency ? "exchange_inferred" : null,
+      dataSource: OPENFIGI_PROVIDER,
+      isExisting: false,
+      existingAssetId: null,
+      index: "",
+      score: 0,
+    });
+  }
+  return results;
 }
 
 function quoteTypeForInstrumentType(instrumentType: string | null): string {
