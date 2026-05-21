@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 253
+turns_used: 254
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T00:44:27+08:00"
+updated_at: "2026-05-22T00:48:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1612,6 +1612,11 @@ updated_at: "2026-05-22T00:44:27+08:00"
   `quoteType`, and mark profile-enriched rows, while rich quoteSummary sector
   and metric profiles plus provider-based auto-classification remain deferred.
   Focused asset tests, backend type-check, and focused code review passed.
+- Turn 254: Matched the first provider-profile auto-classification side effect:
+  assets enriched from Yahoo search profiles now run the existing automatic
+  taxonomy assignment path after instrument-type inference, preserving
+  best-effort warning behavior for assignment failures. Focused asset tests and
+  backend type-check passed.
 
 ## Deferred items
 

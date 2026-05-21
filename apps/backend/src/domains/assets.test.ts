@@ -633,6 +633,7 @@ describe("TS assets domain", () => {
   test("enriches Yahoo search profiles and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
+    const assignments: NewAssetTaxonomyAssignment[] = [];
     const service = createAssetService(db, {
       now: () => "2026-05-22T00:00:00.000Z",
       fetch: ((input: RequestInfo | URL) => {
@@ -654,6 +655,11 @@ describe("TS assets domain", () => {
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`));
       }) as typeof fetch,
+      taxonomyService: {
+        assignAssetToCategory(assignment) {
+          assignments.push(assignment);
+        },
+      },
     });
 
     try {
@@ -688,6 +694,22 @@ describe("TS assets domain", () => {
       expect(readSyncState(db, "equity-1")).toMatchObject({
         profile_enriched_at: "2026-05-22T00:00:00.000Z",
       });
+      expect(assignments).toEqual([
+        {
+          assetId: "equity-1",
+          taxonomyId: "instrument_type",
+          categoryId: "STOCK_COMMON",
+          weight: 10000,
+          source: "AUTO",
+        },
+        {
+          assetId: "equity-1",
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 10000,
+          source: "AUTO",
+        },
+      ]);
     } finally {
       db.close();
     }

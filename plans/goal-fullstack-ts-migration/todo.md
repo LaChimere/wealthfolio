@@ -218,49 +218,50 @@
     domain-event worker wiring to local portfolio jobs, post-portfolio active
     goal-summary refresh, broker-sync failure continuation, and bounded
     asset-enrichment execution for US Treasury bond metadata plus Yahoo search
-    profile fallback now have TS runtime parity, while provider-backed asset
-    resolution outside the activity preview/check round-trip, rich provider
-    quoteSummary/sector/metric profile enrichment, remaining quote sync outbox
-    follow-ups outside migrated alternative-asset and market-data quote paths,
-    device-sync push/pull runtime wiring, and remaining device-sync side effects
-    are deferred to activities/import/device-sync runtime parity slices; AI chat
-    persistence, tag persistence, tool-result mutation, local AI chat
-    sync_outbox callbacks, native/fallback text/reasoning provider streaming,
-    generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
-    tool-call execution, built-in `get_accounts`, `get_holdings`,
-    `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
-    `get_income`, `get_valuation_history`, `get_asset_allocation`,
-    `get_health_status`, `record_activity`, `record_activities`, and
-    `import_csv`, text/CSV attachment prompt injection, Anthropic/Gemini
-    image/PDF native media payloads, OpenAI-compatible image/PDF media payloads,
-    and Ollama image media payloads now have TS runtime parity, while Ollama PDF
-    attachment payloads remain unsupported by the documented `/api/chat`
-    images-only API; device-sync integration for sync crypto is deferred to
-    device-sync runtime parity slices; bounded account/timezone health
-    status/checks, cache behavior, legacy-classification health issues and
-    affected items, classification migration health-fix dispatch,
-    `sync_prices`/`retry_sync` dispatch into the market-data sync seam,
-    `fetch_fx` dispatch into exchange-rate pair registration and targeted
-    market-data sync, targeted `migrate_classifications` dispatch into the
-    taxonomy migration seam, and service-level `migrate_legacy_classifications`
-    dispatch, bounded price-staleness Health Center checks, bounded quote-sync
-    error checks, and bounded FX integrity issue generation, bounded
-    negative-balance data-consistency checks, and Rust-compatible health
-    dismissal hash carryover now have TS runtime parity; market-data no-op sync
-    modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync,
-    custom-provider latest/history/fallback sync, Börse Frankfurt provider sync,
-    MarketData.app provider sync, Finnhub equity provider sync, Alpha Vantage
-    equity/FX/crypto provider sync, Metal Price API metal provider sync, US
-    Treasury calculated bond provider sync, and OpenFIGI bond search fallback
-    now execute in TS, including market-sync failure/skipped-reason payload
-    propagation, while remaining provider breadth, background orchestration,
-    automatic/background FX quote fetching, and portfolio recalculation remain
-    deferred; remaining calculation-heavy health checks are deferred to
-    health/calculation parity slices; disabled Connect feature-flag responses,
-    local Connect synced-account/platform/sync-state/import-run reads, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, subscription entitlement checks, event
+    profile fallback with automatic taxonomy assignment now have TS runtime
+    parity, while provider-backed asset resolution outside the activity
+    preview/check round-trip, rich provider quoteSummary/sector/metric profile
+    enrichment, remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and remaining device-sync side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
+    native/fallback text/reasoning provider streaming, generated thread titles,
+    OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
+    built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
+    `search_activities`, `get_performance`, `get_income`,
+    `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
+    `record_activity`, `record_activities`, and `import_csv`, text/CSV
+    attachment prompt injection, Anthropic/Gemini image/PDF native media
+    payloads, OpenAI-compatible image/PDF media payloads, and Ollama image media
+    payloads now have TS runtime parity, while Ollama PDF attachment payloads
+    remain unsupported by the documented `/api/chat` images-only API;
+    device-sync integration for sync crypto is deferred to device-sync runtime
+    parity slices; bounded account/timezone health status/checks, cache
+    behavior, legacy-classification health issues and affected items,
+    classification migration health-fix dispatch, `sync_prices`/`retry_sync`
+    dispatch into the market-data sync seam, `fetch_fx` dispatch into
+    exchange-rate pair registration and targeted market-data sync, targeted
+    `migrate_classifications` dispatch into the taxonomy migration seam, and
+    service-level `migrate_legacy_classifications` dispatch, bounded
+    price-staleness Health Center checks, bounded quote-sync error checks, and
+    bounded FX integrity issue generation, bounded negative-balance
+    data-consistency checks, and Rust-compatible health dismissal hash carryover
+    now have TS runtime parity; market-data no-op sync modes plus targeted and
+    bounded broad Yahoo provider-backed asset/FX sync, custom-provider
+    latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
+    provider sync, Finnhub equity provider sync, Alpha Vantage equity/FX/crypto
+    provider sync, Metal Price API metal provider sync, US Treasury calculated
+    bond provider sync, and OpenFIGI bond search fallback now execute in TS,
+    including market-sync failure/skipped-reason payload propagation, while
+    remaining provider breadth, background orchestration, automatic/background
+    FX quote fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
+    synced-account/platform/sync-state/import-run reads, local broker sync
+    profile persistence, and disabled device-sync route responses now have TS
+    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
+    broker sync orchestration, subscription entitlement checks, event
     production, E2EE enrollment, sync engine, snapshot/upload runtime,
     background workers, device-sync cloud clients, token lifecycle, team-key
     operations, key material handling, pairing flows, freshness gate
@@ -2014,8 +2015,13 @@ contract:
   missing instrument-type inference from quote type,
   `metadata.profile.quoteType` persistence, profile-enriched marking,
   custom-provider profile skip behavior, and focused code review. Yahoo
-  quoteSummary rich sector/metric profiles and provider-based
-  auto-classification remain deferred.
+  quoteSummary rich sector/metric profiles remain deferred.
+- `pr5-enrichment-auto-classification`: targeted checks passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "enriches Yahoo|enriches US Treasury|skips already profile|keeps enrichment batches"`
+  and `bun run --cwd apps/backend type-check`. Coverage includes running the
+  existing automatic taxonomy assignment path after Yahoo profile enrichment
+  infers a missing instrument type, while preserving best-effort warning
+  behavior for assignment failures.
 - `pr5-activity-derived-snapshot-rebuild`: targeted checks passed:
   `bun test apps/backend/src/domains/portfolio-jobs.test.ts apps/backend/src/runtime.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

@@ -352,7 +352,7 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
     },
 
     async enrichAssets(assetIds) {
-      return enrichAssets(db, assetIds, options, quoteSyncProfileColumnExists);
+      return enrichAssets(db, assetIds, options, quoteSyncProfileColumnExists, exchangeMetadata);
     },
 
     deleteAsset(assetId) {
@@ -675,6 +675,7 @@ async function enrichAssets(
   assetIds: string[],
   options: AssetServiceOptions,
   quoteSyncProfileColumnExists: boolean,
+  exchangeMetadata: ExchangeMetadata,
 ): Promise<AssetEnrichmentResult> {
   const uniqueAssetIds = Array.from(new Set(assetIds));
   let enriched = 0;
@@ -688,7 +689,13 @@ async function enrichAssets(
     }
 
     try {
-      const result = await enrichAssetProfile(db, assetId, options, quoteSyncProfileColumnExists);
+      const result = await enrichAssetProfile(
+        db,
+        assetId,
+        options,
+        quoteSyncProfileColumnExists,
+        exchangeMetadata,
+      );
       if (result === "enriched") {
         enriched += 1;
       } else {
@@ -708,6 +715,7 @@ async function enrichAssetProfile(
   assetId: string,
   options: AssetServiceOptions,
   quoteSyncProfileColumnExists: boolean,
+  exchangeMetadata: ExchangeMetadata,
 ): Promise<"enriched" | "skipped"> {
   const asset = readAssetRow(db, assetId);
   if (asset.quote_mode !== "MARKET") {
@@ -728,7 +736,14 @@ async function enrichAssetProfile(
     return "skipped";
   }
 
-  updateEnrichedAssetProfile(db, asset, options, profile, bondDetails);
+  const updated = updateEnrichedAssetProfile(db, asset, options, profile, bondDetails);
+  const classification = classifyCreatedAsset(
+    options,
+    rowToAsset(updated, exchangeMetadata.nameByMic),
+  );
+  if (classification) {
+    await classification;
+  }
   markProfileEnriched(db, assetId, options, quoteSyncProfileColumnExists);
   return "enriched";
 }
@@ -911,7 +926,7 @@ function updateEnrichedAssetProfile(
   options: AssetServiceOptions,
   profile: AssetProviderProfile | null,
   bondDetails: TreasuryBondDetails | null,
-): void {
+): AssetRow {
   const metadata = parseJsonValue(asset.metadata);
   const metadataObject = isRecord(metadata) ? { ...metadata } : {};
   if (profile) {
@@ -936,20 +951,27 @@ function updateEnrichedAssetProfile(
     (asset.notes === null || asset.notes.trim() === "") && profile?.notes
       ? profile.notes
       : asset.notes;
-  db.query(
-    `
-      UPDATE assets
-      SET name = ?, notes = ?, metadata = ?, instrument_type = ?, updated_at = ?
-      WHERE id = ?
-    `,
-  ).run(
-    profile?.name ?? asset.name,
-    notes,
-    serializeJsonValue(metadataObject),
-    instrumentType,
-    currentTimestamp(options),
-    asset.id,
-  );
+  const updated = db
+    .query<AssetRow, [string | null, string | null, string | null, string | null, string, string]>(
+      `
+        UPDATE assets
+        SET name = ?, notes = ?, metadata = ?, instrument_type = ?, updated_at = ?
+        WHERE id = ?
+        RETURNING *
+      `,
+    )
+    .get(
+      profile?.name ?? asset.name,
+      notes,
+      serializeJsonValue(metadataObject),
+      instrumentType,
+      currentTimestamp(options),
+      asset.id,
+    );
+  if (!updated) {
+    throw new Error(`Record not found: asset ${asset.id}`);
+  }
+  return updated;
 }
 
 function mergeProviderProfileMetadata(
