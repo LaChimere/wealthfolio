@@ -2369,6 +2369,13 @@ contract:
   includes import asset previews, import check/apply preflight, and direct
   symbol-based activity asset creation rejecting all-dash and non-cash `$...`
   symbols before provider resolution or persistence.
+- `pr5-activities-import-symbol-disposition`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes Rust-compatible import symbol classification for dividend/adjustment
+  cash placeholders, never-asset cash movements, asset transfers with quantity
+  or price, and ambiguous transfer symbols that must be reviewed instead of
+  being silently imported as cash.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

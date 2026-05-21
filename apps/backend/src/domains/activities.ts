@@ -591,6 +591,8 @@ const ACTIVITY_TYPES = [
 ] as const;
 const SYMBOL_REQUIRED_ACTIVITY_TYPES = new Set(["BUY", "SELL", "SPLIT", "DIVIDEND", "ADJUSTMENT"]);
 const PRICE_BEARING_ACTIVITY_TYPES = new Set(["BUY", "SELL", "TRANSFER_IN"]);
+const NEVER_ASSET_ACTIVITY_TYPES = new Set(["DEPOSIT", "WITHDRAWAL", "FEE", "TAX", "CREDIT"]);
+const TRANSFER_ACTIVITY_TYPES = new Set(["TRANSFER_IN", "TRANSFER_OUT"]);
 const MANUAL_QUOTE_SOURCE = "MANUAL";
 const CURRENCY_NORMALIZATION_RULES: Record<string, { majorCode: string; factor: Decimal }> = {
   GBp: { majorCode: "GBP", factor: new Decimal("0.01") },
@@ -2289,15 +2291,24 @@ async function activityImportInputWithProviderResolution(
   const assetId = optionalTrimmedString(input.assetId);
   const exchangeMic = optionalTrimmedString(input.exchangeMic);
   const quoteMode = normalizeQuoteMode(optionalTrimmedString(input.quoteMode));
+  const disposition: ImportSymbolDisposition =
+    activityType && symbol
+      ? importSymbolDisposition(
+          activityType,
+          subtype ?? null,
+          symbol,
+          parseOptionalImportDecimal(input.quantity),
+          parseOptionalImportDecimal(input.unitPrice),
+        )
+      : { kind: "cash" };
   if (
     !accountId ||
     !activityType ||
     !symbol ||
-    isGarbageSymbol(symbol) ||
     assetId ||
     exchangeMic ||
     quoteMode === "MANUAL" ||
-    !requiresAssetIdentity(activityType, subtype ?? null)
+    disposition.kind !== "resolve"
   ) {
     return input;
   }
@@ -2434,7 +2445,22 @@ function checkActivityImportRow(
     return { activity, idempotencyKey: null };
   }
 
-  const needsAsset = requiresAssetIdentity(activityType, subtype ?? null);
+  const quantity = parseOptionalImportDecimal(activity.quantity);
+  const unitPrice = parseOptionalImportDecimal(activity.unitPrice);
+  const disposition = importSymbolDisposition(
+    activityType,
+    subtype ?? null,
+    symbol ?? "",
+    quantity,
+    unitPrice,
+  );
+  if (disposition.kind === "needs_review") {
+    addFieldMessage(errors, "symbol", disposition.message);
+    activity.isValid = false;
+    activity.errors = errors;
+    return { activity, idempotencyKey: null };
+  }
+  const needsAsset = disposition.kind === "resolve";
   if (needsAsset && symbol && !assetId && isGarbageSymbol(symbol)) {
     addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
     activity.isValid = false;
@@ -2454,6 +2480,7 @@ function checkActivityImportRow(
     currency: optionalTrimmedString(activity.currency) ?? account?.currency,
     comment: activity.comment,
     fxRate: activity.fxRate,
+    allowMissingAsset: !needsAsset,
   };
   if (assetId) {
     createInput.asset = activityAssetInputFromImportFields(activity, assetId, symbol);
@@ -2807,6 +2834,17 @@ function importActivityCreateInput(activity: Record<string, unknown>): Record<st
   const subtype = optionalTrimmedString(activity.subtype);
   const symbol = optionalTrimmedString(activity.symbol);
   const assetId = optionalTrimmedString(activity.assetId);
+  const disposition: ImportSymbolDisposition =
+    activityType && symbol
+      ? importSymbolDisposition(
+          activityType,
+          subtype ?? null,
+          symbol,
+          parseOptionalImportDecimal(activity.quantity),
+          parseOptionalImportDecimal(activity.unitPrice),
+        )
+      : { kind: "cash" };
+  const shouldResolveAsset = disposition.kind === "resolve";
   const createInput: Record<string, unknown> = {
     id: optionalTrimmedString(activity.id),
     accountId: optionalTrimmedString(activity.accountId),
@@ -2823,10 +2861,11 @@ function importActivityCreateInput(activity: Record<string, unknown>): Record<st
     sourceSystem: "CSV",
     status: activity.isDraft === true ? "DRAFT" : "POSTED",
     metadata: importActivityMetadata(activity),
+    allowMissingAsset: disposition.kind === "cash",
   };
   if (assetId) {
     createInput.asset = activityAssetInputFromImportFields(activity, assetId, symbol);
-  } else if (symbol) {
+  } else if (shouldResolveAsset && symbol) {
     createInput.asset = activityAssetInputFromImportFields(activity, undefined, symbol);
   }
   return createInput;
@@ -2902,14 +2941,28 @@ function collectImportApplyPreflightErrors(
     }
   }
 
-  if (requiresAssetIdentity(activityType, subtype) && !symbol && !assetId) {
+  const disposition = importSymbolDisposition(
+    activityType,
+    subtype,
+    symbol ?? "",
+    quantity,
+    unitPrice,
+  );
+  if (disposition.kind === "needs_review") {
+    addFieldMessage(errors, "symbol", disposition.message);
+    return;
+  }
+  const needsAsset = disposition.kind === "resolve";
+
+  if (needsAsset && !symbol && !assetId) {
     addFieldMessage(errors, "symbol", "Symbol or asset_id is required to import this activity.");
     return;
   }
 
-  if (requiresAssetIdentity(activityType, subtype) && symbol && !assetId) {
+  if (needsAsset && symbol && !assetId) {
     if (isGarbageSymbol(symbol)) {
       addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
+      return;
     }
     if (!optionalTrimmedString(activity.quoteCcy)) {
       addFieldMessage(
@@ -3632,7 +3685,7 @@ function resolveActivityAssetId(
     }
     return stageActivityAsset(assetInput, fallbackCurrencies, assetContext);
   }
-  if (requiresAssetIdentity(activityType, subtype)) {
+  if (requiresAssetIdentity(activityType, subtype) && input.allowMissingAsset !== true) {
     throw new Error("Asset-backed activities need either asset_id or symbol");
   }
   return null;
@@ -5420,6 +5473,57 @@ function requiresAssetIdentity(activityType: string, subtype: string | null): bo
     SYMBOL_REQUIRED_ACTIVITY_TYPES.has(activityType) ||
     isAssetBackedIncomeSubtype(activityType, subtype)
   );
+}
+
+type ImportSymbolDisposition =
+  | { kind: "resolve" }
+  | { kind: "cash" }
+  | { kind: "needs_review"; message: string };
+
+function importSymbolDisposition(
+  activityType: string,
+  subtype: string | null,
+  symbol: string,
+  quantity: Decimal | null,
+  unitPrice: Decimal | null,
+): ImportSymbolDisposition {
+  if (isAssetBackedIncomeSubtype(activityType, subtype)) {
+    return { kind: "resolve" };
+  }
+
+  const trimmedSymbol = symbol.trim();
+  if (activityType === "DIVIDEND" || activityType === "ADJUSTMENT") {
+    if (!trimmedSymbol || isCashSymbol(trimmedSymbol) || isGarbageSymbol(trimmedSymbol)) {
+      return { kind: "cash" };
+    }
+    return { kind: "resolve" };
+  }
+
+  if (SYMBOL_REQUIRED_ACTIVITY_TYPES.has(activityType)) {
+    return { kind: "resolve" };
+  }
+
+  if (!trimmedSymbol || isCashSymbol(trimmedSymbol) || isGarbageSymbol(trimmedSymbol)) {
+    return { kind: "cash" };
+  }
+
+  if (NEVER_ASSET_ACTIVITY_TYPES.has(activityType)) {
+    return { kind: "cash" };
+  }
+
+  if (TRANSFER_ACTIVITY_TYPES.has(activityType)) {
+    const hasQuantity = quantity !== null && !quantity.isZero();
+    const hasUnitPrice = unitPrice !== null && !unitPrice.isZero();
+    if (hasQuantity || hasUnitPrice) {
+      return { kind: "resolve" };
+    }
+    return {
+      kind: "needs_review",
+      message: `Symbol '${trimmedSymbol}' on ${activityType} with no quantity or price. Remove the symbol for a cash transfer, or add quantity for an asset transfer.`,
+    };
+  }
+
+  return { kind: "resolve" };
 }
 
 function isSecuritiesTransfer(activityType: string, assetId: string | null): boolean {
