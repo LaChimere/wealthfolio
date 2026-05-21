@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 
 import type { BackendEventBus } from "../events";
 import type { ExchangeMetadata } from "./assets";
-import type { SymbolSearchResult } from "./market-data";
+import { instrumentTypeFromQuoteType, type SymbolSearchResult } from "./market-data";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_EVEN });
 
@@ -1987,6 +1987,7 @@ function importAssetPreviewItem(
 
 interface ImportAssetSymbolResolution {
   exchangeMic: string;
+  instrumentType?: string;
   name?: string;
   quoteCcy?: string;
 }
@@ -1996,10 +1997,26 @@ async function resolveImportAssetSymbol(
   preferredCurrency: string | undefined,
   options: ActivityServiceOptions,
   searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+  isin?: string,
 ): Promise<ImportAssetSymbolResolution | null> {
   if (!options.symbolSearch) {
     return null;
   }
+
+  if (isin) {
+    const isinResults = await cachedSymbolSearch(isin, options.symbolSearch, searchCache);
+    const isinMatch = isinResults.find((result) => result.exchangeMic?.trim());
+    const exchangeMic = isinMatch?.exchangeMic?.trim().toUpperCase();
+    if (isinMatch && exchangeMic) {
+      return {
+        exchangeMic,
+        instrumentType: instrumentTypeFromQuoteType(isinMatch.quoteType) ?? undefined,
+        name: providerSymbolName(isinMatch, symbol),
+        quoteCcy: providerSymbolQuoteCcy(isinMatch, exchangeMic, options.exchangeMetadata),
+      };
+    }
+  }
+
   const candidates = importAssetSymbolSearchCandidates(
     symbol,
     preferredCurrency,
@@ -2017,6 +2034,7 @@ async function resolveImportAssetSymbol(
     }
     const resolution = {
       exchangeMic,
+      instrumentType: instrumentTypeFromQuoteType(first.quoteType) ?? undefined,
       name: providerSymbolName(first, symbol),
       quoteCcy: providerSymbolQuoteCcy(first, exchangeMic, options.exchangeMetadata),
     };
@@ -2308,39 +2326,65 @@ async function activityImportInputWithProviderResolution(
     return input;
   }
 
-  try {
-    if (
-      findExistingAssetBySymbol(db, {
-        symbol,
-        instrumentType: normalizeInstrumentType(optionalTrimmedString(input.instrumentType)),
-        quoteCcy: normalizeImportQuoteCurrency(optionalTrimmedString(input.quoteCcy)),
-      })
-    ) {
-      return input;
-    }
-  } catch (error) {
-    if (!errorMessage(error).startsWith("Multiple existing assets match symbol ")) {
-      throw error;
-    }
-  }
-
   const preferredCurrency =
     normalizeImportQuoteCurrency(optionalTrimmedString(input.currency)) ??
     normalizeImportQuoteCurrency(accountCurrency);
+  const isin = normalizeIsinKey(optionalTrimmedString(input.isin));
+  if (isin) {
+    const existingIsinAsset = findExistingAssetByIsin(db, isin);
+    const existingIsinResolution = existingIsinAsset
+      ? importAssetSymbolResolutionFromAsset(existingIsinAsset)
+      : null;
+    if (existingIsinResolution) {
+      return importInputWithSymbolResolution(input, existingIsinResolution, preferredCurrency);
+    }
+  } else {
+    try {
+      if (
+        findExistingAssetBySymbol(db, {
+          symbol,
+          instrumentType: normalizeInstrumentType(optionalTrimmedString(input.instrumentType)),
+          quoteCcy: normalizeImportQuoteCurrency(optionalTrimmedString(input.quoteCcy)),
+        })
+      ) {
+        return input;
+      }
+    } catch (error) {
+      if (!errorMessage(error).startsWith("Multiple existing assets match symbol ")) {
+        throw error;
+      }
+    }
+  }
+
   const resolution = await resolveImportAssetSymbol(
     symbol,
     preferredCurrency,
     options,
     searchCache,
+    isin,
   );
   if (!resolution) {
     return input;
   }
 
+  return importInputWithSymbolResolution(input, resolution, preferredCurrency);
+}
+
+function normalizeIsinKey(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.toUpperCase() : undefined;
+}
+
+function importInputWithSymbolResolution(
+  input: Record<string, unknown>,
+  resolution: ImportAssetSymbolResolution,
+  preferredCurrency: string | undefined,
+): Record<string, unknown> {
   return {
     ...input,
     exchangeMic: resolution.exchangeMic,
-    instrumentType: optionalTrimmedString(input.instrumentType) ?? "EQUITY",
+    instrumentType:
+      optionalTrimmedString(input.instrumentType) ?? resolution.instrumentType ?? "EQUITY",
     quoteCcy: optionalTrimmedString(input.quoteCcy) ?? resolution.quoteCcy ?? preferredCurrency,
     ...(!optionalTrimmedString(input.symbolName) &&
     !optionalTrimmedString(input.assetName) &&
@@ -2348,6 +2392,19 @@ async function activityImportInputWithProviderResolution(
     resolution.name
       ? { symbolName: resolution.name }
       : {}),
+  };
+}
+
+function importAssetSymbolResolutionFromAsset(asset: AssetRow): ImportAssetSymbolResolution | null {
+  const exchangeMic = asset.instrument_exchange_mic?.trim().toUpperCase();
+  if (!exchangeMic) {
+    return null;
+  }
+  return {
+    exchangeMic,
+    instrumentType: normalizeInstrumentType(asset.instrument_type ?? undefined),
+    name: asset.name ?? undefined,
+    quoteCcy: normalizeImportQuoteCurrency(asset.quote_ccy),
   };
 }
 
@@ -3875,6 +3932,35 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
     );
   }
   return rows[0] ?? null;
+}
+
+function findExistingAssetByIsin(db: Database, isin: string): AssetRow | null {
+  return (
+    db
+      .query<AssetRow, [string]>(
+        `
+          SELECT
+            id,
+            kind,
+            name,
+            is_active,
+            quote_ccy,
+            quote_mode,
+            display_code,
+            notes,
+            instrument_symbol,
+            instrument_exchange_mic,
+            instrument_type
+          FROM assets
+          WHERE metadata IS NOT NULL
+            AND json_valid(metadata)
+            AND UPPER(json_extract(metadata, '$.identifiers.isin')) = ?
+          ORDER BY id ASC
+          LIMIT 1
+        `,
+      )
+      .get(isin) ?? null
+  );
 }
 
 function insertActivityRow(db: Database, activity: ActivityCreateRowInput): void {

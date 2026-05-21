@@ -625,6 +625,124 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("checks import activities with existing ISIN-backed asset resolution", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      symbolSearch(query) {
+        calls.push(query);
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+      insertAsset(db, {
+        id: "SHOP-CA",
+        displayCode: "SHOP",
+        name: "Shopify Canada",
+        quoteCcy: "CAD",
+        instrumentSymbol: "SHOP",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        metadata: JSON.stringify({ identifiers: { isin: "CA82509L1076" } }),
+      });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "SHOP",
+          isin: " ca82509l1076 ",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+
+      expect(checked[0]).toMatchObject({
+        assetId: "SHOP-CA",
+        symbol: "SHOP",
+        symbolName: "Shopify Canada",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        quoteCcy: "CAD",
+        isValid: true,
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("checks import activities by searching ISIN before ticker fallback", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XTSE", "CAD"]]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "CA0000000001") {
+          return [
+            {
+              symbol: "BOND1",
+              shortName: "Bond by ISIN",
+              longName: "Bond by ISIN",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "BOND",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "BOND1",
+          isin: "CA0000000001",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+
+      expect(checked[0]).toMatchObject({
+        symbol: "BOND1",
+        symbolName: "Bond by ISIN",
+        exchangeMic: "XTSE",
+        instrumentType: "BOND",
+        quoteCcy: "CAD",
+        isValid: true,
+      });
+      expect(calls).toEqual(["CA0000000001"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps import validation invalid when provider resolution has no MIC", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];
@@ -3299,6 +3417,7 @@ interface AssetFixture {
   quoteCcy?: string;
   exchangeMic?: string | null;
   instrumentSymbol?: string | null;
+  metadata?: string | null;
 }
 
 interface ActivityFixture {
@@ -3341,10 +3460,10 @@ function insertAsset(db: Database, asset: AssetFixture): void {
   db.query(
     `
       INSERT INTO assets (
-        id, kind, name, display_code, notes, is_active, instrument_symbol, instrument_exchange_mic,
+        id, kind, name, display_code, notes, metadata, is_active, instrument_symbol, instrument_exchange_mic,
         quote_mode, quote_ccy, instrument_type
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
@@ -3352,6 +3471,7 @@ function insertAsset(db: Database, asset: AssetFixture): void {
     asset.name,
     asset.displayCode,
     null,
+    asset.metadata ?? null,
     1,
     asset.instrumentSymbol ?? asset.displayCode,
     asset.exchangeMic ?? null,

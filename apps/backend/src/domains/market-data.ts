@@ -1962,7 +1962,7 @@ function quoteTypeForInstrumentType(instrumentType: string | null): string {
   }
 }
 
-function instrumentTypeFromQuoteType(quoteType: string): string | null {
+export function instrumentTypeFromQuoteType(quoteType: string): string | null {
   switch (quoteType.toUpperCase()) {
     case "EQUITY":
     case "STOCK":
