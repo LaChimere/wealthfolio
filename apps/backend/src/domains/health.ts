@@ -98,6 +98,7 @@ export interface HealthServiceOptions {
   valuationProvider?: NegativeBalanceProvider;
   now?: () => Date;
   cacheTtlMs?: number;
+  warn?: (message: string) => void;
 }
 
 export interface NegativeAccountBalanceInfo {
@@ -1217,8 +1218,20 @@ async function analyzeDataConsistency(
     .filter((account) => account.accountType === "CASH")
     .map((account) => account.id);
   const [negativeInvestmentAccounts, negativeCashAccounts] = await Promise.all([
-    getNegativeBalanceIssues(options.valuationProvider, investmentAccountIds, accountNameById),
-    getNegativeBalanceIssues(options.valuationProvider, cashAccountIds, accountNameById),
+    getNegativeBalanceIssues(
+      options.valuationProvider,
+      investmentAccountIds,
+      accountNameById,
+      options.warn,
+      "negative account balances",
+    ),
+    getNegativeBalanceIssues(
+      options.valuationProvider,
+      cashAccountIds,
+      accountNameById,
+      options.warn,
+      "negative cash balances",
+    ),
   ]);
 
   return [
@@ -1239,11 +1252,19 @@ async function getNegativeBalanceIssues(
   provider: NegativeBalanceProvider,
   accountIds: string[],
   accountNameById: Map<string, string>,
+  warn: ((message: string) => void) | undefined,
+  failureLabel: string,
 ): Promise<NegativeBalanceIssue[]> {
   if (accountIds.length === 0) {
     return [];
   }
-  const rows = await provider.getAccountsWithNegativeBalance(accountIds);
+  let rows: NegativeAccountBalanceInfo[];
+  try {
+    rows = await provider.getAccountsWithNegativeBalance(accountIds);
+  } catch (error) {
+    warn?.(`Failed to check for ${failureLabel}: ${formatErrorMessage(error)}`);
+    return [];
+  }
   return rows
     .map((row) => ({
       recordId: row.accountId,
@@ -1349,6 +1370,10 @@ function negativeBalanceLikelyCause(cash: Decimal, investments: Decimal): string
 
 function formatHealthDecimal(value: Decimal): string {
   return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function analyzeLegacyClassificationMigration(

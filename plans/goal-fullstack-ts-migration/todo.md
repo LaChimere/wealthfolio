@@ -2382,6 +2382,12 @@ contract:
   expired-option filtering accepting lowercase OCC option type markers while
   preserving Rust's rejection of malformed OCC symbols with no underlying before
   the date/type/strike suffix.
+- `pr5-health-negative-balance-error-parity`: verification passed:
+  `bun test apps/backend/src/domains/health.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes Rust-compatible
+  nonfatal handling for failed negative account-balance lookups: the failed
+  investment/cash group warns and contributes no issue while other data
+  consistency checks continue.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

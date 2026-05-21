@@ -871,6 +871,59 @@ describe("TS health domain", () => {
     }
   });
 
+  test("continues data consistency checks when negative balance lookups fail", async () => {
+    const db = createHealthDb();
+    const warnings: string[] = [];
+    const requestedAccountIds: string[][] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [
+          account({ id: "investment-a", name: "Investment A", accountType: "SECURITIES" }),
+          account({ id: "cash-a", name: "Cash A", accountType: "CASH" }),
+        ],
+        getActiveNonArchivedAccounts: () => [],
+      },
+      valuationProvider: {
+        getAccountsWithNegativeBalance: (accountIds) => {
+          requestedAccountIds.push(accountIds);
+          if (accountIds.includes("investment-a")) {
+            throw new Error("valuation unavailable");
+          }
+          return [
+            {
+              accountId: "cash-a",
+              firstNegativeDate: "2026-05-03",
+              cashBalance: "-25.1",
+              totalValue: "-25.1",
+              accountCurrency: "USD",
+            },
+          ];
+        },
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      warn: (message) => warnings.push(message),
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(requestedAccountIds).toEqual([["investment-a"], ["cash-a"]]);
+      expect(warnings).toEqual([
+        "Failed to check for negative account balances: valuation unavailable",
+      ]);
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: "negative_cash_balance:106c1df9e5f16016",
+          severity: "INFO",
+          affectedItems: [{ id: "cash-a", name: "Cash A", route: "/accounts/cash-a" }],
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches Rust timezone validity and offset-equivalence behavior", async () => {
     const db = createHealthDb();
     try {
