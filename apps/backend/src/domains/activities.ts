@@ -1870,6 +1870,7 @@ async function previewImportAsset(
   const key = optionalTrimmedString(candidate.key) ?? `candidate-${index + 1}`;
   const accountId = optionalTrimmedString(candidate.accountId);
   const symbol = optionalTrimmedString(candidate.symbol);
+  const isin = normalizeIsinKey(optionalTrimmedString(candidate.isin));
   const exchangeMic = optionalTrimmedString(candidate.exchangeMic)?.toUpperCase();
   const instrumentType = normalizeInstrumentType(optionalTrimmedString(candidate.instrumentType));
   const quoteMode = normalizeQuoteMode(optionalTrimmedString(candidate.quoteMode));
@@ -1897,12 +1898,14 @@ async function previewImportAsset(
   }
 
   try {
-    const existingAsset = findExistingAssetBySymbol(db, {
-      symbol,
-      exchangeMic,
-      instrumentType,
-      quoteCcy,
-    });
+    const existingAsset = isin
+      ? findExistingAssetByIsin(db, isin)
+      : findExistingAssetBySymbol(db, {
+          symbol,
+          exchangeMic,
+          instrumentType,
+          quoteCcy,
+        });
     if (existingAsset) {
       return importAssetPreviewItem(key, "EXISTING_ASSET", "existing_asset", {
         assetId: existingAsset.id,
@@ -1936,6 +1939,7 @@ async function previewImportAsset(
       quoteCcy ?? accountCurrency,
       options,
       searchCache,
+      isin,
     );
     resolvedExchangeMic = resolution?.exchangeMic ?? resolvedExchangeMic;
     resolvedName = resolution?.name;

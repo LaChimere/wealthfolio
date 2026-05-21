@@ -448,6 +448,186 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("previews import assets with existing ISIN-backed asset resolution", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      symbolSearch() {
+        throw new Error("provider should not be called for existing ISIN assets");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+      insertAsset(db, {
+        id: "SHOP-CA",
+        displayCode: "SHOP",
+        name: "Shopify Canada",
+        quoteCcy: "CAD",
+        instrumentSymbol: "SHOP",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        metadata: JSON.stringify({ identifiers: { isin: "CA82509L1076" } }),
+      });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "shop",
+            accountId: "account-cad",
+            symbol: "SHOP",
+            isin: " ca82509l1076 ",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "shop",
+          status: "EXISTING_ASSET",
+          resolutionSource: "existing_asset",
+          assetId: "SHOP-CA",
+          draft: expect.objectContaining({
+            name: "Shopify Canada",
+            displayCode: "SHOP",
+            instrumentSymbol: "SHOP",
+            instrumentExchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("previews import assets by searching ISIN before ticker fallback", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XTSE", "CAD"]]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "CA82509L1077") {
+          return [
+            {
+              symbol: "SHOP.TO",
+              shortName: "Shopify by ISIN",
+              longName: "Shopify by ISIN",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "shop",
+            accountId: "account-cad",
+            symbol: "SHOP",
+            isin: "CA82509L1077",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "shop",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            name: "Shopify by ISIN",
+            displayCode: "SHOP",
+            instrumentSymbol: "SHOP",
+            instrumentExchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+        },
+      ]);
+      expect(calls).toEqual(["CA82509L1077"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("previews import assets without local symbol fallback for mismatched ISIN", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XTSE", "CAD"]]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+      insertAsset(db, {
+        id: "SHOP-CA",
+        displayCode: "SHOP",
+        name: "Shopify Canada",
+        quoteCcy: "CAD",
+        instrumentSymbol: "SHOP",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        metadata: JSON.stringify({ identifiers: { isin: "CA82509L1076" } }),
+      });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "shop",
+            accountId: "account-cad",
+            symbol: "SHOP",
+            isin: "CA82509L9999",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "shop",
+          status: "NEEDS_FIXING",
+          resolutionSource: "missing_exchange",
+          draft: expect.objectContaining({
+            displayCode: "SHOP",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+          }),
+          errors: {
+            symbol: [
+              "Could not determine the exchange for 'SHOP'. Please search for the correct ticker.",
+            ],
+          },
+        },
+      ]);
+      expect(calls).toEqual(["CA82509L9999", "SHOP", "SHOP.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("previews import assets as missing exchange when provider returns no MIC", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {
