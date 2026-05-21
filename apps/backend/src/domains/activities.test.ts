@@ -2382,6 +2382,82 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("ensures bulk activity FX pairs before writes", async () => {
+    const db = createActivitiesDb();
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "EUR",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      const setupService = createActivityService(db);
+      const existing = setupService.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "CAD",
+      }) as Activity;
+
+      const ensuredPairs: Array<[string, string]> = [];
+      const service = createActivityService(db, {
+        ensureFxPairs: (pairs) => {
+          ensuredPairs.push(...pairs);
+          throw new Error("fx unavailable");
+        },
+      });
+
+      await expect(
+        service.bulkMutateActivities?.({
+          creates: [
+            {
+              id: "temp-create",
+              accountId: "account-1",
+              asset: { id: "AAPL" },
+              activityType: "BUY",
+              activityDate: "2025-01-16",
+              quantity: "1",
+              unitPrice: "12",
+              amount: "12",
+              currency: "USD",
+            },
+          ],
+          updates: [
+            {
+              id: existing.id,
+              accountId: "account-1",
+              asset: { id: "AAPL" },
+              activityType: "BUY",
+              activityDate: "2025-01-15",
+              quantity: "1",
+              unitPrice: "11",
+              amount: "11",
+              currency: "USD",
+            },
+          ],
+        }),
+      ).rejects.toThrow("fx unavailable");
+
+      expect(ensuredPairs).toEqual([
+        ["USD", "CAD"],
+        ["EUR", "CAD"],
+      ]);
+      expect(readActivityCount(db)).toBe(1);
+      expect(readActivityValue(db, existing.id, "currency")).toBe("CAD");
+    } finally {
+      db.close();
+    }
+  });
+
   test("links and unlinks transfer pairs with Rust-compatible metadata behavior", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

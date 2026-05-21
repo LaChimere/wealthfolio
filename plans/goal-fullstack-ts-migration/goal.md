@@ -1498,6 +1498,11 @@ updated_at: "2026-05-21T15:01:47+08:00"
   pairs against the account currency before persistence, preserving no-write
   behavior when FX registration fails. Focused activity tests, backend
   type-check, and full `bun run check` passed.
+- Turn 232: Extended direct activity FX pair registration parity to bulk
+  mutations: bulk create/update now prepares rows before writes, ensures
+  activity-currency and asset-currency pairs once for the batch, and preserves
+  atomic no-write behavior when FX registration fails. Focused activity tests,
+  backend type-check, and full `bun run check` passed.
 
 ## Deferred items
 

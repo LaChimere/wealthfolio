@@ -546,6 +546,26 @@ interface ActivityCreateRowInput {
   updatedAt: string;
 }
 
+interface PreparedActivityCreateMutation {
+  activity: ActivityCreateRowInput;
+  tempId: string | null;
+}
+
+interface PreparedActivityUpdateMutation {
+  activity: ActivityRow;
+  assetQuoteMode: string | null;
+  shouldWriteQuote: boolean;
+}
+
+interface PreparedBulkActivityMutation {
+  assetContext: ActivityAssetResolutionContext;
+  preparedCreates: PreparedActivityCreateMutation[];
+  preparedUpdates: PreparedActivityUpdateMutation[];
+  preparedUpdateExistingRows: ActivityRow[];
+  preparedDeletes: ActivityRow[];
+  errors: ActivityBulkMutationError[];
+}
+
 type DecimalPatch = { kind: "omit" } | { kind: "clear" } | { kind: "set"; value: Decimal };
 
 const SQLITE_MAX_PARAMS_CHUNK = 500;
@@ -684,136 +704,36 @@ export function createActivityService(
     },
 
     bulkMutateActivities(input) {
-      const outcome = db.transaction(() => {
-        const assetContext = createActivityAssetResolutionContext();
-        const creates = recordArrayField(input, "creates");
-        const updates = recordArrayField(input, "updates");
-        const deleteIds = stringArrayField(input, "deleteIds");
-        const errors: ActivityBulkMutationError[] = [];
-        const preparedCreates: Array<{
-          activity: ActivityCreateRowInput;
-          tempId: string | null;
-        }> = [];
-        const preparedUpdates: Array<{
-          activity: ActivityRow;
-          assetQuoteMode: string | null;
-          shouldWriteQuote: boolean;
-        }> = [];
-        const preparedUpdateExistingRows: ActivityRow[] = [];
-        const preparedDeletes: ActivityRow[] = [];
-        const createIdempotencyKeys = new Set<string>();
-        const deleteIdSet = new Set(deleteIds);
+      if (options.ensureFxPairs) {
+        return (async () => {
+          const prepared = prepareBulkActivityMutation(db, input);
+          if (prepared.errors.length > 0) {
+            return emptyBulkMutationResult(prepared.errors);
+          }
 
-        for (const createInput of creates) {
-          const tempId = stringFieldOrNull(createInput.id)?.trim() || null;
-          try {
-            const activity = normalizeActivityCreateInput(db, createInput, assetContext);
-            if (activity.idempotencyKey !== null) {
-              const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
-              if (existingId !== null && !deleteIdSet.has(existingId)) {
-                throw duplicateActivityError(existingId);
-              }
-              if (createIdempotencyKeys.has(activity.idempotencyKey)) {
-                throw duplicateActivityError(null);
-              }
-              createIdempotencyKeys.add(activity.idempotencyKey);
+          const fxPairs = collectBulkActivityFxPairs(db, prepared);
+          if (fxPairs.length > 0) {
+            await options.ensureFxPairs?.(fxPairs);
+          }
+
+          const outcome = db.transaction(() => persistPreparedBulkActivityMutation(db, prepared))();
+          publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
+          queueActivitySyncEvents(options, outcome.syncEvents);
+          publishBulkActivitiesChanged(options.eventBus, outcome.oldRows, outcome.result);
+          return outcome.result;
+        })();
+      }
+
+      const prepared = prepareBulkActivityMutation(db, input);
+      const outcome =
+        prepared.errors.length > 0
+          ? {
+              result: emptyBulkMutationResult(prepared.errors),
+              oldRows: [] as ActivityRow[],
+              createdAssetIds: [] as string[],
+              syncEvents: [] as ActivitySyncEvent[],
             }
-            preparedCreates.push({ activity, tempId });
-          } catch (error) {
-            errors.push({ id: tempId, action: "create", message: errorMessage(error) });
-          }
-        }
-
-        for (const updateInput of updates) {
-          const targetId = stringFieldOrNull(updateInput.id);
-          try {
-            const activityId = requiredNonEmptyString(updateInput.id, "id");
-            if (deleteIdSet.has(activityId)) {
-              throw new Error("Cannot update and delete the same activity");
-            }
-            const existing = readActivityRow(db, activityId);
-            preparedUpdateExistingRows.push(existing);
-            preparedUpdates.push({
-              activity: normalizeActivityUpdateInput(db, updateInput, existing, assetContext),
-              assetQuoteMode: activityAssetQuoteModeFromRecord(updateInput),
-              shouldWriteQuote: shouldWriteManualQuoteForUpdate(updateInput),
-            });
-          } catch (error) {
-            errors.push({ id: targetId, action: "update", message: errorMessage(error) });
-          }
-        }
-
-        for (const deleteId of deleteIds) {
-          try {
-            preparedDeletes.push(readActivityRow(db, deleteId));
-          } catch (error) {
-            errors.push({ id: deleteId, action: "delete", message: errorMessage(error) });
-          }
-        }
-
-        if (errors.length > 0) {
-          return {
-            result: emptyBulkMutationResult(errors),
-            oldRows: [] as ActivityRow[],
-            createdAssetIds: [] as string[],
-            syncEvents: [] as ActivitySyncEvent[],
-          };
-        }
-
-        const result = emptyBulkMutationResult([]);
-        const syncInputs: ActivitySyncInput[] = [];
-        const quoteModeUpdatedAssetIds = new Set<string>();
-        try {
-          ensurePendingActivityAssets(db, assetContext);
-          for (const activity of preparedDeletes) {
-            db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
-            result.deleted.push(activityFromRow(activity));
-            syncInputs.push({ operation: "Delete", row: activity });
-          }
-          for (const { activity, assetQuoteMode, shouldWriteQuote } of preparedUpdates) {
-            applyActivityQuoteSideEffects(
-              db,
-              activity,
-              assetQuoteMode,
-              shouldWriteQuote,
-              quoteModeUpdatedAssetIds,
-            );
-            updateActivityRow(db, activity);
-            const updatedRow = readActivityRow(db, activity.id);
-            result.updated.push(activityFromRow(updatedRow));
-            syncInputs.push({ operation: "Update", row: updatedRow });
-          }
-          for (const { activity, tempId } of preparedCreates) {
-            applyActivityQuoteSideEffects(
-              db,
-              activity,
-              activity.assetQuoteMode,
-              true,
-              quoteModeUpdatedAssetIds,
-            );
-            insertActivityRow(db, activity);
-            const createdRow = readActivityRow(db, activity.id);
-            result.created.push(activityFromRow(createdRow));
-            result.createdMappings.push({ tempId, activityId: activity.id });
-            syncInputs.push({ operation: "Create", row: createdRow });
-          }
-        } catch (error) {
-          throw mapActivitySqliteError(error);
-        }
-
-        const createdAssetIds = [...assetContext.createdAssetIds];
-        const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
-        return {
-          result,
-          oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
-          createdAssetIds,
-          syncEvents: [
-            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
-            ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
-            ...activitySyncEvents(syncInputs),
-          ],
-        };
-      })();
+          : db.transaction(() => persistPreparedBulkActivityMutation(db, prepared))();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
       queueActivitySyncEvents(options, outcome.syncEvents);
       publishBulkActivitiesChanged(options.eventBus, outcome.oldRows, outcome.result);
@@ -3152,6 +3072,24 @@ function collectActivityFxPairs(
   return [...pairs.values()];
 }
 
+function collectBulkActivityFxPairs(
+  db: Database,
+  prepared: PreparedBulkActivityMutation,
+): Array<[string, string]> {
+  const pairs = new Map<string, [string, string]>();
+  for (const { activity } of prepared.preparedUpdates) {
+    for (const pair of collectActivityFxPairs(db, activity, prepared.assetContext)) {
+      addImportFxPair(pairs, pair[0], pair[1]);
+    }
+  }
+  for (const { activity } of prepared.preparedCreates) {
+    for (const pair of collectActivityFxPairs(db, activity, prepared.assetContext)) {
+      addImportFxPair(pairs, pair[0], pair[1]);
+    }
+  }
+  return [...pairs.values()];
+}
+
 function addImportFxPair(
   pairs: Map<string, [string, string]>,
   fromCurrency: string,
@@ -3321,6 +3259,143 @@ function persistPreparedActivityUpdate(
   } catch (error) {
     throw mapActivitySqliteError(error);
   }
+}
+
+function prepareBulkActivityMutation(
+  db: Database,
+  input: Record<string, unknown>,
+): PreparedBulkActivityMutation {
+  const assetContext = createActivityAssetResolutionContext();
+  const creates = recordArrayField(input, "creates");
+  const updates = recordArrayField(input, "updates");
+  const deleteIds = stringArrayField(input, "deleteIds");
+  const errors: ActivityBulkMutationError[] = [];
+  const preparedCreates: PreparedActivityCreateMutation[] = [];
+  const preparedUpdates: PreparedActivityUpdateMutation[] = [];
+  const preparedUpdateExistingRows: ActivityRow[] = [];
+  const preparedDeletes: ActivityRow[] = [];
+  const createIdempotencyKeys = new Set<string>();
+  const deleteIdSet = new Set(deleteIds);
+
+  for (const createInput of creates) {
+    const tempId = stringFieldOrNull(createInput.id)?.trim() || null;
+    try {
+      const activity = normalizeActivityCreateInput(db, createInput, assetContext);
+      if (activity.idempotencyKey !== null) {
+        const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
+        if (existingId !== null && !deleteIdSet.has(existingId)) {
+          throw duplicateActivityError(existingId);
+        }
+        if (createIdempotencyKeys.has(activity.idempotencyKey)) {
+          throw duplicateActivityError(null);
+        }
+        createIdempotencyKeys.add(activity.idempotencyKey);
+      }
+      preparedCreates.push({ activity, tempId });
+    } catch (error) {
+      errors.push({ id: tempId, action: "create", message: errorMessage(error) });
+    }
+  }
+
+  for (const updateInput of updates) {
+    const targetId = stringFieldOrNull(updateInput.id);
+    try {
+      const activityId = requiredNonEmptyString(updateInput.id, "id");
+      if (deleteIdSet.has(activityId)) {
+        throw new Error("Cannot update and delete the same activity");
+      }
+      const existing = readActivityRow(db, activityId);
+      preparedUpdateExistingRows.push(existing);
+      preparedUpdates.push({
+        activity: normalizeActivityUpdateInput(db, updateInput, existing, assetContext),
+        assetQuoteMode: activityAssetQuoteModeFromRecord(updateInput),
+        shouldWriteQuote: shouldWriteManualQuoteForUpdate(updateInput),
+      });
+    } catch (error) {
+      errors.push({ id: targetId, action: "update", message: errorMessage(error) });
+    }
+  }
+
+  for (const deleteId of deleteIds) {
+    try {
+      preparedDeletes.push(readActivityRow(db, deleteId));
+    } catch (error) {
+      errors.push({ id: deleteId, action: "delete", message: errorMessage(error) });
+    }
+  }
+
+  return {
+    assetContext,
+    preparedCreates,
+    preparedUpdates,
+    preparedUpdateExistingRows,
+    preparedDeletes,
+    errors,
+  };
+}
+
+function persistPreparedBulkActivityMutation(
+  db: Database,
+  prepared: PreparedBulkActivityMutation,
+): {
+  result: ActivityBulkMutationResult;
+  oldRows: ActivityRow[];
+  createdAssetIds: string[];
+  syncEvents: ActivitySyncEvent[];
+} {
+  const result = emptyBulkMutationResult([]);
+  const syncInputs: ActivitySyncInput[] = [];
+  const quoteModeUpdatedAssetIds = new Set<string>();
+  try {
+    ensurePendingActivityAssets(db, prepared.assetContext);
+    for (const activity of prepared.preparedDeletes) {
+      db.query("DELETE FROM activities WHERE id = ?").run(activity.id);
+      result.deleted.push(activityFromRow(activity));
+      syncInputs.push({ operation: "Delete", row: activity });
+    }
+    for (const { activity, assetQuoteMode, shouldWriteQuote } of prepared.preparedUpdates) {
+      applyActivityQuoteSideEffects(
+        db,
+        activity,
+        assetQuoteMode,
+        shouldWriteQuote,
+        quoteModeUpdatedAssetIds,
+      );
+      updateActivityRow(db, activity);
+      const updatedRow = readActivityRow(db, activity.id);
+      result.updated.push(activityFromRow(updatedRow));
+      syncInputs.push({ operation: "Update", row: updatedRow });
+    }
+    for (const { activity, tempId } of prepared.preparedCreates) {
+      applyActivityQuoteSideEffects(
+        db,
+        activity,
+        activity.assetQuoteMode,
+        true,
+        quoteModeUpdatedAssetIds,
+      );
+      insertActivityRow(db, activity);
+      const createdRow = readActivityRow(db, activity.id);
+      result.created.push(activityFromRow(createdRow));
+      result.createdMappings.push({ tempId, activityId: activity.id });
+      syncInputs.push({ operation: "Create", row: createdRow });
+    }
+  } catch (error) {
+    throw mapActivitySqliteError(error);
+  }
+
+  const createdAssetIds = [...prepared.assetContext.createdAssetIds];
+  const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
+  return {
+    result,
+    oldRows: [...prepared.preparedUpdateExistingRows, ...prepared.preparedDeletes],
+    createdAssetIds,
+    syncEvents: [
+      ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+      ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
+      ...activitySyncEvents(syncInputs),
+    ],
+  };
 }
 
 function normalizeActivityCreateInput(
