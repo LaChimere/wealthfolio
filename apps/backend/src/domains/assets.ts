@@ -90,6 +90,22 @@ export interface TreasuryBondDetails {
   couponFrequency: string;
 }
 
+interface AssetProviderProfile {
+  source: string;
+  name?: string;
+  assetType?: string;
+  notes?: string;
+  countries?: string;
+  sectors?: string;
+  industry?: string;
+  url?: string;
+  marketCap?: number;
+  peRatio?: number;
+  dividendYield?: number;
+  week52High?: number;
+  week52Low?: number;
+}
+
 export type AssetSyncOperation = "Create" | "Update" | "Delete";
 
 export interface AssetSyncEvent {
@@ -699,22 +715,146 @@ async function enrichAssetProfile(
     return "enriched";
   }
 
-  if (!isUsTreasuryBondNeedingDetails(asset)) {
+  const profile = await fetchAssetProviderProfile(asset, options);
+  const shouldEnrichTreasuryBond = isUsTreasuryBondNeedingDetails(asset);
+  if (!profile && !shouldEnrichTreasuryBond) {
     return "skipped";
   }
 
-  const isin = asset.instrument_symbol?.toUpperCase() ?? "";
+  const bondDetails = shouldEnrichTreasuryBond
+    ? await fetchTreasuryBondDetails(asset.instrument_symbol?.toUpperCase() ?? "", options)
+    : null;
+  if (!profile && !bondDetails) {
+    return "skipped";
+  }
+
+  updateEnrichedAssetProfile(db, asset, options, profile, bondDetails);
+  markProfileEnriched(db, assetId, options, quoteSyncProfileColumnExists);
+  return "enriched";
+}
+
+async function fetchAssetProviderProfile(
+  asset: AssetRow,
+  options: AssetServiceOptions,
+): Promise<AssetProviderProfile | null> {
+  if (!shouldFetchYahooProfile(asset)) {
+    return null;
+  }
+  const symbol = yahooProfileSymbol(asset, options);
+  if (!symbol) {
+    return null;
+  }
+  return fetchYahooSearchProfile(symbol, options.fetch ?? fetch);
+}
+
+function shouldFetchYahooProfile(asset: AssetRow): boolean {
+  const provider = preferredProviderId(asset.provider_config);
+  return provider === null || provider === "YAHOO";
+}
+
+function yahooProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {
+  const symbol = asset.instrument_symbol?.trim();
+  if (!symbol) {
+    return null;
+  }
+  if (asset.instrument_type === null) {
+    return symbol;
+  }
+  switch (asset.instrument_type) {
+    case "CRYPTO":
+      return asset.quote_ccy ? `${symbol}-${asset.quote_ccy}` : null;
+    case "FX":
+      return asset.quote_ccy ? `${symbol}${asset.quote_ccy}=X` : null;
+    case "EQUITY":
+    case "OPTION":
+    case "METAL": {
+      const suffix = yahooSuffixForMic(asset.instrument_exchange_mic, options);
+      return suffix ? `${symbol}.${suffix}` : symbol;
+    }
+    default:
+      return null;
+  }
+}
+
+function yahooSuffixForMic(mic: string | null, options: AssetServiceOptions): string | null {
+  if (!mic) {
+    return null;
+  }
+  const exchangeMetadata =
+    options.exchangeMetadata ?? exchangeNameMetadata(options.exchangeNameByMic);
+  const normalizedMic = mic.toUpperCase();
+  for (const [suffix, suffixMic] of exchangeMetadata.yahooSuffixToMic.entries()) {
+    if (suffixMic.toUpperCase() === normalizedMic) {
+      return suffix;
+    }
+  }
+  return null;
+}
+
+async function fetchYahooSearchProfile(
+  symbol: string,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile> {
+  const query2Profile = await fetchYahooSearchProfileFromEndpoint(
+    "https://query2.finance.yahoo.com/v1/finance/search",
+    symbol,
+    fetchImpl,
+  ).catch(() => null);
+  if (query2Profile) {
+    return query2Profile;
+  }
+  const query1Profile = await fetchYahooSearchProfileFromEndpoint(
+    "https://query1.finance.yahoo.com/v1/finance/search",
+    symbol,
+    fetchImpl,
+  );
+  if (!query1Profile) {
+    throw new Error(`Symbol not found: ${symbol}`);
+  }
+  return query1Profile;
+}
+
+async function fetchYahooSearchProfileFromEndpoint(
+  endpoint: string,
+  symbol: string,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile | null> {
+  const response = await fetchImpl(`${endpoint}?q=${encodeURIComponent(symbol)}`, {
+    headers: yahooSearchHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`YAHOO: HTTP ${response.status}`);
+  }
+  const payload = (await response.json()) as unknown;
+  if (!isRecord(payload) || !Array.isArray(payload.quotes)) {
+    return null;
+  }
+  const quote = payload.quotes.find((item): item is Record<string, unknown> => {
+    return isRecord(item) && item.symbol === symbol;
+  });
+  if (!quote) {
+    return null;
+  }
+  const assetType = optionalString(quote.quoteType)?.toUpperCase();
+  const name =
+    optionalString(quote.longname) ??
+    optionalString(quote.shortname) ??
+    optionalString(quote.symbol);
+  return {
+    source: "YAHOO",
+    ...(name ? { name } : {}),
+    ...(assetType ? { assetType } : {}),
+  };
+}
+
+async function fetchTreasuryBondDetails(
+  isin: string,
+  options: AssetServiceOptions,
+): Promise<TreasuryBondDetails | null> {
   const fetchBondDetails =
     options.fetchTreasuryBondDetails ??
     ((value: string) => fetchUsTreasuryBondDetails(value, options.fetch));
-  const details = await fetchBondDetails(isin);
-  if (!details) {
-    return "skipped";
-  }
-
-  updateBondMetadata(db, asset, details, options);
-  markProfileEnriched(db, assetId, options, quoteSyncProfileColumnExists);
-  return "enriched";
+  return fetchBondDetails(isin);
 }
 
 function needsProfileEnrichment(
@@ -765,28 +905,91 @@ function isUsTreasuryBondNeedingDetails(asset: AssetRow): boolean {
   return typeof metadata.bond.maturityDate !== "string" || !isIsoDate(metadata.bond.maturityDate);
 }
 
-function updateBondMetadata(
+function updateEnrichedAssetProfile(
   db: Database,
   asset: AssetRow,
-  details: TreasuryBondDetails,
   options: AssetServiceOptions,
+  profile: AssetProviderProfile | null,
+  bondDetails: TreasuryBondDetails | null,
 ): void {
   const metadata = parseJsonValue(asset.metadata);
   const metadataObject = isRecord(metadata) ? { ...metadata } : {};
-  const existingBond = isRecord(metadataObject.bond) ? metadataObject.bond : {};
-  metadataObject.bond = {
-    ...existingBond,
-    isin: asset.instrument_symbol?.toUpperCase(),
-    couponRate: details.couponRate,
-    maturityDate: details.maturityDate,
-    faceValue: details.faceValue,
-    couponFrequency: normalizeCouponFrequency(details.couponFrequency),
-  };
-  db.query("UPDATE assets SET metadata = ?, updated_at = ? WHERE id = ?").run(
+  if (profile) {
+    mergeProviderProfileMetadata(metadataObject, profile);
+  }
+  if (bondDetails) {
+    const existingBond = isRecord(metadataObject.bond) ? metadataObject.bond : {};
+    metadataObject.bond = {
+      ...existingBond,
+      isin: asset.instrument_symbol?.toUpperCase(),
+      couponRate: bondDetails.couponRate,
+      maturityDate: bondDetails.maturityDate,
+      faceValue: bondDetails.faceValue,
+      couponFrequency: normalizeCouponFrequency(bondDetails.couponFrequency),
+    };
+  }
+
+  const instrumentType =
+    asset.instrument_type ??
+    (profile?.assetType ? instrumentTypeFromProvider(profile.assetType) : null);
+  const notes =
+    (asset.notes === null || asset.notes.trim() === "") && profile?.notes
+      ? profile.notes
+      : asset.notes;
+  db.query(
+    `
+      UPDATE assets
+      SET name = ?, notes = ?, metadata = ?, instrument_type = ?, updated_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    profile?.name ?? asset.name,
+    notes,
     serializeJsonValue(metadataObject),
+    instrumentType,
     currentTimestamp(options),
     asset.id,
   );
+}
+
+function mergeProviderProfileMetadata(
+  metadataObject: Record<string, unknown>,
+  profile: AssetProviderProfile,
+): void {
+  const profileMetadata: Record<string, unknown> = {};
+  if (profile.sectors) {
+    profileMetadata.sectors = profile.sectors;
+  }
+  if (profile.industry) {
+    profileMetadata.industry = profile.industry;
+  }
+  if (profile.countries) {
+    profileMetadata.countries = profile.countries;
+  }
+  if (profile.assetType) {
+    profileMetadata.quoteType = profile.assetType;
+  }
+  if (profile.url) {
+    profileMetadata.website = profile.url;
+  }
+  if (profile.marketCap !== undefined) {
+    profileMetadata.marketCap = profile.marketCap;
+  }
+  if (profile.peRatio !== undefined) {
+    profileMetadata.peRatio = profile.peRatio;
+  }
+  if (profile.dividendYield !== undefined) {
+    profileMetadata.dividendYield = profile.dividendYield;
+  }
+  if (profile.week52High !== undefined) {
+    profileMetadata.week52High = profile.week52High;
+  }
+  if (profile.week52Low !== undefined) {
+    profileMetadata.week52Low = profile.week52Low;
+  }
+  if (Object.keys(profileMetadata).length > 0) {
+    metadataObject.profile = profileMetadata;
+  }
 }
 
 async function fetchUsTreasuryBondDetails(
@@ -1328,6 +1531,50 @@ function normalizeCouponFrequency(frequency: string): string {
     default:
       return "SEMI_ANNUAL";
   }
+}
+
+function instrumentTypeFromProvider(assetType: string): string | null {
+  switch (assetType.trim().toUpperCase()) {
+    case "CRYPTOCURRENCY":
+    case "CRYPTO":
+      return "CRYPTO";
+    case "EQUITY":
+    case "STOCK":
+    case "ETF":
+    case "MUTUALFUND":
+    case "MUTUAL FUND":
+    case "INDEX":
+      return "EQUITY";
+    case "CURRENCY":
+    case "FOREX":
+    case "FX":
+      return "FX";
+    case "OPTION":
+      return "OPTION";
+    case "COMMODITY":
+      return "METAL";
+    default:
+      return null;
+  }
+}
+
+function preferredProviderId(providerConfig: string | null): string | null {
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const value = parsed.preferred_provider ?? parsed.preferredProvider;
+  return typeof value === "string" && value.trim() !== "" ? value.trim().toUpperCase() : null;
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function yahooSearchHeaders(): HeadersInit {
+  return {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  };
 }
 
 function normalizeExchangeLookup(

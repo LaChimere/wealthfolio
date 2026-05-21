@@ -630,10 +630,77 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches Yahoo search profiles and marks profile enriched", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        fetched.push(url);
+        if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=AAPL") {
+          return Promise.resolve(
+            Response.json({
+              quotes: [
+                {
+                  symbol: "AAPL",
+                  longname: "Apple Inc.",
+                  shortname: "Apple",
+                  quoteType: "EQUITY",
+                },
+              ],
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-1",
+        kind: "INVESTMENT",
+        name: "Old Apple",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_symbol: "AAPL",
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('equity-1', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["equity-1"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(fetched).toEqual(["https://query2.finance.yahoo.com/v1/finance/search?q=AAPL"]);
+      expect(service.getAssetProfile("equity-1")).toMatchObject({
+        name: "Apple Inc.",
+        instrumentType: "EQUITY",
+        metadata: {
+          profile: { quoteType: "EQUITY" },
+        },
+      });
+      expect(readSyncState(db, "equity-1")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("skips already profile-enriched assets and unsupported market profiles", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
     const service = createAssetService(db, {
+      fetch: ((input: RequestInfo | URL) => {
+        fetched.push(String(input));
+        throw new Error("should not fetch skipped profiles");
+      }) as typeof fetch,
       fetchTreasuryBondDetails(isin) {
         fetched.push(isin);
         throw new Error("should not fetch skipped bonds");
@@ -656,6 +723,7 @@ describe("TS assets domain", () => {
         quote_ccy: "USD",
         instrument_type: "EQUITY",
         instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
       });
       db.exec(`
         INSERT INTO quote_sync_state (
