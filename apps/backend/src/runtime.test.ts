@@ -1163,7 +1163,7 @@ describe("TS backend runtime composition", () => {
         `${server.baseUrl}/api/v1/connect/import-runs?runType=&limit=10&offset=0`,
       );
       expect(emptyRunTypeImportRunsResponse.status).toBe(200);
-      await expect(emptyRunTypeImportRunsResponse.json()).resolves.toHaveLength(2);
+      await expect(emptyRunTypeImportRunsResponse.json()).resolves.toEqual([]);
 
       const defaultProfileResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,

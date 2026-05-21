@@ -4453,9 +4453,9 @@ function parseConnectImportRunsQuery(url: URL): ConnectImportRunsRequest | Respo
   if (offset instanceof Response) {
     return offset;
   }
-  const runType = url.searchParams.get("runType")?.trim();
+  const runType = url.searchParams.has("runType") ? url.searchParams.get("runType") : undefined;
   return {
-    runType: runType ? runType : undefined,
+    runType: runType ?? undefined,
     limit: limit ?? 50,
     offset: offset ?? 0,
   };

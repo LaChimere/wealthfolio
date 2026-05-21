@@ -2013,6 +2013,12 @@ contract:
   includes Rust-compatible nonfatal legacy classification migration
   detail/status read failures, warning emission, and preservation of other
   health issues.
+- `pr5-connect-import-run-filter-parity`: targeted checks passed:
+  `bun test apps/backend/src/http.test.ts --test-name-pattern "Connect broker"`,
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "local Connect runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, and `bun run check`. Coverage
+  includes exact `runType` query forwarding for local import-run reads,
+  preserving Rust's empty-string filtering behavior.
 
 ## Result
 

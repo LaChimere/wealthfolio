@@ -287,9 +287,11 @@ function getLocalBrokerSyncStates(db: Database): unknown[] {
 
 function getLocalImportRuns(db: Database, request: ConnectImportRunsRequest): unknown[] {
   const params: Array<string | number> = [];
-  const whereSql = request.runType ? "WHERE run_type = ?" : "";
-  if (request.runType) {
-    params.push(request.runType);
+  const runType = request.runType;
+  const hasRunTypeFilter = runType !== undefined;
+  const whereSql = hasRunTypeFilter ? "WHERE run_type = ?" : "";
+  if (hasRunTypeFilter) {
+    params.push(runType);
   }
   params.push(request.limit, request.offset);
 
