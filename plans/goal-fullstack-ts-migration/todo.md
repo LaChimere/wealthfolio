@@ -2340,6 +2340,12 @@ contract:
   `bun run --cwd apps/backend type-check`. Coverage includes provider-backed
   `record_activity` asset drafts falling back from blank long names to short
   names before using symbols.
+- `pr5-activities-direct-fx-pairs`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes direct activity create/update paths ensuring activity-currency and
+  asset-currency FX pairs before writes and preserving no-write behavior when FX
+  registration fails.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

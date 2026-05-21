@@ -1493,6 +1493,11 @@ updated_at: "2026-05-21T15:01:47+08:00"
   then short names, then symbols, avoiding blank draft/resolved asset names when
   provider long names are empty. Focused AI chat tool tests and backend
   type-check passed.
+- Turn 231: Added direct activity create/update FX pair registration parity:
+  runtime-backed activity writes now ensure activity-currency and asset-currency
+  pairs against the account currency before persistence, preserving no-write
+  behavior when FX registration fails. Focused activity tests, backend
+  type-check, and full `bun run check` passed.
 
 ## Deferred items
 

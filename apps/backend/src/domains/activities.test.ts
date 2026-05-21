@@ -1866,6 +1866,110 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("ensures direct activity FX pairs before create writes", async () => {
+    const db = createActivitiesDb();
+    const ensuredPairs: Array<[string, string]> = [];
+    const service = createActivityService(db, {
+      ensureFxPairs: (pairs) => {
+        ensuredPairs.push(...pairs);
+        throw new Error("fx unavailable");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "EUR",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      await expect(
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { id: "AAPL" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+        }),
+      ).rejects.toThrow("fx unavailable");
+
+      expect(ensuredPairs).toEqual([
+        ["USD", "CAD"],
+        ["EUR", "CAD"],
+      ]);
+      expect(readActivityCount(db)).toBe(0);
+      expect(readAssetCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("ensures direct activity FX pairs before update writes", async () => {
+    const db = createActivitiesDb();
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "EUR",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      const setupService = createActivityService(db);
+      const existing = setupService.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "CAD",
+      }) as Activity;
+
+      const ensuredPairs: Array<[string, string]> = [];
+      const service = createActivityService(db, {
+        ensureFxPairs: (pairs) => {
+          ensuredPairs.push(...pairs);
+          throw new Error("fx unavailable");
+        },
+      });
+
+      await expect(
+        service.updateActivity?.({
+          id: existing.id,
+          accountId: "account-1",
+          asset: { id: "AAPL" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          quantity: "1",
+          unitPrice: "11",
+          amount: "11",
+          currency: "USD",
+        }),
+      ).rejects.toThrow("fx unavailable");
+
+      expect(ensuredPairs).toEqual([
+        ["USD", "CAD"],
+        ["EUR", "CAD"],
+      ]);
+      expect(readActivityValue(db, existing.id, "currency")).toBe("CAD");
+    } finally {
+      db.close();
+    }
+  });
+
   test("writes manual fallback quotes for price-bearing activity writes", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -4062,7 +4166,8 @@ function readActivityValue(
     | "import_run_id"
     | "source_group_id"
     | "source_system"
-    | "status",
+    | "status"
+    | "currency",
 ): string | null {
   const row = db
     .query<

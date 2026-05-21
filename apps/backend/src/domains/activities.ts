@@ -591,46 +591,32 @@ export function createActivityService(
 ): ActivityService {
   return {
     createActivity(input) {
+      if (options.ensureFxPairs) {
+        return (async () => {
+          const assetContext = createActivityAssetResolutionContext();
+          const activity = normalizeActivityCreateInput(db, input, assetContext);
+          ensureActivityCreateIsUnique(db, activity);
+          const fxPairs = collectActivityFxPairs(db, activity, assetContext);
+          if (fxPairs.length > 0) {
+            await options.ensureFxPairs?.(fxPairs);
+          }
+
+          const outcome = db.transaction(() => {
+            ensureActivityCreateIsUnique(db, activity);
+            return persistPreparedActivityCreate(db, activity, assetContext);
+          })();
+          publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
+          queueActivitySyncEvents(options, outcome.syncEvents);
+          publishActivitiesChanged(options.eventBus, [activityEventRecord(outcome.created)]);
+          return outcome.created;
+        })();
+      }
+
       const outcome = db.transaction(() => {
         const assetContext = createActivityAssetResolutionContext();
         const activity = normalizeActivityCreateInput(db, input, assetContext);
-        if (activity.idempotencyKey !== null) {
-          const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
-          if (existingId !== null) {
-            throw duplicateActivityError(existingId);
-          }
-        }
-
-        try {
-          ensurePendingActivityAssets(db, assetContext);
-          const quoteModeUpdatedAssetIds = new Set<string>();
-          applyActivityQuoteSideEffects(
-            db,
-            activity,
-            activity.assetQuoteMode,
-            true,
-            quoteModeUpdatedAssetIds,
-          );
-          insertActivityRow(db, activity);
-
-          const createdRow = readActivityRow(db, activity.id);
-          const createdAssetIds = [...assetContext.createdAssetIds];
-          const updatedAssetIds = existingUpdatedAssetIds(
-            quoteModeUpdatedAssetIds,
-            createdAssetIds,
-          );
-          return {
-            created: activityFromRow(createdRow),
-            createdAssetIds,
-            syncEvents: [
-              ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
-              ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
-              ...activitySyncEvents([{ operation: "Create", row: createdRow }]),
-            ],
-          };
-        } catch (error) {
-          throw mapActivitySqliteError(error);
-        }
+        ensureActivityCreateIsUnique(db, activity);
+        return persistPreparedActivityCreate(db, activity, assetContext);
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
       queueActivitySyncEvents(options, outcome.syncEvents);
@@ -639,6 +625,39 @@ export function createActivityService(
     },
 
     updateActivity(input) {
+      if (options.ensureFxPairs) {
+        return (async () => {
+          const assetContext = createActivityAssetResolutionContext();
+          const activityId = requiredNonEmptyString(input.id, "id");
+          const existing = readActivityRow(db, activityId);
+          const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
+          const assetQuoteMode = activityAssetQuoteModeFromRecord(input);
+          const shouldWriteQuote = shouldWriteManualQuoteForUpdate(input);
+          const fxPairs = collectActivityFxPairs(db, update, assetContext);
+          if (fxPairs.length > 0) {
+            await options.ensureFxPairs?.(fxPairs);
+          }
+
+          const result = db.transaction(() =>
+            persistPreparedActivityUpdate(
+              db,
+              existing,
+              update,
+              assetContext,
+              assetQuoteMode,
+              shouldWriteQuote,
+            ),
+          )();
+          publishAssetsCreated(options.eventBus, result.createdAssetIds);
+          queueActivitySyncEvents(options, result.syncEvents);
+          publishActivitiesChanged(options.eventBus, [
+            activityEventRecord(result.existing),
+            activityEventRecord(result.updated),
+          ]);
+          return result.updated;
+        })();
+      }
+
       const result = db.transaction(() => {
         const assetContext = createActivityAssetResolutionContext();
         const activityId = requiredNonEmptyString(input.id, "id");
@@ -646,38 +665,14 @@ export function createActivityService(
         const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
         const assetQuoteMode = activityAssetQuoteModeFromRecord(input);
         const shouldWriteQuote = shouldWriteManualQuoteForUpdate(input);
-
-        try {
-          ensurePendingActivityAssets(db, assetContext);
-          const quoteModeUpdatedAssetIds = new Set<string>();
-          applyActivityQuoteSideEffects(
-            db,
-            update,
-            assetQuoteMode,
-            shouldWriteQuote,
-            quoteModeUpdatedAssetIds,
-          );
-          updateActivityRow(db, update);
-
-          const updatedRow = readActivityRow(db, activityId);
-          const createdAssetIds = [...assetContext.createdAssetIds];
-          const updatedAssetIds = existingUpdatedAssetIds(
-            quoteModeUpdatedAssetIds,
-            createdAssetIds,
-          );
-          return {
-            existing: activityFromRow(existing),
-            updated: activityFromRow(updatedRow),
-            createdAssetIds,
-            syncEvents: [
-              ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
-              ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
-              ...activitySyncEvents([{ operation: "Update", row: updatedRow }]),
-            ],
-          };
-        } catch (error) {
-          throw mapActivitySqliteError(error);
-        }
+        return persistPreparedActivityUpdate(
+          db,
+          existing,
+          update,
+          assetContext,
+          assetQuoteMode,
+          shouldWriteQuote,
+        );
       })();
       publishAssetsCreated(options.eventBus, result.createdAssetIds);
       queueActivitySyncEvents(options, result.syncEvents);
@@ -3136,6 +3131,27 @@ function collectImportFxPairs(
   return [...pairs.values()];
 }
 
+function collectActivityFxPairs(
+  db: Database,
+  activity: ActivityCreateRowInput | ActivityRow,
+  assetContext?: ActivityAssetResolutionContext,
+): Array<[string, string]> {
+  const pairs = new Map<string, [string, string]>();
+  const accountId = "accountId" in activity ? activity.accountId : activity.account_id;
+  const assetId = "assetId" in activity ? activity.assetId : activity.asset_id;
+  const account = readAccountRow(db, accountId);
+  const accountCurrency = resolveCurrency([account.currency]);
+  const activityCurrency = activity.currency;
+  addImportFxPair(pairs, activityCurrency, accountCurrency);
+
+  if (assetId) {
+    const asset = readResolvedActivityAssetRow(db, assetId, assetContext);
+    addImportFxPair(pairs, asset.quote_ccy, accountCurrency, activityCurrency);
+  }
+
+  return [...pairs.values()];
+}
+
 function addImportFxPair(
   pairs: Map<string, [string, string]>,
   fromCurrency: string,
@@ -3214,6 +3230,97 @@ function insertCompletedImportRun(
     row.updated_at,
   );
   return row;
+}
+
+function ensureActivityCreateIsUnique(db: Database, activity: ActivityCreateRowInput): void {
+  if (activity.idempotencyKey === null) {
+    return;
+  }
+  const existingId = findActivityIdByIdempotencyKey(db, activity.idempotencyKey);
+  if (existingId !== null) {
+    throw duplicateActivityError(existingId);
+  }
+}
+
+function persistPreparedActivityCreate(
+  db: Database,
+  activity: ActivityCreateRowInput,
+  assetContext: ActivityAssetResolutionContext,
+): {
+  created: Activity;
+  createdAssetIds: string[];
+  syncEvents: ActivitySyncEvent[];
+} {
+  try {
+    ensurePendingActivityAssets(db, assetContext);
+    const quoteModeUpdatedAssetIds = new Set<string>();
+    applyActivityQuoteSideEffects(
+      db,
+      activity,
+      activity.assetQuoteMode,
+      true,
+      quoteModeUpdatedAssetIds,
+    );
+    insertActivityRow(db, activity);
+
+    const createdRow = readActivityRow(db, activity.id);
+    const createdAssetIds = [...assetContext.createdAssetIds];
+    const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
+    return {
+      created: activityFromRow(createdRow),
+      createdAssetIds,
+      syncEvents: [
+        ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+        ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
+        ...activitySyncEvents([{ operation: "Create", row: createdRow }]),
+      ],
+    };
+  } catch (error) {
+    throw mapActivitySqliteError(error);
+  }
+}
+
+function persistPreparedActivityUpdate(
+  db: Database,
+  existing: ActivityRow,
+  update: ActivityRow,
+  assetContext: ActivityAssetResolutionContext,
+  assetQuoteMode: string | null,
+  shouldWriteQuote: boolean,
+): {
+  existing: Activity;
+  updated: Activity;
+  createdAssetIds: string[];
+  syncEvents: ActivitySyncEvent[];
+} {
+  try {
+    ensurePendingActivityAssets(db, assetContext);
+    const quoteModeUpdatedAssetIds = new Set<string>();
+    applyActivityQuoteSideEffects(
+      db,
+      update,
+      assetQuoteMode,
+      shouldWriteQuote,
+      quoteModeUpdatedAssetIds,
+    );
+    updateActivityRow(db, update);
+
+    const updatedRow = readActivityRow(db, update.id);
+    const createdAssetIds = [...assetContext.createdAssetIds];
+    const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
+    return {
+      existing: activityFromRow(existing),
+      updated: activityFromRow(updatedRow),
+      createdAssetIds,
+      syncEvents: [
+        ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+        ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
+        ...activitySyncEvents([{ operation: "Update", row: updatedRow }]),
+      ],
+    };
+  } catch (error) {
+    throw mapActivitySqliteError(error);
+  }
 }
 
 function normalizeActivityCreateInput(
