@@ -2289,6 +2289,13 @@ contract:
   instrument type and quote currency, provider quote-type mapping for non-equity
   assets, no provider calls for manual or complete non-equity previews, and
   existing missing-exchange behavior for unresolved market equities.
+- `pr5-activities-quote-mode-asset-sync`: focused verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts` and
+  `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
+  includes activity create/update/import paths queuing asset Update sync events
+  when an existing asset quote mode changes, preserving activity-created assets
+  as Create events, and clearing stale quote sync state when switching an asset
+  to MANUAL through activity side effects.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2310,7 +2317,8 @@ contract:
   security scanning, full sandbox isolation, and query-cache hardening move with
   add-on runtime parity slices; provider-backed asset resolution, remaining
   quote sync-outbox emission outside migrated alternative-asset and market-data
-  quote paths, sync engine push/pull, and portfolio recalculation side effects
+  quote paths, remaining activity/provider-backed asset resolution beyond
+  preview/check, sync engine push/pull, and portfolio recalculation side effects
   move with activities/import/device-sync runtime parity slices; device-sync
   integration for sync crypto moves with device-sync parity slices; broader
   health checks and real market sync fix execution move with health/calculation

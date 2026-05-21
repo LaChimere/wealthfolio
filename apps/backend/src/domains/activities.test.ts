@@ -2967,6 +2967,182 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("queues asset update sync events for activity quote-mode side effects", async () => {
+    const db = createActivitiesDb();
+    const syncEvents: ActivitySyncEvent[] = [];
+    const service = createActivityService(db, {
+      queueSyncEvent: (event) => syncEvents.push(event),
+    });
+
+    try {
+      db.exec(`
+        CREATE TABLE quote_sync_state (
+          asset_id TEXT PRIMARY KEY NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+      });
+      db.query("INSERT INTO quote_sync_state (asset_id, updated_at) VALUES (?, ?)").run(
+        "AAPL",
+        "2025-01-01T00:00:00Z",
+      );
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL", quoteMode: "MANUAL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10.50",
+        amount: "10.50",
+        currency: "USD",
+      }) as Activity;
+
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entity: "assets",
+          entityId: "AAPL",
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: "AAPL",
+            quote_mode: "MANUAL",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "activities",
+          entityId: created.id,
+          operation: "Create",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { count: number },
+            []
+          >("SELECT COUNT(*) AS count FROM quote_sync_state WHERE asset_id = 'AAPL'")
+          .get()?.count,
+      ).toBe(0);
+
+      syncEvents.length = 0;
+      insertAsset(db, {
+        id: "MSFT",
+        displayCode: "MSFT",
+        name: "Microsoft",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+      });
+      db.query("INSERT INTO quote_sync_state (asset_id, updated_at) VALUES (?, ?)").run(
+        "MSFT",
+        "2025-01-01T00:00:00Z",
+      );
+      const updated = service.updateActivity?.({
+        id: created.id,
+        accountId: "account-1",
+        asset: { id: "MSFT", quoteMode: "MANUAL" },
+        activityType: "BUY",
+        activityDate: "2025-01-16",
+        quantity: "1",
+        unitPrice: "12.25",
+        amount: "12.25",
+        currency: "USD",
+      }) as Activity;
+
+      expect(updated.assetId).toBe("MSFT");
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entity: "assets",
+          entityId: "MSFT",
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: "MSFT",
+            quote_mode: "MANUAL",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "activities",
+          entityId: created.id,
+          operation: "Update",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { count: number },
+            []
+          >("SELECT COUNT(*) AS count FROM quote_sync_state WHERE asset_id = 'MSFT'")
+          .get()?.count,
+      ).toBe(0);
+
+      syncEvents.length = 0;
+      insertAsset(db, {
+        id: "GOOGL",
+        displayCode: "GOOGL",
+        name: "Alphabet",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+      });
+      db.query("INSERT INTO quote_sync_state (asset_id, updated_at) VALUES (?, ?)").run(
+        "GOOGL",
+        "2025-01-01T00:00:00Z",
+      );
+
+      const imported = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          assetId: "GOOGL",
+          quoteMode: "MANUAL",
+          activityType: "BUY",
+          date: "2025-01-17",
+          quantity: "1",
+          unitPrice: "20",
+          amount: "20",
+          currency: "USD",
+          isDraft: false,
+          lineNumber: 1,
+        },
+      ])) as { importRunId: string; summary: Record<string, unknown> };
+
+      expect(imported.summary).toMatchObject({ imported: 1 });
+      expect(syncEvents).toEqual([
+        expect.objectContaining({
+          entity: "assets",
+          entityId: "GOOGL",
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: "GOOGL",
+            quote_mode: "MANUAL",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "import_runs",
+          entityId: imported.importRunId,
+          operation: "Create",
+        }),
+        expect.objectContaining({
+          entity: "activities",
+          operation: "Create",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { count: number },
+            []
+          >("SELECT COUNT(*) AS count FROM quote_sync_state WHERE asset_id = 'GOOGL'")
+          .get()?.count,
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns Rust-compatible default import mapping with legacy context normalization", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

@@ -265,7 +265,7 @@ export interface ActivityImportRunSyncEvent {
 export interface ActivityAssetSyncEvent {
   entity: "assets";
   entityId: string;
-  operation: "Create";
+  operation: "Create" | "Update";
   payload: ActivityAssetSyncRow;
 }
 
@@ -603,22 +603,34 @@ export function createActivityService(
 
         try {
           ensurePendingActivityAssets(db, assetContext);
-          applyActivityQuoteSideEffects(db, activity, activity.assetQuoteMode, true);
+          const quoteModeUpdatedAssetIds = new Set<string>();
+          applyActivityQuoteSideEffects(
+            db,
+            activity,
+            activity.assetQuoteMode,
+            true,
+            quoteModeUpdatedAssetIds,
+          );
           insertActivityRow(db, activity);
+
+          const createdRow = readActivityRow(db, activity.id);
+          const createdAssetIds = [...assetContext.createdAssetIds];
+          const updatedAssetIds = existingUpdatedAssetIds(
+            quoteModeUpdatedAssetIds,
+            createdAssetIds,
+          );
+          return {
+            created: activityFromRow(createdRow),
+            createdAssetIds,
+            syncEvents: [
+              ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+              ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
+              ...activitySyncEvents([{ operation: "Create", row: createdRow }]),
+            ],
+          };
         } catch (error) {
           throw mapActivitySqliteError(error);
         }
-
-        const createdRow = readActivityRow(db, activity.id);
-        const createdAssetIds = [...assetContext.createdAssetIds];
-        return {
-          created: activityFromRow(createdRow),
-          createdAssetIds,
-          syncEvents: [
-            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
-            ...activitySyncEvents([{ operation: "Create", row: createdRow }]),
-          ],
-        };
       })();
       publishAssetsCreated(options.eventBus, outcome.createdAssetIds);
       queueActivitySyncEvents(options, outcome.syncEvents);
@@ -637,23 +649,35 @@ export function createActivityService(
 
         try {
           ensurePendingActivityAssets(db, assetContext);
-          applyActivityQuoteSideEffects(db, update, assetQuoteMode, shouldWriteQuote);
+          const quoteModeUpdatedAssetIds = new Set<string>();
+          applyActivityQuoteSideEffects(
+            db,
+            update,
+            assetQuoteMode,
+            shouldWriteQuote,
+            quoteModeUpdatedAssetIds,
+          );
           updateActivityRow(db, update);
+
+          const updatedRow = readActivityRow(db, activityId);
+          const createdAssetIds = [...assetContext.createdAssetIds];
+          const updatedAssetIds = existingUpdatedAssetIds(
+            quoteModeUpdatedAssetIds,
+            createdAssetIds,
+          );
+          return {
+            existing: activityFromRow(existing),
+            updated: activityFromRow(updatedRow),
+            createdAssetIds,
+            syncEvents: [
+              ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+              ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
+              ...activitySyncEvents([{ operation: "Update", row: updatedRow }]),
+            ],
+          };
         } catch (error) {
           throw mapActivitySqliteError(error);
         }
-
-        const updatedRow = readActivityRow(db, activityId);
-        const createdAssetIds = [...assetContext.createdAssetIds];
-        return {
-          existing: activityFromRow(existing),
-          updated: activityFromRow(updatedRow),
-          createdAssetIds,
-          syncEvents: [
-            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
-            ...activitySyncEvents([{ operation: "Update", row: updatedRow }]),
-          ],
-        };
       })();
       publishAssetsCreated(options.eventBus, result.createdAssetIds);
       queueActivitySyncEvents(options, result.syncEvents);
@@ -743,6 +767,7 @@ export function createActivityService(
 
         const result = emptyBulkMutationResult([]);
         const syncInputs: ActivitySyncInput[] = [];
+        const quoteModeUpdatedAssetIds = new Set<string>();
         try {
           ensurePendingActivityAssets(db, assetContext);
           for (const activity of preparedDeletes) {
@@ -751,14 +776,26 @@ export function createActivityService(
             syncInputs.push({ operation: "Delete", row: activity });
           }
           for (const { activity, assetQuoteMode, shouldWriteQuote } of preparedUpdates) {
-            applyActivityQuoteSideEffects(db, activity, assetQuoteMode, shouldWriteQuote);
+            applyActivityQuoteSideEffects(
+              db,
+              activity,
+              assetQuoteMode,
+              shouldWriteQuote,
+              quoteModeUpdatedAssetIds,
+            );
             updateActivityRow(db, activity);
             const updatedRow = readActivityRow(db, activity.id);
             result.updated.push(activityFromRow(updatedRow));
             syncInputs.push({ operation: "Update", row: updatedRow });
           }
           for (const { activity, tempId } of preparedCreates) {
-            applyActivityQuoteSideEffects(db, activity, activity.assetQuoteMode, true);
+            applyActivityQuoteSideEffects(
+              db,
+              activity,
+              activity.assetQuoteMode,
+              true,
+              quoteModeUpdatedAssetIds,
+            );
             insertActivityRow(db, activity);
             const createdRow = readActivityRow(db, activity.id);
             result.created.push(activityFromRow(createdRow));
@@ -770,12 +807,14 @@ export function createActivityService(
         }
 
         const createdAssetIds = [...assetContext.createdAssetIds];
+        const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
         return {
           result,
           oldRows: [...preparedUpdateExistingRows, ...preparedDeletes],
           createdAssetIds,
           syncEvents: [
-            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+            ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+            ...assetSyncEvents(readAssetSyncRows(db, updatedAssetIds), "Update"),
             ...activitySyncEvents(syncInputs),
           ],
         };
@@ -1335,13 +1374,24 @@ function activitySyncEvents(inputs: ActivitySyncInput[]): ActivitySyncEvent[] {
   });
 }
 
-function assetSyncEvents(rows: ActivityAssetSyncRow[]): ActivitySyncEvent[] {
+function assetSyncEvents(
+  rows: ActivityAssetSyncRow[],
+  operation: ActivityAssetSyncEvent["operation"],
+): ActivitySyncEvent[] {
   return rows.map((row) => ({
     entity: "assets" as const,
     entityId: row.id,
-    operation: "Create" as const,
+    operation,
     payload: { ...row },
   }));
+}
+
+function existingUpdatedAssetIds(
+  updatedAssetIds: Set<string>,
+  createdAssetIds: string[],
+): string[] {
+  const created = new Set(createdAssetIds);
+  return [...updatedAssetIds].filter((assetId) => !created.has(assetId));
 }
 
 function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
@@ -2763,11 +2813,18 @@ async function importActivityRows(
     const createdAssetIds = [...assetContext.createdAssetIds];
     const importRun = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
     const syncInputs: ActivitySyncInput[] = [];
+    const quoteModeUpdatedAssetIds = new Set<string>();
 
     try {
       for (const row of insertable) {
         row.create.importRunId = importRun.id;
-        applyActivityQuoteSideEffects(db, row.create, row.create.assetQuoteMode, true);
+        applyActivityQuoteSideEffects(
+          db,
+          row.create,
+          row.create.assetQuoteMode,
+          true,
+          quoteModeUpdatedAssetIds,
+        );
         insertActivityRow(db, row.create);
         syncInputs.push({ operation: "Create", row: readActivityRow(db, row.create.id) });
       }
@@ -2784,7 +2841,11 @@ async function importActivityRows(
       importRunId: importRun.id,
       summary,
       syncEvents: [
-        ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds)),
+        ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
+        ...assetSyncEvents(
+          readAssetSyncRows(db, existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds)),
+          "Update",
+        ),
         ...importRunSyncEvents(importRun),
         ...activitySyncEvents(syncInputs),
       ],
@@ -3552,6 +3613,7 @@ function applyActivityQuoteSideEffects(
   activity: ActivityCreateRowInput | ActivityRow,
   requestedQuoteMode: string | null,
   shouldWriteQuote: boolean,
+  quoteModeUpdatedAssetIds?: Set<string>,
 ): void {
   const assetId = activityQuoteAssetId(activity);
   if (!assetId) {
@@ -3559,7 +3621,9 @@ function applyActivityQuoteSideEffects(
   }
 
   if (requestedQuoteMode) {
-    updateActivityAssetQuoteMode(db, assetId, requestedQuoteMode);
+    if (updateActivityAssetQuoteMode(db, assetId, requestedQuoteMode)) {
+      quoteModeUpdatedAssetIds?.add(assetId);
+    }
   }
 
   const unitPrice = activityQuoteUnitPrice(activity);
@@ -3599,14 +3663,24 @@ function activityQuoteUnitPrice(activity: ActivityCreateRowInput | ActivityRow):
   return activity.unit_price === null ? null : new Decimal(activity.unit_price);
 }
 
-function updateActivityAssetQuoteMode(db: Database, assetId: string, quoteMode: string): void {
-  db.query(
-    `
-      UPDATE assets
-      SET quote_mode = ?
-      WHERE id = ? AND UPPER(COALESCE(quote_mode, '')) <> UPPER(?)
-    `,
-  ).run(quoteMode, assetId, quoteMode);
+function updateActivityAssetQuoteMode(db: Database, assetId: string, quoteMode: string): boolean {
+  const updated = db
+    .query<{ id: string }, [string, string, string]>(
+      `
+        UPDATE assets
+        SET quote_mode = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ? AND UPPER(COALESCE(quote_mode, '')) <> UPPER(?)
+        RETURNING id
+      `,
+    )
+    .get(quoteMode, assetId, quoteMode);
+  if (!updated) {
+    return false;
+  }
+  if (quoteMode.toUpperCase() === "MANUAL" && tableExists(db, "quote_sync_state")) {
+    db.query("DELETE FROM quote_sync_state WHERE asset_id = ?").run(assetId);
+  }
+  return true;
 }
 
 function readActivityAssetQuoteMode(db: Database, assetId: string): string {
@@ -3614,6 +3688,17 @@ function readActivityAssetQuoteMode(db: Database, assetId: string): string {
     .query<{ quote_mode: string | null }, [string]>("SELECT quote_mode FROM assets WHERE id = ?")
     .get(assetId);
   return row?.quote_mode?.toUpperCase() ?? "MARKET";
+}
+
+function tableExists(db: Database, tableName: string): boolean {
+  return (
+    db
+      .query<
+        { name: string },
+        [string]
+      >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(tableName) !== null
+  );
 }
 
 function upsertManualQuoteFromActivity(
