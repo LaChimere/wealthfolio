@@ -2388,6 +2388,12 @@ contract:
   nonfatal handling for failed negative account-balance lookups: the failed
   investment/cash group warns and contributes no issue while other data
   consistency checks continue.
+- `pr5-health-quote-read-error-parity`: verification passed:
+  `bun test apps/backend/src/domains/health.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes Rust-compatible
+  nonfatal latest-quote failures for price staleness (treated as missing quote
+  data) and quote-sync error snapshot failures (skipping only quote-sync
+  issues).
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

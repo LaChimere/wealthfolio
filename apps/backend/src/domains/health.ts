@@ -557,9 +557,17 @@ async function analyzePriceStaleness(
     return [];
   }
 
-  const latestQuotes = await options.marketDataQuoteProvider.getLatestQuotes(
-    holdings.map((holding) => holding.assetId),
-  );
+  let latestQuotes: Record<string, LatestQuoteSnapshot>;
+  try {
+    latestQuotes = await options.marketDataQuoteProvider.getLatestQuotes(
+      holdings.map((holding) => holding.assetId),
+    );
+  } catch (error) {
+    options.warn?.(
+      `Failed to load latest quotes for price staleness: ${formatErrorMessage(error)}`,
+    );
+    latestQuotes = {};
+  }
   return analyzePriceStalenessFromSnapshots(holdings, latestQuotes, {
     config,
     timestamp,
@@ -791,7 +799,15 @@ async function analyzeQuoteSyncErrors(
     accounts,
     options.holdingsProvider,
   );
-  const syncErrors = (await options.marketDataQuoteProvider.getQuoteSyncErrorSnapshots())
+  let snapshots: Awaited<ReturnType<NonNullable<MarketDataService["getQuoteSyncErrorSnapshots"]>>>;
+  try {
+    snapshots = await options.marketDataQuoteProvider.getQuoteSyncErrorSnapshots();
+  } catch (error) {
+    options.warn?.(`Failed to load quote sync error snapshots: ${formatErrorMessage(error)}`);
+    return [];
+  }
+
+  const syncErrors = snapshots
     .filter((snapshot) => snapshot.quoteMode.toUpperCase() !== "MANUAL")
     .map((snapshot) => ({
       assetId: snapshot.assetId,

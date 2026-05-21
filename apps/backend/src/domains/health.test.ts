@@ -426,6 +426,46 @@ describe("TS health domain", () => {
     }
   });
 
+  test("keeps price staleness checks nonfatal when latest quote loading fails", async () => {
+    const db = createHealthDb();
+    const warnings: string[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "account-a" })],
+        getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId: "asset-missing", symbol: "MISS", marketValue: 10 })],
+      },
+      marketDataQuoteProvider: {
+        getLatestQuotes: () => {
+          throw new Error("quote service unavailable");
+        },
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      warn: (message) => warnings.push(message),
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(warnings).toEqual([
+        "Failed to load latest quotes for price staleness: quote service unavailable",
+      ]);
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^price_stale:error:/),
+          severity: "CRITICAL",
+          title: "No market data for MISS",
+          fixAction: { id: "sync_prices", label: "Sync Prices", payload: ["asset-missing"] },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds bounded quote sync health issues from sync error snapshots", async () => {
     const db = createHealthDb();
     const longError = "x".repeat(90);
@@ -581,6 +621,40 @@ describe("TS health domain", () => {
           details: "1. WARN - 2 failures: timeout",
         }),
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps quote sync checks nonfatal when sync error snapshots fail", async () => {
+    const db = createHealthDb();
+    const warnings: string[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [],
+        getActiveNonArchivedAccounts: () => [],
+      },
+      holdingsProvider: {
+        getHoldings: () => {
+          throw new Error("should not load holdings when there are no active accounts");
+        },
+      },
+      marketDataQuoteProvider: {
+        getQuoteSyncErrorSnapshots: () => {
+          throw new Error("sync state unavailable");
+        },
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(warnings).toEqual([
+        "Failed to load quote sync error snapshots: sync state unavailable",
+      ]);
+      expect(status?.issues).toEqual([]);
     } finally {
       db.close();
     }
