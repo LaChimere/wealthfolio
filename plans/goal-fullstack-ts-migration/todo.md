@@ -2019,6 +2019,11 @@ contract:
   `bun run --cwd apps/backend type-check`, and `bun run check`. Coverage
   includes exact `runType` query forwarding for local import-run reads,
   preserving Rust's empty-string filtering behavior.
+- `pr5-exchange-rate-latest-error-observability`: targeted checks passed:
+  `bun test apps/backend/src/domains/exchange-rates.test.ts` and
+  `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
+  includes Rust-compatible warning emission before missing latest exchange-rate
+  errors are rethrown.
 
 ## Result
 

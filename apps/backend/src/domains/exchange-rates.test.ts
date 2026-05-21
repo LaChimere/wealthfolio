@@ -256,7 +256,7 @@ describe("TS exchange rates domain", () => {
       expect(service.convertCurrencyForDate("10", "USD", "CHF", "2023-10-26")).toBe("20");
       expect(service.convertCurrency("6", "EUR", "GBP")).toBe("18");
       expect(() => service.convertCurrency("1", "USD", "NOK")).toThrow("Exchange rate not found");
-      expect(warnings).toEqual([]);
+      expect(warnings).toEqual(["Exchange rate not available for USD/NOK"]);
     } finally {
       db.close();
     }

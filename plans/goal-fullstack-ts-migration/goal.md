@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 242
+turns_used: 243
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T17:35:00+08:00"
+updated_at: "2026-05-21T17:50:00+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1547,6 +1547,10 @@ updated_at: "2026-05-21T17:35:00+08:00"
   forwarded exactly as Axum receives it, including empty strings, so empty or
   whitespace-only filters no longer expand to all runs. Focused HTTP/runtime
   Connect tests, backend type-check, and full `bun run check` passed.
+- Turn 243: Tightened latest exchange-rate error observability parity: missing
+  latest FX rates now emit a warning before rethrowing, matching Rust's logged
+  error path for unavailable exchange rates. Focused exchange-rate tests,
+  backend type-check, and full `bun run check` passed.
 
 ## Deferred items
 

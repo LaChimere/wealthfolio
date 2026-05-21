@@ -357,9 +357,14 @@ export function createExchangeRateService(
     if (normalizedFrom === normalizedTo) {
       return sourceMultiplier.mul(targetMultiplier);
     }
-    return sourceMultiplier
-      .mul(getLatestRateBetweenNormalized(normalizedFrom, normalizedTo))
-      .mul(targetMultiplier);
+    let baseRate: Decimal;
+    try {
+      baseRate = getLatestRateBetweenNormalized(normalizedFrom, normalizedTo);
+    } catch (error) {
+      options.warn?.(`Exchange rate not available for ${normalizedFrom}/${normalizedTo}`);
+      throw error;
+    }
+    return sourceMultiplier.mul(baseRate).mul(targetMultiplier);
   };
 
   const exchangeRateForDate = (
