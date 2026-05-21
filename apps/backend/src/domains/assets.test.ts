@@ -630,7 +630,197 @@ describe("TS assets domain", () => {
     }
   });
 
-  test("enriches Yahoo search profiles and marks profile enriched", async () => {
+  test("enriches Yahoo quoteSummary profiles and marks profile enriched", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        fetched.push(url);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=crumb-cookie; Path=/" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          return Promise.resolve(new Response("crumb-token"));
+        }
+        if (
+          url ===
+          "https://query1.finance.yahoo.com/v10/finance/quoteSummary/AAPL?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              quoteSummary: {
+                result: [
+                  {
+                    price: {
+                      currency: "USD",
+                      longName: "Apple Inc.",
+                      shortName: "Apple",
+                      quoteType: "EQUITY",
+                    },
+                    summaryProfile: {
+                      sector: "Technology",
+                      industry: "Consumer Electronics",
+                      website: "https://www.apple.com",
+                      longBusinessSummary: "Apple designs devices.",
+                      country: "United States",
+                      fullTimeEmployees: 164000,
+                    },
+                    summaryDetail: {
+                      marketCap: { raw: 2800000000000 },
+                      trailingPE: { raw: 28.5 },
+                      dividendYield: { raw: 0.005 },
+                      fiftyTwoWeekHigh: { raw: 199.62 },
+                      fiftyTwoWeekLow: { raw: 124.17 },
+                    },
+                    topHoldings: { sectorWeightings: [] },
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-1",
+        kind: "INVESTMENT",
+        name: "Old Apple",
+        quote_mode: "MARKET",
+        quote_ccy: "CAD",
+        instrument_symbol: "AAPL",
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('equity-1', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["equity-1"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(fetched).toEqual([
+        "https://fc.yahoo.com",
+        "https://query1.finance.yahoo.com/v1/test/getcrumb",
+        "https://query1.finance.yahoo.com/v10/finance/quoteSummary/AAPL?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token",
+      ]);
+      expect(service.getAssetProfile("equity-1")).toMatchObject({
+        name: "Apple Inc.",
+        notes: "Apple designs devices.",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        metadata: {
+          profile: {
+            quoteType: "EQUITY",
+            sectors: '[{"name":"Technology","weight":1}]',
+            industry: "Consumer Electronics",
+            countries: '[{"name":"United States","weight":1}]',
+            website: "https://www.apple.com",
+            marketCap: 2800000000000,
+            peRatio: 28.5,
+            dividendYield: 0.005,
+            week52High: 199.62,
+            week52Low: 124.17,
+          },
+        },
+      });
+      expect(readSyncState(db, "equity-1")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reuses Yahoo quoteSummary crumbs while enriching a batch", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        fetched.push(url);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=crumb-cookie; Path=/" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          return Promise.resolve(new Response("crumb-token"));
+        }
+        if (
+          url ===
+          "https://query1.finance.yahoo.com/v10/finance/quoteSummary/AAPL?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              quoteSummary: {
+                result: [{ price: { longName: "Apple Inc.", quoteType: "EQUITY" } }],
+              },
+            }),
+          );
+        }
+        if (
+          url ===
+          "https://query1.finance.yahoo.com/v10/finance/quoteSummary/MSFT?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              quoteSummary: {
+                result: [{ price: { longName: "Microsoft Corporation", quoteType: "EQUITY" } }],
+              },
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      for (const [id, symbol] of [
+        ["equity-1", "AAPL"],
+        ["equity-2", "MSFT"],
+      ]) {
+        insertAsset(db, {
+          id,
+          kind: "INVESTMENT",
+          quote_mode: "MARKET",
+          quote_ccy: "USD",
+          instrument_symbol: symbol,
+        });
+        db.query(
+          `
+            INSERT INTO quote_sync_state (
+              asset_id, profile_enriched_at, updated_at
+            )
+            VALUES (?, NULL, '2026-01-01T00:00:00Z')
+          `,
+        ).run(id);
+      }
+
+      const result = await service.enrichAssets(["equity-1", "equity-2"]);
+
+      expect(result).toEqual({ enriched: 2, skipped: 0, failed: 0 });
+      expect(fetched).toEqual([
+        "https://fc.yahoo.com",
+        "https://query1.finance.yahoo.com/v1/test/getcrumb",
+        "https://query1.finance.yahoo.com/v10/finance/quoteSummary/AAPL?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token",
+        "https://query1.finance.yahoo.com/v10/finance/quoteSummary/MSFT?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to Yahoo search profiles and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
     const assignments: NewAssetTaxonomyAssignment[] = [];
@@ -639,6 +829,9 @@ describe("TS assets domain", () => {
       fetch: ((input: RequestInfo | URL) => {
         const url = String(input);
         fetched.push(url);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(new Response("", { status: 500 }));
+        }
         if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=AAPL") {
           return Promise.resolve(
             Response.json({
@@ -683,7 +876,10 @@ describe("TS assets domain", () => {
       const result = await service.enrichAssets(["equity-1"]);
 
       expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
-      expect(fetched).toEqual(["https://query2.finance.yahoo.com/v1/finance/search?q=AAPL"]);
+      expect(fetched).toEqual([
+        "https://fc.yahoo.com",
+        "https://query2.finance.yahoo.com/v1/finance/search?q=AAPL",
+      ]);
       expect(service.getAssetProfile("equity-1")).toMatchObject({
         name: "Apple Inc.",
         instrumentType: "EQUITY",

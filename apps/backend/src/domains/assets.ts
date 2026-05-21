@@ -94,6 +94,7 @@ interface AssetProviderProfile {
   source: string;
   name?: string;
   assetType?: string;
+  quoteCcy?: string;
   notes?: string;
   countries?: string;
   sectors?: string;
@@ -183,6 +184,7 @@ const VALID_ASSET_KINDS = new Set([
 ]);
 const VALID_QUOTE_MODES = new Set(["MARKET", "MANUAL"]);
 const VALID_INSTRUMENT_TYPES = new Set(["EQUITY", "CRYPTO", "FX", "OPTION", "METAL", "BOND"]);
+const yahooCrumbCache = new WeakMap<typeof fetch, { cookie: string; crumb: string }>();
 
 export function createAssetService(db: Database, options: AssetServiceOptions = {}): AssetService {
   const exchangeMetadata =
@@ -759,7 +761,7 @@ async function fetchAssetProviderProfile(
   if (!symbol) {
     return null;
   }
-  return fetchYahooSearchProfile(symbol, options.fetch ?? fetch);
+  return fetchYahooProfile(symbol, options.fetch ?? fetch);
 }
 
 function shouldFetchYahooProfile(asset: AssetRow): boolean {
@@ -835,7 +837,7 @@ async function fetchYahooSearchProfileFromEndpoint(
   fetchImpl: typeof fetch,
 ): Promise<AssetProviderProfile | null> {
   const response = await fetchImpl(`${endpoint}?q=${encodeURIComponent(symbol)}`, {
-    headers: yahooSearchHeaders(),
+    headers: yahooHeaders(),
   });
   if (!response.ok) {
     throw new Error(`YAHOO: HTTP ${response.status}`);
@@ -951,11 +953,15 @@ function updateEnrichedAssetProfile(
     (asset.notes === null || asset.notes.trim() === "") && profile?.notes
       ? profile.notes
       : asset.notes;
+  const quoteCcy = profile?.quoteCcy ?? asset.quote_ccy;
   const updated = db
-    .query<AssetRow, [string | null, string | null, string | null, string | null, string, string]>(
+    .query<
+      AssetRow,
+      [string | null, string | null, string | null, string | null, string, string, string]
+    >(
       `
         UPDATE assets
-        SET name = ?, notes = ?, metadata = ?, instrument_type = ?, updated_at = ?
+        SET name = ?, notes = ?, metadata = ?, instrument_type = ?, quote_ccy = ?, updated_at = ?
         WHERE id = ?
         RETURNING *
       `,
@@ -965,6 +971,7 @@ function updateEnrichedAssetProfile(
       notes,
       serializeJsonValue(metadataObject),
       instrumentType,
+      quoteCcy,
       currentTimestamp(options),
       asset.id,
     );
@@ -1593,7 +1600,244 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-function yahooSearchHeaders(): HeadersInit {
+async function fetchYahooProfile(
+  symbol: string,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile> {
+  const quoteSummaryProfile = await fetchYahooQuoteSummaryProfile(symbol, fetchImpl).catch(
+    () => null,
+  );
+  if (quoteSummaryProfile) {
+    return quoteSummaryProfile;
+  }
+  return fetchYahooSearchProfile(symbol, fetchImpl);
+}
+
+async function fetchYahooQuoteSummaryProfile(
+  symbol: string,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile> {
+  const crumb = await fetchYahooCrumb(fetchImpl);
+  const response = await fetchImpl(
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=${encodeURIComponent(crumb.crumb)}`,
+    {
+      headers: {
+        ...yahooHeaders(),
+        Cookie: crumb.cookie,
+      },
+    },
+  );
+  if (response.status === 401) {
+    yahooCrumbCache.delete(fetchImpl);
+    throw new Error("YAHOO: authentication expired");
+  }
+  if (!response.ok) {
+    throw new Error(`YAHOO: HTTP ${response.status}`);
+  }
+  const payload = (await response.json()) as unknown;
+  const profile = mapYahooQuoteSummaryProfile(symbol, payload);
+  if (!profile) {
+    throw new Error(`Symbol not found: ${symbol}`);
+  }
+  return profile;
+}
+
+async function fetchYahooCrumb(
+  fetchImpl: typeof fetch,
+): Promise<{ cookie: string; crumb: string }> {
+  const cached = yahooCrumbCache.get(fetchImpl);
+  if (cached) {
+    return cached;
+  }
+
+  const cookieResponse = await fetchImpl("https://fc.yahoo.com");
+  if (!cookieResponse.ok) {
+    throw new Error(`YAHOO: HTTP ${cookieResponse.status}`);
+  }
+  const cookie = cookieResponse.headers.get("set-cookie")?.split(";")[0]?.trim();
+  if (!cookie) {
+    throw new Error("YAHOO: Failed to parse Yahoo cookie");
+  }
+
+  const crumbResponse = await fetchImpl("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    headers: {
+      ...yahooHeaders(),
+      Cookie: cookie,
+    },
+  });
+  if (!crumbResponse.ok) {
+    throw new Error(`YAHOO: HTTP ${crumbResponse.status}`);
+  }
+  const crumb = (await crumbResponse.text()).trim();
+  if (!crumb) {
+    throw new Error("YAHOO: Failed to parse Yahoo crumb");
+  }
+  const crumbData = { cookie, crumb };
+  yahooCrumbCache.set(fetchImpl, crumbData);
+  return crumbData;
+}
+
+function mapYahooQuoteSummaryProfile(
+  symbol: string,
+  payload: unknown,
+): AssetProviderProfile | null {
+  if (!isRecord(payload) || !isRecord(payload.quoteSummary)) {
+    return null;
+  }
+  const results = payload.quoteSummary.result;
+  if (!Array.isArray(results) || !isRecord(results[0])) {
+    return null;
+  }
+  const result = results[0];
+  const price = isRecord(result.price) ? result.price : {};
+  const summary = isRecord(result.summaryProfile) ? result.summaryProfile : {};
+  const detail = isRecord(result.summaryDetail) ? result.summaryDetail : {};
+  const topHoldings = isRecord(result.topHoldings) ? result.topHoldings : {};
+  const assetType = optionalString(price.quoteType)?.toUpperCase();
+  const name = formatYahooName(
+    optionalString(price.longName),
+    assetType ?? "",
+    optionalString(price.shortName),
+    symbol,
+  );
+  const quoteCcy = normalizeQuoteCcy(optionalString(price.currency));
+  const sectors = yahooSectorsJson(assetType, summary, topHoldings);
+  const country = optionalString(summary.country);
+  const industry = optionalString(summary.industry);
+  const website = optionalString(summary.website);
+  const description =
+    optionalString(summary.longBusinessSummary) ?? optionalString(summary.description);
+
+  const profile: AssetProviderProfile = { source: "YAHOO" };
+  if (name) {
+    profile.name = name;
+  }
+  if (assetType) {
+    profile.assetType = assetType;
+  }
+  if (quoteCcy) {
+    profile.quoteCcy = quoteCcy;
+  }
+  if (description) {
+    profile.notes = description;
+  }
+  if (country) {
+    profile.countries = weightedProfileJson(country, 1);
+  }
+  if (sectors) {
+    profile.sectors = sectors;
+  }
+  if (industry) {
+    profile.industry = industry;
+  }
+  if (website) {
+    profile.url = website;
+  }
+
+  const marketCap = yahooRawNumber(detail.marketCap);
+  if (marketCap !== undefined) {
+    profile.marketCap = marketCap;
+  }
+  const peRatio = yahooRawNumber(detail.trailingPE);
+  if (peRatio !== undefined) {
+    profile.peRatio = peRatio;
+  }
+  const dividendYield = yahooRawNumber(detail.dividendYield);
+  if (dividendYield !== undefined) {
+    profile.dividendYield = dividendYield;
+  }
+  const week52High = yahooRawNumber(detail.fiftyTwoWeekHigh);
+  if (week52High !== undefined) {
+    profile.week52High = week52High;
+  }
+  const week52Low = yahooRawNumber(detail.fiftyTwoWeekLow);
+  if (week52Low !== undefined) {
+    profile.week52Low = week52Low;
+  }
+  return profile;
+}
+
+function yahooSectorsJson(
+  assetType: string | undefined,
+  summary: Record<string, unknown>,
+  topHoldings: Record<string, unknown>,
+): string | undefined {
+  if (assetType === "ETF" || assetType === "MUTUALFUND") {
+    const sectorWeightings = topHoldings.sectorWeightings;
+    if (!Array.isArray(sectorWeightings)) {
+      return undefined;
+    }
+    const sectors: Array<{ name: string; weight: number }> = [];
+    for (const weighting of sectorWeightings) {
+      if (!isRecord(weighting)) {
+        continue;
+      }
+      for (const [sectorName, value] of Object.entries(weighting)) {
+        const weight = yahooRawNumber(value);
+        if (weight !== undefined) {
+          sectors.push({ name: formatYahooSector(sectorName), weight });
+        }
+      }
+    }
+    return sectors.length > 0 ? JSON.stringify(sectors) : undefined;
+  }
+
+  const sector = optionalString(summary.sector);
+  return sector ? weightedProfileJson(formatYahooSector(sector), 1) : undefined;
+}
+
+function yahooRawNumber(value: unknown): number | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return decimalNumber(value.raw) ?? undefined;
+}
+
+function weightedProfileJson(name: string, weight: number): string {
+  return JSON.stringify([{ name, weight }]);
+}
+
+function formatYahooName(
+  longName: string | null,
+  quoteType: string,
+  shortName: string | null,
+  symbol: string,
+): string {
+  let name = longName ?? "";
+  if (name) {
+    const replacements: Array<[string, string]> = [
+      ["&amp;", "&"],
+      ["Amundi Index Solutions - ", ""],
+      ["iShares ETF (CH) - ", ""],
+      ["iShares III Public Limited Company - ", ""],
+      ["iShares V PLC - ", ""],
+      ["iShares VI Public Limited Company - ", ""],
+      ["iShares VII PLC - ", ""],
+      ["Multi Units Luxembourg - ", ""],
+      ["VanEck ETFs N.V. - ", ""],
+      ["Vaneck Vectors Ucits Etfs Plc - ", ""],
+      ["Vanguard Funds Public Limited Company - ", ""],
+      ["Vanguard Index Funds - ", ""],
+      ["Xtrackers (IE) Plc - ", ""],
+    ];
+    for (const [from, to] of replacements) {
+      name = name.replaceAll(from, to);
+    }
+  }
+  if (quoteType.toUpperCase() === "FUTURE" && shortName && shortName.length >= 7) {
+    return shortName.slice(0, -7);
+  }
+  return name || shortName || symbol;
+}
+
+function formatYahooSector(sector: string): string {
+  return sector
+    .split("_")
+    .map((word) => (word ? `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}` : ""))
+    .join(" ");
+}
+
+function yahooHeaders(): HeadersInit {
   return {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
   };
