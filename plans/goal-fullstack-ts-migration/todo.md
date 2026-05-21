@@ -2024,6 +2024,11 @@ contract:
   `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
   includes Rust-compatible warning emission before missing latest exchange-rate
   errors are rethrown.
+- `pr5-activity-daily-snapshot-replay`: targeted checks passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --timeout 30000`,
+  `bun run --cwd apps/backend type-check`, and `bun run check`. Coverage
+  includes Rust-compatible carry-forward calculated snapshots and valuations for
+  non-activity days through the portfolio calculation day.
 
 ## Result
 

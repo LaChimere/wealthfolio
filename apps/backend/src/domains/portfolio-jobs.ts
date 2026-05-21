@@ -538,9 +538,20 @@ function rebuildCalculatedSnapshotsFromActivities(
       config,
     ),
   );
-  const replayDates = Array.from(
-    new Set(contexts.flatMap((context) => Array.from(context.activitiesByDate.keys()))),
-  ).sort();
+  const replayContexts: Array<{ context: ActivityReplayContext; startDate: string }> = [];
+  for (const context of contexts) {
+    const startDate = activityReplayStartDate(context);
+    if (startDate) {
+      replayContexts.push({ context, startDate });
+    }
+  }
+  const replayStartDate = replayContexts
+    .map((entry) => entry.startDate)
+    .sort()
+    .at(0);
+  const replayDates = replayStartDate
+    ? dateRangeInclusive(replayStartDate, calculatedAt.slice(0, 10))
+    : [];
   const transferLotsCache: TransferLotsCache = new Map();
 
   for (const context of contexts) {
@@ -548,7 +559,9 @@ function rebuildCalculatedSnapshotsFromActivities(
   }
 
   for (const date of replayDates) {
-    const contextsForDate = contexts.filter((context) => context.activitiesByDate.has(date));
+    const contextsForDate = replayContexts
+      .filter((entry) => entry.startDate <= date)
+      .map((entry) => entry.context);
     for (const context of orderReplayContextsByTransferDeps(contextsForDate, date, options)) {
       const activitiesForDate = orderActivitiesByTransferDeps(
         context.activitiesByDate.get(date) ?? [],
@@ -575,6 +588,24 @@ function rebuildCalculatedSnapshotsFromActivities(
     }
   }
   warnForUnpairedTransferredLots(transferLotsCache, options);
+}
+
+function activityReplayStartDate(context: ActivityReplayContext): string | null {
+  if (context.startDate) {
+    return context.startDate;
+  }
+  return Array.from(context.activitiesByDate.keys()).sort().at(0) ?? null;
+}
+
+function dateRangeInclusive(startDate: string, endDate: string): string[] {
+  if (startDate > endDate) {
+    return [];
+  }
+  const dates: string[] = [];
+  for (let date = startDate; date <= endDate; date = nextDate(date)) {
+    dates.push(date);
+  }
+  return dates;
 }
 
 function prepareAccountActivityReplayContext(

@@ -369,6 +369,24 @@ describe("TS portfolio job route config", () => {
       expect(readValuation(db, "TOTAL", "2026-05-15")).toMatchObject({
         total_value: "102",
       });
+      expect(readSnapshot(db, "account-1", "2026-05-16")).toMatchObject({
+        source: "CALCULATED",
+        cash_balances: '{"USD":"82"}',
+        net_contribution: "100",
+      });
+      expect(readValuation(db, "account-1", "2026-05-16")).toMatchObject({
+        cash_balance: "82",
+        investment_market_value: "20",
+        total_value: "102",
+      });
+      expect(readSnapshot(db, "account-1", "2026-05-17")).toMatchObject({
+        source: "CALCULATED",
+        cash_balances: '{"USD":"82"}',
+        net_contribution: "100",
+      });
+      expect(readValuation(db, "TOTAL", "2026-05-17")).toMatchObject({
+        total_value: "102",
+      });
     } finally {
       db.close();
     }
