@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 247
+turns_used: 248
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T18:32:38+08:00"
+updated_at: "2026-05-21T22:42:42+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1573,6 +1573,12 @@ updated_at: "2026-05-21T18:32:38+08:00"
   failures with warnings, and wire the behavior into runtime settings routes.
   Focused settings/runtime tests, backend type-check, and full `bun run check`
   passed.
+- Turn 248: Added direct asset auto-classification parity: newly created TS
+  runtime assets now assign Rust-compatible initial `instrument_type` and
+  `asset_classes` taxonomy categories through the taxonomy service, skip
+  duplicate-existing asset returns, and keep asset creation successful when
+  classification assignment fails. Focused asset/runtime tests, backend
+  type-check, and full `bun run check` passed.
 
 ## Deferred items
 
@@ -1677,12 +1683,14 @@ updated_at: "2026-05-21T18:32:38+08:00"
   remain active follow-ups.
 - Asset create/profile mutation and market identity canonicalization now have TS
   runtime parity for direct SQLite-backed routes, including runtime sync_outbox
-  persistence for direct asset Create/Update/Delete callbacks. reason=asset
-  create/update now preserves generated `instrument_key` behavior, duplicate
-  returns, provider inference, sync-state reset, and Rust-shaped outbox payloads
-  without generated `instrument_key`; quote-provider interactions, remaining
-  quote sync outbox follow-ups outside migrated alternative-asset and
-  market-data quote paths, auto-classification side effects, and portfolio
+  persistence for direct asset Create/Update/Delete callbacks and initial
+  taxonomy auto-classification side effects. reason=asset create/update now
+  preserves generated `instrument_key` behavior, duplicate returns, provider
+  inference, sync-state reset, Rust-shaped outbox payloads without generated
+  `instrument_key`, and Rust-compatible initial
+  `instrument_type`/`asset_classes` assignments for newly created assets;
+  quote-provider interactions, remaining quote sync outbox follow-ups outside
+  migrated alternative-asset and market-data quote paths, and portfolio
   recalculation behavior remain active follow-ups.
 - App utility database restore runtime now has TS runtime parity. reason=the
   standalone backend performs file-level restore after closing the live database

@@ -1480,7 +1480,7 @@ describe("TS backend runtime composition", () => {
 
     try {
       const { assetService } = runtime.options;
-      const created = assetService.createAsset({
+      const created = await assetService.createAsset({
         kind: "INVESTMENT",
         quoteMode: "MARKET",
         quoteCcy: "USD",
@@ -1538,6 +1538,28 @@ describe("TS backend runtime composition", () => {
         expect(profilePayload).not.toHaveProperty("instrument_key");
         expect(JSON.parse(String(assetRows[2]?.payload))).toMatchObject({ quote_mode: "MANUAL" });
         expect(JSON.parse(String(assetRows[3]?.payload))).toEqual({ id: created.id });
+
+        const assignmentRows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "asset_taxonomy_assignment",
+        );
+        expect(assignmentRows).toEqual([
+          expect.objectContaining({ entity_id: expect.any(String), op: "update" }),
+          expect.objectContaining({ entity_id: expect.any(String), op: "update" }),
+        ]);
+        expect(JSON.parse(String(assignmentRows[0]?.payload))).toMatchObject({
+          asset_id: created.id,
+          taxonomy_id: "instrument_type",
+          category_id: "STOCK_COMMON",
+          weight: 10000,
+          source: "AUTO",
+        });
+        expect(JSON.parse(String(assignmentRows[1]?.payload))).toMatchObject({
+          asset_id: created.id,
+          taxonomy_id: "asset_classes",
+          category_id: "EQUITY",
+          weight: 10000,
+          source: "AUTO",
+        });
       } finally {
         db.close();
       }

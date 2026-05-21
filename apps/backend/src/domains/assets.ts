@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { BackendEventBus } from "../events";
+import type { NewAssetTaxonomyAssignment, TaxonomyService } from "./taxonomies";
 
 export interface Asset extends Record<string, unknown> {
   id: string;
@@ -66,6 +67,8 @@ export interface AssetServiceOptions {
   exchangeMetadata?: ExchangeMetadata;
   exchangeNameByMic?: ReadonlyMap<string, string> | Record<string, string>;
   queueSyncEvent?: (event: AssetSyncEvent) => void;
+  taxonomyService?: Pick<TaxonomyService, "assignAssetToCategory">;
+  warn?: (message: string) => void;
 }
 
 export type AssetSyncOperation = "Create" | "Update" | "Delete";
@@ -211,10 +214,20 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
       const result = createAssetRow();
       const created = rowToAsset(result.row, exchangeMetadata.nameByMic);
       if (result.created) {
-        options.eventBus?.publish({
-          name: ASSETS_CREATED_EVENT,
-          payload: { type: ASSETS_CREATED_EVENT, asset_ids: [created.id] },
-        });
+        const publishCreated = () => {
+          options.eventBus?.publish({
+            name: ASSETS_CREATED_EVENT,
+            payload: { type: ASSETS_CREATED_EVENT, asset_ids: [created.id] },
+          });
+        };
+        const classification = classifyCreatedAsset(options, created);
+        if (classification) {
+          return classification.then(() => {
+            publishCreated();
+            return created;
+          });
+        }
+        publishCreated();
       }
       return created;
     },
@@ -614,6 +627,118 @@ function rowToAsset(row: AssetRow, exchangeNameByMic: ReadonlyMap<string, string
     createdAt: normalizeTimestamp(row.created_at),
     updatedAt: normalizeTimestamp(row.updated_at),
   };
+}
+
+function classifyCreatedAsset(
+  options: AssetServiceOptions,
+  asset: Asset,
+): Promise<void> | undefined {
+  if (!options.taxonomyService) {
+    return undefined;
+  }
+  const assignments = initialClassificationAssignments(asset);
+  if (assignments.length === 0) {
+    return undefined;
+  }
+  return classifyCreatedAssetAsync(options.taxonomyService, assignments, options.warn);
+}
+
+async function classifyCreatedAssetAsync(
+  taxonomyService: Pick<TaxonomyService, "assignAssetToCategory">,
+  assignments: NewAssetTaxonomyAssignment[],
+  warn: ((message: string) => void) | undefined,
+): Promise<void> {
+  for (const assignment of assignments) {
+    try {
+      await taxonomyService.assignAssetToCategory(assignment);
+    } catch (error) {
+      warn?.(
+        `Initial classification of asset ${assignment.assetId} ${assignment.taxonomyId} failed: ${errorMessage(error)}`,
+      );
+    }
+  }
+}
+
+function initialClassificationAssignments(asset: Asset): NewAssetTaxonomyAssignment[] {
+  const assignments: NewAssetTaxonomyAssignment[] = [];
+  const instrumentTypeCategory = instrumentTypeTaxonomyCategory(asset.instrumentType);
+  if (instrumentTypeCategory) {
+    assignments.push(taxonomyAssignment(asset.id, "instrument_type", instrumentTypeCategory));
+  }
+
+  const assetClassCategory =
+    instrumentTypeAssetClass(asset.instrumentType) ?? kindAssetClass(asset.kind);
+  if (assetClassCategory) {
+    assignments.push(taxonomyAssignment(asset.id, "asset_classes", assetClassCategory));
+  }
+  return assignments;
+}
+
+function taxonomyAssignment(
+  assetId: string,
+  taxonomyId: string,
+  categoryId: string,
+): NewAssetTaxonomyAssignment {
+  return {
+    assetId,
+    taxonomyId,
+    categoryId,
+    weight: 10000,
+    source: "AUTO",
+  };
+}
+
+function instrumentTypeTaxonomyCategory(instrumentType: string | null): string | null {
+  switch (instrumentType) {
+    case "EQUITY":
+      return "STOCK_COMMON";
+    case "CRYPTO":
+      return "CRYPTO_NATIVE";
+    case "OPTION":
+      return "OPTION";
+    case "BOND":
+      return "BOND_CORPORATE";
+    case "METAL":
+      return "PHYSICAL_METAL";
+    default:
+      return null;
+  }
+}
+
+function instrumentTypeAssetClass(instrumentType: string | null): string | null {
+  switch (instrumentType) {
+    case "EQUITY":
+    case "OPTION":
+      return "EQUITY";
+    case "CRYPTO":
+      return "DIGITAL_ASSETS";
+    case "BOND":
+      return "FIXED_INCOME";
+    case "METAL":
+      return "COMMODITIES";
+    default:
+      return null;
+  }
+}
+
+function kindAssetClass(kind: string): string | null {
+  switch (kind) {
+    case "PROPERTY":
+      return "REAL_ESTATE";
+    case "PRECIOUS_METAL":
+      return "COMMODITIES";
+    case "PRIVATE_EQUITY":
+    case "VEHICLE":
+    case "COLLECTIBLE":
+    case "OTHER":
+      return "ALTERNATIVES";
+    default:
+      return null;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function queueAssetSyncEvent(

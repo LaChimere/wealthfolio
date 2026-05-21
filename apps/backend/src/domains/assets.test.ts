@@ -8,6 +8,7 @@ import {
   parseExchangeNameLookup,
   type AssetSyncEvent,
 } from "./assets";
+import type { NewAssetTaxonomyAssignment } from "./taxonomies";
 
 describe("TS assets domain", () => {
   test("lists and reads assets with Rust-compatible response shape and exchange names", () => {
@@ -368,6 +369,105 @@ describe("TS assets domain", () => {
       expect(() =>
         service.createAsset({ kind: "INVESTMENT", quoteMode: "MARKET", quoteCcy: "USD" }),
       ).toThrow("instrument_symbol");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("auto-classifies newly created assets like Rust", async () => {
+    const db = createAssetsDb();
+    const assignments: NewAssetTaxonomyAssignment[] = [];
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      taxonomyService: {
+        async assignAssetToCategory(assignment) {
+          assignments.push(assignment);
+        },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      const equity = await service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "AAPL",
+      });
+      const property = await service.createAsset({
+        kind: "PROPERTY",
+        quoteMode: "MANUAL",
+        quoteCcy: "USD",
+        name: "Rental",
+      });
+      await service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "AAPL",
+      });
+
+      expect(assignments).toEqual([
+        {
+          assetId: equity.id,
+          taxonomyId: "instrument_type",
+          categoryId: "STOCK_COMMON",
+          weight: 10000,
+          source: "AUTO",
+        },
+        {
+          assetId: equity.id,
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 10000,
+          source: "AUTO",
+        },
+        {
+          assetId: property.id,
+          taxonomyId: "asset_classes",
+          categoryId: "REAL_ESTATE",
+          weight: 10000,
+          source: "AUTO",
+        },
+      ]);
+      expect(warnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps asset creation successful when auto-classification fails", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      taxonomyService: {
+        async assignAssetToCategory(assignment) {
+          if (assignment.taxonomyId === "instrument_type") {
+            throw new Error("taxonomy missing");
+          }
+        },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      const created = await service.createAsset({
+        kind: "INVESTMENT",
+        quoteMode: "MARKET",
+        quoteCcy: "USD",
+        instrumentType: "EQUITY",
+        instrumentSymbol: "MSFT",
+      });
+
+      expect(created).toMatchObject({
+        instrumentSymbol: "MSFT",
+        instrumentType: "EQUITY",
+      });
+      expect(warnings).toEqual([
+        `Initial classification of asset ${created.id} instrument_type failed: taxonomy missing`,
+      ]);
     } finally {
       db.close();
     }

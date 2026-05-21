@@ -427,6 +427,7 @@ function createServicesFromDatabase(
     assetService: createAssetService(db, {
       eventBus,
       exchangeMetadata,
+      taxonomyService,
       queueSyncEvent: (event) => {
         syncOutboxQueue.queueSyncEvent({
           entity: "assets",
@@ -435,6 +436,7 @@ function createServicesFromDatabase(
           payload: event.payload,
         });
       },
+      warn: (message) => console.warn(message),
     }),
     aiProviderService,
     aiChatService: createAiChatService(db, {
