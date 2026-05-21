@@ -862,7 +862,7 @@ export function createActivityService(
     },
 
     checkActivitiesImport(activities) {
-      return checkActivitiesImportRows(db, activities);
+      return checkActivitiesImportRows(db, activities, options);
     },
 
     importActivities(activities) {
@@ -1988,6 +1988,7 @@ function importAssetPreviewItem(
 interface ImportAssetSymbolResolution {
   exchangeMic: string;
   name?: string;
+  quoteCcy?: string;
 }
 
 async function resolveImportAssetSymbol(
@@ -2017,6 +2018,7 @@ async function resolveImportAssetSymbol(
     const resolution = {
       exchangeMic,
       name: providerSymbolName(first, symbol),
+      quoteCcy: providerSymbolQuoteCcy(first, exchangeMic, options.exchangeMetadata),
     };
     if (preferred && resultMatchesCurrency(first, preferred, options.exchangeMetadata)) {
       return resolution;
@@ -2077,6 +2079,17 @@ function resultMatchesCurrency(
   return (
     normalizeCurrencyForComparison(micCurrency) === preferredCurrency ||
     normalizeCurrencyForComparison(result.currency ?? undefined) === preferredCurrency
+  );
+}
+
+function providerSymbolQuoteCcy(
+  result: SymbolSearchResult,
+  exchangeMic: string,
+  exchangeMetadata: Pick<ExchangeMetadata, "currencyByMic"> | undefined,
+): string | undefined {
+  return (
+    normalizeImportQuoteCurrency(result.currency ?? undefined) ??
+    normalizeImportQuoteCurrency(exchangeMetadata?.currencyByMic.get(exchangeMic))
   );
 }
 
@@ -2198,12 +2211,19 @@ function addFieldMessage(messages: Record<string, string[]>, field: string, mess
   messages[field] = [...(messages[field] ?? []), message];
 }
 
-function checkActivitiesImportRows(
+async function checkActivitiesImportRows(
   db: Database,
   activities: unknown[],
-): Array<Record<string, unknown>> {
+  options: ActivityServiceOptions,
+): Promise<Array<Record<string, unknown>>> {
   const assetContext = createActivityAssetResolutionContext();
-  const checked = activities.map((activity, index) =>
+  const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
+  const resolvedActivities = await Promise.all(
+    activities.map((activity) =>
+      activityImportInputWithProviderResolution(db, activity, options, searchCache),
+    ),
+  );
+  const checked = resolvedActivities.map((activity, index) =>
     checkActivityImportRow(db, activity, index, assetContext),
   );
   const firstIndexByKey = new Map<string, number>();
@@ -2247,6 +2267,88 @@ function checkActivitiesImportRows(
   }
 
   return checked.map(({ activity }) => finalizeImportActivity(activity));
+}
+
+async function activityImportInputWithProviderResolution(
+  db: Database,
+  input: unknown,
+  options: ActivityServiceOptions,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<unknown> {
+  if (!options.symbolSearch || !isRecord(input)) {
+    return input;
+  }
+
+  const accountId = optionalTrimmedString(input.accountId);
+  const activityType = optionalTrimmedString(input.activityType);
+  const subtype = optionalTrimmedString(input.subtype);
+  const symbol = optionalTrimmedString(input.symbol);
+  const assetId = optionalTrimmedString(input.assetId);
+  const exchangeMic = optionalTrimmedString(input.exchangeMic);
+  const quoteMode = normalizeQuoteMode(optionalTrimmedString(input.quoteMode));
+  if (
+    !accountId ||
+    !activityType ||
+    !symbol ||
+    assetId ||
+    exchangeMic ||
+    quoteMode === "MANUAL" ||
+    !requiresAssetIdentity(activityType, subtype ?? null)
+  ) {
+    return input;
+  }
+
+  let accountCurrency: string;
+  try {
+    accountCurrency = readAccountRow(db, accountId).currency;
+  } catch (error) {
+    if (!errorMessage(error).startsWith("Record not found: account ")) {
+      throw error;
+    }
+    return input;
+  }
+
+  try {
+    if (
+      findExistingAssetBySymbol(db, {
+        symbol,
+        instrumentType: normalizeInstrumentType(optionalTrimmedString(input.instrumentType)),
+        quoteCcy: normalizeImportQuoteCurrency(optionalTrimmedString(input.quoteCcy)),
+      })
+    ) {
+      return input;
+    }
+  } catch (error) {
+    if (!errorMessage(error).startsWith("Multiple existing assets match symbol ")) {
+      throw error;
+    }
+  }
+
+  const preferredCurrency =
+    normalizeImportQuoteCurrency(optionalTrimmedString(input.currency)) ??
+    normalizeImportQuoteCurrency(accountCurrency);
+  const resolution = await resolveImportAssetSymbol(
+    symbol,
+    preferredCurrency,
+    options,
+    searchCache,
+  );
+  if (!resolution) {
+    return input;
+  }
+
+  return {
+    ...input,
+    exchangeMic: resolution.exchangeMic,
+    instrumentType: optionalTrimmedString(input.instrumentType) ?? "EQUITY",
+    quoteCcy: optionalTrimmedString(input.quoteCcy) ?? resolution.quoteCcy ?? preferredCurrency,
+    ...(!optionalTrimmedString(input.symbolName) &&
+    !optionalTrimmedString(input.assetName) &&
+    !optionalTrimmedString(input.name) &&
+    resolution.name
+      ? { symbolName: resolution.name }
+      : {}),
+  };
 }
 
 function checkActivityImportRow(

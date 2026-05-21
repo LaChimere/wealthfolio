@@ -511,7 +511,226 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("checks import activities read-only with asset resolution and duplicate warnings", () => {
+  test("checks import activities with provider-backed exchange resolution", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([
+          ["XNYS", "USD"],
+          ["XTSE", "CAD"],
+        ]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify US",
+              longName: "Shopify US",
+              exchange: "NYSE",
+              exchangeMic: "XNYS",
+              exchangeName: "NYSE",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "USD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        if (query === "SHOP.TO") {
+          return [
+            {
+              symbol: "SHOP.TO",
+              shortName: "Shopify Canada",
+              longName: "Shopify Canada",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "SHOP",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+      const checkedAssetId = checked[0]?.assetId as string;
+
+      expect(checked).toHaveLength(1);
+      expect(checked[0]).toMatchObject({
+        accountId: "account-cad",
+        accountName: "Canadian",
+        symbol: "SHOP",
+        symbolName: "Shopify Canada",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        quoteCcy: "CAD",
+        isValid: true,
+      });
+      expect(checkedAssetId).toBeString();
+      expect(checked[0]).not.toHaveProperty("errors");
+      expect(readAssetCount(db)).toBe(0);
+
+      const result = (await service.importActivities?.(checked)) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({
+        imported: 1,
+        assetsCreated: 1,
+        success: true,
+      });
+      expect(result.activities[0]?.assetId).toBe(checkedAssetId);
+      expect(readAssetById(db, checkedAssetId)).toMatchObject({
+        name: "Shopify Canada",
+        display_code: "SHOP",
+        instrument_symbol: "SHOP",
+        instrument_exchange_mic: "XTSE",
+        instrument_type: "EQUITY",
+        quote_ccy: "CAD",
+        quote_mode: "MARKET",
+      });
+      expect(calls).toEqual(["SHOP", "SHOP.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps import validation invalid when provider resolution has no MIC", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XTSE", "CAD"]]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        return [
+          {
+            symbol: query,
+            shortName: "Missing MIC",
+            longName: "Missing MIC",
+            exchange: "",
+            exchangeMic: null,
+            exchangeName: null,
+            quoteType: "EQUITY",
+            typeDisplay: "",
+            currency: null,
+            dataSource: "YAHOO",
+            isExisting: false,
+            index: "",
+            score: 0,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "MISSING",
+          instrumentType: "EQUITY",
+          quoteCcy: "CAD",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+
+      expect(checked).toEqual([
+        expect.objectContaining({
+          isValid: false,
+          errors: {
+            symbol: ["Exchange MIC is required to create market asset MISSING"],
+          },
+        }),
+      ]);
+      expect(calls).toEqual(["MISSING", "MISSING.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not provider-resolve manual quoted import assets", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      symbolSearch(query) {
+        calls.push(query);
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "PRIVATE",
+          instrumentType: "EQUITY",
+          quoteCcy: "CAD",
+          quoteMode: "MANUAL",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+
+      expect(checked[0]).toMatchObject({
+        symbol: "PRIVATE",
+        quoteMode: "MANUAL",
+        isValid: true,
+      });
+      expect(checked[0]?.assetId).toBeString();
+      expect(calls).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("checks import activities read-only with asset resolution and duplicate warnings", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -537,7 +756,7 @@ describe("TS activities import domain", () => {
         currency: "USD",
       }) as Activity;
 
-      const checked = service.checkActivitiesImport?.([
+      const checked = await service.checkActivitiesImport?.([
         {
           accountId: "account-1",
           activityType: "BUY",
@@ -753,7 +972,9 @@ describe("TS activities import domain", () => {
           lineNumber: 1,
         },
       ];
-      const checked = service.checkActivitiesImport?.(rows) as Array<Record<string, unknown>>;
+      const checked = (await service.checkActivitiesImport?.(rows)) as Array<
+        Record<string, unknown>
+      >;
       const checkedAssetId = checked[0]?.assetId as string;
       expect(checkedAssetId).toBeString();
       expect(readAssetCount(db)).toBe(0);

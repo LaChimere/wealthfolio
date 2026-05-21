@@ -194,13 +194,13 @@
     history/latest sync and quote resolution, Metal Price API metal
     history/latest sync and quote resolution, US Treasury calculated bond
     history/latest sync and quote resolution, OpenFIGI bond search fallback,
-    Finnhub/Alpha Vantage search fallbacks, and provider-backed activity import
-    asset preview symbol resolution now have TS runtime parity, while remaining
-    provider breadth and background orchestration remain deferred to
-    market-data/portfolio parity slices; market-sync result accounting,
-    portfolio `market:sync-complete` failure/skipped-reason payloads, and
-    market-data quote/sync portfolio job side effects now have TS parity;
-    activity mutation event production,
+    Finnhub/Alpha Vantage search fallbacks, provider-backed activity import
+    asset preview symbol resolution, and provider-backed activity import check
+    resolution now have TS runtime parity, while remaining provider breadth and
+    background orchestration remain deferred to market-data/portfolio parity
+    slices; market-sync result accounting, portfolio `market:sync-complete`
+    failure/skipped-reason payloads, and market-data quote/sync portfolio job
+    side effects now have TS parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -213,12 +213,13 @@
     planning/batch processing/worker helper, standalone runtime domain-event
     worker wiring to local portfolio jobs, and post-portfolio active
     goal-summary refresh now have TS runtime parity, while provider-backed asset
-    resolution, remaining quote sync outbox follow-ups outside migrated
-    alternative-asset and market-data quote paths, device-sync push/pull runtime
-    wiring, and remaining device-sync side effects are deferred to
-    activities/import/device-sync runtime parity slices; AI chat persistence,
-    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
-    native/fallback text/reasoning provider streaming, generated thread titles,
+    resolution outside the activity preview/check round-trip, remaining quote
+    sync outbox follow-ups outside migrated alternative-asset and market-data
+    quote paths, device-sync push/pull runtime wiring, and remaining device-sync
+    side effects are deferred to activities/import/device-sync runtime parity
+    slices; AI chat persistence, tag persistence, tool-result mutation, local AI
+    chat sync_outbox callbacks, native/fallback text/reasoning provider
+    streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -2256,6 +2257,15 @@ contract:
   preferred-currency MIC selection, provider-name propagation into new-asset
   drafts, per-preview search caching, and unresolved/missing-exchange fallback
   when provider search returns no MIC or fails.
+- `pr5-activities-import-check-provider-resolution`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, rubber-duck
+  plan review, and focused code review. Coverage includes provider-backed import
+  check enrichment for symbol-only market rows, activity/account currency-aware
+  MIC selection, provider-name propagation, inferred equity type and quote
+  currency for import round-trips, unresolved provider misses remaining
+  validation errors, and manual quoted assets staying local without provider
+  calls.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
