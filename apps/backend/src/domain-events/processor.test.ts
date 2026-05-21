@@ -260,7 +260,71 @@ describe("TS domain event batch processor", () => {
     expect(plan.brokerSyncAccountIds).toEqual(["account-2"]);
   });
 
-  test("propagates action failures instead of reporting success", async () => {
+  test("reports broker sync failures without failing the batch", async () => {
+    const calls: string[] = [];
+
+    const plan = await processDomainEventBatch(
+      [
+        event(TRACKING_MODE_CHANGED_EVENT, {
+          account_id: "account-1",
+          old_mode: "NOT_SET",
+          new_mode: "TRANSACTIONS",
+          is_connected: true,
+        }),
+      ],
+      {
+        syncBrokerAccounts(accountIds) {
+          calls.push(`broker:${accountIds.join(",")}`);
+          throw new Error("broker failed");
+        },
+        onBrokerSyncError(error, accountIds) {
+          calls.push(
+            `broker-error:${error instanceof Error ? error.message : String(error)}:${accountIds.join(",")}`,
+          );
+        },
+      },
+    );
+
+    expect(calls).toEqual(["broker:account-1", "broker-error:broker failed:account-1"]);
+    expect(plan.brokerSyncAccountIds).toEqual(["account-1"]);
+  });
+
+  test("logs broker sync failures when no explicit error hook is provided", async () => {
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      await expect(
+        processDomainEventBatch(
+          [
+            event(TRACKING_MODE_CHANGED_EVENT, {
+              account_id: "account-1",
+              old_mode: "NOT_SET",
+              new_mode: "TRANSACTIONS",
+              is_connected: true,
+            }),
+          ],
+          {
+            syncBrokerAccounts() {
+              throw new Error("broker failed");
+            },
+          },
+        ),
+      ).resolves.toMatchObject({
+        brokerSyncAccountIds: ["account-1"],
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      ["Broker sync failed after tracking mode change for accounts account-1: broker failed"],
+    ]);
+  });
+
+  test("propagates asset enrichment failures instead of reporting success", async () => {
     await expect(
       processDomainEventBatch([event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] })], {
         enrichAssets() {

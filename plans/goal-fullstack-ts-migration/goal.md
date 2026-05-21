@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 250
+turns_used: 251
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T23:59:41+08:00"
+updated_at: "2026-05-22T00:06:49+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1593,6 +1593,11 @@ updated_at: "2026-05-21T23:59:41+08:00"
   `asset:enrichment-complete` events around the enrichment callback, and the
   runtime worker passes the shared event bus into processor options. Focused
   domain-event processor/worker tests and backend type-check passed.
+- Turn 251: Matched Rust broker-sync failure continuation semantics in the TS
+  domain-event processor: tracking-mode-triggered broker sync callbacks now warn
+  through an explicit error hook or default warning instead of failing the whole
+  batch, preserving the derived broker sync plan. Focused domain-event processor
+  tests and backend type-check passed.
 
 ## Deferred items
 

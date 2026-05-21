@@ -14,6 +14,7 @@ export interface DomainEventProcessorOptions {
     assetIds: string[],
   ) => Promise<AssetEnrichmentResult | void> | AssetEnrichmentResult | void;
   eventBus?: BackendEventBus;
+  onBrokerSyncError?: (error: unknown, accountIds: string[]) => void;
   onGoalSummaryRefreshError?: (error: unknown) => void;
   onPortfolioJobError?: (error: unknown, portfolioJob: PortfolioJobConfig) => void;
   portfolioJobService?: PortfolioJobService;
@@ -59,7 +60,11 @@ export async function processDomainEventBatch(
 
   const brokerSyncAccountIds = planBrokerSync(events);
   if (brokerSyncAccountIds.length > 0) {
-    await options.syncBrokerAccounts?.(brokerSyncAccountIds);
+    try {
+      await options.syncBrokerAccounts?.(brokerSyncAccountIds);
+    } catch (error) {
+      reportBrokerSyncError(error, brokerSyncAccountIds, options.onBrokerSyncError);
+    }
   }
 
   return {
@@ -133,6 +138,20 @@ function reportGoalSummaryRefreshError(
     return;
   }
   console.warn(`Failed to refresh goal summaries after domain events: ${errorMessage(error)}`);
+}
+
+function reportBrokerSyncError(
+  error: unknown,
+  accountIds: string[],
+  onBrokerSyncError?: (error: unknown, accountIds: string[]) => void,
+): void {
+  if (onBrokerSyncError) {
+    onBrokerSyncError(error, accountIds);
+    return;
+  }
+  console.warn(
+    `Broker sync failed after tracking mode change for accounts ${accountIds.join(",")}: ${errorMessage(error)}`,
+  );
 }
 
 function errorMessage(error: unknown): string {
