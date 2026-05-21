@@ -196,9 +196,10 @@
     history/latest sync and quote resolution, OpenFIGI bond search fallback,
     Finnhub/Alpha Vantage search fallbacks, provider-backed activity import
     asset preview symbol resolution, provider-backed activity import check
-    resolution, ISIN-first activity import check resolution, and ISIN-first
-    activity import asset preview resolution now have TS runtime parity, while
-    remaining provider breadth and background orchestration remain deferred to
+    resolution, ISIN-first activity import check resolution, ISIN-first activity
+    import asset preview resolution, and provider-backed preview
+    type/quote-currency inference now have TS runtime parity, while remaining
+    provider breadth and background orchestration remain deferred to
     market-data/portfolio parity slices; market-sync result accounting,
     portfolio `market:sync-complete` failure/skipped-reason payloads, and
     market-data quote/sync portfolio job side effects now have TS parity;
@@ -2281,6 +2282,13 @@ contract:
   code review. Coverage includes candidate ISIN local existing-asset previews,
   provider ISIN search before ticker fallback, preserved candidate symbols, and
   provider MIC/name enrichment in new-asset preview drafts.
+- `pr5-activities-import-preview-provider-inference`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and focused
+  code review. Coverage includes provider-backed preview inference for missing
+  instrument type and quote currency, provider quote-type mapping for non-equity
+  assets, no provider calls for manual or complete non-equity previews, and
+  existing missing-exchange behavior for unresolved market equities.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

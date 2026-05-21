@@ -448,6 +448,65 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("previews import assets without overwriting explicit exchange MIC", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      symbolSearch(query) {
+        calls.push(query);
+        return [
+          {
+            symbol: "AAPL",
+            shortName: "Apple NYSE",
+            longName: "Apple NYSE",
+            exchange: "NYSE",
+            exchangeMic: "XNYS",
+            exchangeName: "NYSE",
+            quoteType: "EQUITY",
+            typeDisplay: "",
+            currency: "USD",
+            dataSource: "YAHOO",
+            isExisting: false,
+            index: "",
+            score: 1,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-usd", name: "US", currency: "USD" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "aapl",
+            accountId: "account-usd",
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+            quoteCcy: "USD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "aapl",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            displayCode: "AAPL",
+            instrumentSymbol: "AAPL",
+            instrumentExchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          }),
+        },
+      ]);
+      expect(calls).toEqual(["AAPL"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("previews import assets with existing ISIN-backed asset resolution", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {
@@ -509,16 +568,16 @@ describe("TS activities import domain", () => {
       },
       symbolSearch(query) {
         calls.push(query);
-        if (query === "CA82509L1077") {
+        if (query === "CA0000000002") {
           return [
             {
-              symbol: "SHOP.TO",
-              shortName: "Shopify by ISIN",
-              longName: "Shopify by ISIN",
+              symbol: "BOND1",
+              shortName: "Bond by ISIN",
+              longName: "Bond by ISIN",
               exchange: "TOR",
               exchangeMic: "XTSE",
               exchangeName: "TSX",
-              quoteType: "EQUITY",
+              quoteType: "BOND",
               typeDisplay: "",
               currency: "CAD",
               dataSource: "YAHOO",
@@ -540,10 +599,8 @@ describe("TS activities import domain", () => {
           {
             key: "shop",
             accountId: "account-cad",
-            symbol: "SHOP",
-            isin: "CA82509L1077",
-            instrumentType: "EQUITY",
-            quoteCcy: "CAD",
+            symbol: "BOND1",
+            isin: "CA0000000002",
           },
         ]),
       ).toEqual([
@@ -552,16 +609,16 @@ describe("TS activities import domain", () => {
           status: "AUTO_RESOLVED_NEW_ASSET",
           resolutionSource: "provider_resolution",
           draft: expect.objectContaining({
-            name: "Shopify by ISIN",
-            displayCode: "SHOP",
-            instrumentSymbol: "SHOP",
+            name: "Bond by ISIN",
+            displayCode: "BOND1",
+            instrumentSymbol: "BOND1",
             instrumentExchangeMic: "XTSE",
-            instrumentType: "EQUITY",
+            instrumentType: "BOND",
             quoteCcy: "CAD",
           }),
         },
       ]);
-      expect(calls).toEqual(["CA82509L1077"]);
+      expect(calls).toEqual(["CA0000000002"]);
     } finally {
       db.close();
     }

@@ -1917,43 +1917,52 @@ async function previewImportAsset(
     return importAssetPreviewItem(key, "NEEDS_FIXING", "ambiguous_existing_asset", { errors });
   }
 
-  if (!instrumentType) {
+  let resolvedExchangeMic = exchangeMic;
+  let resolvedInstrumentType = instrumentType;
+  let resolvedQuoteCcy = quoteCcy;
+  let resolvedName: string | undefined;
+  const shouldResolveWithProvider =
+    quoteMode !== "MANUAL" &&
+    (!resolvedInstrumentType ||
+      !resolvedQuoteCcy ||
+      (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic));
+  if (shouldResolveWithProvider) {
+    const resolution = await resolveImportAssetSymbol(
+      symbol,
+      resolvedQuoteCcy ?? accountCurrency,
+      options,
+      searchCache,
+      isin,
+    );
+    resolvedExchangeMic = resolvedExchangeMic ?? resolution?.exchangeMic;
+    resolvedInstrumentType = resolvedInstrumentType ?? resolution?.instrumentType;
+    resolvedQuoteCcy = resolvedQuoteCcy ?? resolution?.quoteCcy;
+    resolvedName = resolution?.name;
+  }
+
+  if (!resolvedInstrumentType) {
     addFieldMessage(
       errors,
       "instrumentType",
       "Instrument type is required to preview a new asset.",
     );
   }
-  if (!quoteCcy) {
+  if (!resolvedQuoteCcy) {
     addFieldMessage(errors, "quoteCcy", "Quote currency is required to preview a new asset.");
   }
-  if (Object.keys(errors).length > 0 || !instrumentType || !quoteCcy) {
+  if (Object.keys(errors).length > 0 || !resolvedInstrumentType || !resolvedQuoteCcy) {
     return importAssetPreviewItem(key, "NEEDS_FIXING", "validation_error", { errors });
-  }
-
-  let resolvedExchangeMic = exchangeMic;
-  let resolvedName: string | undefined;
-  if (instrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
-    const resolution = await resolveImportAssetSymbol(
-      symbol,
-      quoteCcy ?? accountCurrency,
-      options,
-      searchCache,
-      isin,
-    );
-    resolvedExchangeMic = resolution?.exchangeMic ?? resolvedExchangeMic;
-    resolvedName = resolution?.name;
   }
 
   const draft = newAssetDraftFromImport({
     symbol,
-    quoteCcy,
-    instrumentType,
+    quoteCcy: resolvedQuoteCcy,
+    instrumentType: resolvedInstrumentType,
     exchangeMic: resolvedExchangeMic,
     quoteMode: quoteMode ?? "MARKET",
     name: resolvedName,
   });
-  if (instrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
+  if (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
     addFieldMessage(
       errors,
       "symbol",
