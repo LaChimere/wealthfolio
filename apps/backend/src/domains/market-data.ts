@@ -156,6 +156,9 @@ export interface MarketDataService {
   syncMarketData?(
     marketSyncMode: MarketSyncMode,
   ): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
+  updatePositionStatusFromHoldings?(
+    currentHoldings: ReadonlyMap<string, Decimal.Value>,
+  ): Promise<void> | void;
 }
 
 export interface MarketDataServiceOptions {
@@ -236,10 +239,22 @@ interface AssetQuoteStateRow {
 
 interface QuoteSyncStateRow {
   asset_id: string;
+  position_closed_date: string | null;
   last_synced_at: string | null;
   data_source: string | null;
+  sync_priority: number;
   error_count: number;
   last_error: string | null;
+  profile_enriched_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PositionStatusAssetRow {
+  id: string;
+  kind: string;
+  quote_mode: string;
+  is_active: number;
 }
 
 interface AssetMarketSyncRow {
@@ -365,6 +380,7 @@ const MAX_SYNC_ERRORS = 10;
 const MARKET_CLOSE_GRACE_MINUTES = 60;
 const QUOTE_HISTORY_BUFFER_DAYS = 45;
 const MIN_SYNC_LOOKBACK_DAYS = 5;
+const QUANTITY_SIGNIFICANCE_THRESHOLD = new Decimal("0.00000001");
 const DEFAULT_MARKET_DATA_PROVIDER = "YAHOO";
 const ALPHA_VANTAGE_PROVIDER = "ALPHA_VANTAGE";
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
@@ -564,6 +580,10 @@ export function createMarketDataService(
         options.secretService,
         usTreasuryCurveCache,
       );
+    },
+
+    updatePositionStatusFromHoldings(currentHoldings) {
+      updatePositionStatusFromHoldings(db, quoteSyncStateExists, currentHoldings, now);
     },
   };
 }
@@ -3227,13 +3247,200 @@ function readQuoteSyncStates(db: Database, assetIds: string[]): Map<string, Quot
   const rows = db
     .query<QuoteSyncStateRow, string[]>(
       `
-        SELECT asset_id, last_synced_at, data_source, error_count, last_error
+        SELECT
+          asset_id, position_closed_date, last_synced_at, data_source,
+          sync_priority, error_count, last_error, profile_enriched_at,
+          created_at, updated_at
         FROM quote_sync_state
         WHERE asset_id IN (${placeholders})
       `,
     )
     .all(...assetIds);
   return new Map(rows.map((row) => [row.asset_id, row]));
+}
+
+function updatePositionStatusFromHoldings(
+  db: Database,
+  quoteSyncStateExists: boolean,
+  currentHoldings: ReadonlyMap<string, Decimal.Value>,
+  now: () => Date,
+): void {
+  if (!quoteSyncStateExists) {
+    return;
+  }
+
+  db.transaction(() => {
+    const holdings = normalizedPositionQuantities(currentHoldings);
+    const openAssetIds = Array.from(holdings)
+      .filter(([, quantity]) => hasOpenPositionQuantity(quantity))
+      .map(([assetId]) => assetId);
+
+    if (openAssetIds.length > 0) {
+      const openAssets = readPositionStatusAssets(db, openAssetIds);
+      const openSyncStates = readQuoteSyncStates(db, openAssetIds);
+      const assetsToReactivate: string[] = [];
+      const statesToMarkActive: string[] = [];
+      const statesToCreate: string[] = [];
+
+      for (const asset of openAssets.values()) {
+        if (asset.kind === "FX") {
+          continue;
+        }
+        if (asset.is_active === 0) {
+          assetsToReactivate.push(asset.id);
+        }
+        if (asset.quote_mode !== "MARKET") {
+          continue;
+        }
+
+        const state = openSyncStates.get(asset.id);
+        if (!state) {
+          statesToCreate.push(asset.id);
+        } else if (state.position_closed_date !== null) {
+          statesToMarkActive.push(asset.id);
+        }
+      }
+
+      reactivateAssets(db, assetsToReactivate);
+      markQuoteSyncStatesActive(db, statesToMarkActive, now);
+      createOpenQuoteSyncStates(db, statesToCreate, now);
+    }
+
+    const allStates = readAllQuoteSyncStates(db);
+    const assets = readPositionStatusAssets(
+      db,
+      allStates.map((state) => state.asset_id),
+    );
+    const statesToMarkActive: string[] = [];
+    const statesToMarkInactive: string[] = [];
+
+    for (const state of allStates) {
+      const asset = assets.get(state.asset_id);
+      if (!asset || asset.kind === "FX") {
+        continue;
+      }
+
+      const hasOpenPosition = hasOpenPositionQuantity(
+        holdings.get(state.asset_id) ?? new Decimal(0),
+      );
+      const stateIsActive = state.position_closed_date === null;
+      if (hasOpenPosition && !stateIsActive) {
+        statesToMarkActive.push(state.asset_id);
+      } else if (!hasOpenPosition && stateIsActive) {
+        statesToMarkInactive.push(state.asset_id);
+      }
+    }
+
+    markQuoteSyncStatesActive(db, statesToMarkActive, now);
+    markQuoteSyncStatesInactive(db, statesToMarkInactive, now);
+  })();
+}
+
+function normalizedPositionQuantities(
+  currentHoldings: ReadonlyMap<string, Decimal.Value>,
+): Map<string, Decimal> {
+  const quantities = new Map<string, Decimal>();
+  for (const [assetId, quantity] of currentHoldings) {
+    quantities.set(assetId, new Decimal(quantity));
+  }
+  return quantities;
+}
+
+function hasOpenPositionQuantity(quantity: Decimal): boolean {
+  return !quantity.isZero() && quantity.abs().gte(QUANTITY_SIGNIFICANCE_THRESHOLD);
+}
+
+function readPositionStatusAssets(
+  db: Database,
+  assetIds: string[],
+): Map<string, PositionStatusAssetRow> {
+  if (assetIds.length === 0) {
+    return new Map();
+  }
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rows = db
+    .query<PositionStatusAssetRow, string[]>(
+      `
+        SELECT id, kind, quote_mode, is_active
+        FROM assets
+        WHERE id IN (${placeholders})
+      `,
+    )
+    .all(...assetIds);
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function readAllQuoteSyncStates(db: Database): QuoteSyncStateRow[] {
+  return db
+    .query<QuoteSyncStateRow, []>(
+      `
+        SELECT
+          asset_id, position_closed_date, last_synced_at, data_source,
+          sync_priority, error_count, last_error, profile_enriched_at,
+          created_at, updated_at
+        FROM quote_sync_state
+        ORDER BY sync_priority DESC
+      `,
+    )
+    .all();
+}
+
+function reactivateAssets(db: Database, assetIds: string[]): void {
+  if (assetIds.length === 0) {
+    return;
+  }
+  const placeholders = assetIds.map(() => "?").join(", ");
+  db.query(`UPDATE assets SET is_active = 1 WHERE id IN (${placeholders})`).run(...assetIds);
+}
+
+function markQuoteSyncStatesActive(db: Database, assetIds: string[], now: () => Date): void {
+  if (assetIds.length === 0) {
+    return;
+  }
+  const timestamp = now().toISOString();
+  const placeholders = assetIds.map(() => "?").join(", ");
+  db.query(
+    `
+      UPDATE quote_sync_state
+      SET position_closed_date = NULL, sync_priority = 100, updated_at = ?
+      WHERE asset_id IN (${placeholders})
+    `,
+  ).run(timestamp, ...assetIds);
+}
+
+function markQuoteSyncStatesInactive(db: Database, assetIds: string[], now: () => Date): void {
+  if (assetIds.length === 0) {
+    return;
+  }
+  const currentDate = now().toISOString().slice(0, 10);
+  const timestamp = now().toISOString();
+  const placeholders = assetIds.map(() => "?").join(", ");
+  db.query(
+    `
+      UPDATE quote_sync_state
+      SET position_closed_date = ?, sync_priority = 50, updated_at = ?
+      WHERE asset_id IN (${placeholders})
+    `,
+  ).run(currentDate, timestamp, ...assetIds);
+}
+
+function createOpenQuoteSyncStates(db: Database, assetIds: string[], now: () => Date): void {
+  if (assetIds.length === 0) {
+    return;
+  }
+  const timestamp = now().toISOString();
+  const statement = db.query(
+    `
+      INSERT INTO quote_sync_state (
+        asset_id, position_closed_date, last_synced_at, data_source, sync_priority,
+        error_count, last_error, profile_enriched_at, created_at, updated_at
+      )
+      VALUES (?, NULL, NULL, '', 100, 0, NULL, NULL, ?, ?)
+    `,
+  );
+  for (const assetId of assetIds) {
+    statement.run(assetId, timestamp, timestamp);
+  }
 }
 
 function readAssetsForMarketSync(

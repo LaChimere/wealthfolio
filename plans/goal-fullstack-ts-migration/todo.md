@@ -212,10 +212,11 @@
     update/delete/import callbacks, holdings snapshot asset callbacks, and local
     AI chat thread/message/tag callbacks, contribution-limit callbacks, account
     callbacks, import template/account-template callbacks, holdings snapshot
-    callbacks, activity snapshot cash contribution/cash-total/cost-basis FX
-    parity, domain-event planning/batch processing/worker helper, standalone
-    runtime domain-event worker wiring to local portfolio jobs, and
-    post-portfolio active goal-summary refresh now have TS runtime parity, while
+    callbacks, quote-sync position lifecycle reconciliation around portfolio
+    jobs, activity snapshot cash contribution/cash-total/cost-basis FX parity,
+    domain-event planning/batch processing/worker helper, standalone runtime
+    domain-event worker wiring to local portfolio jobs, and post-portfolio
+    active goal-summary refresh now have TS runtime parity, while
     provider-backed asset resolution outside the activity preview/check
     round-trip, remaining quote sync outbox follow-ups outside migrated
     alternative-asset and market-data quote paths, device-sync push/pull runtime
@@ -2124,8 +2125,9 @@ contract:
   alternative-asset mutation portfolio job side effects, and settings
   base-currency/timezone portfolio job plus health-cache-clear side effects, and
   portfolio-job market-sync health-cache/FX-reinitialize side effects,
-  best-effort health-cache clear failure handling, and domain-event
-  portfolio-failure continuation semantics, activity snapshot cash
+  best-effort health-cache clear failure handling, quote-sync position lifecycle
+  reconciliation around portfolio jobs, and domain-event portfolio-failure
+  continuation semantics, activity snapshot cash
   contribution/cash-total/cost-basis FX parity, and SQLite-backed local Connect
   synced-account/platform/sync-state/import-run reads implemented; broader
   migration remains active.
@@ -2448,6 +2450,15 @@ contract:
   taxonomy assignment for newly created direct assets, duplicate-existing asset
   returns without reclassification, nonfatal classification assignment failures,
   and runtime sync_outbox persistence for auto-created taxonomy assignments.
+- `pr5-quote-sync-position-lifecycle`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "position status|quote sync position"`,
+  `bun run --cwd apps/backend type-check -- --pretty false`,
+  `bun run --cwd apps/backend test`, and `bun run check`. Coverage includes
+  Rust-compatible quote-sync position status reconciliation from latest TOTAL
+  snapshots before market sync and after recalculation, nonzero significant
+  long/short quantity handling with dust-threshold filtering, FX-asset skipping,
+  inactive asset reactivation, MARKET sync state creation/reopen/close priority
+  updates, and best-effort warning behavior when reconciliation fails.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

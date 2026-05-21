@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 248
+turns_used: 249
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-21T22:42:42+08:00"
+updated_at: "2026-05-21T23:33:31+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1579,6 +1579,14 @@ updated_at: "2026-05-21T22:42:42+08:00"
   duplicate-existing asset returns, and keep asset creation successful when
   classification assignment fails. Focused asset/runtime tests, backend
   type-check, and full `bun run check` passed.
+- Turn 249: Added quote-sync position lifecycle reconciliation parity: TS
+  portfolio jobs now reconcile quote sync state from the latest TOTAL holdings
+  snapshot before market sync and after recalculation, reactivating open non-FX
+  assets, creating/reopening MARKET sync states, applying Rust's quantity
+  significance threshold, and closing active sync states when positions
+  disappear while warning without aborting on reconciliation failures. Focused
+  market-data/portfolio-job tests, backend test suite, backend type-check, and
+  full `bun run check` passed.
 
 ## Deferred items
 
@@ -1647,9 +1655,11 @@ updated_at: "2026-05-21T22:42:42+08:00"
   latest sources without purging historical quote rows, can resolve/fetch Börse
   Frankfurt `MIC:ISIN` history and latest price-information responses with bond
   percentage scaling, can fetch MarketData.app candle/latest endpoints with
-  provider secrets and exchange-MIC currency precedence, and can merge search
-  results against existing SQLite assets; remaining provider breadth and
-  portfolio recalculation side effects remain active follow-ups.
+  provider secrets and exchange-MIC currency precedence, can merge search
+  results against existing SQLite assets, and now reconciles quote-sync position
+  lifecycle from latest TOTAL holdings snapshots around portfolio jobs;
+  remaining provider breadth and broader portfolio recalculation side effects
+  remain active follow-ups.
 - Actual portfolio job execution and broad domain-event worker behavior remain
   active follow-ups. reason=holdings snapshot mutation events now have bounded
   TS runtime parity and the Rust domain-event planner, injectable batch

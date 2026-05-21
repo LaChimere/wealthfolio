@@ -2531,6 +2531,100 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("updates quote sync position status from current holdings", () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      now: () => new Date("2026-05-17T12:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, { id: "new-open" });
+      insertAsset(db, { id: "reactivated-open", is_active: 0 });
+      insertAsset(db, { id: "reopened" });
+      insertSyncState(db, {
+        asset_id: "reopened",
+        position_closed_date: "2026-05-01",
+        sync_priority: 50,
+      });
+      insertAsset(db, { id: "closed" });
+      insertSyncState(db, { asset_id: "closed", position_closed_date: null, sync_priority: 100 });
+      insertAsset(db, { id: "zero-closed" });
+      insertSyncState(db, {
+        asset_id: "zero-closed",
+        position_closed_date: null,
+        sync_priority: 100,
+      });
+      insertAsset(db, { id: "dust-new" });
+      insertAsset(db, { id: "dust-closed" });
+      insertSyncState(db, {
+        asset_id: "dust-closed",
+        position_closed_date: null,
+        sync_priority: 100,
+      });
+      insertAsset(db, { id: "manual-open", quote_mode: "MANUAL" });
+      insertAsset(db, { id: "fx-open", kind: "FX", is_active: 0 });
+      insertSyncState(db, {
+        asset_id: "fx-open",
+        position_closed_date: "2026-05-01",
+        sync_priority: 50,
+      });
+      insertSyncState(db, { asset_id: "missing-asset", position_closed_date: null });
+
+      service.updatePositionStatusFromHoldings?.(
+        new Map([
+          ["new-open", "2"],
+          ["reactivated-open", "1"],
+          ["reopened", "-1"],
+          ["zero-closed", "0"],
+          ["dust-new", "0.000000001"],
+          ["dust-closed", "-0.000000001"],
+          ["manual-open", "3"],
+          ["fx-open", "4"],
+        ]),
+      );
+
+      expect(readSyncState(db, "new-open")).toMatchObject({
+        position_closed_date: null,
+        data_source: "",
+        sync_priority: 100,
+        error_count: 0,
+      });
+      expect(readAssetActive(db, "reactivated-open")).toBe(1);
+      expect(readSyncState(db, "reactivated-open")).toMatchObject({
+        position_closed_date: null,
+        sync_priority: 100,
+      });
+      expect(readSyncState(db, "reopened")).toMatchObject({
+        position_closed_date: null,
+        sync_priority: 100,
+      });
+      expect(readSyncState(db, "closed")).toMatchObject({
+        position_closed_date: "2026-05-17",
+        sync_priority: 50,
+      });
+      expect(readSyncState(db, "zero-closed")).toMatchObject({
+        position_closed_date: "2026-05-17",
+        sync_priority: 50,
+      });
+      expect(readSyncState(db, "dust-new")).toBeNull();
+      expect(readSyncState(db, "dust-closed")).toMatchObject({
+        position_closed_date: "2026-05-17",
+        sync_priority: 50,
+      });
+      expect(readSyncState(db, "manual-open")).toBeNull();
+      expect(readAssetActive(db, "fx-open")).toBe(0);
+      expect(readSyncState(db, "fx-open")).toMatchObject({
+        position_closed_date: "2026-05-01",
+        sync_priority: 50,
+      });
+      expect(readSyncState(db, "missing-asset")).toMatchObject({
+        position_closed_date: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks quote CSV imports with Rust-compatible validation and asset matching", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, { exchangeCatalogJson: testExchangeCatalogJson() });
@@ -4448,8 +4542,10 @@ function insertSyncState(
   db: Database,
   state: {
     asset_id: string;
+    position_closed_date?: string | null;
     data_source?: string;
     last_synced_at?: string | null;
+    sync_priority?: number;
     error_count?: number;
     last_error?: string | null;
   },
@@ -4457,14 +4553,17 @@ function insertSyncState(
   db.query(
     `
       INSERT INTO quote_sync_state (
-        asset_id, last_synced_at, data_source, error_count, last_error
+        asset_id, position_closed_date, last_synced_at, data_source, sync_priority, error_count,
+        last_error
       )
-      VALUES (?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     state.asset_id,
+    state.position_closed_date ?? null,
     state.last_synced_at ?? null,
     state.data_source ?? "YAHOO",
+    state.sync_priority ?? 1,
     state.error_count ?? 0,
     state.last_error ?? null,
   );
@@ -4536,6 +4635,14 @@ function readSyncState(db: Database, assetId: string): Record<string, unknown> |
   return db
     .query<Record<string, unknown>, [string]>("SELECT * FROM quote_sync_state WHERE asset_id = ?")
     .get(assetId);
+}
+
+function readAssetActive(db: Database, assetId: string): number | null {
+  return (
+    db
+      .query<{ is_active: number }, [string]>("SELECT is_active FROM assets WHERE id = ?")
+      .get(assetId)?.is_active ?? null
+  );
 }
 
 function emptySyncResult() {

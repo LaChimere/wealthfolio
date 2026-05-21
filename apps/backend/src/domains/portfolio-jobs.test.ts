@@ -180,6 +180,147 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("reconciles quote sync position status before market sync and after recalculation", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false);
+      seedSnapshot(db, {
+        accountId: "TOTAL",
+        date: "2026-05-15",
+        positions: {
+          "old-asset": snapshotPosition("TOTAL", "old-asset", "5", "50", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "50",
+        netContribution: "50",
+      });
+      seedSnapshot(db, {
+        accountId: "account-1",
+        date: "2026-05-16",
+        positions: {
+          "new-asset": snapshotPosition("account-1", "new-asset", "2", "12", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "12",
+        netContribution: "12",
+      });
+      seedQuote(db, "new-asset", "2026-05-16", "10", "USD");
+      const calls: Array<{ kind: string; holdings?: Record<string, string> }> = [];
+      const service = createLocalPortfolioJobService(db, {
+        exchangeRateService: {
+          getExchangeRateForDate() {
+            return "1";
+          },
+          initialize() {},
+        },
+        marketDataService: {
+          updatePositionStatusFromHoldings(holdings) {
+            calls.push({ kind: "reconcile", holdings: decimalMapToRecord(holdings) });
+          },
+          syncMarketData() {
+            calls.push({ kind: "sync" });
+            return {
+              synced: 0,
+              failed: 0,
+              skipped: 0,
+              quotesSynced: 0,
+              failures: [],
+              skippedReasons: [],
+            };
+          },
+        },
+        now: () => new Date("2026-05-17T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: null,
+        marketSyncMode: { type: "incremental", asset_ids: null },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: null,
+      });
+
+      expect(calls).toEqual([
+        { kind: "reconcile", holdings: { "old-asset": "5" } },
+        { kind: "sync" },
+        { kind: "reconcile", holdings: { "new-asset": "2" } },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("continues portfolio jobs when quote sync position reconciliation fails", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false);
+      seedSnapshot(db, {
+        accountId: "TOTAL",
+        date: "2026-05-15",
+        positions: {
+          "old-asset": snapshotPosition("TOTAL", "old-asset", "5", "50", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "50",
+        netContribution: "50",
+      });
+      seedSnapshot(db, {
+        accountId: "account-1",
+        date: "2026-05-16",
+        positions: {
+          "new-asset": snapshotPosition("account-1", "new-asset", "2", "12", "USD"),
+        },
+        cashBalances: {},
+        costBasis: "12",
+        netContribution: "12",
+      });
+      seedQuote(db, "new-asset", "2026-05-16", "10", "USD");
+      const warnings: string[] = [];
+      const service = createLocalPortfolioJobService(db, {
+        exchangeRateService: {
+          getExchangeRateForDate() {
+            return "1";
+          },
+          initialize() {},
+        },
+        marketDataService: {
+          updatePositionStatusFromHoldings() {
+            throw new Error("sync state unavailable");
+          },
+          syncMarketData() {
+            return {
+              synced: 0,
+              failed: 0,
+              skipped: 0,
+              quotesSynced: 0,
+              failures: [],
+              skippedReasons: [],
+            };
+          },
+        },
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: null,
+        marketSyncMode: { type: "incremental", asset_ids: null },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: null,
+      });
+
+      expect(readValuation(db, "TOTAL", "2026-05-16")).toMatchObject({
+        investment_market_value: "20",
+      });
+      expect(warnings).toEqual([
+        "Failed to update position status from latest holdings: sync state unavailable. Quote sync planning may be affected.",
+        "Failed to update position status from holdings: sync state unavailable. Quote sync planning may be affected.",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("aborts portfolio update when market sync fails", async () => {
     const db = createPortfolioJobTestDb();
     try {
@@ -2428,6 +2569,14 @@ function readSnapshotPositions(
     )
     .get(accountId, date);
   return row ? (JSON.parse(row.positions) as Record<string, unknown>) : {};
+}
+
+function decimalMapToRecord(
+  holdings: ReadonlyMap<string, { toString(): string }>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Array.from(holdings, ([assetId, quantity]) => [assetId, quantity.toString()]),
+  );
 }
 
 function readSnapshot(

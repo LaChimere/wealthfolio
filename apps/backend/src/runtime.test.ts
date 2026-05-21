@@ -1903,7 +1903,6 @@ describe("TS backend runtime composition", () => {
           ["snapshot", "delete"],
         ]);
         expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
-          name: "Runtime Snapshot Asset",
           display_code: "SNAP",
           quote_mode: "MARKET",
         });

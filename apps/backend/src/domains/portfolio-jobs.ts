@@ -37,7 +37,10 @@ export interface LocalPortfolioJobServiceOptions {
   eventBus?: BackendEventBus;
   exchangeRateService?: Pick<ExchangeRateService, "getExchangeRateForDate" | "initialize">;
   healthService?: Pick<HealthService, "clearCache">;
-  marketDataService?: Pick<MarketDataService, "syncMarketData">;
+  marketDataService?: Pick<
+    MarketDataService,
+    "syncMarketData" | "updatePositionStatusFromHoldings"
+  >;
   baseCurrency?: string | (() => string | undefined);
   now?: () => Date;
   warn?: (message: string) => void;
@@ -270,6 +273,7 @@ async function executePortfolioJob(
   options: LocalPortfolioJobServiceOptions,
 ): Promise<void> {
   if (config.marketSyncMode.type !== "none" && options.marketDataService?.syncMarketData) {
+    await reconcileQuoteSyncFromLatestTotalSnapshot(db, options, "latest holdings");
     options.eventBus?.publish({ name: MARKET_SYNC_START });
     let syncResult: MarketDataSyncResult | void;
     try {
@@ -298,6 +302,7 @@ async function executePortfolioJob(
   options.eventBus?.publish({ name: PORTFOLIO_UPDATE_START });
   try {
     recalculatePortfolioFromExistingSnapshots(db, config, options);
+    await reconcileQuoteSyncFromLatestTotalSnapshot(db, options, "holdings");
     options.eventBus?.publish({ name: PORTFOLIO_UPDATE_COMPLETE });
   } catch (error) {
     options.eventBus?.publish({
@@ -371,6 +376,30 @@ function recalculatePortfolioFromExistingSnapshots(
     );
   });
   run();
+}
+
+async function reconcileQuoteSyncFromLatestTotalSnapshot(
+  db: Database,
+  options: LocalPortfolioJobServiceOptions,
+  sourceLabel: string,
+): Promise<void> {
+  if (!options.marketDataService?.updatePositionStatusFromHoldings) {
+    return;
+  }
+  const snapshot = readLatestTotalSnapshot(db);
+  if (!snapshot) {
+    return;
+  }
+  const holdings = new Map<string, Decimal>(
+    Array.from(snapshot.positions, ([assetId, position]) => [assetId, position.quantity]),
+  );
+  try {
+    await options.marketDataService.updatePositionStatusFromHoldings(holdings);
+  } catch (error) {
+    options.warn?.(
+      `Failed to update position status from ${sourceLabel}: ${errorMessage(error)}. Quote sync planning may be affected.`,
+    );
+  }
 }
 
 function calculateAndStoreAccountValuations(
@@ -480,6 +509,31 @@ function readSnapshots(
     )
     .all(...params)
     .map(parseSnapshot);
+}
+
+function readLatestTotalSnapshot(db: Database): ParsedSnapshot | null {
+  const row =
+    db
+      .query<SnapshotRow, [string]>(
+        `
+          SELECT
+            id,
+            account_id,
+            snapshot_date,
+            currency,
+            positions,
+            cash_balances,
+            cost_basis,
+            net_contribution,
+            net_contribution_base
+          FROM holdings_snapshots
+          WHERE account_id = ?
+          ORDER BY snapshot_date DESC, calculated_at DESC
+          LIMIT 1
+        `,
+      )
+      .get(PORTFOLIO_TOTAL_ACCOUNT_ID) ?? null;
+  return row ? parseSnapshot(row) : null;
 }
 
 function readIndividualSnapshotsForTotal(db: Database, accountIds: string[]): ParsedSnapshot[] {
