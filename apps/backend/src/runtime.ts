@@ -213,8 +213,6 @@ function createServicesFromDatabase(
     }
     restartRequired = true;
   };
-  const settingsService = createSettingsService(db);
-  const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const syncOutboxQueue = createSyncOutboxQueue(db);
   const appDataDir = runtimeOptions.appDataDir;
   const secretService = createRuntimeSecretService({
@@ -252,6 +250,12 @@ function createServicesFromDatabase(
     },
   );
   exchangeRateService.initialize();
+  const settingsService = createSettingsService(db, {
+    registerCurrencyPair: (currency, base) =>
+      exchangeRateService.registerCurrencyPair(currency, base),
+    warn: (message) => console.warn(message),
+  });
+  const baseCurrency = () => settingsService.getSettings().baseCurrency || undefined;
   const accountService = createRuntimeAccountService(
     db,
     eventBus,

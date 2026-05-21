@@ -25,8 +25,13 @@ export interface SettingsUpdate {
 
 export interface SettingsService {
   getSettings(): Settings;
-  updateSettings(update: SettingsUpdate): Settings;
+  updateSettings(update: SettingsUpdate): Promise<Settings>;
   isAutoUpdateCheckEnabled(): boolean;
+}
+
+export interface SettingsServiceOptions {
+  registerCurrencyPair?: (currency: string, baseCurrency: string) => Promise<void>;
+  warn?: (message: string) => void;
 }
 
 interface SettingRow {
@@ -59,12 +64,16 @@ export const DEFAULT_SETTINGS: Settings = {
   syncEnabled: true,
 };
 
-export function createSettingsService(db: Database): SettingsService {
+export function createSettingsService(
+  db: Database,
+  options: SettingsServiceOptions = {},
+): SettingsService {
   return {
     getSettings() {
       return readSettings(db);
     },
-    updateSettings(update) {
+    async updateSettings(update) {
+      await registerFxPairsForBaseCurrencyUpdate(db, update, options);
       writeSettingsUpdate(db, update);
       return readSettings(db);
     },
@@ -73,6 +82,49 @@ export function createSettingsService(db: Database): SettingsService {
       return value === undefined ? true : parseBoolean(value, true);
     },
   };
+}
+
+async function registerFxPairsForBaseCurrencyUpdate(
+  db: Database,
+  update: SettingsUpdate,
+  options: SettingsServiceOptions,
+): Promise<void> {
+  if (update.baseCurrency === undefined || !options.registerCurrencyPair) {
+    return;
+  }
+  const newBaseCurrency = update.baseCurrency;
+  if (getSetting(db, "base_currency") === newBaseCurrency) {
+    return;
+  }
+
+  for (const currency of readDistinctCurrenciesExcludingBase(db, newBaseCurrency)) {
+    try {
+      await options.registerCurrencyPair(currency, newBaseCurrency);
+    } catch (error) {
+      options.warn?.(
+        `Failed to register currency pair ${newBaseCurrency}${currency}: ${errorMessage(error)}. Skipping.`,
+      );
+    }
+  }
+}
+
+function readDistinctCurrenciesExcludingBase(db: Database, baseCurrency: string): string[] {
+  return db
+    .query<{ currency: string }, [string, string]>(
+      `
+        SELECT quote_ccy AS currency
+        FROM assets
+        WHERE kind = 'FX'
+          AND quote_ccy != ?
+        UNION
+        SELECT currency
+        FROM accounts
+        WHERE currency != ?
+        ORDER BY currency ASC
+      `,
+    )
+    .all(baseCurrency, baseCurrency)
+    .map((row) => row.currency);
 }
 
 export function readSettings(db: Database): Settings {
@@ -195,4 +247,8 @@ function parseBoolean(value: string, defaultValue: boolean): boolean {
     return false;
   }
   return defaultValue;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -3111,7 +3111,7 @@ async function routeSettingsRequest(
     }
     try {
       const previous = settingsService.getSettings();
-      const updated = settingsService.updateSettings(update);
+      const updated = await settingsService.updateSettings(update);
       clearHealthCacheBestEffort(healthService, "Settings update");
       enqueueSettingsPortfolioRecalculation(portfolioJobService, previous, updated);
       return jsonResponse(updated);

@@ -2041,6 +2041,13 @@ contract:
   Coverage includes Rust-compatible FX asset registration when the standalone TS
   runtime creates an account whose currency differs from the configured base
   currency.
+- `pr5-settings-base-currency-fx-registration`: targeted checks passed:
+  `bun test apps/backend/src/domains/settings.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "non-base account|low-risk services"`,
+  and `bun run --cwd apps/backend type-check`, plus full `bun run check`.
+  Coverage includes Rust-compatible registration of existing account and
+  FX-asset currencies when the standalone TS runtime changes base currency,
+  including warn-and-continue behavior for per-pair registration failures.
 
 ## Result
 
