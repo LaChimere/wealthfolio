@@ -54,6 +54,34 @@ describe("TS domain event worker", () => {
     }
   });
 
+  test("passes the source event bus to processor options", async () => {
+    const eventBus = createEventBus();
+    const published: BackendEvent[] = [];
+    const unsubscribe = eventBus.subscribe((backendEvent) => {
+      published.push(backendEvent);
+    });
+    const worker = createDomainEventWorker(eventBus, {
+      debounceMs: 10_000,
+      enrichAssets() {
+        return { enriched: 1, skipped: 0, failed: 0 };
+      },
+    });
+
+    try {
+      eventBus.publish(event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] }));
+      await worker.flush();
+      expect(published).toEqual([
+        event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] }),
+        { name: "asset:enrichment-start", payload: { total: 1 } },
+        { name: "asset:enrichment-progress", payload: { completed: 1, total: 1 } },
+        { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 0, failed: 0 } },
+      ]);
+    } finally {
+      unsubscribe();
+      worker.dispose();
+    }
+  });
+
   test("surfaces scheduled failures through the error callback", async () => {
     const eventBus = createEventBus();
     const reported = Promise.withResolvers<{ error: unknown; events: BackendEvent[] }>();

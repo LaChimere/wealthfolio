@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { BackendEvent } from "../events";
+import { createEventBus, type BackendEvent } from "../events";
 import type { PortfolioJobConfig } from "../domains/portfolio-jobs";
 import {
   ACTIVITIES_CHANGED_EVENT,
@@ -77,6 +77,32 @@ describe("TS domain event batch processor", () => {
       portfolioJob: null,
       brokerSyncAccountIds: [],
     });
+  });
+
+  test("publishes Rust-shaped asset enrichment lifecycle events", async () => {
+    const eventBus = createEventBus();
+    const published: BackendEvent[] = [];
+    eventBus.subscribe((backendEvent) => {
+      published.push(backendEvent);
+    });
+
+    const plan = await processDomainEventBatch(
+      [event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1", "asset-2"] })],
+      {
+        enrichAssets(assetIds) {
+          expect(assetIds).toEqual(["asset-1", "asset-2"]);
+          return { enriched: 1, skipped: 1, failed: 0 };
+        },
+        eventBus,
+      },
+    );
+
+    expect(plan.assetEnrichmentIds).toEqual(["asset-1", "asset-2"]);
+    expect(published).toEqual([
+      { name: "asset:enrichment-start", payload: { total: 2 } },
+      { name: "asset:enrichment-progress", payload: { completed: 2, total: 2 } },
+      { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 1, failed: 0 } },
+    ]);
   });
 
   test("does not refresh goal summaries when portfolio jobs are only planned", async () => {

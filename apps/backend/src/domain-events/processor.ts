@@ -1,9 +1,19 @@
 import type { BackendEvent } from "../events";
+import type { BackendEventBus } from "../events";
 import type { PortfolioJobConfig, PortfolioJobService } from "../domains/portfolio-jobs";
 import { planAssetEnrichment, planBrokerSync, planPortfolioJob } from "./planner";
 
+export interface AssetEnrichmentResult {
+  enriched: number;
+  skipped: number;
+  failed: number;
+}
+
 export interface DomainEventProcessorOptions {
-  enrichAssets?: (assetIds: string[]) => Promise<void> | void;
+  enrichAssets?: (
+    assetIds: string[],
+  ) => Promise<AssetEnrichmentResult | void> | AssetEnrichmentResult | void;
+  eventBus?: BackendEventBus;
   onGoalSummaryRefreshError?: (error: unknown) => void;
   onPortfolioJobError?: (error: unknown, portfolioJob: PortfolioJobConfig) => void;
   portfolioJobService?: PortfolioJobService;
@@ -18,13 +28,17 @@ export interface DomainEventProcessingPlan {
   brokerSyncAccountIds: string[];
 }
 
+const ASSET_ENRICHMENT_START = "asset:enrichment-start";
+const ASSET_ENRICHMENT_PROGRESS = "asset:enrichment-progress";
+const ASSET_ENRICHMENT_COMPLETE = "asset:enrichment-complete";
+
 export async function processDomainEventBatch(
   events: BackendEvent[],
   options: DomainEventProcessorOptions = {},
 ): Promise<DomainEventProcessingPlan> {
   const assetEnrichmentIds = planAssetEnrichment(events);
   if (assetEnrichmentIds.length > 0) {
-    await options.enrichAssets?.(assetEnrichmentIds);
+    await runAssetEnrichment(assetEnrichmentIds, options);
   }
 
   const portfolioJob = planPortfolioJob(events, resolveTimezone(options));
@@ -53,6 +67,40 @@ export async function processDomainEventBatch(
     portfolioJob,
     brokerSyncAccountIds,
   };
+}
+
+async function runAssetEnrichment(
+  assetIds: string[],
+  options: DomainEventProcessorOptions,
+): Promise<void> {
+  if (!options.enrichAssets) {
+    return;
+  }
+  const total = assetIds.length;
+  options.eventBus?.publish({
+    name: ASSET_ENRICHMENT_START,
+    payload: { total },
+  });
+  const result = await options.enrichAssets(assetIds);
+  const counts = normalizeAssetEnrichmentResult(result, total);
+  options.eventBus?.publish({
+    name: ASSET_ENRICHMENT_PROGRESS,
+    payload: { completed: counts.enriched + counts.skipped + counts.failed, total },
+  });
+  options.eventBus?.publish({
+    name: ASSET_ENRICHMENT_COMPLETE,
+    payload: counts,
+  });
+}
+
+function normalizeAssetEnrichmentResult(
+  result: AssetEnrichmentResult | void,
+  total: number,
+): AssetEnrichmentResult {
+  if (!result) {
+    return { enriched: total, skipped: 0, failed: 0 };
+  }
+  return result;
 }
 
 function resolveTimezone(options: DomainEventProcessorOptions): string {

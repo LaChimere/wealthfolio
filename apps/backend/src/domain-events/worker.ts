@@ -76,7 +76,10 @@ export function createDomainEventWorker(
     }
 
     processing = (async () => {
-      const plan = await processBatch(batch, processorOptions);
+      const plan = await processBatch(batch, {
+        ...processorOptions,
+        eventBus: processorOptions.eventBus ?? eventBus,
+      });
       onProcessed?.(plan, batch);
     })().finally(() => {
       processing = null;

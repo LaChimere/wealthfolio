@@ -1974,6 +1974,13 @@ contract:
   after a `holdings_changed` portfolio recalculation, no refresh when portfolio
   jobs are only planned, and best-effort logging for valuation-load,
   active-goal-load, and per-goal refresh failures.
+- `pr5-domain-event-asset-enrichment-events`: targeted checks passed:
+  `bun test apps/backend/src/domain-events/processor.test.ts apps/backend/src/domain-events/worker.test.ts`
+  and `bun run --cwd apps/backend type-check -- --pretty false`. Coverage
+  includes Rust-shaped `asset:enrichment-start`, `asset:enrichment-progress`,
+  and `asset:enrichment-complete` publishing around asset enrichment callbacks
+  plus runtime worker propagation of the shared event bus into processor
+  options.
 - `pr5-domain-event-portfolio-failure-continuation`: targeted checks passed:
   `bun test apps/backend/src/domain-events/processor.test.ts --test-name-pattern "Rust queue-worker order|continues goal refresh and broker sync when a portfolio job fails|logs portfolio job failures when no explicit error hook is provided|continues broker sync when goal summary refresh fails"`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.
