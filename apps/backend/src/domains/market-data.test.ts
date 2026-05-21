@@ -3325,6 +3325,215 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("search falls back to Finnhub after Yahoo returns non-MIC results", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP") {
+        return Promise.resolve(
+          Response.json({
+            quotes: [
+              {
+                symbol: "SHOP",
+                exchange: "UNKNOWN",
+                quoteType: "EQUITY",
+                shortname: "Shopify no MIC",
+              },
+            ],
+          }),
+        );
+      }
+      if (url === "https://finnhub.io/api/v1/search?q=SHOP") {
+        expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+        return Promise.resolve(
+          Response.json({
+            result: [
+              {
+                description: "Shopify Inc.",
+                displaySymbol: "SHOP.TO",
+                symbol: "SHOP.TO",
+                type: "Common Stock",
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      secretService: testSecretService("FINNHUB", "finnhub-key"),
+    });
+
+    try {
+      expect(await service.searchSymbol?.("SHOP")).toEqual([
+        expect.objectContaining({
+          symbol: "SHOP.TO",
+          shortName: "Shopify Inc.",
+          exchangeMic: "XTSE",
+          exchangeName: "TSX",
+          quoteType: "Stock",
+          currency: "CAD",
+          currencySource: "exchange_inferred",
+          dataSource: "YAHOO",
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+        "https://finnhub.io/api/v1/search?q=SHOP",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search keeps first non-empty provider result after a non-MIC Yahoo fallback", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP") {
+        return Promise.resolve(
+          Response.json({
+            quotes: [
+              {
+                symbol: "SHOP",
+                exchange: "UNKNOWN",
+                quoteType: "EQUITY",
+                shortname: "Shopify no MIC",
+              },
+            ],
+          }),
+        );
+      }
+      if (url === "https://finnhub.io/api/v1/search?q=SHOP") {
+        expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+        return Promise.resolve(
+          Response.json({
+            result: [
+              {
+                description: "Shopify Inc.",
+                displaySymbol: "SHOP",
+                symbol: "SHOP",
+                type: "Common Stock",
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      secretService: {
+        setSecret() {},
+        getSecret(key: string) {
+          return key === "FINNHUB" ? "finnhub-key" : key === "ALPHA_VANTAGE" ? "alpha-key" : null;
+        },
+        deleteSecret() {},
+      },
+    });
+
+    try {
+      expect(await service.searchSymbol?.("SHOP")).toEqual([
+        expect.objectContaining({
+          symbol: "SHOP",
+          shortName: "Shopify Inc.",
+          exchangeMic: null,
+          quoteType: "Stock",
+          dataSource: "YAHOO",
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+        "https://finnhub.io/api/v1/search?q=SHOP",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search falls back to Alpha Vantage after empty Yahoo and Finnhub results", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT") {
+        return Promise.resolve(Response.json({ quotes: [] }));
+      }
+      if (url === "https://query1.finance.yahoo.com/v1/finance/search?q=MSFT") {
+        return Promise.resolve(Response.json({ quotes: [] }));
+      }
+      if (url === "https://finnhub.io/api/v1/search?q=MSFT") {
+        expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+        return Promise.resolve(Response.json({ result: [] }));
+      }
+      if (url.startsWith("https://www.alphavantage.co/query?")) {
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("function")).toBe("SYMBOL_SEARCH");
+        expect(parsed.searchParams.get("keywords")).toBe("MSFT");
+        expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+        return Promise.resolve(
+          Response.json({
+            bestMatches: [
+              {
+                "1. symbol": "MSFT",
+                "2. name": "Microsoft Corporation",
+                "3. type": "Equity",
+                "4. region": "NMS",
+                "8. currency": "USD",
+                "9. matchScore": "0.8000",
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      secretService: {
+        setSecret() {},
+        getSecret(key: string) {
+          return key === "FINNHUB" ? "finnhub-key" : key === "ALPHA_VANTAGE" ? "alpha-key" : null;
+        },
+        deleteSecret() {},
+      },
+    });
+
+    try {
+      expect(await service.searchSymbol?.("MSFT")).toEqual([
+        expect.objectContaining({
+          symbol: "MSFT",
+          shortName: "Microsoft Corporation",
+          exchange: "NMS",
+          exchangeMic: "XNAS",
+          exchangeName: "NASDAQ",
+          quoteType: "EQUITY",
+          currency: "USD",
+          currencySource: "provider",
+          dataSource: "ALPHA_VANTAGE",
+          score: 0.8,
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=MSFT",
+        "https://finnhub.io/api/v1/search?q=MSFT",
+        expect.stringContaining("https://www.alphavantage.co/query?"),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("searches OpenFIGI mapping for exact bond identifiers after empty Yahoo results", async () => {
     const db = createMarketDataDb();
     const calls: Array<{ url: string; body: unknown }> = [];

@@ -2235,6 +2235,16 @@ contract:
   display-name/exchange de-duplication, Rust-compatible uppercased-query result
   symbols, `OPENFIGI` data-source tagging, and existing-asset de-duplication
   through the normal market-data search merge path.
+- `pr5-market-data-provider-search-fallbacks`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and focused
+  code review. Coverage includes search fallback from empty/non-MIC Yahoo
+  results to Finnhub and Alpha Vantage through runtime provider secrets, Rust
+  registry first-non-empty fallback semantics, Finnhub `/search` token header,
+  security type mapping and Yahoo-suffix MIC inference, Alpha Vantage
+  `SYMBOL_SEARCH` request/API error handling, type/currency/score/region
+  mapping, and continued OpenFIGI fallback after provider API fallbacks are
+  empty.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

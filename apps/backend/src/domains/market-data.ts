@@ -425,7 +425,7 @@ export function createMarketDataService(
     },
 
     searchSymbol(query) {
-      return searchSymbols(db, query, exchangeCatalog, fetchImpl);
+      return searchSymbols(db, query, exchangeCatalog, fetchImpl, options.secretService);
     },
 
     resolveSymbolQuote(request) {
@@ -1382,6 +1382,7 @@ async function searchSymbols(
   query: string,
   exchangeCatalog: ExchangeCatalog,
   fetchImpl: typeof fetch,
+  secretService: SecretService | undefined,
 ): Promise<SymbolSearchResult[]> {
   const existingSummaries = readSearchAssets(db, query).map((asset) =>
     assetToSearchResult(asset, exchangeCatalog),
@@ -1394,13 +1395,26 @@ async function searchSymbols(
   } catch {
     providerResults = [];
   }
+
   if (providerResults.length === 0 || !providerResults.some((result) => result.exchangeMic)) {
-    const openFigiResults = await searchOpenFigiSymbols(query, exchangeCatalog, fetchImpl).catch(
-      () => [],
-    );
-    if (openFigiResults.length > 0) {
-      providerResults = openFigiResults;
+    let fallbackResults = providerResults.length > 0 ? providerResults : null;
+    for (const searchProvider of providerSearchFallbacks(
+      secretService,
+      exchangeCatalog,
+      fetchImpl,
+    )) {
+      const results = await searchProvider(query).catch(() => []);
+      if (results.length === 0) {
+        continue;
+      }
+      if (results.some((result) => result.exchangeMic) || fallbackResults !== null) {
+        providerResults = results;
+        fallbackResults = null;
+        break;
+      }
+      fallbackResults = results;
     }
+    providerResults = fallbackResults ?? providerResults;
   }
 
   const providerKeys = dedupe(
@@ -1439,6 +1453,26 @@ async function searchSymbols(
     return right.score - left.score;
   });
   return merged;
+}
+
+function providerSearchFallbacks(
+  secretService: SecretService | undefined,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Array<(query: string) => Promise<SymbolSearchResult[]>> {
+  const fallbacks: Array<(query: string) => Promise<SymbolSearchResult[]>> = [];
+  fallbacks.push(async (query) => {
+    const apiKey = await marketDataProviderApiKey(secretService, FINNHUB_PROVIDER);
+    return apiKey === null ? [] : searchFinnhubSymbols(query, exchangeCatalog, fetchImpl, apiKey);
+  });
+  fallbacks.push(async (query) => {
+    const apiKey = await marketDataProviderApiKey(secretService, ALPHA_VANTAGE_PROVIDER);
+    return apiKey === null
+      ? []
+      : searchAlphaVantageSymbols(query, exchangeCatalog, fetchImpl, apiKey);
+  });
+  fallbacks.push((query) => searchOpenFigiSymbols(query, exchangeCatalog, fetchImpl));
+  return fallbacks;
 }
 
 function readSearchAssets(db: Database, query: string): AssetSearchRow[] {
@@ -1607,6 +1641,152 @@ function yahooSearchQuoteToResult(
     index: "",
     score: typeof item.score === "number" && Number.isFinite(item.score) ? item.score : 0,
   };
+}
+
+async function searchFinnhubSymbols(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<SymbolSearchResult[]> {
+  const payload = await fetchFinnhubJson("/search", [["q", query]], fetchImpl, apiKey);
+  if (!isRecord(payload) || !Array.isArray(payload.result)) {
+    throw new Error(`${FINNHUB_PROVIDER}: Failed to parse search response`);
+  }
+  return payload.result
+    .filter(isRecord)
+    .map((item) => finnhubSearchItemToResult(item, exchangeCatalog))
+    .filter((result): result is SymbolSearchResult => result !== null);
+}
+
+function finnhubSearchItemToResult(
+  item: Record<string, unknown>,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult | null {
+  const symbol = optionalString(item.symbol);
+  const description = optionalString(item.description);
+  if (!symbol || !description) {
+    return null;
+  }
+  const exchangeMic = yahooSuffixToMic(symbol, exchangeCatalog);
+  const exchangeName = exchangeMic ? (exchangeCatalog.nameByMic.get(exchangeMic) ?? null) : null;
+  const currency = exchangeMic ? (exchangeCatalog.currencyByMic.get(exchangeMic) ?? null) : null;
+  return {
+    symbol,
+    shortName: description,
+    longName: description,
+    exchange: "",
+    exchangeMic,
+    exchangeName,
+    quoteType: finnhubSearchAssetType(optionalString(item.type) ?? ""),
+    typeDisplay: "",
+    currency,
+    currencySource: currency ? "exchange_inferred" : null,
+    dataSource: "YAHOO",
+    isExisting: false,
+    existingAssetId: null,
+    index: "",
+    score: 0,
+  };
+}
+
+function finnhubSearchAssetType(securityType: string): string {
+  switch (securityType.toLowerCase()) {
+    case "common stock":
+    case "stock":
+      return "Stock";
+    case "etf":
+    case "etp":
+      return "ETF";
+    case "mutual fund":
+    case "fund":
+      return "Mutual Fund";
+    case "adr":
+    case "american depositary receipt":
+      return "ADR";
+    case "reit":
+      return "REIT";
+    case "warrant":
+      return "Warrant";
+    case "preferred stock":
+    case "preferred":
+      return "Preferred Stock";
+    case "unit":
+      return "Unit";
+    case "closed-end fund":
+      return "Closed-End Fund";
+    default:
+      return securityType;
+  }
+}
+
+async function searchAlphaVantageSymbols(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<SymbolSearchResult[]> {
+  const payload = await fetchAlphaVantageJson(
+    [
+      ["function", "SYMBOL_SEARCH"],
+      ["keywords", query],
+    ],
+    fetchImpl,
+    apiKey,
+  );
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse search response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const matches = Array.isArray(payload.bestMatches) ? payload.bestMatches.filter(isRecord) : [];
+  return matches
+    .map((match) => alphaVantageSearchMatchToResult(match, exchangeCatalog))
+    .filter((result): result is SymbolSearchResult => result !== null);
+}
+
+function alphaVantageSearchMatchToResult(
+  match: Record<string, unknown>,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult | null {
+  const symbol = optionalString(match["1. symbol"]);
+  const name = optionalString(match["2. name"]);
+  if (!symbol || !name) {
+    return null;
+  }
+  const exchange = optionalString(match["4. region"]) ?? "";
+  const exchangeMic = yahooCodeToMic(exchange, exchangeCatalog);
+  const exchangeName = exchangeMic ? (exchangeCatalog.nameByMic.get(exchangeMic) ?? null) : null;
+  const currency = optionalString(match["8. currency"]);
+  return {
+    symbol,
+    shortName: name,
+    longName: name,
+    exchange,
+    exchangeMic,
+    exchangeName,
+    quoteType: alphaVantageSearchAssetType(optionalString(match["3. type"]) ?? ""),
+    typeDisplay: "",
+    currency,
+    currencySource: currency ? "provider" : null,
+    dataSource: ALPHA_VANTAGE_PROVIDER,
+    isExisting: false,
+    existingAssetId: null,
+    index: "",
+    score: decimalNumber(match["9. matchScore"]) ?? 0,
+  };
+}
+
+function alphaVantageSearchAssetType(assetType: string): string {
+  switch (assetType.toUpperCase()) {
+    case "EQUITY":
+      return "EQUITY";
+    case "ETF":
+      return "ETF";
+    case "MUTUAL FUND":
+      return "MUTUALFUND";
+    default:
+      return assetType.toUpperCase();
+  }
 }
 
 async function searchOpenFigiSymbols(
