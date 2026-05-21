@@ -315,6 +315,21 @@ function createServicesFromDatabase(
       },
     }),
   );
+  const assetService = createAssetService(db, {
+    eventBus,
+    exchangeMetadata,
+    fetch: runtimeOptions.marketDataFetch,
+    taxonomyService,
+    queueSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent({
+        entity: "assets",
+        entityId: event.assetId,
+        operation: event.operation,
+        payload: event.payload,
+      });
+    },
+    warn: (message) => console.warn(message),
+  });
 
   const activityService = createActivityService(db, {
     eventBus,
@@ -383,6 +398,7 @@ function createServicesFromDatabase(
     ...(runtimeOptions.domainEventDebounceMs === undefined
       ? {}
       : { debounceMs: runtimeOptions.domainEventDebounceMs }),
+    enrichAssets: (assetIds) => assetService.enrichAssets(assetIds),
     portfolioJobService,
     onPortfolioJobError(error, portfolioJob) {
       console.warn(
@@ -424,20 +440,7 @@ function createServicesFromDatabase(
         });
       },
     }),
-    assetService: createAssetService(db, {
-      eventBus,
-      exchangeMetadata,
-      taxonomyService,
-      queueSyncEvent: (event) => {
-        syncOutboxQueue.queueSyncEvent({
-          entity: "assets",
-          entityId: event.assetId,
-          operation: event.operation,
-          payload: event.payload,
-        });
-      },
-      warn: (message) => console.warn(message),
-    }),
+    assetService,
     aiProviderService,
     aiChatService: createAiChatService(db, {
       aiProviderService,

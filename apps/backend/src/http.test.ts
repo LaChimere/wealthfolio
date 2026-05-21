@@ -3471,6 +3471,10 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["quote-mode", { assetId, quoteMode }]);
         return { ...asset, id: assetId, quoteMode };
       },
+      enrichAssets(assetIds) {
+        calls.push(["enrich", assetIds]);
+        return { enriched: assetIds.length, skipped: 0, failed: 0 };
+      },
       deleteAsset(assetId) {
         calls.push(["delete", assetId]);
       },

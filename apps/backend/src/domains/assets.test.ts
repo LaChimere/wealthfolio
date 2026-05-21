@@ -572,6 +572,148 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches US Treasury bond metadata and marks profile enriched", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetchTreasuryBondDetails(isin) {
+        fetched.push(isin);
+        return {
+          couponRate: 0.045,
+          maturityDate: "2043-05-15",
+          faceValue: 1000,
+          couponFrequency: "Semi-Annual",
+        };
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-1",
+        kind: "INVESTMENT",
+        metadata: JSON.stringify({ identifiers: { isin: "US912810TH14" } }),
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH14",
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('bond-1', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["bond-1", "bond-1"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(fetched).toEqual(["US912810TH14"]);
+      expect(service.getAssetProfile("bond-1").metadata).toEqual({
+        identifiers: { isin: "US912810TH14" },
+        bond: {
+          isin: "US912810TH14",
+          couponRate: 0.045,
+          maturityDate: "2043-05-15",
+          faceValue: 1000,
+          couponFrequency: "SEMI_ANNUAL",
+        },
+      });
+      expect(readSyncState(db, "bond-1")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+        updated_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips already profile-enriched assets and unsupported market profiles", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      fetchTreasuryBondDetails(isin) {
+        fetched.push(isin);
+        throw new Error("should not fetch skipped bonds");
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-1",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH14",
+      });
+      insertAsset(db, {
+        id: "equity-1",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+      });
+      db.exec(`
+        INSERT INTO quote_sync_state (
+          asset_id, profile_enriched_at, updated_at
+        )
+        VALUES ('bond-1', '2026-05-21T00:00:00Z', '2026-05-21T00:00:00Z');
+      `);
+
+      const result = await service.enrichAssets(["bond-1", "equity-1"]);
+
+      expect(result).toEqual({ enriched: 0, skipped: 2, failed: 0 });
+      expect(fetched).toEqual([]);
+      expect(readSyncState(db, "bond-1")).toMatchObject({
+        profile_enriched_at: "2026-05-21T00:00:00Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps enrichment batches best-effort when an asset fails", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "manual-1",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('manual-1', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["missing-asset", "manual-1"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 1 });
+      expect(warnings).toEqual([
+        "Failed to enrich asset missing-asset: Record not found: asset missing-asset",
+      ]);
+      expect(readSyncState(db, "manual-1")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("parses exchange names from the Rust exchange metadata catalog", () => {
     const lookup = parseExchangeNameLookup(
       JSON.stringify({
@@ -642,6 +784,7 @@ function createAssetsDb(): Database {
       data_source TEXT NOT NULL DEFAULT 'YAHOO',
       error_count INTEGER NOT NULL DEFAULT 0,
       last_error TEXT,
+      profile_enriched_at TEXT,
       updated_at TEXT NOT NULL
     );
 

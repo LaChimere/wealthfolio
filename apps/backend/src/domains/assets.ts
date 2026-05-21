@@ -59,16 +59,35 @@ export interface AssetService {
   createAsset(asset: NewAsset): Promise<Asset> | Asset;
   updateAssetProfile(assetId: string, profile: UpdateAssetProfile): Promise<Asset> | Asset;
   updateQuoteMode(assetId: string, quoteMode: string): Promise<Asset> | Asset;
+  enrichAssets(assetIds: string[]): Promise<AssetEnrichmentResult> | AssetEnrichmentResult;
   deleteAsset(assetId: string): Promise<void> | void;
+}
+
+export interface AssetEnrichmentResult {
+  enriched: number;
+  skipped: number;
+  failed: number;
 }
 
 export interface AssetServiceOptions {
   eventBus?: BackendEventBus;
   exchangeMetadata?: ExchangeMetadata;
   exchangeNameByMic?: ReadonlyMap<string, string> | Record<string, string>;
+  fetch?: typeof fetch;
+  fetchTreasuryBondDetails?: (
+    isin: string,
+  ) => Promise<TreasuryBondDetails | null> | TreasuryBondDetails | null;
+  now?: () => string;
   queueSyncEvent?: (event: AssetSyncEvent) => void;
   taxonomyService?: Pick<TaxonomyService, "assignAssetToCategory">;
   warn?: (message: string) => void;
+}
+
+export interface TreasuryBondDetails {
+  couponRate: number;
+  maturityDate: string;
+  faceValue: number;
+  couponFrequency: string;
 }
 
 export type AssetSyncOperation = "Create" | "Update" | "Delete";
@@ -153,6 +172,8 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
   const exchangeMetadata =
     options.exchangeMetadata ?? exchangeNameMetadata(options.exchangeNameByMic);
   const quoteSyncStateExists = tableExists(db, "quote_sync_state");
+  const quoteSyncProfileColumnExists =
+    quoteSyncStateExists && columnExists(db, "quote_sync_state", "profile_enriched_at");
 
   return {
     listAssets() {
@@ -312,6 +333,10 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
         payload: { type: ASSETS_UPDATED_EVENT, asset_ids: [asset.id] },
       });
       return asset;
+    },
+
+    async enrichAssets(assetIds) {
+      return enrichAssets(db, assetIds, options, quoteSyncProfileColumnExists);
     },
 
     deleteAsset(assetId) {
@@ -626,6 +651,193 @@ function rowToAsset(row: AssetRow, exchangeNameByMic: ReadonlyMap<string, string
       : null,
     createdAt: normalizeTimestamp(row.created_at),
     updatedAt: normalizeTimestamp(row.updated_at),
+  };
+}
+
+async function enrichAssets(
+  db: Database,
+  assetIds: string[],
+  options: AssetServiceOptions,
+  quoteSyncProfileColumnExists: boolean,
+): Promise<AssetEnrichmentResult> {
+  const uniqueAssetIds = Array.from(new Set(assetIds));
+  let enriched = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const assetId of uniqueAssetIds) {
+    if (!needsProfileEnrichment(db, assetId, quoteSyncProfileColumnExists)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const result = await enrichAssetProfile(db, assetId, options, quoteSyncProfileColumnExists);
+      if (result === "enriched") {
+        enriched += 1;
+      } else {
+        skipped += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      options.warn?.(`Failed to enrich asset ${assetId}: ${errorMessage(error)}`);
+    }
+  }
+
+  return { enriched, skipped, failed };
+}
+
+async function enrichAssetProfile(
+  db: Database,
+  assetId: string,
+  options: AssetServiceOptions,
+  quoteSyncProfileColumnExists: boolean,
+): Promise<"enriched" | "skipped"> {
+  const asset = readAssetRow(db, assetId);
+  if (asset.quote_mode !== "MARKET") {
+    markProfileEnriched(db, assetId, options, quoteSyncProfileColumnExists);
+    return "enriched";
+  }
+
+  if (!isUsTreasuryBondNeedingDetails(asset)) {
+    return "skipped";
+  }
+
+  const isin = asset.instrument_symbol?.toUpperCase() ?? "";
+  const fetchBondDetails =
+    options.fetchTreasuryBondDetails ??
+    ((value: string) => fetchUsTreasuryBondDetails(value, options.fetch));
+  const details = await fetchBondDetails(isin);
+  if (!details) {
+    return "skipped";
+  }
+
+  updateBondMetadata(db, asset, details, options);
+  markProfileEnriched(db, assetId, options, quoteSyncProfileColumnExists);
+  return "enriched";
+}
+
+function needsProfileEnrichment(
+  db: Database,
+  assetId: string,
+  quoteSyncProfileColumnExists: boolean,
+): boolean {
+  if (!quoteSyncProfileColumnExists) {
+    return true;
+  }
+  const state = db
+    .query<
+      { profile_enriched_at: string | null },
+      [string]
+    >("SELECT profile_enriched_at FROM quote_sync_state WHERE asset_id = ?")
+    .get(assetId);
+  return !state || state.profile_enriched_at === null;
+}
+
+function markProfileEnriched(
+  db: Database,
+  assetId: string,
+  options: AssetServiceOptions,
+  quoteSyncProfileColumnExists: boolean,
+): void {
+  if (!quoteSyncProfileColumnExists) {
+    return;
+  }
+  const now = currentTimestamp(options);
+  db.query(
+    `
+      UPDATE quote_sync_state
+      SET profile_enriched_at = ?, updated_at = ?
+      WHERE asset_id = ?
+    `,
+  ).run(now, now, assetId);
+}
+
+function isUsTreasuryBondNeedingDetails(asset: AssetRow): boolean {
+  const isin = asset.instrument_symbol?.toUpperCase();
+  if (asset.instrument_type !== "BOND" || !isin?.startsWith("US912")) {
+    return false;
+  }
+  const metadata = parseJsonValue(asset.metadata);
+  if (!isRecord(metadata) || !isRecord(metadata.bond)) {
+    return true;
+  }
+  return typeof metadata.bond.maturityDate !== "string" || !isIsoDate(metadata.bond.maturityDate);
+}
+
+function updateBondMetadata(
+  db: Database,
+  asset: AssetRow,
+  details: TreasuryBondDetails,
+  options: AssetServiceOptions,
+): void {
+  const metadata = parseJsonValue(asset.metadata);
+  const metadataObject = isRecord(metadata) ? { ...metadata } : {};
+  const existingBond = isRecord(metadataObject.bond) ? metadataObject.bond : {};
+  metadataObject.bond = {
+    ...existingBond,
+    isin: asset.instrument_symbol?.toUpperCase(),
+    couponRate: details.couponRate,
+    maturityDate: details.maturityDate,
+    faceValue: details.faceValue,
+    couponFrequency: normalizeCouponFrequency(details.couponFrequency),
+  };
+  db.query("UPDATE assets SET metadata = ?, updated_at = ? WHERE id = ?").run(
+    serializeJsonValue(metadataObject),
+    currentTimestamp(options),
+    asset.id,
+  );
+}
+
+async function fetchUsTreasuryBondDetails(
+  isin: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TreasuryBondDetails | null> {
+  if (!isin.startsWith("US912") || isin.length < 11) {
+    return null;
+  }
+  const cusip = isin.slice(2, 11);
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://www.treasurydirect.gov/TA_WS/securities/search?cusip=${encodeURIComponent(cusip)}&format=json`,
+    );
+  } catch {
+    return null;
+  }
+  if (!response.ok) {
+    return null;
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(body) || !isRecord(body[0])) {
+    return null;
+  }
+  const item = body[0];
+  const maturityDate = stringPrefix(item.maturityDate, 10);
+  if (!maturityDate || !isIsoDate(maturityDate)) {
+    return null;
+  }
+  const couponRate = decimalNumber(item.interestRate);
+  const normalizedCouponRate = couponRate === null ? 0 : couponRate / 100;
+  const rawFrequency =
+    typeof item.interestPaymentFrequency === "string" ? item.interestPaymentFrequency : "";
+
+  return {
+    couponRate: normalizedCouponRate,
+    maturityDate,
+    faceValue: 1000,
+    couponFrequency:
+      rawFrequency.trim() !== "" && rawFrequency !== "None"
+        ? normalizeCouponFrequency(rawFrequency)
+        : normalizedCouponRate === 0
+          ? "ZERO"
+          : "SEMI_ANNUAL",
   };
 }
 
@@ -1073,6 +1285,51 @@ function normalizeTimestamp(value: string): string {
   return trimmed;
 }
 
+function currentTimestamp(options: AssetServiceOptions): string {
+  return options.now?.() ?? timestampNow();
+}
+
+function stringPrefix(value: unknown, length: number): string | null {
+  return typeof value === "string" && value.length >= length ? value.slice(0, length) : null;
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function decimalNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeCouponFrequency(frequency: string): string {
+  switch (frequency.trim().toUpperCase()) {
+    case "SEMI-ANNUAL":
+    case "SEMI_ANNUAL":
+    case "SEMIANNUAL":
+      return "SEMI_ANNUAL";
+    case "ANNUAL":
+      return "ANNUAL";
+    case "QUARTERLY":
+      return "QUARTERLY";
+    case "NONE":
+    case "ZERO":
+      return "ZERO";
+    default:
+      return "SEMI_ANNUAL";
+  }
+}
+
 function normalizeExchangeLookup(
   lookup: AssetServiceOptions["exchangeNameByMic"],
 ): ReadonlyMap<string, string> {
@@ -1102,6 +1359,15 @@ function tableExists(db: Database, tableName: string): boolean {
       >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(tableName) !== null
   );
+}
+
+function columnExists(db: Database, tableName: string, columnName: string): boolean {
+  return db
+    .query<{ name: string }, []>(`PRAGMA table_info(${tableName})`)
+    .all()
+    .some((column) => {
+      return column.name === columnName;
+    });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

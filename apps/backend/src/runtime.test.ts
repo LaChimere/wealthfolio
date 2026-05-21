@@ -13,7 +13,11 @@ import {
 } from "./runtime";
 import { startBackendServer } from "./server";
 import { openSqliteDatabase } from "./storage/sqlite";
-import { ACTIVITIES_CHANGED_EVENT, HOLDINGS_CHANGED_EVENT } from "./domain-events/planner";
+import {
+  ACTIVITIES_CHANGED_EVENT,
+  ASSETS_CREATED_EVENT,
+  HOLDINGS_CHANGED_EVENT,
+} from "./domain-events/planner";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 const config: BackendRuntimeConfig = {
@@ -2377,6 +2381,54 @@ describe("TS backend runtime composition", () => {
         "portfolio:update-start",
         "portfolio:update-complete",
       ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime asset-created events to asset enrichment", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-enrichment-"));
+    const fetchCalls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        fetchCalls.push(String(input));
+        return Promise.reject(new Error("unexpected enrichment network call"));
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: unknown[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event);
+    });
+
+    try {
+      const { assetService } = runtime.options;
+      if (!assetService) {
+        throw new Error("Runtime asset enrichment test requires asset service");
+      }
+
+      await assetService.createAsset({
+        kind: "PROPERTY",
+        quoteMode: "MANUAL",
+        quoteCcy: "USD",
+        name: "Manual Property",
+      });
+      await runtime.close();
+
+      expect(events).toEqual([
+        {
+          name: ASSETS_CREATED_EVENT,
+          payload: { type: ASSETS_CREATED_EVENT, asset_ids: [expect.any(String)] },
+        },
+        { name: "asset:enrichment-start", payload: { total: 1 } },
+        { name: "asset:enrichment-progress", payload: { completed: 1, total: 1 } },
+        { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 0, failed: 0 } },
+      ]);
+      expect(fetchCalls).toEqual([]);
     } finally {
       unsubscribe?.();
       await runtime.close();

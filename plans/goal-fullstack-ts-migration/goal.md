@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 251
+turns_used: 252
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T00:06:49+08:00"
+updated_at: "2026-05-22T00:31:14+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1598,6 +1598,14 @@ updated_at: "2026-05-22T00:06:49+08:00"
   through an explicit error hook or default warning instead of failing the whole
   batch, preserving the derived broker sync plan. Focused domain-event processor
   tests and backend type-check passed.
+- Turn 252: Added bounded asset enrichment execution in the standalone TS
+  runtime: domain-event workers now call the SQLite-backed asset service for
+  `AssetsCreated` batches, US Treasury bond assets can fetch and persist missing
+  coupon/maturity metadata from TreasuryDirect, quote sync states skip already
+  profile-enriched rows, and per-asset failures warn/count without aborting the
+  batch. Generic provider profile enrichment remains deferred. Focused
+  assets/runtime/domain-event tests, backend type-check, rubber-duck plan
+  review, and focused code review passed.
 
 ## Deferred items
 
