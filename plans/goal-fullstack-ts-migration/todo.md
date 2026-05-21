@@ -209,20 +209,20 @@
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
     asset taxonomy assignment callbacks, direct asset Create/Update/Delete
     callbacks, alternative asset/UUID MANUAL quote callbacks, market-data quote
-    update/delete/import callbacks, and local AI chat thread/message/tag
-    callbacks, contribution-limit callbacks, account callbacks, import
-    template/account-template callbacks, holdings snapshot callbacks, activity
-    snapshot cash contribution/cash-total/cost-basis FX parity, domain-event
-    planning/batch processing/worker helper, standalone runtime domain-event
-    worker wiring to local portfolio jobs, and post-portfolio active
-    goal-summary refresh now have TS runtime parity, while provider-backed asset
-    resolution outside the activity preview/check round-trip, remaining quote
-    sync outbox follow-ups outside migrated alternative-asset and market-data
-    quote paths, device-sync push/pull runtime wiring, and remaining device-sync
-    side effects are deferred to activities/import/device-sync runtime parity
-    slices; AI chat persistence, tag persistence, tool-result mutation, local AI
-    chat sync_outbox callbacks, native/fallback text/reasoning provider
-    streaming, generated thread titles,
+    update/delete/import callbacks, holdings snapshot asset callbacks, and local
+    AI chat thread/message/tag callbacks, contribution-limit callbacks, account
+    callbacks, import template/account-template callbacks, holdings snapshot
+    callbacks, activity snapshot cash contribution/cash-total/cost-basis FX
+    parity, domain-event planning/batch processing/worker helper, standalone
+    runtime domain-event worker wiring to local portfolio jobs, and
+    post-portfolio active goal-summary refresh now have TS runtime parity, while
+    provider-backed asset resolution outside the activity preview/check
+    round-trip, remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and remaining device-sync side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
+    native/fallback text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -2309,6 +2309,15 @@ contract:
   to set name, exchange MIC, and missing quote currency before creating local
   market assets, while preserving local exact-symbol precedence and ignoring
   non-exact provider matches.
+- `pr5-holdings-snapshot-asset-sync`: focused verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes manual/imported holdings snapshot writes queuing Rust-shaped asset
+  Create/Update callbacks for newly created, reactivated, and MANUAL
+  quote-mode-updated assets before snapshot callbacks, clearing stale quote sync
+  state when switching to MANUAL, persisting runtime `asset` sync_outbox rows,
+  and omitting generated `instrument_key` from asset payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

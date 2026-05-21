@@ -110,12 +110,39 @@ export interface HoldingsServiceOptions {
   baseCurrency?: string | (() => string | undefined);
   eventBus?: BackendEventBus;
   exchangeRateService?: HoldingsExchangeRateService;
+  queueAssetSyncEvent?: (event: HoldingsAssetSyncEvent) => void;
   queueSnapshotSyncEvent?: (event: HoldingsSnapshotSyncEvent) => void;
   symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   today?: () => string;
 }
 
 export type HoldingsSnapshotSyncOperation = "Create" | "Delete";
+export type HoldingsAssetSyncOperation = "Create" | "Update";
+
+export interface HoldingsAssetSyncRow {
+  id: string;
+  kind: string;
+  name: string | null;
+  display_code: string | null;
+  notes: string | null;
+  metadata: string | null;
+  is_active: number;
+  quote_mode: string;
+  quote_ccy: string;
+  instrument_type: string | null;
+  instrument_symbol: string | null;
+  instrument_exchange_mic: string | null;
+  provider_config: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HoldingsAssetSyncEvent {
+  entity: "assets";
+  entityId: string;
+  operation: HoldingsAssetSyncOperation;
+  payload: HoldingsAssetSyncRow;
+}
 
 export interface HoldingsSnapshotSyncEvent {
   snapshotId: string;
@@ -851,6 +878,7 @@ async function persistHoldingsSnapshot(
 
   const now = new Date().toISOString();
   const positions: Record<string, SnapshotPosition> = {};
+  const assetSyncOperations = new Map<string, HoldingsAssetSyncOperation>();
   const snapshotSyncEvents: HoldingsSnapshotSyncEvent[] = [];
 
   const assetIds = db.transaction(() => {
@@ -866,10 +894,15 @@ async function persistHoldingsSnapshot(
       const averageCost = holding.averageCost
         ? decimalOrThrow(holding.averageCost, `Invalid average cost for ${holding.symbol}`)
         : new Decimal(0);
-      const asset = getOrCreateManualSnapshotAsset(db, holding);
+      const { asset, operation } = getOrCreateManualSnapshotAsset(db, holding);
+      if (operation) {
+        recordAssetSyncOperation(assetSyncOperations, asset.id, operation);
+      }
       if (holding.dataSource === "MANUAL" && asset.quote_mode !== "MANUAL") {
         db.prepare("UPDATE assets SET quote_mode = 'MANUAL' WHERE id = ?").run(asset.id);
+        clearQuoteSyncStateForManualAsset(db, asset.id);
         asset.quote_mode = "MANUAL";
+        recordAssetSyncOperation(assetSyncOperations, asset.id, "Update");
       }
 
       const totalCostBasis = quantity.mul(averageCost);
@@ -966,21 +999,27 @@ async function persistHoldingsSnapshot(
     }
     return uniqueSortedStrings(Object.keys(positions));
   })();
+  queueAssetSyncEvents(options, assetSyncEvents(db, assetSyncOperations));
   queueSnapshotSyncEvents(options, snapshotSyncEvents);
   publishManualSnapshotSavedEvents(options.eventBus, request.accountId, assetIds);
 }
 
-function getOrCreateManualSnapshotAsset(db: Database, holding: HoldingInput): AssetRow {
+function getOrCreateManualSnapshotAsset(
+  db: Database,
+  holding: HoldingInput,
+): { asset: AssetRow; operation: HoldingsAssetSyncOperation | null } {
   const explicitAssetId = holding.assetId?.trim();
   const existingAsset = explicitAssetId
     ? readAssetsById(db, [explicitAssetId]).get(explicitAssetId)
     : readExactAssetSymbol(db, holding.symbol.trim().toUpperCase());
   if (existingAsset) {
+    let operation: HoldingsAssetSyncOperation | null = null;
     if (existingAsset.is_active === 0) {
       db.prepare("UPDATE assets SET is_active = 1 WHERE id = ?").run(existingAsset.id);
       existingAsset.is_active = 1;
+      operation = "Update";
     }
-    return existingAsset;
+    return { asset: existingAsset, operation };
   }
 
   const assetId = explicitAssetId && explicitAssetId.length > 0 ? explicitAssetId : randomUUID();
@@ -1012,7 +1051,7 @@ function getOrCreateManualSnapshotAsset(db: Database, holding: HoldingInput): As
   if (!created) {
     throw new Error(`Failed to create asset ${assetId}`);
   }
-  return created;
+  return { asset: created, operation: "Create" };
 }
 
 function upsertManualQuote(
@@ -1709,6 +1748,64 @@ function readSnapshotSyncRowByDateOrThrow(
   return snapshot;
 }
 
+function readAssetSyncRow(db: Database, assetId: string): HoldingsAssetSyncRow {
+  const row = db
+    .query<HoldingsAssetSyncRow, [string]>(
+      `
+        SELECT
+          id,
+          kind,
+          name,
+          display_code,
+          notes,
+          metadata,
+          is_active,
+          quote_mode,
+          quote_ccy,
+          instrument_type,
+          instrument_symbol,
+          instrument_exchange_mic,
+          provider_config,
+          created_at,
+          updated_at
+        FROM assets
+        WHERE id = ?
+      `,
+    )
+    .get(assetId);
+  if (!row) {
+    throw new Error(`Record not found: asset ${assetId}`);
+  }
+  return row;
+}
+
+function clearQuoteSyncStateForManualAsset(db: Database, assetId: string): void {
+  if (tableExists(db, "quote_sync_state")) {
+    db.query("DELETE FROM quote_sync_state WHERE asset_id = ?").run(assetId);
+  }
+}
+
+function recordAssetSyncOperation(
+  operations: Map<string, HoldingsAssetSyncOperation>,
+  assetId: string,
+  operation: HoldingsAssetSyncOperation,
+): void {
+  const existing = operations.get(assetId);
+  operations.set(assetId, existing === "Create" ? "Create" : operation);
+}
+
+function queueAssetSyncEvents(
+  options: HoldingsServiceOptions,
+  events: HoldingsAssetSyncEvent[],
+): void {
+  if (!options.queueAssetSyncEvent) {
+    return;
+  }
+  for (const event of events) {
+    options.queueAssetSyncEvent(event);
+  }
+}
+
 function queueSnapshotSyncEvents(
   options: HoldingsServiceOptions,
   events: HoldingsSnapshotSyncEvent[],
@@ -1719,6 +1816,29 @@ function queueSnapshotSyncEvents(
   for (const event of events) {
     options.queueSnapshotSyncEvent(event);
   }
+}
+
+function assetSyncEvents(
+  db: Database,
+  operations: Map<string, HoldingsAssetSyncOperation>,
+): HoldingsAssetSyncEvent[] {
+  return [...operations].map(([assetId, operation]) => ({
+    entity: "assets",
+    entityId: assetId,
+    operation,
+    payload: { ...readAssetSyncRow(db, assetId) },
+  }));
+}
+
+function tableExists(db: Database, tableName: string): boolean {
+  return (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(tableName)?.count === 1
+  );
 }
 
 function snapshotSyncCreateEvents(rows: SnapshotSyncRow[]): HoldingsSnapshotSyncEvent[] {

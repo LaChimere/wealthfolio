@@ -9,6 +9,7 @@ import {
 import type {
   AllocationHoldings,
   Holding,
+  HoldingsAssetSyncEvent,
   HoldingsSnapshotSyncEvent,
   HoldingsServiceOptions,
   PortfolioAllocations,
@@ -425,6 +426,81 @@ describe("TS holdings domain", () => {
       });
       await service.deleteSnapshot("a1", "2026-02-14");
       expect(syncEvents).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("queues asset sync events for holdings-created and updated assets", async () => {
+    const db = createHoldingsDb();
+    const assetSyncEvents: HoldingsAssetSyncEvent[] = [];
+    const service = createHoldingsService(db, {
+      queueAssetSyncEvent: (event) => assetSyncEvents.push(event),
+      today: () => "2026-02-15",
+    });
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", currency: "CAD" });
+      insertAsset(db, {
+        id: "asset-existing",
+        kind: "INVESTMENT",
+        name: "Existing Asset",
+        displayCode: "EXIST",
+        quoteMode: "MARKET",
+      });
+      db.query("INSERT INTO quote_sync_state (asset_id, updated_at) VALUES (?, ?)").run(
+        "asset-existing",
+        "2025-01-01T00:00:00Z",
+      );
+
+      await service.saveManualHoldings({
+        accountId: "a1",
+        snapshotDate: "2026-02-15",
+        holdings: [
+          {
+            symbol: "NEW",
+            quantity: "2",
+            currency: "USD",
+            averageCost: "5",
+            name: "New Manual Asset",
+            dataSource: "MANUAL",
+          },
+          {
+            assetId: "asset-existing",
+            symbol: "EXIST",
+            quantity: "1",
+            currency: "USD",
+            averageCost: "10",
+            dataSource: "MANUAL",
+          },
+        ],
+        cashBalances: {},
+      });
+
+      expect(assetSyncEvents).toEqual([
+        expect.objectContaining({
+          entity: "assets",
+          operation: "Create",
+          payload: expect.objectContaining({
+            name: "New Manual Asset",
+            display_code: "NEW",
+            quote_mode: "MANUAL",
+            quote_ccy: "USD",
+          }),
+        }),
+        expect.objectContaining({
+          entity: "assets",
+          entityId: "asset-existing",
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: "asset-existing",
+            quote_mode: "MANUAL",
+          }),
+        }),
+      ]);
+      expect(assetSyncEvents[0]?.payload).not.toHaveProperty("instrument_key");
+      expect(readAssetQuoteMode(db, "asset-existing")).toBe("MANUAL");
+      expect(readQuoteSyncStateCount(db, "asset-existing")).toBe(0);
     } finally {
       db.close();
     }
@@ -1458,7 +1534,13 @@ function createHoldingsDb(): Database {
       instrument_type TEXT,
       instrument_symbol TEXT,
       instrument_exchange_mic TEXT,
-      provider_config TEXT
+      provider_config TEXT,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+    CREATE TABLE quote_sync_state (
+      asset_id TEXT PRIMARY KEY NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
     );
     CREATE TABLE quotes (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1594,6 +1676,25 @@ function insertAsset(
     asset.quoteCcy ?? "USD",
     asset.instrumentType ?? null,
     asset.instrumentSymbol ?? asset.displayCode,
+  );
+}
+
+function readAssetQuoteMode(db: Database, assetId: string): string | null {
+  return (
+    db
+      .query<{ quote_mode: string }, [string]>("SELECT quote_mode FROM assets WHERE id = ?")
+      .get(assetId)?.quote_mode ?? null
+  );
+}
+
+function readQuoteSyncStateCount(db: Database, assetId: string): number {
+  return (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM quote_sync_state WHERE asset_id = ?")
+      .get(assetId)?.count ?? 0
   );
 }
 

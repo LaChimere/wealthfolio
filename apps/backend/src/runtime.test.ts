@@ -1808,11 +1808,17 @@ describe("TS backend runtime composition", () => {
       try {
         const rows = readRuntimeSyncOutbox(db);
         expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["asset", "create"],
           ["snapshot", "create"],
           ["snapshot", "create"],
           ["snapshot", "delete"],
         ]);
         expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          name: "Runtime Snapshot Asset",
+          display_code: "SNAP",
+          quote_mode: "MARKET",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
           account_id: "account-1",
           snapshot_date: "2026-04-02",
           source: "MANUAL_ENTRY",
@@ -1820,12 +1826,12 @@ describe("TS backend runtime composition", () => {
           cash_total_account_currency: "0",
           cash_total_base_currency: "0",
         });
-        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
           account_id: "account-1",
           snapshot_date: "2026-01-02",
           source: "SYNTHETIC",
         });
-        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: rows[0]?.entity_id });
+        expect(JSON.parse(String(rows[3]?.payload))).toEqual({ id: rows[1]?.entity_id });
       } finally {
         db.close();
       }

@@ -317,6 +317,9 @@ function createServicesFromDatabase(
     baseCurrency,
     eventBus,
     exchangeRateService,
+    queueAssetSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent(event);
+    },
     queueSnapshotSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent({
         entity: "holdings_snapshots",
