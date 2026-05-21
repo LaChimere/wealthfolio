@@ -295,6 +295,13 @@ describe("TS activities import domain", () => {
             instrumentType: "EQUITY",
             quoteCcy: "USD",
           },
+          {
+            key: "garbage-symbol",
+            accountId: "account-1",
+            symbol: "$FOO",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          },
         ]),
       ).toEqual([
         {
@@ -351,6 +358,14 @@ describe("TS activities import domain", () => {
           resolutionSource: "validation_error",
           errors: {
             accountId: ["Account is required before running backend validation."],
+          },
+        },
+        {
+          key: "garbage-symbol",
+          status: "NEEDS_FIXING",
+          resolutionSource: "validation_error",
+          errors: {
+            symbol: ["Invalid symbol '$FOO'. Please correct or remove it."],
           },
         },
       ]);
@@ -1271,9 +1286,24 @@ describe("TS activities import domain", () => {
           isDraft: true,
           lineNumber: 5,
         },
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-19",
+          symbol: "$FOO",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          isDraft: true,
+          lineNumber: 6,
+        },
       ]);
 
-      expect(checked).toHaveLength(5);
+      expect(checked).toHaveLength(6);
       expect(checked?.[0]).toMatchObject({
         accountId: "account-1",
         accountName: "Alpha",
@@ -1309,6 +1339,10 @@ describe("TS activities import domain", () => {
       expect(checked?.[4]).toMatchObject({
         isValid: false,
         errors: { accountId: ["Account is required before running backend validation."] },
+      });
+      expect(checked?.[5]).toMatchObject({
+        isValid: false,
+        errors: { symbol: ["Invalid symbol '$FOO'. Please correct or remove it."] },
       });
       expect(readActivityCount(db)).toBe(1);
       expect(readAssetCount(db)).toBe(1);
@@ -2082,6 +2116,34 @@ describe("TS activities import domain", () => {
           currency: "USD",
         }),
       ).toThrow("Instrument type is required to create asset from symbol UNKNOWN");
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: {
+            symbol: "$FOO",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          currency: "USD",
+        }),
+      ).toThrow("Invalid symbol '$FOO'. Please search for a valid ticker.");
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: {
+            symbol: "----",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+          },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          currency: "USD",
+        }),
+      ).toThrow("Invalid symbol '----'. Please search for a valid ticker.");
       insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
       insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
       expect(() =>

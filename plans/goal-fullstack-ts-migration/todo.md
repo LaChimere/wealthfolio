@@ -2363,6 +2363,12 @@ contract:
   includes import validation/apply preserving raw date-only quote inputs for
   manual fallback quotes so imported quotes use Rust-compatible noon UTC
   timestamps while imported activity dates remain normalized.
+- `pr5-activities-garbage-symbol-validation`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, and full `bun run check`. Coverage
+  includes import asset previews, import check/apply preflight, and direct
+  symbol-based activity asset creation rejecting all-dash and non-cash `$...`
+  symbols before provider resolution or persistence.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

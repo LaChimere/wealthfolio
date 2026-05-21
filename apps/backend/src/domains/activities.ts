@@ -1861,6 +1861,8 @@ async function previewImportAsset(
   }
   if (!symbol) {
     addFieldMessage(errors, "symbol", "Symbol is required for asset preview.");
+  } else if (isGarbageSymbol(symbol)) {
+    addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
   }
 
   if (Object.keys(errors).length > 0 || !symbol) {
@@ -2291,6 +2293,7 @@ async function activityImportInputWithProviderResolution(
     !accountId ||
     !activityType ||
     !symbol ||
+    isGarbageSymbol(symbol) ||
     assetId ||
     exchangeMic ||
     quoteMode === "MANUAL" ||
@@ -2432,6 +2435,12 @@ function checkActivityImportRow(
   }
 
   const needsAsset = requiresAssetIdentity(activityType, subtype ?? null);
+  if (needsAsset && symbol && !assetId && isGarbageSymbol(symbol)) {
+    addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
+    activity.isValid = false;
+    activity.errors = errors;
+    return { activity, idempotencyKey: null };
+  }
   const createInput: Record<string, unknown> = {
     id: optionalTrimmedString(activity.id),
     accountId,
@@ -2899,6 +2908,9 @@ function collectImportApplyPreflightErrors(
   }
 
   if (requiresAssetIdentity(activityType, subtype) && symbol && !assetId) {
+    if (isGarbageSymbol(symbol)) {
+      addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
+    }
     if (!optionalTrimmedString(activity.quoteCcy)) {
       addFieldMessage(
         errors,
@@ -3703,6 +3715,9 @@ function pendingActivityAssetFromInput(
   const rawSymbol = asset.symbol?.trim();
   if (!rawSymbol) {
     throw new Error("Invalid input: symbol is required to create an asset");
+  }
+  if (isGarbageSymbol(rawSymbol)) {
+    throw new Error(`Invalid symbol '${rawSymbol}'. Please search for a valid ticker.`);
   }
 
   const instrumentType = normalizeInstrumentType(asset.instrumentType);
@@ -5419,6 +5434,17 @@ function isCashSymbol(symbol: string): boolean {
   const stripped = symbol.trim().toUpperCase().replace(/^\$/u, "");
   const currency = stripped.match(/^CASH[-_:]([A-Z]{3})$/u)?.[1];
   return currency !== undefined;
+}
+
+function isGarbageSymbol(symbol: string): boolean {
+  const trimmed = symbol.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return (
+    [...trimmed].every((char) => char === "-") ||
+    (trimmed.startsWith("$") && !isCashSymbol(trimmed))
+  );
 }
 
 function resolveCurrency(candidates: string[]): string {
