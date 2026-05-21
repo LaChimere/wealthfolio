@@ -862,6 +862,111 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("imports symbol-only activities with provider-backed exchange resolution", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([
+          ["XNYS", "USD"],
+          ["XTSE", "CAD"],
+        ]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify US",
+              longName: "Shopify US",
+              exchange: "NYSE",
+              exchangeMic: "XNYS",
+              exchangeName: "NYSE",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "USD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        if (query === "SHOP.TO") {
+          return [
+            {
+              symbol: "SHOP.TO",
+              shortName: "Shopify Canada",
+              longName: "Shopify Canada",
+              exchange: "TOR",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-cad", name: "Canadian", currency: "CAD" });
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "SHOP",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 1,
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      const assetId = result.activities[0]?.assetId as string;
+      expect(assetId).toBeString();
+      expect(result.summary).toMatchObject({
+        imported: 1,
+        assetsCreated: 1,
+        success: true,
+      });
+      expect(result.activities[0]).toMatchObject({
+        symbol: "SHOP",
+        symbolName: "Shopify Canada",
+        exchangeMic: "XTSE",
+        instrumentType: "EQUITY",
+        quoteCcy: "CAD",
+        isValid: true,
+      });
+      expect(readAssetById(db, assetId)).toMatchObject({
+        name: "Shopify Canada",
+        display_code: "SHOP",
+        instrument_symbol: "SHOP",
+        instrument_exchange_mic: "XTSE",
+        instrument_type: "EQUITY",
+        quote_ccy: "CAD",
+        quote_mode: "MARKET",
+      });
+      expect(calls).toEqual(["SHOP", "SHOP.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks import activities with existing ISIN-backed asset resolution", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];

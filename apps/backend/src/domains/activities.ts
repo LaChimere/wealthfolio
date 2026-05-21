@@ -2641,6 +2641,7 @@ async function importActivityRows(
   const ordered: Array<Record<string, unknown> | null> = Array.from({ length: total }, () => null);
   const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
   const assetContext = createActivityAssetResolutionContext();
+  const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
   let hasValidationErrors = false;
 
   for (const [index, input] of activities.entries()) {
@@ -2677,18 +2678,27 @@ async function importActivityRows(
   const prepared: PreparedImportActivity[] = [];
   for (const { index, activity } of validInputs) {
     const errors = cloneMessageMap(activity.errors);
-    const createInput = importActivityCreateInput(activity);
-    collectImportApplyPreflightErrors(activity, errors);
-
-    if (hasMessageMapEntries(errors)) {
-      activity.errors = errors;
-      activity.isValid = false;
-      ordered[index] = activity;
-      hasValidationErrors = true;
-      continue;
-    }
-
     try {
+      const resolvedActivity = await activityImportInputWithProviderResolution(
+        db,
+        activity,
+        options,
+        searchCache,
+      );
+      if (isRecord(resolvedActivity)) {
+        Object.assign(activity, resolvedActivity);
+      }
+      const createInput = importActivityCreateInput(activity);
+      collectImportApplyPreflightErrors(activity, errors);
+
+      if (hasMessageMapEntries(errors)) {
+        activity.errors = errors;
+        activity.isValid = false;
+        ordered[index] = activity;
+        hasValidationErrors = true;
+        continue;
+      }
+
       const create = normalizeActivityCreateInput(db, createInput, assetContext);
       const explicitId = optionalTrimmedString(activity.id);
       if (explicitId) {

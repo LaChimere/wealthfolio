@@ -2296,6 +2296,12 @@ contract:
   when an existing asset quote mode changes, preserving activity-created assets
   as Create events, and clearing stale quote sync state when switching an asset
   to MANUAL through activity side effects.
+- `pr5-activities-import-apply-provider-resolution`: focused verification
+  passed: `bun test apps/backend/src/domains/activities.test.ts` and
+  `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
+  includes direct import apply using provider search and currency-aware Yahoo
+  suffix fallback to enrich symbol-only market rows with MIC, name, instrument
+  type, and quote currency before creating assets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -2317,9 +2323,9 @@ contract:
   security scanning, full sandbox isolation, and query-cache hardening move with
   add-on runtime parity slices; provider-backed asset resolution, remaining
   quote sync-outbox emission outside migrated alternative-asset and market-data
-  quote paths, remaining activity/provider-backed asset resolution beyond
-  preview/check, sync engine push/pull, and portfolio recalculation side effects
-  move with activities/import/device-sync runtime parity slices; device-sync
+  quote paths, remaining activity/provider-backed asset resolution beyond import
+  flows, sync engine push/pull, and portfolio recalculation side effects move
+  with activities/import/device-sync runtime parity slices; device-sync
   integration for sync crypto moves with device-sync parity slices; broader
   health checks and real market sync fix execution move with health/calculation
   parity slices; real Connect token lifecycle, cloud HTTP clients, broker sync
