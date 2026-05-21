@@ -1440,6 +1440,71 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("applies import symbol disposition before writing activities", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DIVIDEND",
+          date: "2025-01-20",
+          symbol: "$FOO",
+          amount: "3",
+          currency: "USD",
+          isDraft: false,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-21",
+          symbol: "AAPL",
+          amount: "25",
+          currency: "USD",
+          isDraft: false,
+        },
+        {
+          accountId: "account-1",
+          activityType: "TRANSFER_IN",
+          date: "2025-01-22",
+          symbol: "AAPL",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          quantity: "1",
+          unitPrice: "10",
+          currency: "USD",
+          isDraft: false,
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({ total: 3, imported: 3, success: true });
+      const dividendId = result.activities[0]?.id as string;
+      const depositId = result.activities[1]?.id as string;
+      const transferId = result.activities[2]?.id as string;
+      expect(readActivityValue(db, dividendId, "asset_id")).toBeNull();
+      expect(readActivityValue(db, depositId, "asset_id")).toBeNull();
+      expect(readActivityValue(db, transferId, "asset_id")).toBe("AAPL");
+    } finally {
+      db.close();
+    }
+  });
+
   test("imports checked activities with import run metadata", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
