@@ -2035,6 +2035,12 @@ contract:
   includes Rust-compatible preservation of zero-quantity positions when reading
   seed snapshots and writing calculated activity-derived snapshots, without
   treating zero-quantity seed positions as quote-gap valuation blockers.
+- `pr5-runtime-account-fx-registration`: targeted checks passed:
+  `bun test apps/backend/src/runtime.test.ts --test-name-pattern "non-base account"`
+  and `bun run --cwd apps/backend type-check`, plus full `bun run check`.
+  Coverage includes Rust-compatible FX asset registration when the standalone TS
+  runtime creates an account whose currency differs from the configured base
+  currency.
 
 ## Result
 

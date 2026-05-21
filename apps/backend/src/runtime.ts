@@ -29,7 +29,11 @@ import {
   createCustomProviderService,
 } from "./domains/custom-providers";
 import { createDisabledDeviceSyncService } from "./domains/device-sync";
-import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
+import {
+  createExchangeRateRepository,
+  createExchangeRateService,
+  type ExchangeRateService,
+} from "./domains/exchange-rates";
 import { createGoalRepository, createGoalService, type GoalService } from "./domains/goals";
 import {
   createHealthRepository,
@@ -232,14 +236,6 @@ function createServicesFromDatabase(
     fetchImpl: runtimeOptions.marketDataFetch,
     secretService,
   });
-  const accountService = createRuntimeAccountService(db, eventBus, baseCurrency, (event) => {
-    syncOutboxQueue.queueSyncEvent({
-      entity: "accounts",
-      entityId: event.accountId,
-      operation: event.operation,
-      payload: event.payload,
-    });
-  });
   const exchangeRateService = createExchangeRateService(
     createExchangeRateRepository(db, {
       queueAssetSyncEvent: (event) => {
@@ -256,6 +252,20 @@ function createServicesFromDatabase(
     },
   );
   exchangeRateService.initialize();
+  const accountService = createRuntimeAccountService(
+    db,
+    eventBus,
+    baseCurrency,
+    exchangeRateService,
+    (event) => {
+      syncOutboxQueue.queueSyncEvent({
+        entity: "accounts",
+        entityId: event.accountId,
+        operation: event.operation,
+        payload: event.payload,
+      });
+    },
+  );
   const exchangeCatalogJson = readExchangeCatalogJson(runtimeOptions.repositoryRoot);
   const exchangeMetadata = parseExchangeMetadataLookup(exchangeCatalogJson);
   const marketDataService = createMarketDataService(db, {
@@ -606,11 +616,14 @@ function createRuntimeAccountService(
   db: InitializedSqliteDatabase["db"],
   eventBus: BackendEventBus,
   baseCurrency: () => string | undefined,
+  exchangeRateService: ExchangeRateService,
   queueSyncEvent?: (event: AccountSyncEvent) => void,
 ): AccountService {
   return createAccountService(createAccountRepository(db, { queueSyncEvent }), {
     baseCurrency,
     eventBus,
+    registerCurrencyPair: (currency, base) =>
+      exchangeRateService.registerCurrencyPair(currency, base),
   });
 }
 

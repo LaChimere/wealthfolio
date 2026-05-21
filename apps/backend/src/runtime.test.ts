@@ -1008,6 +1008,73 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("registers an FX asset when creating a non-base account in runtime", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const settingsResponse = await fetch(`${server.baseUrl}/api/v1/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseCurrency: "USD", timezone: "UTC" }),
+      });
+      expect(settingsResponse.status).toBe(200);
+
+      const accountResponse = await fetch(`${server.baseUrl}/api/v1/accounts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "CAD Brokerage",
+          accountType: "SECURITIES",
+          currency: "CAD",
+          isDefault: false,
+          isActive: true,
+        }),
+      });
+      expect(accountResponse.status).toBe(200);
+      await expect(accountResponse.json()).resolves.toMatchObject({ currency: "CAD" });
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const fxAsset = db
+          .query<
+            {
+              kind: string;
+              display_code: string;
+              quote_ccy: string;
+              instrument_type: string | null;
+              instrument_symbol: string | null;
+            },
+            []
+          >(
+            `
+              SELECT kind, display_code, quote_ccy, instrument_type, instrument_symbol
+              FROM assets
+              WHERE instrument_key = 'FX:CAD/USD'
+            `,
+          )
+          .get();
+        expect(fxAsset).toEqual({
+          kind: "FX",
+          display_code: "CAD/USD",
+          quote_ccy: "USD",
+          instrument_type: "FX",
+          instrument_symbol: "CAD",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires local Connect runtime behavior with disabled cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
     const runtime = createSqliteBackedBackendServices({
