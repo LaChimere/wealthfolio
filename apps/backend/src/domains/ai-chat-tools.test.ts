@@ -267,6 +267,45 @@ describe("TS AI chat built-in tools", () => {
     });
   });
 
+  test("falls back to provider short names for record_activity asset drafts", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [account({ id: "acct-1", name: "Brokerage", currency: "USD" })],
+      },
+      marketDataService: {
+        searchSymbol: () => [
+          symbolSearchResult({
+            symbol: "SHORT",
+            shortName: "Short Provider Name",
+            longName: "   ",
+            existingAssetId: "asset-short",
+          }),
+        ],
+      },
+    });
+
+    const result = await tools
+      .find((tool) => tool.name === "record_activity")
+      ?.execute({
+        activityType: "BUY",
+        activityDate: "2026-01-17",
+        symbol: "SHORT",
+        quantity: 1,
+        unitPrice: 10,
+      });
+
+    expect(result).toMatchObject({
+      data: {
+        draft: {
+          assetName: "Short Provider Name",
+        },
+        resolvedAsset: {
+          name: "Short Provider Name",
+        },
+      },
+    });
+  });
+
   test("returns record_activity account and custom asset validation prompts", async () => {
     const tools = createPortfolioAiChatTools({
       accountService: {

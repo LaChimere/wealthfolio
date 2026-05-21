@@ -2335,6 +2335,11 @@ contract:
   `bun run --cwd apps/backend type-check`. Coverage includes provider
   exact-match enrichment falling back from blank long names to short names for
   import checks and snapshot asset creation.
+- `pr5-ai-chat-record-activity-name-fallback`: focused verification passed:
+  `bun test apps/backend/src/domains/ai-chat-tools.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes provider-backed
+  `record_activity` asset drafts falling back from blank long names to short
+  names before using symbols.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

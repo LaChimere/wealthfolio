@@ -1874,7 +1874,7 @@ async function resolveRecordActivityAsset(options: {
   const asset: ResolvedAsset = {
     assetId: result.existingAssetId ?? `${result.symbol}:${result.exchangeMic ?? "UNKNOWN"}`,
     symbol: result.symbol,
-    name: result.longName,
+    name: symbolSearchDisplayName(result),
     currency: result.currency ?? options.currency,
     exchange: result.exchangeName ?? null,
     exchangeMic: result.exchangeMic ?? null,
@@ -1887,6 +1887,10 @@ async function resolveRecordActivityAsset(options: {
     assetName: asset.name,
     isCustomAsset: false,
   };
+}
+
+function symbolSearchDisplayName(result: SymbolSearchResult): string {
+  return result.longName.trim() || result.shortName.trim() || result.symbol;
 }
 
 function firstRecordActivitySymbolResult(

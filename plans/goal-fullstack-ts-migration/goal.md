@@ -1488,6 +1488,11 @@ updated_at: "2026-05-21T15:01:47+08:00"
   for import checks and snapshot asset creation, avoiding blank asset names when
   providers omit long names. Focused holdings tests and backend type-check
   passed.
+- Turn 230: Tightened AI activity draft provider display-name fallback parity:
+  `record_activity` resolved assets now use trimmed provider long names first,
+  then short names, then symbols, avoiding blank draft/resolved asset names when
+  provider long names are empty. Focused AI chat tool tests and backend
+  type-check passed.
 
 ## Deferred items
 
