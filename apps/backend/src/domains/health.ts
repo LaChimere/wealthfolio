@@ -1020,7 +1020,12 @@ async function analyzeFxIntegrity(
     return [];
   }
 
-  const latestFxRates = fxSnapshotsByPair(options.exchangeRateProvider.getLatestFxRateSnapshots());
+  let latestFxRates = new Map<string, LatestFxRateSnapshot>();
+  try {
+    latestFxRates = fxSnapshotsByPair(options.exchangeRateProvider.getLatestFxRateSnapshots());
+  } catch (error) {
+    options.warn?.(`Failed to load latest FX rate snapshots: ${formatErrorMessage(error)}`);
+  }
   const pairs = [...pairMarketValues.values()].map((pair) => ({
     ...pair,
     pairId: `${pair.fromCurrency}:${pair.toCurrency}`,

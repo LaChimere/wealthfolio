@@ -829,6 +829,67 @@ describe("TS health domain", () => {
     }
   });
 
+  test("continues fx integrity checks when latest fx snapshots fail to load", async () => {
+    const db = createHealthDb();
+    const warnings: string[] = [];
+    const service = createHealthService(
+      createHealthRepository(db),
+      { ...DEFAULT_HEALTH_CONFIG, mvEscalationThreshold: 0.75 },
+      {
+        accountProvider: {
+          getActiveAccounts: () => [account({ id: "account-a" })],
+          getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: () => [
+            holding({
+              assetId: "asset-eur",
+              symbol: "EURSEC",
+              marketValue: 100,
+              localCurrency: "EUR",
+              baseCurrency: "USD",
+            }),
+            holding({ assetId: "asset-usd", symbol: "USDSEC", marketValue: 100 }),
+          ],
+        },
+        exchangeRateProvider: {
+          ensureFxPairs: async () => [],
+          getLatestFxRateSnapshots: () => {
+            throw new Error("fx snapshots unavailable");
+          },
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+        warn: (message) => warnings.push(message),
+      },
+    );
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(warnings).toEqual([
+        "Failed to load latest FX rate snapshots: fx snapshots unavailable",
+      ]);
+      expect(status?.issues).toContainEqual(
+        expect.objectContaining({
+          severity: "ERROR",
+          category: "FX_INTEGRITY",
+          title: "Missing exchange rate for EUR",
+          affectedCount: 1,
+          affectedMvPct: 0.5,
+          fixAction: {
+            id: "fetch_fx",
+            label: "Fetch Exchange Rates",
+            payload: ["EUR:USD"],
+          },
+          affectedItems: [{ id: "EUR:USD", name: "EUR \u2192 USD" }],
+        }),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds bounded data consistency issues for negative account balances", async () => {
     const db = createHealthDb();
     const requestedAccountIds: string[][] = [];

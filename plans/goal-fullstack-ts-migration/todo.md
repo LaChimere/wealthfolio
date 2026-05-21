@@ -2001,6 +2001,12 @@ contract:
   same-day split deduplication across transaction accounts, and since-date
   replay restarting from earliest activity when a split enters the recalculation
   range.
+- `pr5-health-fx-read-error-parity`: targeted checks passed:
+  `bun test apps/backend/src/domains/health.test.ts`,
+  `bun run --cwd apps/backend type-check`, and `bun run check`. Coverage
+  includes Rust-compatible nonfatal latest FX snapshot read failures, warning
+  emission, and fallback FX integrity analysis that reports affected pairs as
+  missing exchange rates instead of aborting the health run.
 
 ## Result
 
