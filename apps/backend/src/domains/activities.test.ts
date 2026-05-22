@@ -2806,6 +2806,75 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("normalizes direct activity-created broker option symbols like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const fidelityOptionActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "-mu270115c600", kind: "OPTION", quoteCcy: "USD" },
+        activityType: "BUY",
+        activityDate: "2025-01-19",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      const fidelityOptionAsset = readAssetById(db, fidelityOptionActivity.assetId ?? "");
+
+      expect(fidelityOptionAsset).toMatchObject({
+        display_code: "MU270115C00600000",
+        instrument_type: "OPTION",
+        instrument_symbol: "MU270115C00600000",
+        instrument_exchange_mic: null,
+      });
+      expect(JSON.parse(fidelityOptionAsset?.metadata as string)).toEqual({
+        option: {
+          underlyingAssetId: "MU",
+          expiration: "2027-01-15",
+          right: "CALL",
+          strike: 600,
+          multiplier: 100,
+          occSymbol: "MU270115C00600000",
+        },
+      });
+
+      const paddedOptionActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "nvda  250117p00850000", quoteCcy: "USD" },
+        activityType: "BUY",
+        activityDate: "2025-01-20",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      const paddedOptionAsset = readAssetById(db, paddedOptionActivity.assetId ?? "");
+
+      expect(paddedOptionAsset).toMatchObject({
+        display_code: "NVDA250117P00850000",
+        instrument_type: "OPTION",
+        instrument_symbol: "NVDA250117P00850000",
+        instrument_exchange_mic: null,
+      });
+      expect(JSON.parse(paddedOptionAsset?.metadata as string)).toEqual({
+        option: {
+          underlyingAssetId: "NVDA",
+          expiration: "2025-01-17",
+          right: "PUT",
+          strike: 850,
+          multiplier: 100,
+          occSymbol: "NVDA250117P00850000",
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures direct activity FX pairs before create writes", async () => {
     const db = createActivitiesDb();
     const ensuredPairs: Array<[string, string]> = [];

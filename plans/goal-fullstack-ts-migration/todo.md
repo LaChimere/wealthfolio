@@ -2459,6 +2459,14 @@ contract:
   assets normalizing OCC symbols and persisting Rust-shaped option specs with
   `contract_multiplier` overrides, plus BOND CUSIP-to-ISIN canonicalization,
   Rust-shaped bond specs, and no Yahoo provider default for bond assets.
+- `pr5-activities-direct-option-normalization`: verification passed: focused
+  option normalization test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes direct
+  activity-created OPTION assets normalizing Fidelity compact broker symbols
+  such as `-MU270115C600` and space-padded OCC symbols to compact OCC
+  identifiers while persisting Rust-shaped option metadata.
 - `pr5-holdings-import-write-provider-resolution`: focused verification passed:
   `bun test apps/backend/src/domains/holdings.test.ts` and
   `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
