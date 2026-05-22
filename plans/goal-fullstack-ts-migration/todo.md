@@ -2411,6 +2411,15 @@ contract:
   currency for import round-trips, unresolved provider misses remaining
   validation errors, and manual quoted assets staying local without provider
   calls.
+- `pr5-activities-import-check-missing-mic-error`: verification passed: focused
+  missing-MIC import check test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes unresolved
+  market asset import checks returning Rust's
+  `Could not find '<symbol>' in market data. Please search for the correct ticker symbol.`
+  validation message instead of leaking the lower-level asset creation MIC
+  error.
 - `pr5-activities-import-check-isin-resolution`: verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, full `bun run check`, and focused

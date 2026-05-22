@@ -2591,7 +2591,16 @@ function checkActivityImportRow(
     activity.errors = errors;
     return { activity, idempotencyKey: normalized.idempotencyKey };
   } catch (error) {
-    addFieldMessage(errors, importValidationField(error), errorMessage(error));
+    const message = errorMessage(error);
+    if (message.startsWith("Exchange MIC is required to create market asset ") && symbol) {
+      addFieldMessage(
+        errors,
+        "symbol",
+        `Could not find '${symbol}' in market data. Please search for the correct ticker symbol.`,
+      );
+    } else {
+      addFieldMessage(errors, importValidationField(error), message);
+    }
     activity.isValid = false;
     activity.errors = errors;
     return { activity, idempotencyKey: null };

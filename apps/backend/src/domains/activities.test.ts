@@ -1285,7 +1285,9 @@ describe("TS activities import domain", () => {
         expect.objectContaining({
           isValid: false,
           errors: {
-            symbol: ["Exchange MIC is required to create market asset MISSING"],
+            symbol: [
+              "Could not find 'MISSING' in market data. Please search for the correct ticker symbol.",
+            ],
           },
         }),
       ]);
