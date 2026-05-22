@@ -167,6 +167,31 @@ describe("TS exchange rates domain", () => {
     }
   });
 
+  test("refreshes the converter after manual rate mutations", async () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db));
+
+    try {
+      seedFxAsset(db, { id: "usd-cad", from: "USD", to: "CAD" });
+      seedQuote(db, {
+        id: "old-usd-cad",
+        assetId: "usd-cad",
+        day: "2023-10-25",
+        close: "1.2",
+        source: "MANUAL",
+      });
+      service.initialize();
+
+      expect(service.convertCurrency("10", "USD", "CAD")).toBe("12");
+
+      await service.updateExchangeRate("USD", "CAD", "2");
+
+      expect(service.convertCurrency("10", "USD", "CAD")).toBe("20");
+    } finally {
+      db.close();
+    }
+  });
+
   test("deletes exchange rates by removing quotes and asset with sync delete only when present", async () => {
     const db = createExchangeRatesDb();
     const syncEvents: ExchangeRateAssetSyncEvent[] = [];

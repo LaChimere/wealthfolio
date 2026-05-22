@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 305
+turns_used: 306
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T20:45:07+08:00"
+updated_at: "2026-05-22T20:56:33+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1931,6 +1931,12 @@ updated_at: "2026-05-22T20:45:07+08:00"
   before returning a price. Focused invalid Yahoo/custom-provider resolve tests,
   full market-data tests, runtime tests, backend test suite, full
   `bun run check`, and `git diff --check` passed.
+- Turn 306: Tightened exchange-rate converter refresh parity: manual TS
+  exchange-rate add/update now refreshes the in-memory converter immediately
+  like delete already did, so post-mutation conversions use the newly persisted
+  FX quote instead of stale initialized graph data. Focused exchange-rate
+  mutation tests, full exchange-rate tests, runtime tests, backend test suite,
+  full `bun run check`, and `git diff --check` passed.
 
 ## Deferred items
 
@@ -1958,12 +1964,12 @@ updated_at: "2026-05-22T20:45:07+08:00"
   runtime remains deferred below.
 - FX currency converter, historical lookup, register-pair behavior, and runtime
   FX asset sync_outbox persistence now have TS runtime parity. reason=the
-  standalone TS exchange-rate service initializes the historical converter, can
-  register required FX assets, and persists FX asset Create/Delete callbacks
-  without generated `instrument_key` payload fields, and exchange-rate mutations
-  now enqueue full portfolio recalculation jobs; automatic market sync, provider
-  HTTP, quote import/persistence, and quote outbox follow-ups remain deferred
-  below.
+  standalone TS exchange-rate service initializes and refreshes the historical
+  converter after rate mutations, can register required FX assets, and persists
+  FX asset Create/Delete callbacks without generated `instrument_key` payload
+  fields, and exchange-rate mutations now enqueue full portfolio recalculation
+  jobs; automatic market sync, provider HTTP, quote import/persistence, and
+  quote outbox follow-ups remain deferred below.
 - Alternative asset persistence, manual valuation quotes, liability metadata
   linking/unlinking quirks, alternative holdings reads, and alternative
   asset/UUID quote sync_outbox persistence now have TS runtime parity.

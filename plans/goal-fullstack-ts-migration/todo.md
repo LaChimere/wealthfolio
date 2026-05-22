@@ -2877,6 +2877,15 @@ contract:
   quote summaries resolving to no quote instead of surfacing negative prices,
   while the shared validation helper applies the same hard provider quote checks
   to all provider-backed `resolveSymbolQuote` paths.
+- `pr5-exchange-rate-converter-refresh`: verification passed:
+  `bun test apps/backend/src/domains/exchange-rates.test.ts --test-name-pattern "manual rate mutations|updates exchange rates|converts currencies"`,
+  `bun run --cwd apps/backend type-check`,
+  `bun test apps/backend/src/domains/exchange-rates.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes an initialized converter using a newly
+  updated manual FX quote immediately after mutation instead of stale
+  pre-mutation graph data.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

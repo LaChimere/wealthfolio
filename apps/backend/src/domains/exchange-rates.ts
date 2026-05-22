@@ -461,13 +461,17 @@ export function createExchangeRateService(
       if (!newRate.source.trim()) {
         throw new Error("Invalid input: source cannot be empty");
       }
-      return repository.addExchangeRate(newRate);
+      const exchangeRate = repository.addExchangeRate(newRate);
+      initializeConverter();
+      return exchangeRate;
     },
     async updateExchangeRate(fromCurrency, toCurrency, rate) {
       validateCurrency(fromCurrency, "fromCurrency");
       validateCurrency(toCurrency, "toCurrency");
       validateRate(rate);
-      return repository.updateExchangeRate(fromCurrency, toCurrency, rate);
+      const exchangeRate = repository.updateExchangeRate(fromCurrency, toCurrency, rate);
+      initializeConverter();
+      return exchangeRate;
     },
     async deleteExchangeRate(rateId) {
       repository.deleteExchangeRate(rateId);
