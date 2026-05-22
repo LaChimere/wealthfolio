@@ -285,6 +285,14 @@ describe("TS activities import domain", () => {
             quoteMode: "MANUAL",
           },
           {
+            key: "manual-padded",
+            accountId: "account-1",
+            symbol: "PRIVATE_PADDED",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            quoteMode: " MANUAL ",
+          },
+          {
             key: "ambiguous",
             accountId: "account-1",
             symbol: "DUP",
@@ -341,6 +349,21 @@ describe("TS activities import domain", () => {
             quoteMode: "MANUAL",
             instrumentType: "EQUITY",
           }),
+        },
+        {
+          key: "manual-padded",
+          status: "NEEDS_FIXING",
+          resolutionSource: "missing_exchange",
+          draft: expect.objectContaining({
+            displayCode: "PRIVATE_PADDED",
+            quoteMode: "MARKET",
+            instrumentType: "EQUITY",
+          }),
+          errors: {
+            symbol: [
+              "Could not determine the exchange for 'PRIVATE_PADDED'. Please search for the correct ticker.",
+            ],
+          },
         },
         {
           key: "ambiguous",

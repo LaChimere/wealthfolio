@@ -2496,6 +2496,13 @@ contract:
   preview/check/apply paths preserving raw `quoteMode` whitespace before
   quote-mode normalization so space-padded `MANUAL` values do not skip provider
   resolution or create manual assets/quotes unlike Rust.
+- `pr5-activities-import-preview-quote-mode-trim-coverage`: verification passed:
+  focused import preview test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage explicitly proves
+  space-padded `MANUAL` import-preview candidates produce Rust-compatible
+  missing-exchange feedback instead of auto-resolving as manual assets.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
