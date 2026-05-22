@@ -725,6 +725,71 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches explicit Boerse Frankfurt bond profiles from metadata ISINs", async () => {
+    const db = createAssetsDb();
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        fetched.push(url);
+        if (
+          url ===
+          "https://api.live.deutsche-boerse.com/v1/tradingview/symbols?symbol=XFRA%3ADE0001102341"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              name: "DE0001102341",
+              exchange: "XFRA",
+              description: "Bundesrepublik Deutschland 4.75%",
+              currency_code: "EUR",
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-boerse",
+        kind: "INVESTMENT",
+        name: "Old Bund",
+        metadata: JSON.stringify({ identifiers: { isin: "DE0001102341" } }),
+        quote_mode: "MARKET",
+        quote_ccy: "EUR",
+        instrument_type: "BOND",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('bond-boerse', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["bond-boerse"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(fetched).toEqual([
+        "https://api.live.deutsche-boerse.com/v1/tradingview/symbols?symbol=XFRA%3ADE0001102341",
+      ]);
+      expect(service.getAssetProfile("bond-boerse")).toMatchObject({
+        name: "Bundesrepublik Deutschland 4.75%",
+        metadata: { identifiers: { isin: "DE0001102341" } },
+        quoteCcy: "EUR",
+        instrumentType: "BOND",
+      });
+      expect(readSyncState(db, "bond-boerse")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
