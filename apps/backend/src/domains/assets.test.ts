@@ -820,6 +820,128 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("auto-classifies Yahoo provider sectors and region", async () => {
+    const db = createAssetsDb();
+    const assignments: NewAssetTaxonomyAssignment[] = [];
+    const service = createAssetService(db, {
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=crumb-cookie; Path=/" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          return Promise.resolve(new Response("crumb-token"));
+        }
+        if (
+          url ===
+          "https://query1.finance.yahoo.com/v10/finance/quoteSummary/VTI?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              quoteSummary: {
+                result: [
+                  {
+                    price: {
+                      currency: "USD",
+                      longName: "Vanguard Total Stock Market ETF",
+                      quoteType: "ETF",
+                    },
+                    topHoldings: {
+                      sectorWeightings: [
+                        { technology: { raw: 0.2915 } },
+                        { healthcare: { raw: 0.128 } },
+                      ],
+                    },
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+      taxonomyService: {
+        assignAssetToCategory(assignment) {
+          assignments.push(assignment);
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "etf-1",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_symbol: "VTI",
+        instrument_exchange_mic: "XNAS",
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('etf-1', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["etf-1"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(service.getAssetProfile("etf-1")).toMatchObject({
+        name: "Vanguard Total Stock Market ETF",
+        instrumentType: "EQUITY",
+        metadata: {
+          profile: {
+            quoteType: "ETF",
+            sectors: '[{"name":"Technology","weight":0.2915},{"name":"Healthcare","weight":0.128}]',
+          },
+        },
+      });
+      expect(assignments).toEqual([
+        {
+          assetId: "etf-1",
+          taxonomyId: "instrument_type",
+          categoryId: "ETF",
+          weight: 10000,
+          source: "AUTO",
+        },
+        {
+          assetId: "etf-1",
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 10000,
+          source: "AUTO",
+        },
+        {
+          assetId: "etf-1",
+          taxonomyId: "industries_gics",
+          categoryId: "45",
+          weight: 2915,
+          source: "AUTO",
+        },
+        {
+          assetId: "etf-1",
+          taxonomyId: "industries_gics",
+          categoryId: "35",
+          weight: 1280,
+          source: "AUTO",
+        },
+        {
+          assetId: "etf-1",
+          taxonomyId: "regions",
+          categoryId: "country_US",
+          weight: 10000,
+          source: "AUTO",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("falls back to Yahoo search profiles and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];

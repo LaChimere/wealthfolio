@@ -739,10 +739,10 @@ async function enrichAssetProfile(
   }
 
   const updated = updateEnrichedAssetProfile(db, asset, options, profile, bondDetails);
-  const classification = classifyCreatedAsset(
-    options,
-    rowToAsset(updated, exchangeMetadata.nameByMic),
-  );
+  const updatedAsset = rowToAsset(updated, exchangeMetadata.nameByMic);
+  const classification = profile
+    ? classifyProviderProfileAsset(options, updatedAsset, updated, profile)
+    : classifyCreatedAsset(options, updatedAsset);
   if (classification) {
     await classification;
   }
@@ -1084,23 +1084,94 @@ function classifyCreatedAsset(
   if (assignments.length === 0) {
     return undefined;
   }
-  return classifyCreatedAssetAsync(options.taxonomyService, assignments, options.warn);
+  return classifyCreatedAssetAsync(
+    options.taxonomyService,
+    assignments,
+    options.warn,
+    "Initial classification",
+  );
+}
+
+function classifyProviderProfileAsset(
+  options: AssetServiceOptions,
+  asset: Asset,
+  row: AssetRow,
+  profile: AssetProviderProfile,
+): Promise<void> | undefined {
+  if (!options.taxonomyService) {
+    return undefined;
+  }
+  const assignments = providerProfileClassificationAssignments(asset, row, profile);
+  if (assignments.length === 0) {
+    return undefined;
+  }
+  return classifyCreatedAssetAsync(
+    options.taxonomyService,
+    assignments,
+    options.warn,
+    "Auto-classification",
+  );
 }
 
 async function classifyCreatedAssetAsync(
   taxonomyService: Pick<TaxonomyService, "assignAssetToCategory">,
   assignments: NewAssetTaxonomyAssignment[],
   warn: ((message: string) => void) | undefined,
+  label: string,
 ): Promise<void> {
   for (const assignment of assignments) {
     try {
       await taxonomyService.assignAssetToCategory(assignment);
     } catch (error) {
       warn?.(
-        `Initial classification of asset ${assignment.assetId} ${assignment.taxonomyId} failed: ${errorMessage(error)}`,
+        `${label} of asset ${assignment.assetId} ${assignment.taxonomyId} failed: ${errorMessage(error)}`,
       );
     }
   }
+}
+
+function providerProfileClassificationAssignments(
+  asset: Asset,
+  row: AssetRow,
+  profile: AssetProviderProfile,
+): NewAssetTaxonomyAssignment[] {
+  const assignments: NewAssetTaxonomyAssignment[] = [];
+  if (profile.assetType) {
+    const instrumentTypeCategory = providerQuoteTypeInstrumentCategory(
+      profile.assetType,
+      profile.name ?? asset.name,
+    );
+    if (instrumentTypeCategory) {
+      assignments.push(taxonomyAssignment(asset.id, "instrument_type", instrumentTypeCategory));
+    }
+
+    const assetClassCategory = providerQuoteTypeAssetClass(profile.assetType);
+    if (assetClassCategory) {
+      assignments.push(taxonomyAssignment(asset.id, "asset_classes", assetClassCategory));
+    }
+  }
+
+  for (const sector of providerProfileSectors(profile.sectors)) {
+    const categoryId = providerSectorGicsCategory(sector.name);
+    if (categoryId) {
+      assignments.push(
+        taxonomyAssignment(
+          asset.id,
+          "industries_gics",
+          categoryId,
+          Math.round(sector.weight * 10000),
+        ),
+      );
+    }
+  }
+
+  const country =
+    providerProfileCountry(profile.countries) ?? countryForMic(row.instrument_exchange_mic);
+  const regionCategory = country ? providerCountryRegionCategory(country) : null;
+  if (regionCategory) {
+    assignments.push(taxonomyAssignment(asset.id, "regions", regionCategory));
+  }
+  return assignments;
 }
 
 function initialClassificationAssignments(asset: Asset): NewAssetTaxonomyAssignment[] {
@@ -1122,14 +1193,346 @@ function taxonomyAssignment(
   assetId: string,
   taxonomyId: string,
   categoryId: string,
+  weight = 10000,
 ): NewAssetTaxonomyAssignment {
   return {
     assetId,
     taxonomyId,
     categoryId,
-    weight: 10000,
+    weight,
     source: "AUTO",
   };
+}
+
+function providerQuoteTypeInstrumentCategory(
+  quoteType: string,
+  name: string | null | undefined,
+): string | null {
+  switch (quoteType.trim().toUpperCase()) {
+    case "EQUITY":
+      return "STOCK_COMMON";
+    case "ETF":
+    case "INDEX":
+      return "ETF";
+    case "MUTUALFUND":
+    case "MUTUAL FUND":
+      return "FUND_MUTUAL";
+    case "CRYPTOCURRENCY":
+    case "CRYPTO":
+      return "CRYPTO_NATIVE";
+    case "OPTION":
+      return "OPTION";
+    case "BOND":
+      return name && isGovernmentBondName(name) ? "BOND_GOVERNMENT" : "BOND_CORPORATE";
+    case "MONEYMARKET":
+      return "MONEY_MARKET_DEBT";
+    case "FUTURE":
+    case "FUTURES":
+      return "FUTURE";
+    default:
+      return null;
+  }
+}
+
+function providerQuoteTypeAssetClass(quoteType: string): string | null {
+  switch (quoteType.trim().toUpperCase()) {
+    case "EQUITY":
+    case "ETF":
+    case "MUTUALFUND":
+    case "MUTUAL FUND":
+    case "INDEX":
+    case "OPTION":
+      return "EQUITY";
+    case "BOND":
+    case "MONEYMARKET":
+      return "FIXED_INCOME";
+    case "CURRENCY":
+    case "FOREX":
+    case "FX":
+    case "CASH":
+      return "CASH_BANK_DEPOSITS";
+    case "CRYPTOCURRENCY":
+    case "CRYPTO":
+      return "DIGITAL_ASSETS";
+    case "COMMODITY":
+    case "FUTURE":
+    case "FUTURES":
+      return "COMMODITIES";
+    default:
+      return null;
+  }
+}
+
+function isGovernmentBondName(name: string): boolean {
+  const normalized = name.toUpperCase();
+  return (
+    normalized.includes("TREASURY") ||
+    normalized.includes("T-BILL") ||
+    normalized.includes("T-NOTE") ||
+    normalized.includes("T-BOND") ||
+    normalized.includes("GOVT OF CANADA") ||
+    normalized.includes("GOVERNMENT OF CANADA") ||
+    normalized.includes("CANADA GOVT") ||
+    normalized.includes(" GILT") ||
+    normalized.includes("BUNDESREPUBLIK") ||
+    normalized.includes("BUNDESOBLIGATION") ||
+    normalized.includes("OAT ") ||
+    normalized.startsWith("OAT ") ||
+    normalized.includes("JAPAN GOVT") ||
+    normalized.includes("JAPANESE GOVERNMENT") ||
+    normalized.includes("SOVEREIGN")
+  );
+}
+
+function providerProfileSectors(
+  value: string | undefined,
+): Array<{ name: string; weight: number }> {
+  if (!value) {
+    return [];
+  }
+  const parsed = parseWeightedProfileEntries(value);
+  return parsed.filter((entry) => entry !== null);
+}
+
+function providerProfileCountry(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  return parseWeightedProfileEntries(value)[0]?.name ?? null;
+}
+
+function parseWeightedProfileEntries(
+  value: string,
+): Array<{ name: string; weight: number } | null> {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.map((entry) => {
+    if (!isRecord(entry) || typeof entry.name !== "string" || typeof entry.weight !== "number") {
+      return null;
+    }
+    if (entry.name.trim() === "" || !Number.isFinite(entry.weight)) {
+      return null;
+    }
+    return { name: entry.name, weight: entry.weight };
+  });
+}
+
+function providerSectorGicsCategory(sector: string): string | null {
+  switch (sector.toLowerCase()) {
+    case "energy":
+      return "10";
+    case "materials":
+    case "basic materials":
+      return "15";
+    case "industrials":
+      return "20";
+    case "consumer discretionary":
+    case "consumer cyclical":
+      return "25";
+    case "consumer staples":
+    case "consumer defensive":
+      return "30";
+    case "health care":
+    case "healthcare":
+      return "35";
+    case "financials":
+    case "financial services":
+    case "financial":
+      return "40";
+    case "information technology":
+    case "technology":
+      return "45";
+    case "communication services":
+    case "communication":
+    case "telecommunications":
+      return "50";
+    case "utilities":
+      return "55";
+    case "real estate":
+    case "realestate":
+      return "60";
+    default:
+      return null;
+  }
+}
+
+function countryForMic(mic: string | null): string | null {
+  switch (mic) {
+    case "XNYS":
+    case "XNAS":
+    case "XASE":
+    case "ARCX":
+    case "BATS":
+      return "United States";
+    case "XTSE":
+    case "XTSX":
+    case "XCNQ":
+      return "Canada";
+    case "XMEX":
+      return "Mexico";
+    case "XLON":
+      return "United Kingdom";
+    case "XDUB":
+      return "Ireland";
+    case "XETR":
+    case "XFRA":
+    case "XSTU":
+    case "XHAM":
+    case "XDUS":
+    case "XMUN":
+    case "XBER":
+    case "XHAN":
+      return "Germany";
+    case "XPAR":
+      return "France";
+    case "XAMS":
+      return "Netherlands";
+    case "XBRU":
+      return "Belgium";
+    case "XLIS":
+      return "Portugal";
+    case "XMIL":
+      return "Italy";
+    case "XMAD":
+      return "Spain";
+    case "XATH":
+      return "Greece";
+    case "XSTO":
+      return "Sweden";
+    case "XHEL":
+      return "Finland";
+    case "XCSE":
+      return "Denmark";
+    case "XOSL":
+      return "Norway";
+    case "XSWX":
+      return "Switzerland";
+    case "XWBO":
+      return "Austria";
+    case "XWAR":
+      return "Poland";
+    case "XSHG":
+    case "XSHE":
+      return "China";
+    case "XHKG":
+      return "Hong Kong";
+    case "XTKS":
+      return "Japan";
+    case "XKRX":
+    case "XKOS":
+      return "South Korea";
+    case "XSES":
+      return "Singapore";
+    case "XBOM":
+    case "XNSE":
+      return "India";
+    case "XTAI":
+      return "Taiwan";
+    case "XASX":
+      return "Australia";
+    case "XNZE":
+      return "New Zealand";
+    case "BVMF":
+      return "Brazil";
+    case "XTAE":
+      return "Israel";
+    case "XJSE":
+      return "South Africa";
+    default:
+      return null;
+  }
+}
+
+function providerCountryRegionCategory(country: string): string | null {
+  switch (country.toLowerCase()) {
+    case "united states":
+    case "usa":
+    case "us":
+      return "country_US";
+    case "canada":
+      return "country_CA";
+    case "japan":
+    case "\u65e5\u672c":
+      return "country_JP";
+    case "china":
+    case "\u4e2d\u56fd":
+      return "country_CN";
+    case "hong kong":
+    case "\u9999\u6e2f":
+      return "country_HK";
+    case "australia":
+      return "country_AU";
+    case "united kingdom":
+    case "uk":
+    case "great britain":
+    case "england":
+    case "germany":
+    case "deutschland":
+    case "france":
+    case "switzerland":
+    case "schweiz":
+    case "netherlands":
+    case "holland":
+    case "spain":
+    case "espa\u00f1a":
+    case "italy":
+    case "italia":
+    case "sweden":
+    case "sverige":
+    case "ireland":
+    case "belgium":
+    case "denmark":
+    case "danmark":
+    case "norway":
+    case "norge":
+    case "finland":
+    case "suomi":
+    case "austria":
+    case "\u00f6sterreich":
+    case "portugal":
+    case "poland":
+    case "polska":
+    case "greece":
+    case "czech republic":
+    case "czechia":
+    case "russia":
+      return "R10";
+    case "mexico":
+    case "m\u00e9xico":
+      return "R2010";
+    case "brazil":
+    case "brasil":
+    case "argentina":
+    case "chile":
+    case "colombia":
+    case "peru":
+      return "R2040";
+    case "south korea":
+    case "korea":
+    case "\ub300\ud55c\ubbfc\uad6d":
+    case "taiwan":
+    case "\u81fa\u7063":
+      return "R3030";
+    case "singapore":
+    case "india":
+    case "\u092d\u093e\u0930\u0924":
+    case "indonesia":
+    case "malaysia":
+    case "thailand":
+    case "vietnam":
+    case "philippines":
+      return "R30";
+    case "new zealand":
+      return "R50";
+    case "south africa":
+    case "nigeria":
+    case "egypt":
+      return "R40";
+    default:
+      return null;
+  }
 }
 
 function instrumentTypeTaxonomyCategory(instrumentType: string | null): string | null {
