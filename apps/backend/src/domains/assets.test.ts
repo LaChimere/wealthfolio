@@ -572,6 +572,76 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches explicit OpenFIGI bond profiles without metadata churn", async () => {
+    const db = createAssetsDb();
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+        requests.push({ url, body });
+        if (url === "https://api.openfigi.com/v3/mapping") {
+          return Promise.resolve(
+            Response.json([
+              {
+                data: [
+                  {
+                    name: "ACME CORP BOND",
+                    ticker: "ACME 4 02/15/44",
+                  },
+                ],
+              },
+            ]),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-openfigi",
+        kind: "INVESTMENT",
+        name: "Old Bond",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "XS1234567890",
+        provider_config: JSON.stringify({ preferred_provider: "OPENFIGI" }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('bond-openfigi', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["bond-openfigi"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(requests).toEqual([
+        {
+          url: "https://api.openfigi.com/v3/mapping",
+          body: [{ idType: "ID_ISIN", idValue: "XS1234567890" }],
+        },
+      ]);
+      expect(service.getAssetProfile("bond-openfigi")).toMatchObject({
+        name: "ACME CORP BOND - ACME 4 02/15/44",
+        metadata: null,
+        quoteCcy: "USD",
+        instrumentType: "BOND",
+      });
+      expect(readSyncState(db, "bond-openfigi")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];

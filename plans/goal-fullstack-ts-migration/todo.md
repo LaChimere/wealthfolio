@@ -2902,6 +2902,14 @@ contract:
   summaries and general-purpose latest sync using historical row extraction with
   a 90-day range and choosing the newest dated row, matching Rust's
   latest-from-historical fallback behavior.
+- `pr5-openfigi-bond-profile-enrichment`: verification passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "OpenFIGI bond profiles|US Treasury bond metadata|unsupported market profiles"`,
+  `bun test apps/backend/src/domains/assets.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes explicit
+  OpenFIGI BOND profile enrichment through the mapping API with `ID_ISIN`,
+  Rust-compatible `name - ticker` formatting, profile-enriched marking, and
+  metadata preservation for name-only provider profiles.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

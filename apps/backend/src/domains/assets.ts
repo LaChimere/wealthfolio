@@ -184,6 +184,8 @@ const VALID_ASSET_KINDS = new Set([
 ]);
 const VALID_QUOTE_MODES = new Set(["MARKET", "MANUAL"]);
 const VALID_INSTRUMENT_TYPES = new Set(["EQUITY", "CRYPTO", "FX", "OPTION", "METAL", "BOND"]);
+const OPENFIGI_PROVIDER = "OPENFIGI";
+const OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping";
 const yahooCrumbCache = new WeakMap<typeof fetch, { cookie: string; crumb: string }>();
 
 export function createAssetService(db: Database, options: AssetServiceOptions = {}): AssetService {
@@ -754,7 +756,11 @@ async function fetchAssetProviderProfile(
   asset: AssetRow,
   options: AssetServiceOptions,
 ): Promise<AssetProviderProfile | null> {
-  if (!shouldFetchYahooProfile(asset)) {
+  const provider = preferredProviderId(asset.provider_config);
+  if (shouldFetchOpenFigiProfile(asset, provider)) {
+    return fetchOpenFigiBondProfile(asset.instrument_symbol?.trim() ?? "", options.fetch ?? fetch);
+  }
+  if (!shouldFetchYahooProfile(provider)) {
     return null;
   }
   const symbol = yahooProfileSymbol(asset, options);
@@ -764,9 +770,12 @@ async function fetchAssetProviderProfile(
   return fetchYahooProfile(symbol, options.fetch ?? fetch);
 }
 
-function shouldFetchYahooProfile(asset: AssetRow): boolean {
-  const provider = preferredProviderId(asset.provider_config);
+function shouldFetchYahooProfile(provider: string | null): boolean {
   return provider === null || provider === "YAHOO";
+}
+
+function shouldFetchOpenFigiProfile(asset: AssetRow, provider: string | null): boolean {
+  return provider === OPENFIGI_PROVIDER && asset.instrument_type === "BOND";
 }
 
 function yahooProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {
@@ -829,6 +838,63 @@ async function fetchYahooSearchProfile(
     throw new Error(`Symbol not found: ${symbol}`);
   }
   return query1Profile;
+}
+
+async function fetchOpenFigiBondProfile(
+  isin: string,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile> {
+  if (!isin) {
+    throw new Error(`${OPENFIGI_PROVIDER}: Symbol not found`);
+  }
+  const payload = await fetchOpenFigiMapping(isin, fetchImpl);
+  const first = payload[0];
+  if (!isRecord(first)) {
+    throw new Error(`${OPENFIGI_PROVIDER}: Symbol not found: ${isin}`);
+  }
+  const name = optionalString(first.name);
+  if (!name) {
+    throw new Error(`${OPENFIGI_PROVIDER}: No name found for ${isin}`);
+  }
+  const ticker = optionalString(first.ticker);
+  return {
+    source: OPENFIGI_PROVIDER,
+    name: ticker ? `${name} - ${ticker}` : name,
+  };
+}
+
+async function fetchOpenFigiMapping(
+  isin: string,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>[]> {
+  let response: Response;
+  try {
+    response = await fetchImpl(OPENFIGI_MAPPING_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ idType: "ID_ISIN", idValue: isin }]),
+    });
+  } catch (error) {
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${response.status}`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new Error(`${OPENFIGI_PROVIDER}: JSON parse error: ${errorMessage(error)}`);
+  }
+  if (!Array.isArray(payload)) {
+    throw new Error(`${OPENFIGI_PROVIDER}: JSON parse error`);
+  }
+  const first = payload[0];
+  if (!isRecord(first) || !Array.isArray(first.data)) {
+    return [];
+  }
+  return first.data.filter(isRecord);
 }
 
 async function fetchYahooSearchProfileFromEndpoint(
@@ -931,8 +997,9 @@ function updateEnrichedAssetProfile(
 ): AssetRow {
   const metadata = parseJsonValue(asset.metadata);
   const metadataObject = isRecord(metadata) ? { ...metadata } : {};
+  let metadataChanged = false;
   if (profile) {
-    mergeProviderProfileMetadata(metadataObject, profile);
+    metadataChanged = mergeProviderProfileMetadata(metadataObject, profile);
   }
   if (bondDetails) {
     const existingBond = isRecord(metadataObject.bond) ? metadataObject.bond : {};
@@ -944,6 +1011,7 @@ function updateEnrichedAssetProfile(
       faceValue: bondDetails.faceValue,
       couponFrequency: normalizeCouponFrequency(bondDetails.couponFrequency),
     };
+    metadataChanged = true;
   }
 
   const instrumentType =
@@ -969,7 +1037,7 @@ function updateEnrichedAssetProfile(
     .get(
       profile?.name ?? asset.name,
       notes,
-      serializeJsonValue(metadataObject),
+      metadataChanged ? serializeJsonValue(metadataObject) : asset.metadata,
       instrumentType,
       quoteCcy,
       currentTimestamp(options),
@@ -985,7 +1053,7 @@ function updateEnrichedAssetProfile(
 function mergeProviderProfileMetadata(
   metadataObject: Record<string, unknown>,
   profile: AssetProviderProfile,
-): void {
+): boolean {
   const profileMetadata: Record<string, unknown> = {};
   if (profile.sectors) {
     profileMetadata.sectors = profile.sectors;
@@ -1019,7 +1087,9 @@ function mergeProviderProfileMetadata(
   }
   if (Object.keys(profileMetadata).length > 0) {
     metadataObject.profile = profileMetadata;
+    return true;
   }
+  return false;
 }
 
 async function fetchUsTreasuryBondDetails(
