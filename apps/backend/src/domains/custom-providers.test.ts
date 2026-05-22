@@ -449,6 +449,93 @@ describe("TS custom providers domain", () => {
     }
   });
 
+  test("uses default prices for empty URLs and fetch failures like Rust", async () => {
+    const db = createCustomProvidersDb();
+    const calls: string[] = [];
+    const service = createCustomProviderService(createCustomProviderRepository(db), {
+      fetchImpl: ((input) => {
+        const url = input.toString();
+        calls.push(url);
+        if (url.includes("network")) {
+          return Promise.reject(new Error("connection refused"));
+        }
+        return Promise.resolve(new Response("Service down", { status: 503 }));
+      }) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+    });
+
+    try {
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          url: "",
+          defaultPrice: 12.34,
+          currency: "CAD",
+          factor: 2,
+          invert: true,
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        statusCode: null,
+        price: 12.34,
+        currency: "CAD",
+      });
+
+      await expect(
+        service.fetchSourceRows({
+          ...baseTestSourceRequest(),
+          url: "",
+          defaultPrice: 56.78,
+          currency: "EUR",
+        }),
+      ).resolves.toEqual({
+        statusCode: null,
+        currency: "EUR",
+        rows: [
+          {
+            price: 56.78,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            date: null,
+          },
+        ],
+      });
+
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          url: "https://example.test/network",
+          defaultPrice: 9.5,
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        statusCode: null,
+        price: 9.5,
+        currency: "USD",
+      });
+
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          url: "https://example.test/http",
+          defaultPrice: 8.75,
+          currency: "GBP",
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        statusCode: 503,
+        price: 8.75,
+        currency: "GBP",
+        rawResponse: null,
+      });
+
+      expect(calls).toEqual(["https://example.test/network", "https://example.test/http"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("tests CSV sources with delimiter detection, last-row extraction, and locale parsing", async () => {
     const db = createCustomProvidersDb();
     const service = createCustomProviderService(createCustomProviderRepository(db), {

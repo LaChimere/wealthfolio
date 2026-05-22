@@ -491,6 +491,14 @@ async function fetchCustomProviderSourceRows(
 ): Promise<CustomProviderRowsResult> {
   const fetched = await fetchCustomProviderSourceBody(payload, options);
   if (isTestSourceResult(fetched)) {
+    const rows = defaultPriceRows(fetched);
+    if (rows) {
+      return {
+        statusCode: fetched.statusCode,
+        currency: fetched.currency,
+        rows,
+      };
+    }
     throw new Error(fetched.error ?? "Custom provider source fetch failed");
   }
   const { context, statusCode, body } = fetched;
@@ -560,11 +568,21 @@ async function fetchCustomProviderSourceBody(
     to: payload.to ?? undefined,
   };
   const url = expandTemplate(payload.url, context, options.now());
+  if (url === "") {
+    const fallback = defaultPriceResult(payload);
+    if (fallback) {
+      return fallback;
+    }
+  }
   validateHttpUrl(url);
 
   const headers = await buildTestSourceHeaders(payload, url, options.secretService);
   const response = await fetchWithRedirects(url, headers, options.fetchImpl);
   if (response instanceof Error) {
+    const fallback = defaultPriceResult(payload);
+    if (fallback) {
+      return fallback;
+    }
     return testSourceResult({
       success: false,
       error: `HTTP request failed: ${response.message}`,
@@ -572,8 +590,18 @@ async function fetchCustomProviderSourceBody(
   }
 
   const statusCode = response.status;
+  if (!response.ok) {
+    const fallback = defaultPriceResult(payload, statusCode);
+    if (fallback) {
+      return fallback;
+    }
+  }
   const contentLength = parseContentLength(response.headers.get("content-length"));
   if (contentLength !== null && contentLength > options.responseSizeLimitBytes) {
+    const fallback = defaultPriceResult(payload, statusCode);
+    if (fallback) {
+      return fallback;
+    }
     return testSourceResult({
       success: false,
       statusCode,
@@ -585,6 +613,10 @@ async function fetchCustomProviderSourceBody(
   try {
     bodyBytes = await response.arrayBuffer();
   } catch (error) {
+    const fallback = defaultPriceResult(payload, statusCode);
+    if (fallback) {
+      return fallback;
+    }
     return testSourceResult({
       success: false,
       statusCode,
@@ -593,6 +625,10 @@ async function fetchCustomProviderSourceBody(
   }
 
   if (bodyBytes.byteLength > options.responseSizeLimitBytes) {
+    const fallback = defaultPriceResult(payload, statusCode);
+    if (fallback) {
+      return fallback;
+    }
     return testSourceResult({
       success: false,
       statusCode,
@@ -951,6 +987,38 @@ function testSourceResult(overrides: Partial<TestSourceResult>): TestSourceResul
     detectedTables: null,
     ...overrides,
   };
+}
+
+function defaultPriceResult(
+  payload: TestSourceRequest,
+  statusCode: number | null = null,
+): TestSourceResult | null {
+  const price = payload.defaultPrice;
+  if (price === null || price === undefined || !Number.isFinite(price)) {
+    return null;
+  }
+  return testSourceResult({
+    success: true,
+    statusCode,
+    price,
+    currency: payload.currency ?? "USD",
+  });
+}
+
+function defaultPriceRows(result: TestSourceResult): CustomProviderQuoteRow[] | null {
+  if (!result.success || result.price === null || !Number.isFinite(result.price)) {
+    return null;
+  }
+  return [
+    {
+      price: result.price,
+      open: null,
+      high: null,
+      low: null,
+      volume: null,
+      date: null,
+    },
+  ];
 }
 
 interface TemplateContext {

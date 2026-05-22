@@ -2765,6 +2765,15 @@ contract:
   replay grouping a `2025-01-01T07:30:00Z` BUY into the `2024-12-31` snapshot
   for `America/Los_Angeles`, carrying the resulting position/cash into the next
   day, and keeping invalid activity dates as explicit replay failures.
+- `pr5-custom-provider-default-price-fallback`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts --test-name-pattern "default prices|source fetch|CSV sources|HTML sources|HTML table"`,
+  `bun test apps/backend/src/domains/custom-providers.test.ts`,
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "custom provider"`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes empty-source
+  URL fallback without fetching, network and HTTP failure fallback to the
+  configured static price/currency, historical row fallback for
+  `fetchSourceRows`, and unchanged CSV/HTML/table extraction behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
