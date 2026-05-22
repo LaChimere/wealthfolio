@@ -2805,6 +2805,14 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes invalid UTF-8
   response bodies returning a Rust-compatible source-test error and invalid-body
   fetch failures falling back to configured `defaultPrice`.
+- `pr5-custom-provider-transient-retry-parity`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts --test-name-pattern "network failures|default prices"`,
+  `bun test apps/backend/src/domains/custom-providers.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes a single retry
+  after network and HTTP 5xx fetch failures before returning an error or
+  applying configured `defaultPrice`, while 4xx responses and redirect behavior
+  remain unchanged.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

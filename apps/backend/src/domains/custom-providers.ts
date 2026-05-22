@@ -1204,13 +1204,28 @@ async function fetchWithRedirects(
   const timeout = setTimeout(() => controller.abort("custom provider test-source timeout"), 15_000);
   try {
     let url = initialUrl;
-    for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
-      const response = await fetchImpl(url, {
-        headers,
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-      });
+    let redirectCount = 0;
+    let retriedTransientFailure = false;
+    while (redirectCount <= 5) {
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          headers,
+          method: "GET",
+          redirect: "manual",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (!retriedTransientFailure) {
+          retriedTransientFailure = true;
+          continue;
+        }
+        return error instanceof Error ? error : new Error(String(error));
+      }
+      if (response.status >= 500 && !retriedTransientFailure) {
+        retriedTransientFailure = true;
+        continue;
+      }
       if (!isRedirectStatus(response.status)) {
         return response;
       }
@@ -1221,6 +1236,7 @@ async function fetchWithRedirects(
       if (redirectCount === 5) {
         return new Error("redirect limit exceeded");
       }
+      redirectCount += 1;
       url = new URL(location, url).toString();
       headers.set("referer", `${new URL(url).origin}/`);
     }

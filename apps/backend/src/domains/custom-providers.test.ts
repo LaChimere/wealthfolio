@@ -435,6 +435,51 @@ describe("TS custom providers domain", () => {
       invalidUtf8Db.close();
     }
 
+    const retryDb = createCustomProvidersDb();
+    let serverRetryCalls = 0;
+    const retryService = createCustomProviderService(createCustomProviderRepository(retryDb), {
+      fetchImpl: (() => {
+        serverRetryCalls += 1;
+        return Promise.resolve(
+          serverRetryCalls === 1
+            ? new Response("temporary outage", { status: 503 })
+            : jsonResponse({ price: 64 }),
+        );
+      }) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+    });
+    try {
+      await expect(retryService.testSource(baseTestSourceRequest())).resolves.toMatchObject({
+        success: true,
+        price: 64,
+      });
+      expect(serverRetryCalls).toBe(2);
+    } finally {
+      retryDb.close();
+    }
+
+    const networkRetryDb = createCustomProvidersDb();
+    let networkRetryCalls = 0;
+    const networkRetryService = createCustomProviderService(
+      createCustomProviderRepository(networkRetryDb),
+      {
+        fetchImpl: (() => {
+          networkRetryCalls += 1;
+          return networkRetryCalls === 1
+            ? Promise.reject(new Error("socket hang up"))
+            : jsonResponse({ price: 65 });
+        }) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      },
+    );
+    try {
+      await expect(networkRetryService.testSource(baseTestSourceRequest())).resolves.toMatchObject({
+        success: true,
+        price: 65,
+      });
+      expect(networkRetryCalls).toBe(2);
+    } finally {
+      networkRetryDb.close();
+    }
+
     const redirectDb = createCustomProvidersDb();
     const redirectCalls: string[] = [];
     const redirectService = createCustomProviderService(
@@ -571,6 +616,8 @@ describe("TS custom providers domain", () => {
 
       expect(calls).toEqual([
         "https://example.test/network",
+        "https://example.test/network",
+        "https://example.test/http",
         "https://example.test/http",
         "https://example.test/invalid-utf8",
       ]);
