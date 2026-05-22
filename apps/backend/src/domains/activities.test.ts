@@ -2648,6 +2648,57 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("derives direct activity-created asset kind from instrument type like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const equityActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          symbol: "AAPL",
+          kind: "PROPERTY",
+          instrumentType: "EQUITY",
+          exchangeMic: "XNAS",
+          quoteCcy: "USD",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-21",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(readAssetById(db, equityActivity.assetId ?? "")).toMatchObject({
+        kind: "INVESTMENT",
+        instrument_type: "EQUITY",
+      });
+
+      const fxActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          symbol: "EUR/USD",
+          kind: "PROPERTY",
+          instrumentType: "FX",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-22",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(readAssetById(db, fxActivity.assetId ?? "")).toMatchObject({
+        kind: "FX",
+        instrument_type: "FX",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("infers Börse Frankfurt provider config for activity-created German ISIN equities", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

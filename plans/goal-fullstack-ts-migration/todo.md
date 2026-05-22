@@ -2458,6 +2458,13 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes implicit
   crypto-pair inference only for Rust's supported quote-code set while
   preserving explicit `kind: CRYPTO` pair parsing for wider broker symbols.
+- `pr5-activities-direct-asset-kind-derivation`: verification passed: focused
+  asset kind derivation test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes explicit
+  instrument type taking precedence over conflicting alternative-kind hints for
+  activity-created assets, matching Rust's `kind_from_instrument_type` behavior.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

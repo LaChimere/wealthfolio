@@ -4180,22 +4180,8 @@ function inferActivityInstrumentType(
   return "EQUITY";
 }
 
-function normalizeActivityAssetKind(kind: string | undefined, instrumentType: string): string {
-  if (instrumentType === "FX") {
-    return "FX";
-  }
-  switch (kind?.trim().toUpperCase()) {
-    case "PROPERTY":
-    case "VEHICLE":
-    case "COLLECTIBLE":
-    case "PRECIOUS_METAL":
-    case "PRIVATE_EQUITY":
-    case "LIABILITY":
-    case "OTHER":
-      return kind.trim().toUpperCase();
-    default:
-      return "INVESTMENT";
-  }
+function normalizeActivityAssetKind(_kind: string | undefined, instrumentType: string): string {
+  return instrumentType === "FX" ? "FX" : "INVESTMENT";
 }
 
 function normalizeActivityAssetQuoteCcyForNewAsset(
