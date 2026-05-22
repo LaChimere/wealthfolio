@@ -2056,6 +2056,40 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("infers direct activity-created crypto assets from pair symbols like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "btc-usd" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "0.5",
+        unitPrice: "100000",
+        amount: "50000",
+        currency: "USD",
+      }) as Activity;
+
+      const asset = readAssetById(db, created.assetId ?? "");
+      expect(asset).toMatchObject({
+        kind: "INVESTMENT",
+        display_code: "BTC",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "BTC",
+        instrument_exchange_mic: null,
+        provider_config: '{"preferred_provider":"YAHOO"}',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures direct activity FX pairs before create writes", async () => {
     const db = createActivitiesDb();
     const ensuredPairs: Array<[string, string]> = [];
@@ -2269,7 +2303,7 @@ describe("TS activities import domain", () => {
           activityDate: "2025-01-15",
           currency: "USD",
         }),
-      ).toThrow("Instrument type is required to create asset from symbol UNKNOWN");
+      ).toThrow("Quote currency is required. Please re-select the symbol.");
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",

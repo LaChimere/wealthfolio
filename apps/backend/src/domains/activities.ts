@@ -3773,7 +3773,8 @@ function pendingActivityAssetFromInput(
     throw new Error(`Invalid symbol '${rawSymbol}'. Please search for a valid ticker.`);
   }
 
-  const instrumentType = normalizeInstrumentType(asset.instrumentType);
+  const instrumentType =
+    normalizeInstrumentType(asset.instrumentType) ?? inferActivityInstrumentType(asset, rawSymbol);
   if (!instrumentType) {
     throw new Error(`Instrument type is required to create asset from symbol ${rawSymbol}`);
   }
@@ -3804,9 +3805,13 @@ function pendingActivityAssetFromInput(
     exchangeMic = null;
   }
 
-  const quoteCcy = normalizeActivityAssetQuoteCcy(parsedQuoteCcy ?? asset.quoteCcy, [
-    ...fallbackCurrencies,
-  ]);
+  const quoteCcy = normalizeActivityAssetQuoteCcyForNewAsset(
+    parsedQuoteCcy,
+    asset.quoteCcy,
+    [...fallbackCurrencies],
+    instrumentType,
+    quoteMode,
+  );
   if (instrumentType === "EQUITY" && quoteMode === "MARKET" && !exchangeMic) {
     throw new Error(`Exchange MIC is required to create market asset ${instrumentSymbol}`);
   }
@@ -3822,6 +3827,62 @@ function pendingActivityAssetFromInput(
     instrumentSymbol,
     instrumentExchangeMic: exchangeMic,
   };
+}
+
+function inferActivityInstrumentType(
+  asset: ActivityAssetInput,
+  rawSymbol: string,
+): string | undefined {
+  switch (asset.kind?.trim().toUpperCase()) {
+    case "SECURITY":
+    case "INVESTMENT":
+    case "EQUITY":
+      return "EQUITY";
+    case "CRYPTO":
+      return "CRYPTO";
+    case "FX_RATE":
+    case "FX":
+      return "FX";
+    case "OPTION":
+    case "OPT":
+      return "OPTION";
+    case "BOND":
+      return "BOND";
+    case "COMMODITY":
+    case "CMDTY":
+    case "METAL":
+      return "METAL";
+    case "PROPERTY":
+    case "PROP":
+    case "VEHICLE":
+    case "VEH":
+    case "COLLECTIBLE":
+    case "COLL":
+    case "PRECIOUS_METAL":
+    case "PREC":
+    case "PRIVATE_EQUITY":
+    case "PEQ":
+    case "LIABILITY":
+    case "LIAB":
+    case "OTHER":
+    case "ALT":
+      return undefined;
+  }
+
+  const upperSymbol = rawSymbol.trim().toUpperCase();
+  if (parseActivityCryptoPairSymbol(upperSymbol)) {
+    return "CRYPTO";
+  }
+  if (/^[A-Z]{1,6}\d{6}[CP]\d{8}$/u.test(upperSymbol)) {
+    return "OPTION";
+  }
+  if (asset.exchangeMic?.trim()) {
+    return "EQUITY";
+  }
+  if (isCommonCryptoSymbol(upperSymbol)) {
+    return "CRYPTO";
+  }
+  return "EQUITY";
 }
 
 function normalizeActivityAssetKind(kind: string | undefined, instrumentType: string): string {
@@ -3840,6 +3901,29 @@ function normalizeActivityAssetKind(kind: string | undefined, instrumentType: st
     default:
       return "INVESTMENT";
   }
+}
+
+function normalizeActivityAssetQuoteCcyForNewAsset(
+  parsedQuoteCcy: string | undefined,
+  quoteCcy: string | undefined,
+  fallbackCurrencies: string[],
+  instrumentType: string,
+  quoteMode: string,
+): string {
+  const explicitQuoteCcy = parsedQuoteCcy ?? quoteCcy;
+  if (explicitQuoteCcy !== undefined) {
+    const normalized = normalizeImportQuoteCurrency(explicitQuoteCcy);
+    if (!normalized) {
+      throw new Error(`Invalid input: quote currency '${explicitQuoteCcy}' is not supported`);
+    }
+    return normalized;
+  }
+
+  if (quoteMode === "MARKET" && instrumentType !== "CRYPTO" && instrumentType !== "FX") {
+    throw new Error("Quote currency is required. Please re-select the symbol.");
+  }
+
+  return normalizeActivityAssetQuoteCcy(undefined, fallbackCurrencies);
 }
 
 function normalizeActivityAssetQuoteCcy(
@@ -4072,6 +4156,39 @@ function parseActivityFxSymbol(symbol: string): { base: string; quote: string } 
     return { base: cleaned.slice(0, 3), quote: cleaned.slice(3) };
   }
   return null;
+}
+
+function isCommonCryptoSymbol(symbol: string): boolean {
+  return [
+    "BTC",
+    "ETH",
+    "XRP",
+    "LTC",
+    "BCH",
+    "ADA",
+    "DOT",
+    "LINK",
+    "XLM",
+    "DOGE",
+    "UNI",
+    "SOL",
+    "AVAX",
+    "MATIC",
+    "ATOM",
+    "ALGO",
+    "VET",
+    "FIL",
+    "TRX",
+    "ETC",
+    "XMR",
+    "AAVE",
+    "MKR",
+    "COMP",
+    "SNX",
+    "YFI",
+    "SUSHI",
+    "CRV",
+  ].includes(symbol);
 }
 
 function generatedActivityInstrumentKey(asset: PendingActivityAsset): string {

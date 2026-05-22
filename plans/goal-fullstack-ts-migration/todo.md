@@ -220,13 +220,15 @@
     local portfolio jobs, post-portfolio active goal-summary refresh,
     broker-sync failure continuation, and bounded asset-enrichment execution for
     US Treasury bond metadata plus Yahoo quoteSummary/search profile enrichment
-    with provider-profile taxonomy assignment and asset Update sync callbacks
-    now have TS runtime parity, while provider-backed asset resolution outside
-    the activity preview/check round-trip and remaining quote sync outbox
-    follow-ups outside migrated alternative-asset and market-data quote paths,
-    device-sync push/pull runtime wiring, and remaining device-sync side effects
-    are deferred to activities/import/device-sync runtime parity slices; AI chat
-    persistence, tag persistence, tool-result mutation, local AI chat
+    with provider-profile taxonomy assignment and asset Update sync callbacks,
+    plus direct activity-created crypto/FX/option/security instrument inference
+    and Rust-compatible quote-currency errors for incomplete market securities,
+    now have TS runtime parity, while broader provider-backed asset resolution
+    outside the activity preview/check/apply round-trip and remaining quote sync
+    outbox follow-ups outside migrated alternative-asset and market-data quote
+    paths, device-sync push/pull runtime wiring, and remaining device-sync side
+    effects are deferred to activities/import/device-sync runtime parity slices;
+    AI chat persistence, tag persistence, tool-result mutation, local AI chat
     sync_outbox callbacks, native/fallback text/reasoning provider streaming,
     generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
     tool-call execution, built-in `get_accounts`, `get_holdings`,
@@ -2432,6 +2434,14 @@ contract:
   includes direct import apply using provider search and currency-aware Yahoo
   suffix fallback to enrich symbol-only market rows with MIC, name, instrument
   type, and quote currency before creating assets.
+- `pr5-activities-direct-asset-inference`: focused verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts` and
+  `bun run --cwd apps/backend type-check`, plus
+  `bun run --cwd apps/backend test` and full `bun run check`. Coverage includes
+  direct activity writes inferring crypto pair assets from Rust-compatible
+  symbol/kind heuristics, preserving activity-created asset sync payload shape,
+  and rejecting incomplete market security symbols with Rust's quote-currency
+  re-selection error.
 - `pr5-holdings-import-write-provider-resolution`: focused verification passed:
   `bun test apps/backend/src/domains/holdings.test.ts` and
   `bun run --cwd apps/backend type-check`, plus full `bun run check`. Coverage
