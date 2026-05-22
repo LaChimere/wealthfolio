@@ -626,6 +626,61 @@ function addMarketSyncSkip(result: MarketDataSyncResult, assetId: string, reason
   result.skippedReasons.push([assetId, reason]);
 }
 
+function validatedProviderQuoteWrite(asset: AssetMarketSyncRow, quote: QuoteWrite): QuoteWrite {
+  const error = providerQuoteValidationError(asset, quote);
+  if (error !== null) {
+    throw new Error(`Quote validation failed: ${error}`);
+  }
+  return quote;
+}
+
+function validatedProviderQuoteWrites(
+  asset: AssetMarketSyncRow,
+  quotes: QuoteWrite[],
+): QuoteWrite[] {
+  const validQuotes = quotes.filter((quote) => providerQuoteValidationError(asset, quote) === null);
+  if (validQuotes.length === 0 && quotes.length > 0) {
+    throw new Error("All quotes failed validation");
+  }
+  return validQuotes;
+}
+
+function providerQuoteValidationError(asset: AssetMarketSyncRow, quote: QuoteWrite): string | null {
+  const errors: string[] = [];
+  if (compareDecimals(quote.close, "0") < 0) {
+    errors.push(`Negative close price: ${quote.close}`);
+  }
+
+  const hasOhlc = quote.open !== null || quote.high !== null || quote.low !== null;
+  if (hasOhlc) {
+    const open = quote.open ?? quote.close;
+    const high = quote.high ?? quote.close;
+    const low = quote.low ?? quote.close;
+    if (compareDecimals(high, low) < 0) {
+      errors.push(`High (${high}) is less than Low (${low})`);
+    }
+    if (compareDecimals(high, "0") < 0) {
+      errors.push(`Negative high price: ${high}`);
+    }
+    if (compareDecimals(low, "0") < 0) {
+      errors.push(`Negative low price: ${low}`);
+    }
+    if (compareDecimals(open, "0") < 0) {
+      errors.push(`Negative open price: ${open}`);
+    }
+  }
+
+  if (
+    asset.instrument_type?.toUpperCase() !== "FX" &&
+    quote.volume !== null &&
+    compareDecimals(quote.volume, "0") < 0
+  ) {
+    errors.push(`Negative volume: ${quote.volume}`);
+  }
+
+  return errors.length > 0 ? errors.join("; ") : null;
+}
+
 async function syncMarketDataExecution(
   db: Database,
   marketSyncMode: MarketSyncMode,
@@ -731,15 +786,12 @@ async function syncMarketDataExecution(
                 endDate,
                 now,
               );
+          const validQuotes = validatedProviderQuoteWrites(asset, historicalQuotes.quotes);
           db.transaction(() => {
-            if (
-              purgeProviderQuotes &&
-              historicalQuotes.allowPurge &&
-              historicalQuotes.quotes.length > 0
-            ) {
+            if (purgeProviderQuotes && historicalQuotes.allowPurge && validQuotes.length > 0) {
               deleteProviderQuotesForAsset(db, asset.id, historicalQuotes.source);
             }
-            for (const quote of historicalQuotes.quotes) {
+            for (const quote of validQuotes) {
               upsertQuoteWrite(db, quote, undefined);
             }
             updateQuoteSyncStateAfterSync(
@@ -750,7 +802,7 @@ async function syncMarketDataExecution(
             );
           })();
           result.synced += 1;
-          result.quotesSynced += historicalQuotes.quotes.length;
+          result.quotesSynced += validQuotes.length;
         } catch (error) {
           const message = errorMessage(error);
           updateQuoteSyncStateAfterFailure(
@@ -784,12 +836,15 @@ async function syncMarketDataExecution(
         continue;
       }
       try {
-        const quote = await fetchCustomProviderSyncQuote(
+        const quote = validatedProviderQuoteWrite(
           asset,
-          customProviderCode,
-          customSymbol,
-          customProviderService,
-          now,
+          await fetchCustomProviderSyncQuote(
+            asset,
+            customProviderCode,
+            customSymbol,
+            customProviderService,
+            now,
+          ),
         );
         db.transaction(() => {
           upsertQuoteWrite(db, quote, undefined);
@@ -847,17 +902,21 @@ async function syncMarketDataExecution(
           fetchImpl,
           usTreasuryCurveCache,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -917,17 +976,21 @@ async function syncMarketDataExecution(
           fetchImpl,
           apiKey,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -985,17 +1048,21 @@ async function syncMarketDataExecution(
           fetchImpl,
           apiKey,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -1061,17 +1128,21 @@ async function syncMarketDataExecution(
           apiKey,
           now,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -1136,17 +1207,21 @@ async function syncMarketDataExecution(
           fetchImpl,
           apiKey,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -1191,17 +1266,21 @@ async function syncMarketDataExecution(
           fetchImpl,
           boerseIsinCache,
         );
+        const validQuotes = validatedProviderQuoteWrites(
+          asset,
+          quotes.map(historicalQuoteToQuoteWrite),
+        );
         db.transaction(() => {
-          if (purgeProviderQuotes && quotes.length > 0) {
+          if (purgeProviderQuotes && validQuotes.length > 0) {
             deleteProviderQuotesForAsset(db, asset.id, provider);
           }
-          for (const quote of quotes) {
-            upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+          for (const quote of validQuotes) {
+            upsertQuoteWrite(db, quote, undefined);
           }
           updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
         })();
         result.synced += 1;
-        result.quotesSynced += quotes.length;
+        result.quotesSynced += validQuotes.length;
       } catch (error) {
         const message = errorMessage(error);
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -1266,18 +1345,22 @@ async function syncMarketDataExecution(
         fetchImpl,
         crumbCache,
       );
+      const validQuotes = validatedProviderQuoteWrites(
+        asset,
+        quotes.map(historicalQuoteToQuoteWrite),
+      );
 
       db.transaction(() => {
-        if (purgeProviderQuotes && quotes.length > 0) {
+        if (purgeProviderQuotes && validQuotes.length > 0) {
           deleteProviderQuotesForAsset(db, asset.id, provider);
         }
-        for (const quote of quotes) {
-          upsertQuoteWrite(db, historicalQuoteToQuoteWrite(quote), undefined);
+        for (const quote of validQuotes) {
+          upsertQuoteWrite(db, quote, undefined);
         }
         updateQuoteSyncStateAfterSync(db, quoteSyncStateExists, asset.id, provider);
       })();
       result.synced += 1;
-      result.quotesSynced += quotes.length;
+      result.quotesSynced += validQuotes.length;
     } catch (error) {
       const message = errorMessage(error);
       updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);

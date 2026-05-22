@@ -2857,6 +2857,16 @@ contract:
   `git diff --check`. Coverage includes persisted provider configs with invalid
   top-level `sources` shapes warning before returning no sources, matching Rust
   serde fallback observability.
+- `pr5-market-data-provider-quote-validation`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "custom provider latest|explicit custom provider historical|invalid synced"`,
+  `bun run --cwd apps/backend type-check`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes latest synced custom-provider
+  negative-close rejection without persistence, sync-state failure recording,
+  historical invalid-row filtering before persistence, and provider write
+  validation applying Rust's hard negative-price/OHLC/non-FX-volume checks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

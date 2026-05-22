@@ -336,6 +336,95 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("rejects invalid synced custom provider latest quotes like Rust validation", async () => {
+    const db = createMarketDataDb();
+    const latestSource: CustomProviderSource = {
+      id: "source-latest",
+      providerId: "my-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-11T00:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          expect(kind).toBe("latest");
+          return latestSource;
+        },
+        testSource() {
+          return {
+            success: true,
+            statusCode: 200,
+            price: -5,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-10",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-custom"] }),
+      ).resolves.toEqual({
+        synced: 0,
+        failed: 1,
+        skipped: 0,
+        quotesSynced: 0,
+        failures: [["FUND", "Quote validation failed: Negative close price: -5"]],
+        skippedReasons: [],
+      });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-10")).toBeNull();
+      expect(readSyncState(db, "asset-custom")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:my-feed",
+        error_count: 1,
+        last_error: "Quote validation failed: Negative close price: -5",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("falls back to now for custom provider dates with invalid ISO prefixes", async () => {
     const db = createMarketDataDb();
     const latestSource: CustomProviderSource = {
@@ -468,6 +557,14 @@ describe("TS market data domain", () => {
             currency: "CAD",
             rows: [
               {
+                price: -1,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-12",
+              },
+              {
                 price: 10.25,
                 open: 10,
                 high: 10.5,
@@ -547,6 +644,7 @@ describe("TS market data domain", () => {
       ]);
       expect(readQuote(db, "stale-custom-quote")).toBeNull();
       expect(readQuote(db, "manual-custom-quote")).toMatchObject({ close: "88" });
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-12")).toBeNull();
       expect(readQuoteByDay(db, "asset-custom", "2026-01-13")).toMatchObject({
         id: "asset-custom_2026-01-13_CUSTOM_SCRAPER:my-feed",
         source: "CUSTOM_SCRAPER:my-feed",
