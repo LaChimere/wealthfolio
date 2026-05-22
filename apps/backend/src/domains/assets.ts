@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { BackendEventBus } from "../events";
+import type { SecretService } from "./secrets";
 import type { NewAssetTaxonomyAssignment, TaxonomyService } from "./taxonomies";
 
 export interface Asset extends Record<string, unknown> {
@@ -79,6 +80,7 @@ export interface AssetServiceOptions {
   ) => Promise<TreasuryBondDetails | null> | TreasuryBondDetails | null;
   now?: () => string;
   queueSyncEvent?: (event: AssetSyncEvent) => void;
+  secretService?: SecretService;
   taxonomyService?: Pick<TaxonomyService, "assignAssetToCategory">;
   warn?: (message: string) => void;
 }
@@ -188,6 +190,8 @@ const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const FINNHUB_PROVIDER = "FINNHUB";
+const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
 const OPENFIGI_PROVIDER = "OPENFIGI";
 const OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping";
 const yahooCrumbCache = new WeakMap<typeof fetch, { cookie: string; crumb: string }>();
@@ -767,6 +771,9 @@ async function fetchAssetProviderProfile(
   if (shouldFetchOpenFigiProfile(asset, provider)) {
     return fetchOpenFigiBondProfile(openFigiProfileSymbol(asset), options.fetch ?? fetch);
   }
+  if (shouldFetchFinnhubProfile(asset, provider)) {
+    return fetchFinnhubProfile(asset, options);
+  }
   if (!shouldFetchYahooProfile(provider)) {
     return null;
   }
@@ -799,6 +806,10 @@ function shouldFetchBoerseProfile(asset: AssetRow, provider: string | null): boo
     provider === BOERSE_FRANKFURT_PROVIDER &&
     (asset.instrument_type === "EQUITY" || asset.instrument_type === "BOND")
   );
+}
+
+function shouldFetchFinnhubProfile(asset: AssetRow, provider: string | null): boolean {
+  return provider === FINNHUB_PROVIDER && asset.instrument_type === "EQUITY";
 }
 
 function yahooProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {
@@ -1034,6 +1045,100 @@ function splitBoerseMicSymbol(value: string): [string | null, string | null] {
 
 function boerseSupportedGermanType(value: string): boolean {
   return value === "Aktie" || value === "ETP" || value === "Anleihe" || value === "Fonds";
+}
+
+async function fetchFinnhubProfile(
+  asset: AssetRow,
+  options: AssetServiceOptions,
+): Promise<AssetProviderProfile | null> {
+  const apiKey = await providerApiKey(options.secretService, FINNHUB_PROVIDER);
+  const symbol =
+    providerOverrideSymbol(asset.provider_config, FINNHUB_PROVIDER) ??
+    optionalString(asset.instrument_symbol);
+  if (!apiKey || !symbol) {
+    return null;
+  }
+
+  const payload = await fetchFinnhubJson(
+    "/stock/profile2",
+    [["symbol", symbol]],
+    options.fetch ?? fetch,
+    apiKey,
+  );
+  if (!isRecord(payload) || Object.keys(payload).length === 0) {
+    return null;
+  }
+  const name = optionalString(payload.name);
+  const ticker = optionalString(payload.ticker);
+  if (!name && !ticker) {
+    return null;
+  }
+
+  const profile: AssetProviderProfile = {
+    source: FINNHUB_PROVIDER,
+    assetType: "EQUITY",
+  };
+  if (name) {
+    profile.name = name;
+  }
+  const industry = optionalString(payload.finnhubIndustry);
+  if (industry) {
+    profile.sectors = weightedProfileJson(industry, 1);
+    profile.industry = industry;
+  }
+  const country = optionalString(payload.country);
+  if (country) {
+    profile.countries = weightedProfileJson(country, 1);
+  }
+  const webUrl = optionalString(payload.weburl);
+  if (webUrl) {
+    profile.url = webUrl;
+  }
+  const description = optionalString(payload.description);
+  if (description) {
+    profile.notes = description;
+  }
+  const marketCapitalization = decimalNumber(payload.marketCapitalization);
+  if (marketCapitalization !== null) {
+    profile.marketCap = marketCapitalization * 1_000_000;
+  }
+  return profile;
+}
+
+async function fetchFinnhubJson(
+  endpoint: string,
+  params: Array<[string, string]>,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  const url = new URL(`${FINNHUB_BASE_URL}${endpoint}`);
+  for (const [key, value] of params) {
+    url.searchParams.set(key, value);
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { headers: { "X-Finnhub-Token": apiKey } });
+  } catch (error) {
+    throw new Error(`${FINNHUB_PROVIDER}: Request failed: ${errorMessage(error)}`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${FINNHUB_PROVIDER}: rate limited`);
+  }
+  if (response.status === 401) {
+    throw new Error(`${FINNHUB_PROVIDER}: Invalid or missing API key`);
+  }
+  const text = await response.text();
+  if (response.status === 403) {
+    throw new Error(`${FINNHUB_PROVIDER}: Access forbidden - check API key: ${text}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${FINNHUB_PROVIDER}: HTTP ${response.status} - ${text}`);
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${FINNHUB_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
+  }
 }
 
 async function fetchYahooSearchProfileFromEndpoint(
@@ -2241,6 +2346,18 @@ function providerOverrideRecord(
   }
   const override = parsed.overrides[provider];
   return isRecord(override) ? override : null;
+}
+
+async function providerApiKey(
+  secretService: SecretService | undefined,
+  provider: string,
+): Promise<string | null> {
+  const apiKey = (await secretService?.getSecret(provider)) ?? null;
+  if (apiKey === null) {
+    return null;
+  }
+  const trimmed = apiKey.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 function optionalString(value: unknown): string | null {

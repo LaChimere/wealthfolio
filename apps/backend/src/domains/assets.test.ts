@@ -793,6 +793,132 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches explicit Finnhub equity profiles with secret API keys", async () => {
+    const db = createAssetsDb();
+    const secretKeys: string[] = [];
+    const requests: Array<{ url: string; token: string | null }> = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      secretService: {
+        setSecret() {},
+        getSecret(secretKey) {
+          secretKeys.push(secretKey);
+          return secretKey === "FINNHUB" ? "finnhub-key" : null;
+        },
+        deleteSecret() {},
+      },
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        requests.push({ url, token: headers.get("X-Finnhub-Token") });
+        if (url === "https://finnhub.io/api/v1/stock/profile2?symbol=AAPL.US") {
+          return Promise.resolve(
+            Response.json({
+              name: "Apple Inc",
+              ticker: "AAPL",
+              description: "Designs consumer devices.",
+              finnhubIndustry: "Technology",
+              country: "US",
+              weburl: "https://www.apple.com",
+              marketCapitalization: 2800000,
+            }),
+          );
+        }
+        if (url === "https://finnhub.io/api/v1/stock/profile2?symbol=EMPTY.US") {
+          return Promise.resolve(Response.json({}));
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-finnhub",
+        kind: "INVESTMENT",
+        name: "Old Apple",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({
+          preferred_provider: "FINNHUB",
+          overrides: { FINNHUB: { symbol: "AAPL.US" } },
+        }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('equity-finnhub', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["equity-finnhub"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      insertAsset(db, {
+        id: "equity-finnhub-empty",
+        kind: "INVESTMENT",
+        name: "Empty profile",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "EMPTY",
+        provider_config: JSON.stringify({
+          preferred_provider: "FINNHUB",
+          overrides: { FINNHUB: { symbol: "EMPTY.US" } },
+        }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('equity-finnhub-empty', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const emptyResult = await service.enrichAssets(["equity-finnhub-empty"]);
+
+      expect(emptyResult).toEqual({ enriched: 0, skipped: 1, failed: 0 });
+      expect(readSyncState(db, "equity-finnhub-empty")).toMatchObject({
+        profile_enriched_at: null,
+      });
+      expect(secretKeys).toEqual(["FINNHUB", "FINNHUB"]);
+      expect(requests).toEqual([
+        {
+          url: "https://finnhub.io/api/v1/stock/profile2?symbol=AAPL.US",
+          token: "finnhub-key",
+        },
+        {
+          url: "https://finnhub.io/api/v1/stock/profile2?symbol=EMPTY.US",
+          token: "finnhub-key",
+        },
+      ]);
+      expect(service.getAssetProfile("equity-finnhub")).toMatchObject({
+        name: "Apple Inc",
+        notes: "Designs consumer devices.",
+        metadata: {
+          profile: {
+            quoteType: "EQUITY",
+            sectors: JSON.stringify([{ name: "Technology", weight: 1 }]),
+            industry: "Technology",
+            countries: JSON.stringify([{ name: "US", weight: 1 }]),
+            website: "https://www.apple.com",
+            marketCap: 2_800_000_000_000,
+          },
+        },
+        instrumentType: "EQUITY",
+      });
+      expect(readSyncState(db, "equity-finnhub")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
@@ -1330,6 +1456,15 @@ describe("TS assets domain", () => {
         instrument_symbol: "AAPL",
         provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
       });
+      insertAsset(db, {
+        id: "finnhub-no-key",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
+      });
       db.exec(`
         INSERT INTO quote_sync_state (
           asset_id, profile_enriched_at, updated_at
@@ -1337,9 +1472,9 @@ describe("TS assets domain", () => {
         VALUES ('bond-1', '2026-05-21T00:00:00Z', '2026-05-21T00:00:00Z');
       `);
 
-      const result = await service.enrichAssets(["bond-1", "equity-1"]);
+      const result = await service.enrichAssets(["bond-1", "equity-1", "finnhub-no-key"]);
 
-      expect(result).toEqual({ enriched: 0, skipped: 2, failed: 0 });
+      expect(result).toEqual({ enriched: 0, skipped: 3, failed: 0 });
       expect(fetched).toEqual([]);
       expect(readSyncState(db, "bond-1")).toMatchObject({
         profile_enriched_at: "2026-05-21T00:00:00Z",

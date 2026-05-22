@@ -319,6 +319,7 @@ function createServicesFromDatabase(
     eventBus,
     exchangeMetadata,
     fetch: runtimeOptions.marketDataFetch,
+    secretService,
     taxonomyService,
     queueSyncEvent: (event) => {
       syncOutboxQueue.queueSyncEvent({
