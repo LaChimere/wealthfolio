@@ -2927,6 +2927,13 @@ contract:
   and symbols endpoints, Rust-compatible MIC venue matching, user-agent use,
   provider description name updates, metadata-ISIN bond lookup, profile-enriched
   marking, and metadata preservation for name-only provider profiles.
+- `pr5-openfigi-profile-override`: verification passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "OpenFIGI bond profiles|Boerse Frankfurt .* profiles|US Treasury bond metadata"`,
+  `bun test apps/backend/src/domains/assets.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes OpenFIGI BOND
+  profile enrichment using provider-specific override symbols before metadata
+  identifiers or instrument symbols, matching Rust's provider override resolver.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

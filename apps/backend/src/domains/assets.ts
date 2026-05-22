@@ -765,7 +765,7 @@ async function fetchAssetProviderProfile(
     return fetchBoerseProfile(asset, options.fetch ?? fetch);
   }
   if (shouldFetchOpenFigiProfile(asset, provider)) {
-    return fetchOpenFigiBondProfile(asset.instrument_symbol?.trim() ?? "", options.fetch ?? fetch);
+    return fetchOpenFigiBondProfile(openFigiProfileSymbol(asset), options.fetch ?? fetch);
   }
   if (!shouldFetchYahooProfile(provider)) {
     return null;
@@ -783,6 +783,15 @@ function shouldFetchYahooProfile(provider: string | null): boolean {
 
 function shouldFetchOpenFigiProfile(asset: AssetRow, provider: string | null): boolean {
   return (provider === null || provider === OPENFIGI_PROVIDER) && asset.instrument_type === "BOND";
+}
+
+function openFigiProfileSymbol(asset: AssetRow): string {
+  return (
+    providerOverrideSymbol(asset.provider_config, OPENFIGI_PROVIDER) ??
+    metadataIdentifier(asset.metadata, "isin") ??
+    asset.instrument_symbol?.trim() ??
+    ""
+  );
 }
 
 function shouldFetchBoerseProfile(asset: AssetRow, provider: string | null): boolean {

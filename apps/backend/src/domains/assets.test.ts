@@ -608,7 +608,10 @@ describe("TS assets domain", () => {
         quote_ccy: "USD",
         instrument_type: "BOND",
         instrument_symbol: "XS1234567890",
-        provider_config: JSON.stringify({ preferred_provider: "OPENFIGI" }),
+        provider_config: JSON.stringify({
+          preferred_provider: "OPENFIGI",
+          overrides: { OPENFIGI: { symbol: "XS0987654321" } },
+        }),
       });
       db.query(
         `
@@ -625,7 +628,7 @@ describe("TS assets domain", () => {
       expect(requests).toEqual([
         {
           url: "https://api.openfigi.com/v3/mapping",
-          body: [{ idType: "ID_ISIN", idValue: "XS1234567890" }],
+          body: [{ idType: "ID_ISIN", idValue: "XS0987654321" }],
         },
       ]);
       expect(service.getAssetProfile("bond-openfigi")).toMatchObject({
