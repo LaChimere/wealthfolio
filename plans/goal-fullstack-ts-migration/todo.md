@@ -2525,6 +2525,13 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage proves stale dismissal
   removal failures warn and still restore the issue like Rust's best-effort
   cleanup path.
+- `pr5-portfolio-missing-option-sell-cash`: verification passed: focused
+  portfolio job test,
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage proves option sell
+  activities for missing positions still apply cash proceeds with the asset
+  contract multiplier, warn, and leave positions absent like Rust.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

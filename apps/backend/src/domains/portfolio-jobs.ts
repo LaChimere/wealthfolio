@@ -1413,7 +1413,7 @@ function processActivityForSnapshot(
       applyBuyActivity(db, state, activity, options);
       break;
     case "SELL":
-      applySellActivity(state, activity, options);
+      applySellActivity(db, state, activity, options);
       break;
     case "DEPOSIT":
       applyContributionActivity(state, activity, baseCurrency, options, 1);
@@ -1500,6 +1500,7 @@ function applyBuyActivity(
 }
 
 function applySellActivity(
+  db: Database,
   state: ActivityRebuildState,
   activity: ActivityRebuildRow,
   options: LocalPortfolioJobServiceOptions,
@@ -1508,7 +1509,9 @@ function applySellActivity(
   const quantity = positiveActivityQuantity(activity);
   const fee = activityFee(activity);
   const position = state.positions.get(assetId);
-  const multiplier = position?.contractMultiplier ?? new Decimal(1);
+  const asset = position ? null : readAssetInfo(db, assetId);
+  const multiplier =
+    position?.contractMultiplier ?? (asset ? assetContractMultiplier(asset) : new Decimal(1));
   const proceeds = quantity.mul(activityUnitPrice(activity)).mul(multiplier).minus(fee);
   addBrokerConvertedCash(state, activity, proceeds);
 

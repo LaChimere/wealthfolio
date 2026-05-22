@@ -1040,6 +1040,63 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("books option sell proceeds when the sold position is missing like Rust", async () => {
+    const db = createPortfolioJobTestDb();
+    const warnings: string[] = [];
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "option-asset", "USD", { instrumentType: "OPTION" });
+      seedSnapshot(db, {
+        accountId: "account-1",
+        date: "2026-05-10",
+        positions: {},
+        cashBalances: { USD: "100" },
+        costBasis: "0",
+        netContribution: "100",
+      });
+      seedActivity(db, {
+        id: "sell-missing-option",
+        accountId: "account-1",
+        assetId: "option-asset",
+        type: "SELL",
+        date: "2026-05-12T12:00:00Z",
+        quantity: "1",
+        unitPrice: "2",
+        fee: "1",
+        currency: "USD",
+      });
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-12T00:00:00Z"),
+        warn: (message) => warnings.push(message),
+      });
+
+      await service.enqueuePortfolioJob({
+        accountIds: ["account-1"],
+        marketSyncMode: { type: "none" },
+        snapshotMode: "full",
+        valuationMode: "full",
+        sinceDate: "2026-05-12",
+      });
+
+      expect(warnings).toEqual([
+        "Activity sell-missing-option sold missing position option-asset; cash effect was still applied",
+      ]);
+      expect(readSnapshot(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balances: '{"USD":"299"}',
+        cash_total_account_currency: "299",
+        cost_basis: "0",
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toEqual({});
+      expect(readValuation(db, "account-1", "2026-05-12")).toMatchObject({
+        cash_balance: "299",
+        investment_market_value: "0",
+        total_value: "299",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("preserves zero-quantity positions in activity-derived snapshots", async () => {
     const db = createPortfolioJobTestDb();
     try {
