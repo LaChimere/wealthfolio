@@ -556,6 +556,46 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("previews explicit GBp quote currency as GBP like Rust activity imports", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      symbolSearch() {
+        throw new Error("manual quote-mode imports should not call providers");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-gbp", name: "Pounds", currency: "GBP" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "vod-gbp",
+            accountId: "account-gbp",
+            symbol: "VOD",
+            instrumentType: "EQUITY",
+            quoteCcy: "GBp",
+            quoteMode: "MANUAL",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "vod-gbp",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            displayCode: "VOD",
+            instrumentType: "EQUITY",
+            quoteCcy: "GBP",
+            quoteMode: "MANUAL",
+          }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("previews import assets without overwriting explicit exchange MIC", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];

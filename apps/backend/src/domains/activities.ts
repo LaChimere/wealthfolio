@@ -2226,8 +2226,8 @@ function normalizeImportQuoteCurrency(value: string | undefined): string | undef
   if (trimmed === "") {
     return undefined;
   }
-  if (trimmed === "GBp") {
-    return "GBp";
+  if (trimmed.toUpperCase() === "GBP") {
+    return "GBP";
   }
   if (trimmed.toUpperCase() === "GBX") {
     return "GBX";

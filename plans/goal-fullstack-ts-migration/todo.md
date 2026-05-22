@@ -2511,6 +2511,14 @@ contract:
   `git diff --check`. Coverage proves lowercase `manual` preview hints skip the
   missing-exchange error like Rust while still producing a MARKET draft unless
   the raw value is exactly `MANUAL`.
+- `pr5-activities-import-preview-gbp-quote-currency`: verification passed:
+  focused import preview test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`
+  rerun after the known sync-outbox flake, full `bun run check`, and
+  `git diff --check`. Coverage proves explicit `GBp` quote-currency hints in
+  activity import previews normalize to `GBP` like Rust's activity import
+  `normalize_quote_ccy` path.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
