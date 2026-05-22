@@ -2082,6 +2082,10 @@ describe("TS backend runtime composition", () => {
       repositoryRoot,
       secretKey: config.secretKey,
     });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
 
     try {
       const { contributionLimitService } = runtime.options;
@@ -2100,6 +2104,7 @@ describe("TS backend runtime composition", () => {
       });
       await contributionLimitService.deleteContributionLimit(created.id);
       await contributionLimitService.deleteContributionLimit("missing-limit");
+      await waitForEventCount(events, "portfolio:update-complete", 4);
 
       const db = openSqliteDatabase(runtime.dbPath);
       try {
@@ -2128,10 +2133,13 @@ describe("TS backend runtime composition", () => {
           end_date: null,
         });
         expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+        expect(events.filter((event) => event === "portfolio:update-start")).toHaveLength(4);
+        expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(4);
       } finally {
         db.close();
       }
     } finally {
+      unsubscribe?.();
       await runtime.close();
     }
   });
@@ -2695,6 +2703,21 @@ describe("TS backend runtime composition", () => {
     }
   });
 });
+
+async function waitForEventCount(
+  events: string[],
+  eventName: string,
+  count: number,
+): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (events.filter((event) => event === eventName).length >= count) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(events.filter((event) => event === eventName)).toHaveLength(count);
+}
 
 function readRuntimeSyncOutbox(
   db: ReturnType<typeof openSqliteDatabase>,

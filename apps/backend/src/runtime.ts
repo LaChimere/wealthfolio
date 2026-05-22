@@ -46,7 +46,10 @@ import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
 } from "./domains/market-data-providers";
-import { createLocalPortfolioJobService } from "./domains/portfolio-jobs";
+import {
+  createLocalPortfolioJobService,
+  enqueueIncrementalPortfolioRecalculation,
+} from "./domains/portfolio-jobs";
 import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
 import {
   createFileSecretService,
@@ -510,6 +513,11 @@ function createServicesFromDatabase(
           exchangeRateService,
           () => settingsService.getSettings().timezone,
         ),
+        notifyPortfolioUpdate: () =>
+          enqueueIncrementalPortfolioRecalculation(
+            portfolioJobService,
+            "Contribution-limit mutation",
+          ),
       },
     ),
     customProviderService,

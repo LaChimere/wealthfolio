@@ -269,6 +269,57 @@ export function buildPortfolioUpdateConfig(body: PortfolioRequestBody = {}): Por
   };
 }
 
+export function enqueueFullPortfolioRecalculation(
+  portfolioJobService: PortfolioJobService | undefined,
+  context: string,
+): void {
+  enqueuePortfolioJobBestEffort(
+    portfolioJobService,
+    {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "full",
+      valuationMode: "full",
+      sinceDate: null,
+    },
+    context,
+  );
+}
+
+export function enqueueIncrementalPortfolioRecalculation(
+  portfolioJobService: PortfolioJobService | undefined,
+  context: string,
+): void {
+  enqueuePortfolioJobBestEffort(
+    portfolioJobService,
+    {
+      accountIds: null,
+      marketSyncMode: { type: "none" },
+      snapshotMode: "incremental_from_last",
+      valuationMode: "incremental_from_last",
+      sinceDate: null,
+    },
+    context,
+  );
+}
+
+export function enqueuePortfolioJobBestEffort(
+  portfolioJobService: PortfolioJobService | undefined,
+  config: PortfolioJobConfig,
+  context: string,
+): void {
+  if (!portfolioJobService) {
+    return;
+  }
+  try {
+    void Promise.resolve(portfolioJobService.enqueuePortfolioJob(config)).catch((error) => {
+      console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
+    });
+  } catch (error) {
+    console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
+  }
+}
+
 async function executePortfolioJob(
   db: Database,
   config: PortfolioJobConfig,

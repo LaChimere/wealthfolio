@@ -90,8 +90,10 @@ import {
   DEFAULT_HISTORY_DAYS,
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
+  enqueueFullPortfolioRecalculation,
+  enqueueIncrementalPortfolioRecalculation,
+  enqueuePortfolioJobBestEffort,
   type MarketSyncMode,
-  type PortfolioJobConfig,
   type PortfolioJobService,
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
@@ -2129,57 +2131,6 @@ function routeMarketDataRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
-}
-
-function enqueueFullPortfolioRecalculation(
-  portfolioJobService: PortfolioJobService | undefined,
-  context: string,
-): void {
-  enqueuePortfolioJobBestEffort(
-    portfolioJobService,
-    {
-      accountIds: null,
-      marketSyncMode: { type: "none" },
-      snapshotMode: "full",
-      valuationMode: "full",
-      sinceDate: null,
-    },
-    context,
-  );
-}
-
-function enqueueIncrementalPortfolioRecalculation(
-  portfolioJobService: PortfolioJobService | undefined,
-  context: string,
-): void {
-  enqueuePortfolioJobBestEffort(
-    portfolioJobService,
-    {
-      accountIds: null,
-      marketSyncMode: { type: "none" },
-      snapshotMode: "incremental_from_last",
-      valuationMode: "incremental_from_last",
-      sinceDate: null,
-    },
-    context,
-  );
-}
-
-function enqueuePortfolioJobBestEffort(
-  portfolioJobService: PortfolioJobService | undefined,
-  config: PortfolioJobConfig,
-  context: string,
-): void {
-  if (!portfolioJobService) {
-    return;
-  }
-  try {
-    void Promise.resolve(portfolioJobService.enqueuePortfolioJob(config)).catch((error) => {
-      console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
-    });
-  } catch (error) {
-    console.warn(`${context} portfolio recalculation failed: ${errorMessage(error)}`);
-  }
 }
 
 function routeMarketDataProviderRequest(

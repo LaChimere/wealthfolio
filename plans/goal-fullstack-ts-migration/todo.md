@@ -128,20 +128,22 @@
     parity; automatic/background FX quote fetching and all-provider market-data
     sync execution remain deferred and move to calculation/market-data slices;
     bounded portfolio job execution, event production, valuation recalculation
-    from existing holdings snapshots, TOTAL snapshot rebuilding, and bounded
-    transaction-account snapshot rebuilding from posted common activities,
-    BUY/SELL broker FX handling, option contract multipliers, option-expiry
-    adjustments, split preprocessing, lot-level asset transfers, other
-    adjustment no-op behavior, and DRIP/dividend-in-kind/staking-reward activity
-    compiler expansion now run in the standalone TS runtime; TS file-backed
-    secret persistence and native keyring-backed `WF_SECRET_BACKEND=keyring` are
-    wired into standalone runtime while packaged keyring cutover and
-    cross-platform keyring CI remain deferred to a runtime/keyring parity slice;
-    AI provider catalog/settings/model-listing runtime behavior, bounded
-    native/fallback text/reasoning AI chat provider streaming, generated thread
-    titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call
-    execution, built-in `get_accounts`, `get_holdings`, `get_cash_balances`,
-    `get_goals`, `search_activities`, `get_performance`, `get_income`,
+    from existing holdings snapshots, TOTAL snapshot rebuilding, bounded
+    transaction-account snapshot rebuilding from posted common activities, and
+    contribution-limit lightweight portfolio update side effects now run in the
+    standalone TS runtime; BUY/SELL broker FX handling, option contract
+    multipliers, option-expiry adjustments, split preprocessing, lot-level asset
+    transfers, other adjustment no-op behavior, and
+    DRIP/dividend-in-kind/staking reward activity compiler expansion now run in
+    the standalone TS runtime; TS file-backed secret persistence and native
+    keyring-backed `WF_SECRET_BACKEND=keyring` are wired into standalone runtime
+    while packaged keyring cutover and cross-platform keyring CI remain deferred
+    to a runtime/keyring parity slice; AI provider
+    catalog/settings/model-listing runtime behavior, bounded native/fallback
+    text/reasoning AI chat provider streaming, generated thread titles,
+    OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
+    built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
+    `search_activities`, `get_performance`, `get_income`,
     `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
     `record_activity`, `record_activities`, and `import_csv`, text/CSV
     attachment prompt injection, Anthropic/Gemini image/PDF native media
@@ -2953,6 +2955,21 @@ contract:
   provider override symbol precedence, exchange suffix metadata, `OVERVIEW` plus
   `ETF_PROFILE` requests, Rust-compatible profile metadata and metric mapping,
   and no-key skip behavior that leaves assets unmarked.
+- `pr5-health-data-consistency-parity`: verification passed:
+  `bun test apps/backend/src/domains/health.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes orphan
+  activity account references, orphan activity asset references, negative latest
+  holdings positions, Rust-shaped data hashes/messages/navigation, and
+  preservation of existing negative-balance checks.
+- `pr5-contribution-limit-portfolio-update`: verification passed:
+  `bun test apps/backend/src/domains/contribution-limits.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "contribution-limit"`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes standalone
+  runtime create/update/delete/idempotent-delete mutations triggering
+  Rust-compatible no-market-sync incremental portfolio update events while sync
+  outbox behavior remains unchanged.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
