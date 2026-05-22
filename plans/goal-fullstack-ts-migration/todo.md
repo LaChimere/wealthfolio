@@ -219,14 +219,14 @@
     goal-summary refresh, broker-sync failure continuation, and bounded
     asset-enrichment execution for US Treasury bond metadata plus Yahoo
     quoteSummary/search profile enrichment with provider-profile taxonomy
-    assignment now have TS runtime parity, while provider-backed asset
-    resolution outside the activity preview/check round-trip and remaining quote
-    sync outbox follow-ups outside migrated alternative-asset and market-data
-    quote paths, device-sync push/pull runtime wiring, and remaining device-sync
-    side effects are deferred to activities/import/device-sync runtime parity
-    slices; AI chat persistence, tag persistence, tool-result mutation, local AI
-    chat sync_outbox callbacks, native/fallback text/reasoning provider
-    streaming, generated thread titles,
+    assignment and asset Update sync callbacks now have TS runtime parity, while
+    provider-backed asset resolution outside the activity preview/check
+    round-trip and remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and remaining device-sync side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
+    native/fallback text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -2040,6 +2040,12 @@ contract:
   Yahoo sector-weight mapping to `industries_gics`, exchange-MIC country
   fallback to `regions`, and preservation of initial-classification warning
   behavior for non-profile enrichment paths.
+- `pr5-asset-enrichment-sync-callbacks`: targeted checks passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "Yahoo quoteSummary|provider sectors|Yahoo search profiles|US Treasury|already profile|best-effort"`
+  and `bun run --cwd apps/backend type-check`. Coverage includes successful
+  profile enrichment queuing an asset Update sync-event callback with
+  Rust-shaped payloads that omit generated `instrumentKey`, while
+  `profile_enriched_at` remains a local quote-sync state update.
 - `pr5-activity-derived-snapshot-rebuild`: targeted checks passed:
   `bun test apps/backend/src/domains/portfolio-jobs.test.ts apps/backend/src/runtime.test.ts`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

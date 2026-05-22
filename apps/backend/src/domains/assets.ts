@@ -978,6 +978,7 @@ function updateEnrichedAssetProfile(
   if (!updated) {
     throw new Error(`Record not found: asset ${asset.id}`);
   }
+  queueAssetSyncEvent(options, updated, "Update");
   return updated;
 }
 

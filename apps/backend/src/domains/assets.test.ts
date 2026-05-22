@@ -633,8 +633,10 @@ describe("TS assets domain", () => {
   test("enriches Yahoo quoteSummary profiles and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
+    const syncEvents: AssetSyncEvent[] = [];
     const service = createAssetService(db, {
       now: () => "2026-05-22T00:00:00.000Z",
+      queueSyncEvent: (event) => syncEvents.push(event),
       fetch: ((input: RequestInfo | URL) => {
         const url = String(input);
         fetched.push(url);
@@ -736,6 +738,18 @@ describe("TS assets domain", () => {
       expect(readSyncState(db, "equity-1")).toMatchObject({
         profile_enriched_at: "2026-05-22T00:00:00.000Z",
       });
+      expect(syncEvents).toHaveLength(1);
+      expect(syncEvents[0]).toMatchObject({
+        assetId: "equity-1",
+        operation: "Update",
+        payload: {
+          id: "equity-1",
+          name: "Apple Inc.",
+          quoteCcy: "USD",
+          instrumentType: "EQUITY",
+        },
+      });
+      expect("instrumentKey" in syncEvents[0].payload).toBe(false);
     } finally {
       db.close();
     }
