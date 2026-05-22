@@ -2542,6 +2542,7 @@ function checkActivityImportRow(
     activity.date = normalized.activityDate;
     activity.quoteActivityDate = normalized.quoteActivityDate;
     activity.currency = normalized.currency;
+    validateImportActivityCurrency(errors, activity.currency, account?.currency ?? "");
     activity.amount = normalized.amount?.toString() ?? null;
     activity.quantity = normalized.quantity?.toString() ?? null;
     activity.unitPrice = normalized.unitPrice?.toString() ?? null;
@@ -2575,6 +2576,35 @@ function checkActivityImportRow(
     activity.errors = errors;
     return { activity, idempotencyKey: null };
   }
+}
+
+function validateImportActivityCurrency(
+  errors: Record<string, string[]>,
+  currency: unknown,
+  accountCurrency: string,
+): void {
+  const activityCurrency = optionalTrimmedString(currency) ?? "";
+  if (!activityCurrency) {
+    addFieldMessage(errors, "currency", "Activity currency is missing in the import data.");
+    return;
+  }
+  if (activityCurrency === accountCurrency) {
+    return;
+  }
+  if (
+    !isThreeLetterAlphabeticCurrency(accountCurrency) ||
+    !isThreeLetterAlphabeticCurrency(activityCurrency)
+  ) {
+    addFieldMessage(
+      errors,
+      "currency",
+      `Invalid currency code: ${accountCurrency} or ${activityCurrency}`,
+    );
+  }
+}
+
+function isThreeLetterAlphabeticCurrency(value: string): boolean {
+  return /^[A-Za-z]{3}$/.test(value);
 }
 
 function hydrateImportActivityFromAssetRow(

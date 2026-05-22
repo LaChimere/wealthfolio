@@ -1532,6 +1532,48 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("validates import activity currency codes like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const checked = await service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-15",
+          amount: "10",
+          currency: "US1",
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          date: "2025-01-16",
+          amount: "10",
+          currency: "EUR",
+          lineNumber: 2,
+        },
+      ]);
+
+      expect(checked?.[0]).toMatchObject({
+        isValid: false,
+        errors: {
+          currency: ["Invalid currency code: USD or US1"],
+        },
+      });
+      expect(checked?.[1]).toMatchObject({
+        currency: "EUR",
+        isValid: true,
+      });
+      expect(checked?.[1]).not.toHaveProperty("errors");
+    } finally {
+      db.close();
+    }
+  });
+
   test("classifies import symbols with Rust-compatible optional asset rules", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
