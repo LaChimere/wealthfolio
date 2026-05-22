@@ -2795,6 +2795,46 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("resolves bare common crypto symbols to existing crypto assets like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "BTC-EQUITY",
+        displayCode: "BTC",
+        name: "Bitcoin Depot",
+        quoteCcy: "USD",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, {
+        id: "BTC-CRYPTO",
+        displayCode: "BTC",
+        name: "Bitcoin",
+        quoteCcy: "USD",
+        exchangeMic: null,
+        instrumentType: "CRYPTO",
+      });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "BTC" },
+        activityType: "BUY",
+        activityDate: "2025-01-21",
+        quantity: "1",
+        unitPrice: "50000",
+        amount: "50000",
+        currency: "USD",
+      }) as Activity;
+
+      expect(created.assetId).toBe("BTC-CRYPTO");
+    } finally {
+      db.close();
+    }
+  });
+
   test("derives direct activity-created asset kind from trimmed instrument type like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

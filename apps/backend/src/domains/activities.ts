@@ -3938,19 +3938,26 @@ function normalizeActivityAssetInputForLookup(
   asset: ActivityAssetInput,
   exchangeMetadata: ActivityExchangeMetadata | undefined,
 ): ActivityAssetInput {
-  if (!asset.symbol || !exchangeMetadata) {
+  if (!asset.symbol) {
     return asset;
   }
   const instrumentType =
     normalizeInstrumentType(asset.instrumentType) ??
     inferActivityInstrumentType(asset, asset.symbol);
-  if (!instrumentType || !isMicBackedActivityInstrument(instrumentType)) {
+  if (!instrumentType) {
     return asset;
+  }
+  const typedAsset =
+    asset.instrumentType === undefined && instrumentType === "CRYPTO"
+      ? { ...asset, instrumentType }
+      : asset;
+  if (!exchangeMetadata || !isMicBackedActivityInstrument(instrumentType)) {
+    return typedAsset;
   }
 
   const parsed = parseActivitySymbolWithExchangeSuffix(asset.symbol, exchangeMetadata);
   if (!parsed.mic && parsed.baseSymbol === asset.symbol.trim()) {
-    return asset;
+    return typedAsset;
   }
 
   const exchangeMic = asset.exchangeMic?.trim() || parsed.mic || undefined;
@@ -3958,10 +3965,9 @@ function normalizeActivityAssetInputForLookup(
     asset.quoteCcy ??
     (exchangeMic ? exchangeMetadata.currencyByMic.get(exchangeMic.toUpperCase()) : undefined);
   return {
-    ...asset,
+    ...typedAsset,
     symbol: parsed.baseSymbol,
     exchangeMic,
-    instrumentType: asset.instrumentType ?? instrumentType,
     quoteCcy,
   };
 }

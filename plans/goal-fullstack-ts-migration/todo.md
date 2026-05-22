@@ -2539,6 +2539,13 @@ contract:
   `cargo check -p wealthfolio-core`, full `bun run check`, and
   `git diff --check`. Coverage proves zero-valued inverse latest exchange rates
   are treated as unavailable instead of being inverted.
+- `pr5-activities-bare-crypto-existing-lookup`: verification passed: focused
+  activity tests, `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`
+  rerun after the known sync-outbox flake, full `bun run check`, and
+  `git diff --check`. Coverage proves symbol-only direct activities for common
+  crypto tickers resolve to existing CRYPTO assets even when an equity shares
+  the same display code.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
