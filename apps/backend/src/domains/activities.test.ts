@@ -1633,6 +1633,40 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("clears duplicate import subtypes during apply like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          subtype: "deposit",
+          date: "2025-01-16",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 1,
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({ imported: 1, success: true });
+      expect(result.activities[0]).toMatchObject({
+        symbol: "",
+        isValid: true,
+      });
+      expect(result.activities[0]).not.toHaveProperty("subtype");
+      expect(readActivityValue(db, result.activities[0]?.id as string, "subtype")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("validates empty import symbols for asset-backed activity rows like Rust", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
@@ -5138,6 +5172,7 @@ function readActivityValue(
     | "source_group_id"
     | "source_system"
     | "status"
+    | "subtype"
     | "currency",
 ): string | null {
   const row = db

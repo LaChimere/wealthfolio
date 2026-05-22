@@ -229,7 +229,7 @@
     with MIC quote-currency fallback plus existing-asset lookup normalization
     across direct activity, import asset preview, and import check/apply paths,
     Rust-compatible asset-id hydration, symbol-name fallback, staged
-    pending-asset symbol/MIC/type/quote-currency hydration, subtype
+    pending-asset symbol/MIC/type/quote-currency hydration, check/apply subtype
     normalization, currency validation, and empty required-symbol validation for
     import validation, and Rust-compatible quote-currency errors for incomplete
     market securities, now have TS runtime parity, while broader provider-backed
@@ -2628,6 +2628,13 @@ contract:
   and full `bun run check`. Coverage includes import validation returning the
   normalized pending-asset symbol, exchange MIC, instrument type, and quote
   currency for new staged assets before the import apply step persists them.
+- `pr5-activities-import-apply-subtype-normalization`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "clears duplicate import subtypes during apply like Rust"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes import apply canonicalizing
+  subtypes and clearing duplicate activity-type subtypes before validation,
+  returned rows, and persisted activity storage.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

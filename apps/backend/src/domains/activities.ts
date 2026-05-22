@@ -2827,6 +2827,7 @@ async function importActivityRows(
       if (isRecord(resolvedActivity)) {
         Object.assign(activity, resolvedActivity);
       }
+      normalizeImportActivityForApply(activity);
       const createInput = importActivityCreateInput(activity);
       collectImportApplyPreflightErrors(activity, errors);
 
@@ -3160,6 +3161,13 @@ function collectImportApplyPreflightErrors(
         "Instrument type is required to import this activity.",
       );
     }
+  }
+}
+
+function normalizeImportActivityForApply(activity: Record<string, unknown>): void {
+  const activityType = optionalTrimmedString(activity.activityType);
+  if (activityType) {
+    normalizeImportActivitySubtype(activity, activityType);
   }
 }
 
