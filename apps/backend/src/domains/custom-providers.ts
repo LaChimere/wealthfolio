@@ -1083,26 +1083,57 @@ function formatUtcDate(date: Date, format: string): string {
     "December",
   ];
   const shortMonthNames = monthNames.map((name) => name.slice(0, 3));
+  const weekdayNames = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const shortWeekdayNames = weekdayNames.map((name) => name.slice(0, 3));
   const pad = (value: number, size = 2): string => value.toString().padStart(size, "0");
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  const hour = date.getUTCHours();
+  const minute = date.getUTCMinutes();
+  const second = date.getUTCSeconds();
+  const weekday = date.getUTCDay();
+  const isoWeekday = weekday === 0 ? 7 : weekday;
+  const dayOfYear =
+    Math.floor(
+      (Date.UTC(year, date.getUTCMonth(), day) - Date.UTC(year, 0, 1)) / (24 * 60 * 60 * 1000),
+    ) + 1;
   const replacements: Record<string, string> = {
-    "%Y": date.getUTCFullYear().toString(),
-    "%y": pad(date.getUTCFullYear() % 100),
-    "%m": pad(date.getUTCMonth() + 1),
-    "%d": pad(date.getUTCDate()),
-    "%e": date.getUTCDate().toString().padStart(2, " "),
-    "%H": pad(date.getUTCHours()),
-    "%M": pad(date.getUTCMinutes()),
-    "%S": pad(date.getUTCSeconds()),
-    "%F": `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
-    "%T": `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`,
+    "%Y": year.toString(),
+    "%y": pad(year % 100),
+    "%C": Math.trunc(year / 100).toString(),
+    "%m": pad(month),
+    "%d": pad(day),
+    "%e": day.toString().padStart(2, " "),
+    "%j": pad(dayOfYear, 3),
+    "%H": pad(hour),
+    "%M": pad(minute),
+    "%S": pad(second),
+    "%F": `${year}-${pad(month)}-${pad(day)}`,
+    "%D": `${pad(month)}/${pad(day)}/${pad(year % 100)}`,
+    "%R": `${pad(hour)}:${pad(minute)}`,
+    "%T": `${pad(hour)}:${pad(minute)}:${pad(second)}`,
     "%s": Math.floor(date.getTime() / 1000).toString(),
     "%z": "+0000",
     "%Z": "UTC",
+    "%a": shortWeekdayNames[weekday] ?? "",
+    "%A": weekdayNames[weekday] ?? "",
     "%b": shortMonthNames[date.getUTCMonth()] ?? "",
+    "%h": shortMonthNames[date.getUTCMonth()] ?? "",
     "%B": monthNames[date.getUTCMonth()] ?? "",
+    "%u": isoWeekday.toString(),
+    "%w": weekday.toString(),
     "%%": "%",
   };
-  return format.replace(/%[YymdeHMSFTszZbB%]/g, (token) => replacements[token] ?? token);
+  return format.replace(/%[YyCmdejHMSFDRTszZaAbhBuw%]/g, (token) => replacements[token] ?? token);
 }
 
 function validateHttpUrl(raw: string): void {

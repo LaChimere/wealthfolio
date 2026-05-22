@@ -281,7 +281,7 @@ describe("TS custom providers domain", () => {
     try {
       const request: TestSourceRequest = {
         format: "json",
-        url: "https://api.example.test/{SYMBOL}?start={DATE:%Y-01-01}&end={TODAY}&from={FROM}&to={TO}&ccy={currency}&upper={CURRENCY}",
+        url: "https://api.example.test/{SYMBOL}?start={DATE:%Y-01-01}&end={TODAY}&from={FROM}&to={TO}&ccy={currency}&upper={CURRENCY}&doy={DATE:%j}&weekday={DATE:%a-%A-%u-%w}&compact={DATE:%C-%D-%R-%h}",
         pricePath: "$.body.fundPrice.content[-1:].price",
         openPath: "$.body.fundPrice.content[-1:].open",
         highPath: "$.body.fundPrice.content[-1:].high",
@@ -311,7 +311,7 @@ describe("TS custom providers domain", () => {
         currency: "GBP",
       });
       expect(calls[0]?.url).toBe(
-        "https://api.example.test/M219?start=2026-01-01&end=2026-05-04&from=2026-05-01&to=2026-05-04&ccy=gbp&upper=GBP",
+        "https://api.example.test/M219?start=2026-01-01&end=2026-05-04&from=2026-05-01&to=2026-05-04&ccy=gbp&upper=GBP&doy=124&weekday=Mon-Monday-1-1&compact=20-05/04/26-12:34-May",
       );
       expect(calls[0]?.headers.get("authorization")).toBe("resolved-secret");
       expect(calls[0]?.headers.get("accept")).toBe("application/vnd.test");

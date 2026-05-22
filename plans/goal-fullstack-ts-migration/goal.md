@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 299
+turns_used: 300
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T19:46:01+08:00"
+updated_at: "2026-05-22T19:58:44+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1889,6 +1889,14 @@ updated_at: "2026-05-22T19:46:01+08:00"
   scraper runtime behavior while leaving test-source preview semantics
   unchanged. The account-FX runtime test now also stubs market-data fetches so
   cleanup-time enrichment cannot depend on external network availability.
+  Focused custom-provider tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check` passed.
+- Turn 300: Tightened custom-provider date-template parity: TS `{DATE:...}`
+  expansion now supports additional Rust/chrono-compatible directives for
+  day-of-year, weekday names/numbers, century, compact date/time aliases, and
+  `%h` month aliases so custom provider URLs no longer leak those tokens. The
+  holdings snapshot sync-outbox runtime test now also stubs market-data fetches
+  so cleanup-time enrichment cannot depend on external network availability.
   Focused custom-provider tests, backend type-check, backend test suite, full
   `bun run check`, and `git diff --check` passed.
 
