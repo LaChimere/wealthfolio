@@ -1719,6 +1719,46 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("fills import symbol names from normalized symbols for new assets like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const checked = await service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "MSFT",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 1,
+        },
+      ]);
+
+      expect(checked?.[0]).toMatchObject({
+        symbol: "MSFT",
+        symbolName: "MSFT",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+        quoteCcy: "USD",
+        isValid: true,
+      });
+      expect(checked?.[0]?.assetId).toBeString();
+      expect(checked?.[0]).not.toHaveProperty("errors");
+      expect(readAssetCount(db)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("classifies import symbols with Rust-compatible optional asset rules", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

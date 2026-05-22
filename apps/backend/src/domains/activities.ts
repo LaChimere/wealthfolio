@@ -2559,15 +2559,17 @@ function checkActivityImportRow(
     activity.fxRate = normalized.fxRate?.toString() ?? null;
     activity.assetId = normalized.assetId ?? undefined;
     if (normalized.assetId) {
+      const normalizedAssetInput = symbol
+        ? normalizeActivityAssetInputForLookup(
+            activityAssetInputFromImportFields(activity, undefined, symbol),
+            assetContext.exchangeMetadata,
+          )
+        : undefined;
       const existingAsset = findAssetRowById(db, normalized.assetId);
       if (existingAsset) {
-        const normalizedAssetInput = symbol
-          ? normalizeActivityAssetInputForLookup(
-              activityAssetInputFromImportFields(activity, undefined, symbol),
-              assetContext.exchangeMetadata,
-            )
-          : undefined;
         hydrateImportActivityFromAssetRow(activity, existingAsset, normalizedAssetInput?.symbol);
+      } else if (!optionalTrimmedString(activity.symbolName) && normalizedAssetInput?.symbol) {
+        activity.symbolName = normalizedAssetInput.symbol;
       }
     }
     if (normalized.assetId === null && !needsAsset) {
