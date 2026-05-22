@@ -2519,6 +2519,12 @@ contract:
   `git diff --check`. Coverage proves explicit `GBp` quote-currency hints in
   activity import previews normalize to `GBP` like Rust's activity import
   `normalize_quote_ccy` path.
+- `pr5-health-stale-dismissal-warning`: verification passed: focused
+  stale-dismissal tests, `bun test apps/backend/src/domains/health.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage proves stale dismissal
+  removal failures warn and still restore the issue like Rust's best-effort
+  cleanup path.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

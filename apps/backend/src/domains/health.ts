@@ -386,15 +386,19 @@ async function runChecks(
   cache: Map<string, { status: HealthStatus; cachedAt: Date }>,
 ): Promise<HealthStatus> {
   const checkedAt = now();
-  const issues = filterDismissedIssues(repository, [
-    ...analyzeUnconfiguredAccounts(options, checkedAt),
-    ...(await analyzePriceStaleness(options, config, checkedAt)),
-    ...(await analyzeQuoteSyncErrors(options, config, checkedAt)),
-    ...(await analyzeFxIntegrity(options, config, checkedAt)),
-    ...(await analyzeDataConsistency(options, checkedAt)),
-    ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
-    ...analyzeTimezone(options, clientTimezone, checkedAt),
-  ]);
+  const issues = filterDismissedIssues(
+    repository,
+    [
+      ...analyzeUnconfiguredAccounts(options, checkedAt),
+      ...(await analyzePriceStaleness(options, config, checkedAt)),
+      ...(await analyzeQuoteSyncErrors(options, config, checkedAt)),
+      ...(await analyzeFxIntegrity(options, config, checkedAt)),
+      ...(await analyzeDataConsistency(options, checkedAt)),
+      ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
+      ...analyzeTimezone(options, clientTimezone, checkedAt),
+    ],
+    options.warn,
+  );
   const status = buildStatus(issues, checkedAt);
   cache.set(clientTimezone?.trim() ?? "", { status: cloneStatus(status), cachedAt: checkedAt });
   return status;
@@ -1488,7 +1492,11 @@ function legacyClassificationMigrationIssue(input: {
   };
 }
 
-function filterDismissedIssues(repository: HealthRepository, issues: HealthIssue[]): HealthIssue[] {
+function filterDismissedIssues(
+  repository: HealthRepository,
+  issues: HealthIssue[],
+  warn?: (message: string) => void,
+): HealthIssue[] {
   const dismissals = new Map(
     repository.getDismissals().map((dismissal) => [dismissal.issueId, dismissal]),
   );
@@ -1500,7 +1508,11 @@ function filterDismissedIssues(repository: HealthRepository, issues: HealthIssue
       continue;
     }
     if (dismissal.dataHash !== issue.dataHash) {
-      repository.removeDismissal(issue.id);
+      try {
+        repository.removeDismissal(issue.id);
+      } catch (error) {
+        warn?.(`Failed to remove stale dismissal: ${formatErrorMessage(error)}`);
+      }
       filtered.push(issue);
     }
   }

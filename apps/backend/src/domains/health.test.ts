@@ -1198,6 +1198,40 @@ describe("TS health domain", () => {
     }
   });
 
+  test("warns and restores stale dismissal hashes when removal fails", async () => {
+    const db = createHealthDb();
+    const baseRepository = createHealthRepository(db);
+    const warnings: string[] = [];
+    const repository = {
+      ...baseRepository,
+      removeDismissal() {
+        throw new Error("database locked");
+      },
+    };
+    const service = createHealthService(repository, DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveNonArchivedAccounts: () => [account({ id: "account-1", trackingMode: "NOT_SET" })],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      const initialStatus = await service.runHealthChecks?.();
+      const issue = initialStatus?.issues[0];
+      expect(issue).toBeDefined();
+
+      await service.dismissIssue(issue!.id, "stale-hash");
+      const restoredStatus = await service.runHealthChecks?.();
+      expect(restoredStatus?.issues).toHaveLength(1);
+      expect(restoredStatus?.issues[0]?.id).toBe(issue!.id);
+      expect(warnings).toEqual(["Failed to remove stale dismissal: database locked"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("caches status per client timezone and invalidates cache after mutations", async () => {
     const db = createHealthDb();
     let nowMs = Date.parse("2026-05-14T12:00:00.000Z");
