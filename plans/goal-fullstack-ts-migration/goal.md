@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 301
+turns_used: 302
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T20:06:19+08:00"
+updated_at: "2026-05-22T20:12:57+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1903,6 +1903,12 @@ updated_at: "2026-05-22T20:06:19+08:00"
   create/update validation now reports valid source kinds and formats in the
   same error text style as Rust, so invalid custom provider definitions surface
   actionable allowed-value lists. Focused custom-provider tests, backend
+  type-check, backend test suite, full `bun run check`, and `git diff --check`
+  passed.
+- Turn 302: Tightened custom-provider stored config parsing parity: TS now
+  treats any malformed source entry in a persisted provider config as a parse
+  failure for the whole config, matching Rust serde behavior instead of silently
+  dropping only the malformed source. Focused custom-provider tests, backend
   type-check, backend test suite, full `bun run check`, and `git diff --check`
   passed.
 

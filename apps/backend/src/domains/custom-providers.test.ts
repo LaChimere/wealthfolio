@@ -41,9 +41,31 @@ describe("TS custom providers domain", () => {
         priority: 10,
         config: "{bad",
       });
+      seedCustomProvider(db, {
+        id: "uuid-mixed",
+        code: "mixed",
+        name: "Mixed Priority",
+        priority: 15,
+        config: JSON.stringify({
+          sources: [
+            {
+              kind: "latest",
+              format: "json",
+              url: "https://example.test/latest/{SYMBOL}",
+              pricePath: "$.price",
+            },
+            {
+              kind: "historical",
+              format: "csv",
+              url: "https://example.test/history/{SYMBOL}",
+            },
+          ],
+        }),
+      });
 
       expect(service.getAll()).toEqual([
         expect.objectContaining({ id: "low", sources: [] }),
+        expect.objectContaining({ id: "mixed", sources: [] }),
         expect.objectContaining({
           id: "high",
           sources: [
@@ -58,10 +80,12 @@ describe("TS custom providers domain", () => {
       ]);
       expect(warnings).toEqual([
         expect.stringContaining("Failed to parse config JSON for provider 'low'"),
+        expect.stringContaining("Failed to parse config JSON for provider 'mixed'"),
       ]);
       expect(service.getSourceByKind("high", "latest")).toEqual(
         expect.objectContaining({ id: "high:latest" }),
       );
+      expect(service.getSourceByKind("mixed", "latest")).toBeNull();
       expect(service.getSourceByKind("missing", "latest")).toBeNull();
     } finally {
       db.close();

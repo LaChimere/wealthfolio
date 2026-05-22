@@ -2843,6 +2843,13 @@ contract:
   `bun run --cwd apps/backend test`, full `bun run check`, and
   `git diff --check`. Coverage includes invalid custom provider source kinds and
   formats reporting Rust-compatible allowed-value lists in validation errors.
+- `pr5-custom-provider-stored-config-parse-parity`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts` and
+  `bun run --cwd apps/backend type-check`; final validation passed with
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes persisted provider configs with mixed
+  valid and malformed source entries returning no sources, matching Rust's
+  whole-config serde fallback instead of retaining partial sources.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

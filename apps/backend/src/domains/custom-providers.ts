@@ -2013,15 +2013,21 @@ function parseSources(
     );
     return [];
   }
-  if (!Array.isArray(parsed.sources)) {
+  if (!isRecord(parsed) || !Array.isArray(parsed.sources)) {
     return [];
   }
-  return parsed.sources
-    .filter(isNewSourceRecord)
-    .map((source) => newSourceToSource(providerCode, source));
+  const sources: NewCustomProviderSource[] = [];
+  for (const source of parsed.sources) {
+    if (!isStoredNewSourceRecord(source)) {
+      warn(options, `Failed to parse config JSON for provider '${providerCode}': invalid source`);
+      return [];
+    }
+    sources.push(source);
+  }
+  return sources.map((source) => newSourceToSource(providerCode, source));
 }
 
-function isNewSourceRecord(value: unknown): value is NewCustomProviderSource {
+function isStoredNewSourceRecord(value: unknown): value is NewCustomProviderSource {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
@@ -2030,8 +2036,33 @@ function isNewSourceRecord(value: unknown): value is NewCustomProviderSource {
     typeof candidate.kind === "string" &&
     typeof candidate.format === "string" &&
     typeof candidate.url === "string" &&
-    typeof candidate.pricePath === "string"
+    typeof candidate.pricePath === "string" &&
+    isOptionalString(candidate.datePath) &&
+    isOptionalString(candidate.dateFormat) &&
+    isOptionalString(candidate.currencyPath) &&
+    isOptionalNumber(candidate.factor) &&
+    isOptionalBoolean(candidate.invert) &&
+    isOptionalString(candidate.locale) &&
+    isOptionalString(candidate.headers) &&
+    isOptionalString(candidate.openPath) &&
+    isOptionalString(candidate.highPath) &&
+    isOptionalString(candidate.lowPath) &&
+    isOptionalString(candidate.volumePath) &&
+    isOptionalNumber(candidate.defaultPrice) &&
+    isOptionalString(candidate.dateTimezone)
   );
+}
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalNumber(value: unknown): value is number | null | undefined {
+  return value === undefined || value === null || typeof value === "number";
+}
+
+function isOptionalBoolean(value: unknown): value is boolean | null | undefined {
+  return value === undefined || value === null || typeof value === "boolean";
 }
 
 function newSourceToSource(
