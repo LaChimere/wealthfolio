@@ -2090,6 +2090,79 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("stores structured metadata for direct activity-created option and bond assets like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const optionActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "aapl  240119c00195000", quoteCcy: "USD" },
+        activityType: "BUY",
+        activityDate: "2025-01-19",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+        metadata: { contract_multiplier: 10 },
+      }) as Activity;
+      const optionAsset = readAssetById(db, optionActivity.assetId ?? "");
+
+      expect(optionAsset).toMatchObject({
+        display_code: "AAPL240119C00195000",
+        quote_ccy: "USD",
+        instrument_type: "OPTION",
+        instrument_symbol: "AAPL240119C00195000",
+        instrument_exchange_mic: null,
+        provider_config: '{"preferred_provider":"YAHOO"}',
+      });
+      expect(JSON.parse(optionAsset?.metadata as string)).toEqual({
+        option: {
+          underlyingAssetId: "AAPL",
+          expiration: "2024-01-19",
+          right: "CALL",
+          strike: 195,
+          multiplier: 10,
+          occSymbol: "AAPL240119C00195000",
+        },
+      });
+
+      const bondActivity = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "912797NQ6", kind: "BOND", quoteCcy: "USD" },
+        activityType: "BUY",
+        activityDate: "2025-01-20",
+        quantity: "1",
+        unitPrice: "99",
+        amount: "99",
+        currency: "USD",
+      }) as Activity;
+      const bondAsset = readAssetById(db, bondActivity.assetId ?? "");
+
+      expect(bondAsset).toMatchObject({
+        display_code: "US912797NQ65",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912797NQ65",
+        instrument_exchange_mic: null,
+        provider_config: null,
+      });
+      expect(JSON.parse(bondAsset?.metadata as string)).toEqual({
+        bond: {
+          maturityDate: null,
+          couponRate: 0,
+          faceValue: null,
+          couponFrequency: "ZERO",
+          isin: "US912797NQ65",
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures direct activity FX pairs before create writes", async () => {
     const db = createActivitiesDb();
     const ensuredPairs: Array<[string, string]> = [];

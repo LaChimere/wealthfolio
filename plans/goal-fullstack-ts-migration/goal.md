@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 260
+turns_used: 261
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T12:11:02+08:00"
+updated_at: "2026-05-22T12:25:45+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1654,6 +1654,12 @@ updated_at: "2026-05-22T12:11:02+08:00"
   explicit quote currency with Rust's re-select-symbol error. Activity domain
   tests, backend type-check, backend test suite, and full `bun run check`
   passed.
+- Turn 261: Added direct activity-created structured asset metadata parity:
+  activity-created OPTION assets now normalize OCC symbols and persist
+  Rust-shaped option specs, including `contract_multiplier` overrides, while
+  activity-created BOND assets canonicalize CUSIPs to ISINs, persist Rust-shaped
+  bond specs, and avoid Yahoo provider defaults. Activity domain tests, backend
+  type-check, backend test suite, and full `bun run check` passed.
 
 ## Deferred items
 
@@ -1818,13 +1824,14 @@ updated_at: "2026-05-22T12:11:02+08:00"
   CSV import-run sync-event callback queuing, activity-created asset Create
   sync-event callback queuing, activity quote-mode asset Update callback queuing
   with stale quote sync-state cleanup, and runtime sync_outbox persistence for
-  these callbacks, and direct import apply can create provider-enriched assets
-  from symbol-only market rows without a prior check round-trip; remaining quote
-  sync outbox follow-ups outside migrated alternative-asset and market-data
-  quote paths, provider-backed asset resolution outside activity import flows,
-  device-sync push/pull runtime wiring, and portfolio recalculation side effects
-  remain active follow-ups for dedicated activities/import/device-sync/portfolio
-  parity slices.
+  these callbacks, direct activity-created OPTION/BOND structured metadata, and
+  direct import apply can create provider-enriched assets from symbol-only
+  market rows without a prior check round-trip; remaining quote sync outbox
+  follow-ups outside migrated alternative-asset and market-data quote paths,
+  provider-backed asset resolution outside activity import flows, device-sync
+  push/pull runtime wiring, and portfolio recalculation side effects remain
+  active follow-ups for dedicated activities/import/device-sync/portfolio parity
+  slices.
 - AI chat tool execution, multimodal PDF provider behavior, and full tool-result
   side effects remain active follow-ups. reason=local thread/message
   persistence, tool-result mutation, tag persistence, sync callbacks, text-only

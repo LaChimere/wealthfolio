@@ -467,6 +467,7 @@ interface AssetRow {
   quote_mode: string;
   display_code: string | null;
   notes: string | null;
+  metadata: string | null;
   instrument_symbol: string | null;
   instrument_exchange_mic: string | null;
   instrument_type: string | null;
@@ -506,11 +507,20 @@ interface PendingActivityAsset {
   kind: string;
   name: string | null;
   displayCode: string;
+  metadata: string | null;
   quoteMode: string;
   quoteCcy: string;
   instrumentType: string;
   instrumentSymbol: string;
   instrumentExchangeMic: string | null;
+}
+
+interface ParsedActivityOccSymbol {
+  underlying: string;
+  expiration: string;
+  right: "CALL" | "PUT";
+  strike: number;
+  occSymbol: string;
 }
 
 interface ActivityAssetResolutionContext {
@@ -3489,10 +3499,15 @@ function normalizeActivityCreateInput(
   validateAssetBackedIncomeValues(activityType, subtype, quantity, unitPrice, amount);
   validateSplitRatio(activityType, amount);
 
-  const assetId = resolveActivityAssetId(db, input, activityType, subtype, assetContext, [
-    stringFieldOrEmpty(input.currency),
-    account.currency,
-  ]);
+  const assetId = resolveActivityAssetId(
+    db,
+    input,
+    activityType,
+    subtype,
+    assetContext,
+    [stringFieldOrEmpty(input.currency), account.currency],
+    input.metadata,
+  );
   const asset = assetId === null ? null : readResolvedActivityAssetRow(db, assetId, assetContext);
   let currency = resolveCurrency([
     stringFieldOrEmpty(input.currency),
@@ -3595,10 +3610,19 @@ function normalizeActivityUpdateInput(
   );
   validateSplitRatio(activityType, effectiveAmount);
 
-  const assetId = resolveActivityAssetId(db, input, activityType, effectiveSubtype, assetContext, [
-    stringFieldOrEmpty(input.currency),
-    account.currency,
-  ]);
+  const assetMetadataForNewAsset =
+    hasOwn(input, "metadata") && input.metadata !== null && input.metadata !== undefined
+      ? input.metadata
+      : existing.metadata;
+  const assetId = resolveActivityAssetId(
+    db,
+    input,
+    activityType,
+    effectiveSubtype,
+    assetContext,
+    [stringFieldOrEmpty(input.currency), account.currency],
+    assetMetadataForNewAsset,
+  );
   const asset = assetId === null ? null : readResolvedActivityAssetRow(db, assetId, assetContext);
   let currency = resolveCurrency([
     stringFieldOrEmpty(input.currency),
@@ -3664,6 +3688,7 @@ function resolveActivityAssetId(
   subtype: string | null,
   assetContext: ActivityAssetResolutionContext | undefined,
   fallbackCurrencies: string[] = [],
+  activityMetadata?: unknown,
 ): string | null {
   const assetInput = activityAssetInputFromRecord(input);
   if (assetInput?.id) {
@@ -3683,7 +3708,7 @@ function resolveActivityAssetId(
     if (!assetContext) {
       throw new Error("Symbol-based asset creation requires an asset resolution context");
     }
-    return stageActivityAsset(assetInput, fallbackCurrencies, assetContext);
+    return stageActivityAsset(assetInput, fallbackCurrencies, assetContext, activityMetadata);
   }
   if (requiresAssetIdentity(activityType, subtype) && input.allowMissingAsset !== true) {
     throw new Error("Asset-backed activities need either asset_id or symbol");
@@ -3743,8 +3768,9 @@ function stageActivityAsset(
   asset: ActivityAssetInput,
   fallbackCurrencies: string[],
   assetContext: ActivityAssetResolutionContext,
+  activityMetadata?: unknown,
 ): string {
-  const pending = pendingActivityAssetFromInput(asset, fallbackCurrencies);
+  const pending = pendingActivityAssetFromInput(asset, fallbackCurrencies, activityMetadata);
   const key = generatedActivityInstrumentKey(pending);
   const existingPendingId = assetContext.pendingAssetIdByKey.get(key);
   if (existingPendingId) {
@@ -3764,6 +3790,7 @@ function stageActivityAsset(
 function pendingActivityAssetFromInput(
   asset: ActivityAssetInput,
   fallbackCurrencies: string[],
+  activityMetadata?: unknown,
 ): PendingActivityAsset {
   const rawSymbol = asset.symbol?.trim();
   if (!rawSymbol) {
@@ -3802,6 +3829,13 @@ function pendingActivityAssetFromInput(
     }
     exchangeMic = null;
   } else if (instrumentType === "OPTION") {
+    const normalizedOptionSymbol = normalizeActivityOptionSymbol(rawSymbol);
+    if (normalizedOptionSymbol) {
+      instrumentSymbol = normalizedOptionSymbol;
+      displayCode = normalizedOptionSymbol;
+    }
+    exchangeMic = null;
+  } else if (instrumentType === "BOND") {
     exchangeMic = null;
   }
 
@@ -3815,12 +3849,17 @@ function pendingActivityAssetFromInput(
   if (instrumentType === "EQUITY" && quoteMode === "MARKET" && !exchangeMic) {
     throw new Error(`Exchange MIC is required to create market asset ${instrumentSymbol}`);
   }
+  if (instrumentType === "BOND") {
+    instrumentSymbol = normalizeActivityBondSymbol(instrumentSymbol, quoteCcy);
+    displayCode = instrumentSymbol;
+  }
 
   return {
     id: asset.id ?? crypto.randomUUID(),
     kind: normalizeActivityAssetKind(asset.kind, instrumentType),
     name: asset.name ?? null,
     displayCode,
+    metadata: buildActivityAssetMetadata(instrumentType, instrumentSymbol, activityMetadata),
     quoteMode,
     quoteCcy,
     instrumentType,
@@ -3873,7 +3912,7 @@ function inferActivityInstrumentType(
   if (parseActivityCryptoPairSymbol(upperSymbol)) {
     return "CRYPTO";
   }
-  if (/^[A-Z]{1,6}\d{6}[CP]\d{8}$/u.test(upperSymbol)) {
+  if (looksLikeActivityOccSymbol(upperSymbol)) {
     return "OPTION";
   }
   if (asset.exchangeMic?.trim()) {
@@ -4158,6 +4197,193 @@ function parseActivityFxSymbol(symbol: string): { base: string; quote: string } 
   return null;
 }
 
+function buildActivityAssetMetadata(
+  instrumentType: string,
+  instrumentSymbol: string,
+  activityMetadata: unknown,
+): string | null {
+  if (instrumentType === "OPTION") {
+    const parsed = parseActivityOccSymbol(instrumentSymbol);
+    if (!parsed) {
+      return null;
+    }
+    return JSON.stringify({
+      option: {
+        underlyingAssetId: parsed.underlying,
+        expiration: parsed.expiration,
+        right: parsed.right,
+        strike: parsed.strike,
+        multiplier: customActivityOptionMultiplier(activityMetadata) ?? 100,
+        occSymbol: parsed.occSymbol,
+      },
+    });
+  }
+
+  if (instrumentType === "BOND") {
+    const isin = instrumentSymbol.toUpperCase();
+    const isTreasuryBill = isin.startsWith("US912797") || isin.startsWith("912797");
+    return JSON.stringify({
+      bond: {
+        maturityDate: null,
+        couponRate: isTreasuryBill ? 0 : null,
+        faceValue: null,
+        couponFrequency: isTreasuryBill ? "ZERO" : null,
+        isin,
+      },
+    });
+  }
+
+  return null;
+}
+
+function customActivityOptionMultiplier(activityMetadata: unknown): number | null {
+  const metadata =
+    typeof activityMetadata === "string" ? parseJsonOrNull(activityMetadata) : activityMetadata;
+  if (!isRecord(metadata)) {
+    return null;
+  }
+  const multiplier = metadata.contract_multiplier;
+  return typeof multiplier === "number" && Number.isFinite(multiplier) && multiplier > 0
+    ? multiplier
+    : null;
+}
+
+function normalizeActivityOptionSymbol(symbol: string): string | null {
+  const trimmed = symbol.trim();
+  const standard = trimmed.startsWith("-") ? trimmed.slice(1).trim() : trimmed;
+  if (!standard) {
+    return null;
+  }
+  const parsedStandard = parseActivityOccSymbol(standard);
+  if (parsedStandard) {
+    return parsedStandard.occSymbol;
+  }
+
+  const digitStart = standard.search(/\d/u);
+  if (digitStart <= 0) {
+    return null;
+  }
+  const underlying = standard.slice(0, digitStart);
+  const rest = standard.slice(digitStart);
+  if (rest.length < 8) {
+    return null;
+  }
+  const datePart = rest.slice(0, 6);
+  const optionType = rest[6]?.toUpperCase();
+  const strike = rest.slice(7);
+  if (
+    !/^\d{6}$/u.test(datePart) ||
+    (optionType !== "C" && optionType !== "P") ||
+    !/^\d+$/u.test(strike) ||
+    !activityOccExpirationDate(datePart)
+  ) {
+    return null;
+  }
+
+  const scaledStrike = Number(strike) * 1000;
+  const paddedStrike = String(scaledStrike).padStart(8, "0");
+  if (!Number.isSafeInteger(scaledStrike) || paddedStrike.length > 8) {
+    return null;
+  }
+  return `${underlying.toUpperCase()}${datePart}${optionType}${paddedStrike}`;
+}
+
+function parseActivityOccSymbol(symbol: string): ParsedActivityOccSymbol | null {
+  const trimmed = symbol.trim();
+  if (!looksLikeActivityOccSymbol(trimmed)) {
+    return null;
+  }
+
+  const strikePart = trimmed.slice(-8);
+  const dateStart = trimmed.length - 15;
+  const typeIndex = trimmed.length - 9;
+  const underlying = trimmed.slice(0, dateStart).trim().toUpperCase();
+  const expiration = activityOccExpirationDate(trimmed.slice(dateStart, typeIndex));
+  const optionType = trimmed[typeIndex]?.toUpperCase();
+  if (!underlying || !expiration || (optionType !== "C" && optionType !== "P")) {
+    return null;
+  }
+
+  return {
+    underlying,
+    expiration,
+    right: optionType === "C" ? "CALL" : "PUT",
+    strike: Number(strikePart) / 1000,
+    occSymbol: `${underlying}${trimmed.slice(dateStart, typeIndex)}${optionType}${strikePart}`,
+  };
+}
+
+function looksLikeActivityOccSymbol(symbol: string): boolean {
+  const trimmed = symbol.trim();
+  const length = trimmed.length;
+  if (length < 15 || length > 21) {
+    return false;
+  }
+  const optionType = trimmed[length - 9]?.toUpperCase();
+  return (
+    (optionType === "C" || optionType === "P") &&
+    /^\d{8}$/u.test(trimmed.slice(-8)) &&
+    /^\d{6}$/u.test(trimmed.slice(length - 15, length - 9))
+  );
+}
+
+function activityOccExpirationDate(value: string): string | null {
+  if (!/^\d{6}$/u.test(value)) {
+    return null;
+  }
+  const year = 2000 + Number(value.slice(0, 2));
+  const month = Number(value.slice(2, 4));
+  const day = Number(value.slice(4, 6));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeActivityBondSymbol(symbol: string, quoteCcy: string): string {
+  const upper = symbol.toUpperCase();
+  if (!looksLikeActivityCusip(upper)) {
+    return upper;
+  }
+  const country = quoteCcy === "CAD" ? "CA" : quoteCcy === "BMD" ? "BM" : "US";
+  return activityCusipToIsin(upper, country);
+}
+
+function looksLikeActivityCusip(value: string): boolean {
+  return /^[A-Z0-9]{8}\d$/u.test(value.trim());
+}
+
+function activityCusipToIsin(cusip: string, countryCode: string): string {
+  const body = `${countryCode}${cusip.slice(0, 9)}`;
+  return `${body}${computeActivityIsinCheckDigit(body)}`;
+}
+
+function computeActivityIsinCheckDigit(firstEleven: string): number {
+  const digits: number[] = [];
+  for (const char of firstEleven) {
+    if (/\d/u.test(char)) {
+      digits.push(Number(char));
+    } else if (/[A-Z]/iu.test(char)) {
+      const value = char.toUpperCase().charCodeAt(0) - "A".charCodeAt(0) + 10;
+      digits.push(Math.floor(value / 10), value % 10);
+    }
+  }
+
+  let sum = 0;
+  for (let index = 0; index < digits.length; index += 1) {
+    let value = digits[digits.length - 1 - index] ?? 0;
+    if (index % 2 === 0) {
+      value *= 2;
+      if (value > 9) {
+        value -= 9;
+      }
+    }
+    sum += value;
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
 function isCommonCryptoSymbol(symbol: string): boolean {
   return [
     "BTC",
@@ -4211,6 +4437,7 @@ function pendingActivityAssetToRow(asset: PendingActivityAsset): AssetRow {
     quote_mode: asset.quoteMode,
     display_code: asset.displayCode,
     notes: null,
+    metadata: asset.metadata,
     instrument_symbol: asset.instrumentSymbol,
     instrument_exchange_mic: asset.instrumentExchangeMic,
     instrument_type: asset.instrumentType,
@@ -4237,6 +4464,7 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
     "kind",
     "name",
     "display_code",
+    "metadata",
     "is_active",
     "quote_mode",
     "quote_ccy",
@@ -4249,6 +4477,7 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
     asset.kind,
     asset.name,
     asset.displayCode,
+    asset.metadata,
     1,
     asset.quoteMode,
     asset.quoteCcy,
@@ -4259,7 +4488,9 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
   if (assetTableColumns(db).has("provider_config")) {
     columns.push("provider_config");
     values.push(
-      asset.quoteMode === "MARKET" ? JSON.stringify({ preferred_provider: "YAHOO" }) : null,
+      asset.quoteMode === "MARKET" && asset.instrumentType !== "BOND"
+        ? JSON.stringify({ preferred_provider: "YAHOO" })
+        : null,
     );
   }
 
@@ -4366,6 +4597,7 @@ function findAssetRowById(db: Database, assetId: string): AssetRow | null {
             quote_mode,
             display_code,
             notes,
+            metadata,
             instrument_symbol,
             instrument_exchange_mic,
             instrument_type
@@ -4415,6 +4647,7 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
           quote_mode,
           display_code,
           notes,
+          metadata,
           instrument_symbol,
           instrument_exchange_mic,
           instrument_type
@@ -4449,6 +4682,7 @@ function findExistingAssetByIsin(db: Database, isin: string): AssetRow | null {
             quote_mode,
             display_code,
             notes,
+            metadata,
             instrument_symbol,
             instrument_exchange_mic,
             instrument_type
