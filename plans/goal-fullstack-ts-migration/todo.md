@@ -2789,6 +2789,15 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes FIFO sell
   removal of the oldest lot advancing `inceptionDate` to the next remaining lot,
   unchanged `createdAt` semantics, and transferred-lot inception preservation.
+- `pr5-health-archived-unconfigured-accounts`: verification passed:
+  `cargo test -p wealthfolio-core health::service::tests::test_unconfigured_accounts_excludes_archived_accounts --quiet`,
+  `cargo test -p wealthfolio-core health --quiet`,
+  `cargo check -p wealthfolio-core --quiet`,
+  `bun test apps/backend/src/domains/health.test.ts`,
+  `cargo test -p wealthfolio-core --quiet`, full `bun run check`, and
+  `git diff --check`. Coverage includes archived `NOT_SET` accounts no longer
+  contributing to Rust account-configuration health issues, matching the TS
+  runtime's active non-archived account setup check.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

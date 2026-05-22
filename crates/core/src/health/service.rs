@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::accounts::AccountServiceTrait;
+use crate::accounts::{Account, AccountServiceTrait, TrackingMode};
 use crate::assets::AssetServiceTrait;
 use crate::errors::Result;
 use crate::portfolio::holdings::HoldingsServiceTrait;
@@ -437,14 +437,7 @@ impl HealthService {
         }
 
         // Gather accounts without tracking mode set
-        let unconfigured_accounts: Vec<UnconfiguredAccountInfo> = accounts
-            .iter()
-            .filter(|acc| acc.tracking_mode == crate::accounts::TrackingMode::NotSet)
-            .map(|acc| UnconfiguredAccountInfo {
-                account_id: acc.id.clone(),
-                account_name: acc.name.clone(),
-            })
-            .collect();
+        let unconfigured_accounts = unconfigured_accounts_from_accounts(&accounts);
 
         // Run checks with gathered data
         self.run_checks_with_data(
@@ -681,6 +674,17 @@ impl HealthServiceTrait for HealthService {
     }
 }
 
+fn unconfigured_accounts_from_accounts(accounts: &[Account]) -> Vec<UnconfiguredAccountInfo> {
+    accounts
+        .iter()
+        .filter(|acc| !acc.is_archived && acc.tracking_mode == TrackingMode::NotSet)
+        .map(|acc| UnconfiguredAccountInfo {
+            account_id: acc.id.clone(),
+            account_name: acc.name.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,6 +731,36 @@ mod tests {
             self.dismissals.write().await.clear();
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_unconfigured_accounts_excludes_archived_accounts() {
+        let accounts = vec![
+            Account {
+                id: "active-unconfigured".to_string(),
+                name: "Active".to_string(),
+                tracking_mode: TrackingMode::NotSet,
+                ..Default::default()
+            },
+            Account {
+                id: "archived-unconfigured".to_string(),
+                name: "Archived".to_string(),
+                is_archived: true,
+                tracking_mode: TrackingMode::NotSet,
+                ..Default::default()
+            },
+            Account {
+                id: "active-configured".to_string(),
+                name: "Configured".to_string(),
+                tracking_mode: TrackingMode::Transactions,
+                ..Default::default()
+            },
+        ];
+
+        let unconfigured = unconfigured_accounts_from_accounts(&accounts);
+
+        assert_eq!(unconfigured.len(), 1);
+        assert_eq!(unconfigured[0].account_id, "active-unconfigured");
     }
 
     #[tokio::test]
