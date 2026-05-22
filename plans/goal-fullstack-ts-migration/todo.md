@@ -2970,6 +2970,14 @@ contract:
   runtime create/update/delete/idempotent-delete mutations triggering
   Rust-compatible no-market-sync incremental portfolio update events while sync
   outbox behavior remains unchanged.
+- `pr5-asset-update-portfolio-side-effects`: verification passed:
+  `bun test apps/backend/src/runtime.test.ts -t "asset-updated events"`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes standalone
+  runtime asset profile and quote-mode mutations publishing `assets_updated` and
+  the domain-event worker triggering market-sync plus portfolio-update events,
+  matching Rust's asset-update portfolio side-effect path.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

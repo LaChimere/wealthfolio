@@ -16,6 +16,7 @@ import { openSqliteDatabase } from "./storage/sqlite";
 import {
   ACTIVITIES_CHANGED_EVENT,
   ASSETS_CREATED_EVENT,
+  ASSETS_UPDATED_EVENT,
   HOLDINGS_CHANGED_EVENT,
 } from "./domain-events/planner";
 
@@ -2441,6 +2442,63 @@ describe("TS backend runtime composition", () => {
         { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 0, failed: 0 } },
       ]);
       expect(fetchCalls).toEqual([]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime asset-updated events to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-updated-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      marketDataFetch: (() => {
+        throw new Error("unexpected market data fetch");
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const { assetService } = runtime.options;
+      if (!assetService) {
+        throw new Error("Runtime asset update test requires asset service");
+      }
+
+      const created = await assetService.createAsset({
+        kind: "PROPERTY",
+        quoteMode: "MANUAL",
+        quoteCcy: "USD",
+        name: "Manual Property",
+      });
+      await runtime.domainEventWorker.flush();
+
+      events.length = 0;
+      await assetService.updateAssetProfile(created.id, { notes: "updated profile" });
+      await runtime.domainEventWorker.flush();
+      expect(events).toEqual([
+        ASSETS_UPDATED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+
+      events.length = 0;
+      assetService.updateQuoteMode(created.id, "MARKET");
+      await runtime.domainEventWorker.flush();
+      expect(events).toEqual([
+        ASSETS_UPDATED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
     } finally {
       unsubscribe?.();
       await runtime.close();
