@@ -2827,7 +2827,11 @@ async function importActivityRows(
       if (isRecord(resolvedActivity)) {
         Object.assign(activity, resolvedActivity);
       }
-      normalizeImportActivityForApply(activity);
+      const accountCurrency = readAccountRow(
+        db,
+        optionalTrimmedString(activity.accountId) ?? "",
+      ).currency;
+      normalizeImportActivityForApply(activity, accountCurrency);
       const createInput = importActivityCreateInput(activity);
       collectImportApplyPreflightErrors(activity, errors);
 
@@ -3164,10 +3168,21 @@ function collectImportApplyPreflightErrors(
   }
 }
 
-function normalizeImportActivityForApply(activity: Record<string, unknown>): void {
+function normalizeImportActivityForApply(
+  activity: Record<string, unknown>,
+  accountCurrency: string,
+): void {
   const activityType = optionalTrimmedString(activity.activityType);
-  if (activityType) {
-    normalizeImportActivitySubtype(activity, activityType);
+  if (!activityType) {
+    return;
+  }
+
+  normalizeImportActivitySubtype(activity, activityType);
+  if (activityType === "SPLIT") {
+    const currency = optionalTrimmedString(activity.currency) ?? "";
+    if (!isThreeLetterAlphabeticCurrency(currency)) {
+      activity.currency = accountCurrency;
+    }
   }
 }
 

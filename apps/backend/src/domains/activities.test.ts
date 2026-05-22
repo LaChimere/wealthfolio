@@ -1667,6 +1667,49 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("falls back to account currency for invalid split import apply currencies like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          assetId: "AAPL",
+          activityType: "SPLIT",
+          date: "2025-01-16",
+          amount: "2",
+          currency: "$$",
+          lineNumber: 1,
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({ imported: 1, success: true });
+      expect(result.activities[0]).toMatchObject({
+        assetId: "AAPL",
+        currency: "USD",
+        isValid: true,
+      });
+      expect(readActivityValue(db, result.activities[0]?.id as string, "currency")).toBe("USD");
+    } finally {
+      db.close();
+    }
+  });
+
   test("validates empty import symbols for asset-backed activity rows like Rust", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
