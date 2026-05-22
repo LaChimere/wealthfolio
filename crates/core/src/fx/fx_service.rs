@@ -82,6 +82,13 @@ impl FxService {
                     .get_latest_exchange_rate_by_symbol(&inverse_key)?
                 {
                     Some(inverse_rate) => {
+                        if inverse_rate.rate.is_zero() {
+                            return Err(FxError::RateNotFound(format!(
+                                "Exchange rate not found for {}/{}",
+                                from, to
+                            ))
+                            .into());
+                        }
                         let direct_rate = ExchangeRate {
                             id: inverse_rate.id,
                             from_currency: from.to_string(),
@@ -446,6 +453,7 @@ mod tests {
     #[derive(Default)]
     struct MockFxRepository {
         created_pairs: Mutex<Vec<(String, String, String)>>,
+        latest_by_symbol: Mutex<Option<ExchangeRate>>,
     }
 
     #[async_trait]
@@ -466,7 +474,7 @@ mod tests {
             &self,
             _symbol: &str,
         ) -> Result<Option<ExchangeRate>> {
-            Ok(None)
+            Ok(self.latest_by_symbol.lock().unwrap().clone())
         }
 
         fn get_historical_quotes(
@@ -526,6 +534,24 @@ mod tests {
             repo.created_pairs.lock().unwrap().is_empty(),
             "GBp/GBP should not create an FX asset after normalization"
         );
+    }
+
+    #[test]
+    fn inverse_latest_rate_with_zero_value_returns_not_found() {
+        let repo = Arc::new(MockFxRepository::default());
+        *repo.latest_by_symbol.lock().unwrap() = Some(ExchangeRate {
+            id: "cad-usd".to_string(),
+            from_currency: "CAD".to_string(),
+            to_currency: "USD".to_string(),
+            rate: Decimal::ZERO,
+            source: DATA_SOURCE_MANUAL.to_string(),
+            timestamp: Utc::now(),
+        });
+        let service = FxService::new(repo);
+
+        let error = service.load_latest_exchange_rate("USD", "CAD").unwrap_err();
+
+        assert!(error.to_string().contains("Exchange rate not found"));
     }
 
     #[tokio::test]

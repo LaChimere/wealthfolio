@@ -262,6 +262,30 @@ describe("TS exchange rates domain", () => {
     }
   });
 
+  test("treats zero inverse latest rates as unavailable", () => {
+    const db = createExchangeRatesDb();
+    const warnings: string[] = [];
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      warn: (message) => warnings.push(message),
+    });
+
+    try {
+      seedFxAsset(db, { id: "cad-usd", from: "CAD", to: "USD" });
+      seedQuote(db, {
+        id: "cad-usd-zero",
+        assetId: "cad-usd",
+        day: "2026-01-01",
+        close: "0",
+        source: "MANUAL",
+      });
+
+      expect(() => service.getLatestExchangeRate("USD", "CAD")).toThrow("Exchange rate not found");
+      expect(warnings).toEqual(["Exchange rate not available for USD/CAD"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("warns when dated conversion falls back to latest available rate", () => {
     const db = createExchangeRatesDb();
     const warnings: string[] = [];

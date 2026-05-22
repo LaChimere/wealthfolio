@@ -2532,6 +2532,13 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage proves option sell
   activities for missing positions still apply cash proceeds with the asset
   contract multiplier, warn, and leave positions absent like Rust.
+- `pr5-fx-zero-inverse-rate`: verification passed: focused TS/Rust FX tests,
+  `bun test apps/backend/src/domains/exchange-rates.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  `cargo test -p wealthfolio-core fx::fx_service`,
+  `cargo check -p wealthfolio-core`, full `bun run check`, and
+  `git diff --check`. Coverage proves zero-valued inverse latest exchange rates
+  are treated as unavailable instead of being inverted.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
