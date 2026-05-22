@@ -2494,6 +2494,14 @@ describe("TS market data domain", () => {
       insertAsset(db, { id: "aapl", display_code: "AAPL" });
       insertSyncState(db, { asset_id: "aapl", error_count: 6, last_error: "rate limited" });
       insertAsset(db, { id: "msft", display_code: null, instrument_symbol: "MSFT" });
+      insertQuote(db, {
+        id: "msft_2026-05-01_YAHOO",
+        asset_id: "msft",
+        day: "2026-05-01",
+        source: "YAHOO",
+        close: "420",
+        currency: "USD",
+      });
       insertSyncState(db, { asset_id: "msft", error_count: 3, last_error: null });
 
       expect(service.getQuoteSyncErrorSnapshots?.()).toEqual([
@@ -2503,6 +2511,7 @@ describe("TS market data domain", () => {
           quoteMode: "MANUAL",
           errorCount: 9,
           lastError: "manual ignored",
+          hasSyncedBefore: false,
         },
         {
           assetId: "missing-asset",
@@ -2510,6 +2519,7 @@ describe("TS market data domain", () => {
           quoteMode: "MARKET",
           errorCount: 7,
           lastError: "not found",
+          hasSyncedBefore: false,
         },
         {
           assetId: "aapl",
@@ -2517,6 +2527,7 @@ describe("TS market data domain", () => {
           quoteMode: "MARKET",
           errorCount: 6,
           lastError: "rate limited",
+          hasSyncedBefore: false,
         },
         {
           assetId: "msft",
@@ -2524,6 +2535,7 @@ describe("TS market data domain", () => {
           quoteMode: "MARKET",
           errorCount: 3,
           lastError: null,
+          hasSyncedBefore: true,
         },
       ]);
     } finally {

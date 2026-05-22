@@ -61,7 +61,8 @@ describe("TS sync outbox queue", () => {
         operation: "Update",
         payload: { id: "goal-1", statusHealth: "on_track" },
       });
-      expect(JSON.parse(String(readOutboxRows(db).at(-1)?.payload))).toEqual({
+      const updateRow = readOutboxRows(db).find((row) => row.event_id === updateEventId);
+      expect(JSON.parse(String(updateRow?.payload))).toEqual({
         id: "goal-1",
         status_health: "on_track",
       });

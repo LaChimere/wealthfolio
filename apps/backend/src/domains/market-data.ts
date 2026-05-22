@@ -63,6 +63,7 @@ export interface QuoteSyncErrorSnapshot {
   quoteMode: string;
   errorCount: number;
   lastError: string | null;
+  hasSyncedBefore: boolean;
 }
 
 export interface NoQuoteReason {
@@ -3879,6 +3880,7 @@ function quoteSyncErrorSnapshots(db: Database): QuoteSyncErrorSnapshot[] {
         quote_mode: string | null;
         error_count: number;
         last_error: string | null;
+        has_synced_before: number;
       },
       []
     >(
@@ -3887,7 +3889,12 @@ function quoteSyncErrorSnapshots(db: Database): QuoteSyncErrorSnapshot[] {
           COALESCE(a.display_code, a.instrument_symbol, qss.asset_id) AS symbol,
           COALESCE(a.quote_mode, 'MARKET') AS quote_mode,
           qss.error_count,
-          qss.last_error
+          qss.last_error,
+          EXISTS (
+            SELECT 1
+            FROM quotes q
+            WHERE q.asset_id = qss.asset_id
+          ) AS has_synced_before
         FROM quote_sync_state qss
         LEFT JOIN assets a ON a.id = qss.asset_id
         WHERE qss.error_count > 0
@@ -3901,6 +3908,7 @@ function quoteSyncErrorSnapshots(db: Database): QuoteSyncErrorSnapshot[] {
       quoteMode: row.quote_mode ?? "MARKET",
       errorCount: row.error_count,
       lastError: row.last_error,
+      hasSyncedBefore: row.has_synced_before !== 0,
     }));
 }
 

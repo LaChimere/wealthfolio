@@ -2745,6 +2745,18 @@ contract:
   `bun run --cwd apps/backend test`, and full `bun run check`. Coverage includes
   import apply replacing malformed SPLIT currencies with the account currency
   before returned rows and persisted activity storage.
+- `pr5-health-quote-sync-has-synced`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "quote sync error snapshots"`,
+  `bun test apps/backend/src/domains/health.test.ts --test-name-pattern "quote sync"`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun test apps/backend/src/domains/health.test.ts`,
+  `bun test ./apps/backend/src/sync-outbox.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes quote sync
+  error snapshots exposing Rust-compatible `hasSyncedBefore` values from local
+  quotes, Health Center preserving the field for never-synced assets while
+  keeping Rust's 1-5 warning/6+ error thresholds, and deterministic sync-outbox
+  event payload assertions.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

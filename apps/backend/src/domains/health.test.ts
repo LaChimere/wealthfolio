@@ -680,6 +680,59 @@ describe("TS health domain", () => {
     }
   });
 
+  test("classifies never-synced quote sync failures by Rust error-count thresholds", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [],
+        getActiveNonArchivedAccounts: () => [],
+      },
+      holdingsProvider: {
+        getHoldings: () => {
+          throw new Error("should not load holdings when there are no active accounts");
+        },
+      },
+      marketDataQuoteProvider: {
+        getQuoteSyncErrorSnapshots: () => [
+          quoteSyncError({
+            assetId: "never-low",
+            symbol: "LOW",
+            errorCount: 1,
+            hasSyncedBefore: false,
+          }),
+          quoteSyncError({
+            assetId: "never-high",
+            symbol: "HIGH",
+            errorCount: 8,
+            hasSyncedBefore: false,
+          }),
+        ],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^quote_sync:error:/),
+          severity: "ERROR",
+          title: "Quotes sync failing for HIGH",
+          fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["never-high"] },
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^quote_sync:warning:/),
+          severity: "WARNING",
+          title: "Sync issues for LOW",
+          fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["never-low"] },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps quote sync checks nonfatal when sync error snapshots fail", async () => {
     const db = createHealthDb();
     const warnings: string[] = [];
@@ -1695,6 +1748,7 @@ function quoteSyncError(update: {
   errorCount: number;
   quoteMode?: string;
   lastError?: string | null;
+  hasSyncedBefore?: boolean;
 }) {
   return {
     assetId: update.assetId,
@@ -1702,5 +1756,6 @@ function quoteSyncError(update: {
     quoteMode: update.quoteMode ?? "MARKET",
     errorCount: update.errorCount,
     lastError: update.lastError ?? null,
+    hasSyncedBefore: update.hasSyncedBefore ?? true,
   };
 }

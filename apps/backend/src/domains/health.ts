@@ -781,6 +781,7 @@ interface QuoteSyncHealthError {
   errorCount: number;
   lastError: string | null;
   marketValue: number;
+  hasSyncedBefore: boolean;
 }
 
 async function analyzeQuoteSyncErrors(
@@ -819,6 +820,7 @@ async function analyzeQuoteSyncErrors(
       errorCount: snapshot.errorCount,
       lastError: snapshot.lastError,
       marketValue: holdingMarketValues.get(snapshot.assetId) ?? 0,
+      hasSyncedBefore: snapshot.hasSyncedBefore,
     }));
 
   return analyzeQuoteSyncErrorsFromSnapshots(syncErrors, {
