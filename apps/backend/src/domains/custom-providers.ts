@@ -1939,10 +1939,14 @@ function normalizeNewProviderCode(rawCode: string): string {
 function validateSourceDefinitions(sources: NewCustomProviderSource[]): void {
   for (const source of sources) {
     if (!(VALID_SOURCE_KINDS as readonly string[]).includes(source.kind)) {
-      throw new Error(`Invalid input: Invalid source kind '${source.kind}'`);
+      throw new Error(
+        `Invalid input: Invalid source kind '${source.kind}'. Must be one of: ${VALID_SOURCE_KINDS.join(", ")}`,
+      );
     }
     if (!(VALID_SOURCE_FORMATS as readonly string[]).includes(source.format)) {
-      throw new Error(`Invalid input: Invalid source format '${source.format}'`);
+      throw new Error(
+        `Invalid input: Invalid source format '${source.format}'. Must be one of: ${VALID_SOURCE_FORMATS.join(", ")}`,
+      );
     }
   }
 }

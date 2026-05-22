@@ -120,6 +120,20 @@ describe("TS custom providers domain", () => {
       ).rejects.toThrow("Code must contain only lowercase letters, numbers, and hyphens");
       await expect(
         service.create({
+          code: "bad-kind",
+          name: "Bad Kind",
+          sources: [
+            {
+              kind: "current" as "latest",
+              format: "json",
+              url: "https://example.test",
+              pricePath: "$.price",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Invalid source kind 'current'. Must be one of: latest, historical");
+      await expect(
+        service.create({
           code: "bad-format",
           name: "Bad Format",
           sources: [
@@ -131,7 +145,7 @@ describe("TS custom providers domain", () => {
             },
           ],
         }),
-      ).rejects.toThrow("Invalid source format 'xml'");
+      ).rejects.toThrow("Invalid source format 'xml'. Must be one of: json, html, html_table, csv");
     } finally {
       db.close();
     }

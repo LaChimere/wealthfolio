@@ -2837,6 +2837,12 @@ contract:
   date/time aliases, and `%h` month aliases in custom provider URLs, plus
   deterministic holdings snapshot sync-outbox runtime test cleanup with
   market-data fetches stubbed.
+- `pr5-custom-provider-source-validation-message-parity`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts` and
+  `bun run --cwd apps/backend type-check`; final validation passed with
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes invalid custom provider source kinds and
+  formats reporting Rust-compatible allowed-value lists in validation errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
