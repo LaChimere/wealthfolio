@@ -1885,15 +1885,21 @@ async function previewImportAsset(
     return importAssetPreviewItem(key, "NEEDS_FIXING", "validation_error", { errors });
   }
 
+  const previewAssetInput = normalizeActivityAssetInputForLookup(
+    {
+      symbol,
+      exchangeMic,
+      instrumentType,
+      quoteCcy,
+    },
+    options.exchangeMetadata,
+  );
+  const previewSymbol = previewAssetInput.symbol ?? symbol;
+
   try {
     const existingAsset = isin
       ? findExistingAssetByIsin(db, isin)
-      : findExistingAssetBySymbol(db, {
-          symbol,
-          exchangeMic,
-          instrumentType,
-          quoteCcy,
-        });
+      : findExistingAssetBySymbol(db, previewAssetInput);
     if (existingAsset) {
       return importAssetPreviewItem(key, "EXISTING_ASSET", "existing_asset", {
         assetId: existingAsset.id,
@@ -1905,9 +1911,9 @@ async function previewImportAsset(
     return importAssetPreviewItem(key, "NEEDS_FIXING", "ambiguous_existing_asset", { errors });
   }
 
-  let resolvedExchangeMic = exchangeMic;
-  let resolvedInstrumentType = instrumentType;
-  let resolvedQuoteCcy = quoteCcy;
+  let resolvedExchangeMic = previewAssetInput.exchangeMic;
+  let resolvedInstrumentType = previewAssetInput.instrumentType;
+  let resolvedQuoteCcy = previewAssetInput.quoteCcy;
   let resolvedName: string | undefined;
   const shouldResolveWithProvider =
     quoteMode !== "MANUAL" &&
@@ -1916,7 +1922,7 @@ async function previewImportAsset(
       (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic));
   if (shouldResolveWithProvider) {
     const resolution = await resolveImportAssetSymbol(
-      symbol,
+      previewSymbol,
       resolvedQuoteCcy ?? accountCurrency,
       options,
       searchCache,
@@ -1943,7 +1949,7 @@ async function previewImportAsset(
   }
 
   const draft = newAssetDraftFromImport({
-    symbol,
+    symbol: previewSymbol,
     quoteCcy: resolvedQuoteCcy,
     instrumentType: resolvedInstrumentType,
     exchangeMic: resolvedExchangeMic,
@@ -1954,7 +1960,7 @@ async function previewImportAsset(
     addFieldMessage(
       errors,
       "symbol",
-      `Could not determine the exchange for '${symbol}'. Please search for the correct ticker.`,
+      `Could not determine the exchange for '${previewSymbol}'. Please search for the correct ticker.`,
     );
     return importAssetPreviewItem(key, "NEEDS_FIXING", "missing_exchange", { draft, errors });
   }

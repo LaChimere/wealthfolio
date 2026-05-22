@@ -226,14 +226,15 @@
     structured OPTION/BOND metadata, Rust-shaped import preview draft
     serialization for existing/new assets, Börse Frankfurt provider preference
     inference for XETR/XFRA ISIN equities, Yahoo suffix-to-MIC canonicalization
-    with MIC quote-currency fallback plus existing-asset lookup normalization,
-    and Rust-compatible quote-currency errors for incomplete market securities,
-    now have TS runtime parity, while broader provider-backed asset resolution
-    outside the activity preview/check/apply round-trip and remaining quote sync
-    outbox follow-ups outside migrated alternative-asset and market-data quote
-    paths, device-sync push/pull runtime wiring, and remaining device-sync side
-    effects are deferred to activities/import/device-sync runtime parity slices;
-    AI chat persistence, tag persistence, tool-result mutation, local AI chat
+    with MIC quote-currency fallback plus existing-asset lookup normalization
+    across direct activity and import asset preview paths, and Rust-compatible
+    quote-currency errors for incomplete market securities, now have TS runtime
+    parity, while broader provider-backed asset resolution outside the activity
+    preview/check/apply round-trip and remaining quote sync outbox follow-ups
+    outside migrated alternative-asset and market-data quote paths, device-sync
+    push/pull runtime wiring, and remaining device-sync side effects are
+    deferred to activities/import/device-sync runtime parity slices; AI chat
+    persistence, tag persistence, tool-result mutation, local AI chat
     sync_outbox callbacks, native/fallback text/reasoning provider streaming,
     generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
     tool-call execution, built-in `get_accounts`, `get_holdings`,
@@ -2562,6 +2563,14 @@ contract:
   long/short quantity handling with dust-threshold filtering, FX-asset skipping,
   inactive asset reactivation, MARKET sync state creation/reopen/close priority
   updates, and best-effort warning behavior when reconciliation fails.
+- `pr5-activities-import-preview-suffix-existing-match`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "previews import assets by matching yahoo-suffixed symbols to existing assets"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes import asset previews normalizing
+  configured Yahoo suffixes such as `.DE` before existing SQLite asset lookup
+  and provider fallback, avoiding duplicate new-asset previews for known
+  MIC-backed XETR/XFRA-style assets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

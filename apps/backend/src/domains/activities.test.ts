@@ -374,6 +374,58 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("previews import assets by matching yahoo-suffixed symbols to existing assets", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+      symbolSearch() {
+        throw new Error("provider should not be called for suffix-normalized existing assets");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-eur", name: "Euro", currency: "EUR" });
+      insertAsset(db, {
+        id: "BASF",
+        displayCode: "BASF",
+        name: "BASF SE",
+        quoteCcy: "EUR",
+        instrumentSymbol: "DE000BASF111",
+        exchangeMic: "XETR",
+        instrumentType: "EQUITY",
+      });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "basf",
+            accountId: "account-eur",
+            symbol: "de000basf111.de",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "basf",
+          status: "EXISTING_ASSET",
+          resolutionSource: "existing_asset",
+          assetId: "BASF",
+          draft: expect.objectContaining({
+            id: "BASF",
+            displayCode: "BASF",
+            instrumentSymbol: "DE000BASF111",
+            instrumentExchangeMic: "XETR",
+            quoteCcy: "EUR",
+          }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("previews import assets with provider-backed exchange resolution", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];
