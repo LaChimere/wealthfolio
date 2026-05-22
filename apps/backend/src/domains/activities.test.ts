@@ -540,7 +540,9 @@ describe("TS activities import domain", () => {
         instrumentSymbol: "SHOP",
         exchangeMic: "XTSE",
         instrumentType: "EQUITY",
+        notes: "local note",
         metadata: JSON.stringify({ identifiers: { isin: "CA82509L1076" } }),
+        providerConfig: JSON.stringify({ preferred_provider: "YAHOO" }),
       });
 
       expect(
@@ -565,6 +567,9 @@ describe("TS activities import domain", () => {
             instrumentExchangeMic: "XTSE",
             instrumentType: "EQUITY",
             quoteCcy: "CAD",
+            providerConfig: { preferred_provider: "YAHOO" },
+            notes: "local note",
+            metadata: { identifiers: { isin: "CA82509L1076" } },
           }),
         },
       ]);
@@ -624,12 +629,16 @@ describe("TS activities import domain", () => {
           status: "AUTO_RESOLVED_NEW_ASSET",
           resolutionSource: "provider_resolution",
           draft: expect.objectContaining({
+            id: null,
             name: "Bond by ISIN",
             displayCode: "BOND1",
             instrumentSymbol: "BOND1",
             instrumentExchangeMic: "XTSE",
             instrumentType: "BOND",
             quoteCcy: "CAD",
+            providerConfig: null,
+            notes: null,
+            metadata: null,
           }),
         },
       ]);
@@ -4436,12 +4445,14 @@ interface AssetFixture {
   id: string;
   displayCode: string;
   name: string;
+  notes?: string | null;
   instrumentType?: string | null;
   quoteMode?: string | null;
   quoteCcy?: string;
   exchangeMic?: string | null;
   instrumentSymbol?: string | null;
   metadata?: string | null;
+  providerConfig?: string | null;
 }
 
 interface ActivityFixture {
@@ -4485,16 +4496,16 @@ function insertAsset(db: Database, asset: AssetFixture): void {
     `
       INSERT INTO assets (
         id, kind, name, display_code, notes, metadata, is_active, instrument_symbol, instrument_exchange_mic,
-        quote_mode, quote_ccy, instrument_type
+        quote_mode, quote_ccy, instrument_type, provider_config
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     asset.id,
     "INVESTMENT",
     asset.name,
     asset.displayCode,
-    null,
+    asset.notes ?? null,
     asset.metadata ?? null,
     1,
     asset.instrumentSymbol ?? asset.displayCode,
@@ -4502,6 +4513,7 @@ function insertAsset(db: Database, asset: AssetFixture): void {
     asset.quoteMode ?? "MARKET",
     asset.quoteCcy ?? "USD",
     asset.instrumentType ?? null,
+    asset.providerConfig ?? null,
   );
 }
 

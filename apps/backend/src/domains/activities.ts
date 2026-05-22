@@ -468,6 +468,7 @@ interface AssetRow {
   display_code: string | null;
   notes: string | null;
   metadata: string | null;
+  provider_config: string | null;
   instrument_symbol: string | null;
   instrument_exchange_mic: string | null;
   instrument_type: string | null;
@@ -2133,7 +2134,9 @@ function newAssetDraftFromAssetRow(asset: AssetRow): Record<string, unknown> {
     instrumentType: asset.instrument_type ?? undefined,
     instrumentSymbol: asset.instrument_symbol ?? undefined,
     instrumentExchangeMic: asset.instrument_exchange_mic ?? undefined,
+    providerConfig: parseJsonOrNull(asset.provider_config),
     notes: asset.notes ?? undefined,
+    metadata: parseJsonOrNull(asset.metadata),
   };
 }
 
@@ -2146,15 +2149,19 @@ function newAssetDraftFromImport(input: {
   name?: string;
 }): Record<string, unknown> {
   return {
+    id: null,
     kind: input.instrumentType === "FX" ? "FX" : "INVESTMENT",
-    name: input.name,
+    name: input.name ?? null,
     displayCode: input.symbol,
     isActive: true,
     quoteMode: input.quoteMode,
     quoteCcy: input.quoteCcy,
     instrumentType: input.instrumentType,
     instrumentSymbol: input.symbol,
-    instrumentExchangeMic: input.exchangeMic,
+    instrumentExchangeMic: input.exchangeMic ?? null,
+    providerConfig: null,
+    notes: null,
+    metadata: null,
   };
 }
 
@@ -4438,6 +4445,7 @@ function pendingActivityAssetToRow(asset: PendingActivityAsset): AssetRow {
     display_code: asset.displayCode,
     notes: null,
     metadata: asset.metadata,
+    provider_config: null,
     instrument_symbol: asset.instrumentSymbol,
     instrument_exchange_mic: asset.instrumentExchangeMic,
     instrument_type: asset.instrumentType,
@@ -4598,6 +4606,7 @@ function findAssetRowById(db: Database, assetId: string): AssetRow | null {
             display_code,
             notes,
             metadata,
+            provider_config,
             instrument_symbol,
             instrument_exchange_mic,
             instrument_type
@@ -4648,6 +4657,7 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
           display_code,
           notes,
           metadata,
+          provider_config,
           instrument_symbol,
           instrument_exchange_mic,
           instrument_type
@@ -4683,6 +4693,7 @@ function findExistingAssetByIsin(db: Database, isin: string): AssetRow | null {
             display_code,
             notes,
             metadata,
+            provider_config,
             instrument_symbol,
             instrument_exchange_mic,
             instrument_type
