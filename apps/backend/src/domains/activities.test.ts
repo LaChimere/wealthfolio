@@ -2176,6 +2176,45 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "BASF-XETR",
+        displayCode: "DE000BASF111",
+        name: "BASF",
+        quoteCcy: "EUR",
+        instrumentSymbol: "DE000BASF111",
+        exchangeMic: "XETR",
+        instrumentType: "EQUITY",
+      });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "de000basf111.de" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "EUR",
+      }) as Activity;
+
+      expect(created.assetId).toBe("BASF-XETR");
+      expect(readAssetCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("stores structured metadata for direct activity-created option and bond assets like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

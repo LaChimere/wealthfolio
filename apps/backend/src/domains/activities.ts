@@ -3712,19 +3712,60 @@ function resolveActivityAssetId(
     }
   }
   if (assetInput?.symbol) {
-    const existingAsset = findExistingAssetBySymbol(db, assetInput);
+    const normalizedAssetInput = normalizeActivityAssetInputForLookup(
+      assetInput,
+      assetContext?.exchangeMetadata,
+    );
+    const existingAsset = findExistingAssetBySymbol(db, normalizedAssetInput);
     if (existingAsset) {
       return existingAsset.id;
     }
     if (!assetContext) {
       throw new Error("Symbol-based asset creation requires an asset resolution context");
     }
-    return stageActivityAsset(assetInput, fallbackCurrencies, assetContext, activityMetadata);
+    return stageActivityAsset(
+      normalizedAssetInput,
+      fallbackCurrencies,
+      assetContext,
+      activityMetadata,
+    );
   }
   if (requiresAssetIdentity(activityType, subtype) && input.allowMissingAsset !== true) {
     throw new Error("Asset-backed activities need either asset_id or symbol");
   }
   return null;
+}
+
+function normalizeActivityAssetInputForLookup(
+  asset: ActivityAssetInput,
+  exchangeMetadata: ActivityExchangeMetadata | undefined,
+): ActivityAssetInput {
+  if (!asset.symbol || !exchangeMetadata) {
+    return asset;
+  }
+  const instrumentType =
+    normalizeInstrumentType(asset.instrumentType) ??
+    inferActivityInstrumentType(asset, asset.symbol);
+  if (!instrumentType || !isMicBackedActivityInstrument(instrumentType)) {
+    return asset;
+  }
+
+  const parsed = parseActivitySymbolWithExchangeSuffix(asset.symbol, exchangeMetadata);
+  if (!parsed.mic && parsed.baseSymbol === asset.symbol.trim()) {
+    return asset;
+  }
+
+  const exchangeMic = asset.exchangeMic?.trim() || parsed.mic || undefined;
+  const quoteCcy =
+    asset.quoteCcy ??
+    (exchangeMic ? exchangeMetadata.currencyByMic.get(exchangeMic.toUpperCase()) : undefined);
+  return {
+    ...asset,
+    symbol: parsed.baseSymbol,
+    exchangeMic,
+    instrumentType: asset.instrumentType ?? instrumentType,
+    quoteCcy,
+  };
 }
 
 function activityAssetInputFromRecord(input: Record<string, unknown>): ActivityAssetInput | null {
