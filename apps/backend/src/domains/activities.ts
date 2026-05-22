@@ -2568,8 +2568,17 @@ function checkActivityImportRow(
       const existingAsset = findAssetRowById(db, normalized.assetId);
       if (existingAsset) {
         hydrateImportActivityFromAssetRow(activity, existingAsset, normalizedAssetInput?.symbol);
-      } else if (!optionalTrimmedString(activity.symbolName) && normalizedAssetInput?.symbol) {
-        activity.symbolName = normalizedAssetInput.symbol;
+      } else {
+        const pendingAsset = assetContext.pendingAssetsById.get(normalized.assetId);
+        if (pendingAsset) {
+          hydrateImportActivityFromPendingAsset(
+            activity,
+            pendingAsset,
+            normalizedAssetInput?.symbol,
+          );
+        } else if (!optionalTrimmedString(activity.symbolName) && normalizedAssetInput?.symbol) {
+          activity.symbolName = normalizedAssetInput.symbol;
+        }
       }
     }
     if (normalized.assetId === null && !needsAsset) {
@@ -2666,6 +2675,28 @@ function hydrateImportActivityFromAssetRow(
   }
   if (!optionalTrimmedString(activity.currency)) {
     activity.currency = asset.quote_ccy;
+  }
+}
+
+function hydrateImportActivityFromPendingAsset(
+  activity: Record<string, unknown>,
+  asset: PendingActivityAsset,
+  normalizedSymbol?: string,
+): void {
+  if (normalizedSymbol || !optionalTrimmedString(activity.symbol)) {
+    activity.symbol = normalizedSymbol ?? asset.displayCode;
+  }
+  if (!optionalTrimmedString(activity.symbolName)) {
+    activity.symbolName = asset.name ?? normalizedSymbol ?? asset.displayCode;
+  }
+  if (!optionalTrimmedString(activity.exchangeMic) && asset.instrumentExchangeMic) {
+    activity.exchangeMic = asset.instrumentExchangeMic;
+  }
+  if (!optionalTrimmedString(activity.quoteCcy)) {
+    activity.quoteCcy = asset.quoteCcy;
+  }
+  if (!optionalTrimmedString(activity.instrumentType)) {
+    activity.instrumentType = asset.instrumentType;
   }
 }
 

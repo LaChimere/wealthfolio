@@ -228,7 +228,8 @@
     inference for XETR/XFRA ISIN equities, Yahoo suffix-to-MIC canonicalization
     with MIC quote-currency fallback plus existing-asset lookup normalization
     across direct activity, import asset preview, and import check/apply paths,
-    Rust-compatible asset-id hydration, symbol-name fallback, subtype
+    Rust-compatible asset-id hydration, symbol-name fallback, staged
+    pending-asset symbol/MIC/type/quote-currency hydration, subtype
     normalization, currency validation, and empty required-symbol validation for
     import validation, and Rust-compatible quote-currency errors for incomplete
     market securities, now have TS runtime parity, while broader provider-backed
@@ -2620,6 +2621,13 @@ contract:
   and full `bun run check`. Coverage includes import validation populating
   missing `symbolName` with the normalized symbol for staged new assets when
   neither a local existing asset nor provider-supplied name is available.
+- `pr5-activities-import-staged-asset-hydration`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "hydrates staged import asset fields from normalized symbols like Rust"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes import validation returning the
+  normalized pending-asset symbol, exchange MIC, instrument type, and quote
+  currency for new staged assets before the import apply step persists them.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

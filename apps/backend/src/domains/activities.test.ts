@@ -1759,6 +1759,48 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("hydrates staged import asset fields from normalized symbols like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const checked = await service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "sap.de",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          lineNumber: 1,
+        },
+      ]);
+
+      expect(checked?.[0]).toMatchObject({
+        symbol: "sap",
+        symbolName: "sap",
+        exchangeMic: "XETR",
+        instrumentType: "EQUITY",
+        quoteCcy: "EUR",
+        currency: "USD",
+        isValid: true,
+      });
+      expect(checked?.[0]?.assetId).toBeString();
+      expect(checked?.[0]).not.toHaveProperty("errors");
+      expect(readAssetCount(db)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("classifies import symbols with Rust-compatible optional asset rules", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
