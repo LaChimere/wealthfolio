@@ -533,6 +533,47 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("groups transaction replay activities by user timezone like Rust", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "buy-timezone",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2025-01-01T07:30:00Z",
+        quantity: "1",
+        unitPrice: "100",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2024-12-31", "100", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2025-01-01T12:00:00Z"),
+        timezone: "America/Los_Angeles",
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshotPositions(db, "account-1", "2024-12-31")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "1",
+          totalCostBasis: "100",
+        }),
+      });
+      expect(readSnapshot(db, "account-1", "2025-01-01")).toMatchObject({
+        cash_balances: '{"USD":"-100"}',
+        net_contribution: "0",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("compiles asset income subtypes before transaction snapshot replay", async () => {
     const db = createPortfolioJobTestDb();
     try {

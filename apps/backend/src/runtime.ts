@@ -391,6 +391,7 @@ function createServicesFromDatabase(
     exchangeRateService,
     healthService,
     marketDataService,
+    timezone: () => settingsService.getSettings().timezone,
     warn: (message) => console.warn(message),
   });
   const goalValuationProvider = createGoalValuationProvider(db, accountService);

@@ -42,6 +42,7 @@ export interface LocalPortfolioJobServiceOptions {
     "syncMarketData" | "updatePositionStatusFromHoldings"
   >;
   baseCurrency?: string | (() => string | undefined);
+  timezone?: string | (() => string | undefined);
   now?: () => Date;
   warn?: (message: string) => void;
 }
@@ -188,6 +189,7 @@ interface ActivityRebuildRow {
 
 type SplitFactorsByAsset = Map<string, Array<[string, Decimal]>>;
 type TransferLotsCache = Map<string, TransferredLotBatch[]>;
+const activityDateFormatters = new Map<string, Intl.DateTimeFormat>();
 
 interface TransferredLotBatch {
   assetId: string;
@@ -579,9 +581,11 @@ function rebuildCalculatedSnapshotsFromActivities(
     db,
     transactionAccounts.map((account) => account.id),
   );
+  const timezone = resolveTimezone(options);
   const splitFactors = calculateSplitFactors(
     Array.from(activitiesByAccount.values()).flat(),
     options,
+    timezone,
   );
   const contexts = transactionAccounts.map((account) =>
     prepareAccountActivityReplayContext(
@@ -590,6 +594,7 @@ function rebuildCalculatedSnapshotsFromActivities(
       activitiesByAccount.get(account.id) ?? [],
       splitFactors,
       config,
+      timezone,
     ),
   );
   const replayContexts: Array<{ context: ActivityReplayContext; startDate: string }> = [];
@@ -620,6 +625,7 @@ function rebuildCalculatedSnapshotsFromActivities(
       const activitiesForDate = orderActivitiesByTransferDeps(
         context.activitiesByDate.get(date) ?? [],
         options,
+        timezone,
       );
       for (const activity of activitiesForDate) {
         processActivityForSnapshot(
@@ -668,6 +674,7 @@ function prepareAccountActivityReplayContext(
   allActivities: ActivityRebuildRow[],
   splitFactors: SplitFactorsByAsset,
   config: PortfolioJobConfig,
+  timezone: string,
 ): ActivityReplayContext {
   const requestedStartDate = activityRebuildStartDate(db, account.id, config);
   const requestedSeedSnapshot = requestedStartDate
@@ -677,6 +684,7 @@ function prepareAccountActivityReplayContext(
     allActivities,
     requestedStartDate,
     requestedSeedSnapshot !== null,
+    timezone,
   );
   const seedSnapshot = useSeedSnapshot
     ? requestedSeedSnapshot
@@ -687,14 +695,15 @@ function prepareAccountActivityReplayContext(
     ? activityStateFromSnapshot(account, parseSnapshot(seedSnapshot))
     : emptyActivityState(account);
   const activities = adjustActivitiesForSplits(
-    compileActivitiesForReplay(filterActivitiesFromDate(allActivities, startDate)),
+    compileActivitiesForReplay(filterActivitiesFromDate(allActivities, startDate, timezone)),
     splitFactors,
+    timezone,
   );
   return {
     account,
     state,
     startDate,
-    activitiesByDate: groupActivitiesByDate(activities),
+    activitiesByDate: groupActivitiesByDate(activities, timezone),
   };
 }
 
@@ -789,28 +798,31 @@ function readPostedActivitiesForAccounts(
 function filterActivitiesFromDate(
   activities: ActivityRebuildRow[],
   startDate: string | null,
+  timezone: string,
 ): ActivityRebuildRow[] {
   if (!startDate) {
     return activities;
   }
-  return activities.filter((activity) => activityLocalDate(activity) >= startDate);
+  return activities.filter((activity) => activityLocalDate(activity, timezone) >= startDate);
 }
 
 function splitAdjustedActivityStartDate(
   activities: ActivityRebuildRow[],
   requestedStartDate: string | null,
   hasSeedSnapshot: boolean,
+  timezone: string,
 ): { startDate: string | null; useSeedSnapshot: boolean } {
   if (!requestedStartDate) {
     return { startDate: null, useSeedSnapshot: false };
   }
-  const earliestActivityDate = activities.at(0) ? activityLocalDate(activities[0]) : null;
+  const earliestActivityDate = activities.at(0) ? activityLocalDate(activities[0], timezone) : null;
   if (!hasSeedSnapshot || !earliestActivityDate || earliestActivityDate >= requestedStartDate) {
     return { startDate: requestedStartDate, useSeedSnapshot: hasSeedSnapshot };
   }
   const hasSplitInRange = activities.some(
     (activity) =>
-      activity.activity_type === "SPLIT" && activityLocalDate(activity) >= requestedStartDate,
+      activity.activity_type === "SPLIT" &&
+      activityLocalDate(activity, timezone) >= requestedStartDate,
   );
   return hasSplitInRange
     ? { startDate: earliestActivityDate, useSeedSnapshot: false }
@@ -887,6 +899,7 @@ function activityEffectiveType(activity: ActivityRebuildRow): string {
 function calculateSplitFactors(
   activities: ActivityRebuildRow[],
   options: LocalPortfolioJobServiceOptions,
+  timezone: string,
 ): SplitFactorsByAsset {
   const factors = new Map<string, Array<[string, Decimal]>>();
   for (const activity of activities) {
@@ -920,7 +933,7 @@ function calculateSplitFactors(
       continue;
     }
     const existing = factors.get(assetId) ?? [];
-    existing.push([activityLocalDate(activity), splitRatio]);
+    existing.push([activityLocalDate(activity, timezone), splitRatio]);
     factors.set(assetId, existing);
   }
 
@@ -943,6 +956,7 @@ function calculateSplitFactors(
 function adjustActivitiesForSplits(
   activities: ActivityRebuildRow[],
   splitFactors: SplitFactorsByAsset,
+  timezone: string,
 ): ActivityRebuildRow[] {
   return activities.map((activity) => {
     if (!activity.asset_id || activityEffectiveType(activity) === "SPLIT") {
@@ -952,7 +966,7 @@ function adjustActivitiesForSplits(
     if (!splits) {
       return activity;
     }
-    const activityDate = activityLocalDate(activity);
+    const activityDate = activityLocalDate(activity, timezone);
     const cumulativeFactor = splits.reduce((factor, [splitDate, splitRatio]) => {
       return splitDate > activityDate ? factor.mul(splitRatio) : factor;
     }, new Decimal(1));
@@ -987,10 +1001,11 @@ function adjustActivitiesForSplits(
 
 function groupActivitiesByDate(
   activities: ActivityRebuildRow[],
+  timezone: string,
 ): Map<string, ActivityRebuildRow[]> {
   const grouped = new Map<string, ActivityRebuildRow[]>();
   for (const activity of activities) {
-    const date = activityLocalDate(activity);
+    const date = activityLocalDate(activity, timezone);
     const existing = grouped.get(date) ?? [];
     existing.push(activity);
     grouped.set(date, existing);
@@ -1048,6 +1063,7 @@ function orderReplayContextsByTransferDeps(
 function orderActivitiesByTransferDeps(
   activities: ActivityRebuildRow[],
   options: LocalPortfolioJobServiceOptions,
+  timezone: string,
 ): ActivityRebuildRow[] {
   if (activities.length <= 1) {
     return activities;
@@ -1084,7 +1100,7 @@ function orderActivitiesByTransferDeps(
   return stableTopologicalOrder(activities, successors, inDegree, () =>
     warnPortfolioJob(
       options,
-      `Detected cyclic same-account transfer dependencies on ${activityLocalDate(activities[0])}; preserving input activity order for remaining activities`,
+      `Detected cyclic same-account transfer dependencies on ${activityLocalDate(activities[0], timezone)}; preserving input activity order for remaining activities`,
     ),
   );
 }
@@ -1794,7 +1810,7 @@ function convertPositionAmountForAccountContribution(
     amount,
     positionCurrency,
     accountCurrency,
-    activityLocalDate(activity),
+    activityLocalDateForOptions(activity, options),
     options,
     amount,
   );
@@ -1814,7 +1830,7 @@ function convertPositionAmountForBaseContribution(
     amount,
     positionCurrency,
     baseCurrency,
-    activityLocalDate(activity),
+    activityLocalDateForOptions(activity, options),
     options,
     amount,
   );
@@ -1841,7 +1857,7 @@ function convertActivityAmountForAccountContribution(
     amount,
     activity.currency,
     targetCurrency,
-    activityLocalDate(activity),
+    activityLocalDateForOptions(activity, options),
     options,
     amount,
   );
@@ -1860,7 +1876,7 @@ function convertActivityAmountForBaseContribution(
     amount,
     activity.currency,
     baseCurrency,
-    activityLocalDate(activity),
+    activityLocalDateForOptions(activity, options),
     options,
     new Decimal(0),
   );
@@ -2033,7 +2049,7 @@ function convertActivityAmountToPositionCurrency(
     amount,
     activity.currency,
     position.currency,
-    activityLocalDate(activity),
+    activityLocalDateForOptions(activity, options),
     options,
   );
 }
@@ -2299,7 +2315,7 @@ function costBasisInAccountCurrency(
   );
 }
 
-function activityLocalDate(activity: ActivityRebuildRow): string {
+function activityLocalDate(activity: ActivityRebuildRow, timezone: string): string {
   const date = activity.activity_date.trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return date;
@@ -2308,7 +2324,23 @@ function activityLocalDate(activity: ActivityRebuildRow): string {
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid activity date for activity ${activity.id}: ${date}`);
   }
-  return parsed.toISOString().slice(0, 10);
+  const formatter = activityDateFormatters.get(timezone) ?? createActivityDateFormatter(timezone);
+  activityDateFormatters.set(timezone, formatter);
+  const parts = formatter.formatToParts(parsed);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) {
+    throw new Error(`Failed to format activity date for activity ${activity.id}: ${date}`);
+  }
+  return `${year}-${month}-${day}`;
+}
+
+function activityLocalDateForOptions(
+  activity: ActivityRebuildRow,
+  options: LocalPortfolioJobServiceOptions,
+): string {
+  return activityLocalDate(activity, resolveTimezone(options));
 }
 
 function activitySourceGroupId(activity: ActivityRebuildRow): string | null {
@@ -2786,6 +2818,25 @@ function resolveBaseCurrency(options: LocalPortfolioJobServiceOptions): string {
   const value =
     typeof options.baseCurrency === "function" ? options.baseCurrency() : options.baseCurrency;
   return value?.trim() || "USD";
+}
+
+function resolveTimezone(options: LocalPortfolioJobServiceOptions): string {
+  const value = typeof options.timezone === "function" ? options.timezone() : options.timezone;
+  const timezone = value?.trim() || "UTC";
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: timezone }).resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function createActivityDateFormatter(timezone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 function nextDate(date: string): string {

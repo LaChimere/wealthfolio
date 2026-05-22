@@ -2757,6 +2757,14 @@ contract:
   quotes, Health Center preserving the field for never-synced assets while
   keeping Rust's 1-5 warning/6+ error thresholds, and deterministic sync-outbox
   event payload assertions.
+- `pr5-portfolio-activity-timezone-replay`: verification passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "user timezone|invalid activity dates"`,
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes transaction
+  replay grouping a `2025-01-01T07:30:00Z` BUY into the `2024-12-31` snapshot
+  for `America/Los_Angeles`, carrying the resulting position/cash into the next
+  day, and keeping invalid activity dates as explicit replay failures.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
