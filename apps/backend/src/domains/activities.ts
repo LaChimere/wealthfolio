@@ -2456,7 +2456,6 @@ function checkActivityImportRow(
   const errors = cloneMessageMap(activity.errors);
   const accountId = optionalTrimmedString(activity.accountId);
   const activityType = optionalTrimmedString(activity.activityType);
-  const subtype = optionalTrimmedString(activity.subtype);
   const assetId = optionalTrimmedString(activity.assetId);
   let account: AccountRow | null = null;
 
@@ -2484,6 +2483,9 @@ function checkActivityImportRow(
       hydrateImportActivityFromAssetRow(activity, existingAsset);
     }
   }
+  if (activityType) {
+    normalizeImportActivitySubtype(activity, activityType);
+  }
 
   if (Object.keys(errors).length > 0 || !accountId || !activityType) {
     activity.isValid = false;
@@ -2492,6 +2494,7 @@ function checkActivityImportRow(
   }
 
   const symbol = optionalTrimmedString(activity.symbol);
+  const subtype = optionalTrimmedString(activity.subtype);
   const quantity = parseOptionalImportDecimal(activity.quantity);
   const unitPrice = parseOptionalImportDecimal(activity.unitPrice);
   const disposition = importSymbolDisposition(
@@ -2576,6 +2579,23 @@ function checkActivityImportRow(
     activity.errors = errors;
     return { activity, idempotencyKey: null };
   }
+}
+
+function normalizeImportActivitySubtype(
+  activity: Record<string, unknown>,
+  activityType: string,
+): void {
+  const rawSubtype = optionalTrimmedString(activity.subtype);
+  if (!rawSubtype) {
+    delete activity.subtype;
+    return;
+  }
+  const subtype = canonicalizeActivitySubtype(rawSubtype);
+  if (subtype.toUpperCase() === activityType.toUpperCase()) {
+    delete activity.subtype;
+    return;
+  }
+  activity.subtype = subtype;
 }
 
 function validateImportActivityCurrency(

@@ -228,16 +228,16 @@
     inference for XETR/XFRA ISIN equities, Yahoo suffix-to-MIC canonicalization
     with MIC quote-currency fallback plus existing-asset lookup normalization
     across direct activity, import asset preview, and import check/apply paths,
-    Rust-compatible asset-id hydration and currency validation for import
-    validation, and Rust-compatible quote-currency errors for incomplete market
-    securities, now have TS runtime parity, while broader provider-backed asset
-    resolution outside the activity preview/check/apply round-trip and remaining
-    quote sync outbox follow-ups outside migrated alternative-asset and
-    market-data quote paths, device-sync push/pull runtime wiring, and remaining
-    device-sync side effects are deferred to activities/import/device-sync
-    runtime parity slices; AI chat persistence, tag persistence, tool-result
-    mutation, local AI chat sync_outbox callbacks, native/fallback
-    text/reasoning provider streaming, generated thread titles,
+    Rust-compatible asset-id hydration, subtype normalization, and currency
+    validation for import validation, and Rust-compatible quote-currency errors
+    for incomplete market securities, now have TS runtime parity, while broader
+    provider-backed asset resolution outside the activity preview/check/apply
+    round-trip and remaining quote sync outbox follow-ups outside migrated
+    alternative-asset and market-data quote paths, device-sync push/pull runtime
+    wiring, and remaining device-sync side effects are deferred to
+    activities/import/device-sync runtime parity slices; AI chat persistence,
+    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
+    native/fallback text/reasoning provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
     built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
     `search_activities`, `get_performance`, `get_income`,
@@ -2596,6 +2596,14 @@ contract:
   and full `bun run check`. Coverage includes import validation rejecting
   malformed non-account currency codes with Rust-compatible error text while
   preserving valid cross-currency cash movements.
+- `pr5-activities-import-subtype-normalization`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "canonicalizes and clears import activity subtypes like Rust"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes import validation canonicalizing
+  known subtypes such as `drip` to `DRIP`, clearing subtypes that duplicate the
+  activity type case-insensitively, and running disposition/validation against
+  the normalized subtype.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

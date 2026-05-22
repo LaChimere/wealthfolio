@@ -1574,6 +1574,65 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("canonicalizes and clears import activity subtypes like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      const checked = await service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "DIVIDEND",
+          subtype: "drip",
+          date: "2025-01-15",
+          symbol: "AAPL",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DEPOSIT",
+          subtype: "deposit",
+          date: "2025-01-16",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 2,
+        },
+      ]);
+
+      expect(checked?.[0]).toMatchObject({
+        subtype: "DRIP",
+        assetId: "AAPL",
+        isValid: true,
+      });
+      expect(checked?.[0]).not.toHaveProperty("errors");
+      expect(checked?.[1]).toMatchObject({
+        symbol: "",
+        isValid: true,
+      });
+      expect(checked?.[1]).not.toHaveProperty("subtype");
+      expect(checked?.[1]).not.toHaveProperty("errors");
+    } finally {
+      db.close();
+    }
+  });
+
   test("classifies import symbols with Rust-compatible optional asset rules", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
