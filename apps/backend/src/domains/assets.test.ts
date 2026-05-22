@@ -642,6 +642,89 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches explicit Boerse Frankfurt equity profiles", async () => {
+    const db = createAssetsDb();
+    const requests: Array<{ url: string; userAgent: string | null }> = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        requests.push({ url, userAgent: headers.get("User-Agent") });
+        if (
+          url === "https://api.live.deutsche-boerse.com/v1/tradingview/search?query=BAS&limit=5"
+        ) {
+          return Promise.resolve(
+            Response.json([
+              {
+                symbol: "XETR:DE000BASF111",
+                description: "BASF SE",
+                exchange: "XETR",
+                type: "Aktie",
+              },
+            ]),
+          );
+        }
+        if (
+          url ===
+          "https://api.live.deutsche-boerse.com/v1/tradingview/symbols?symbol=XETR%3ADE000BASF111"
+        ) {
+          return Promise.resolve(
+            Response.json({
+              name: "BAS",
+              exchange: "XETR",
+              description: "BASF SE",
+              currency_code: "EUR",
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-boerse",
+        kind: "INVESTMENT",
+        name: "Old BASF",
+        quote_mode: "MARKET",
+        quote_ccy: "EUR",
+        instrument_type: "EQUITY",
+        instrument_symbol: "BAS",
+        instrument_exchange_mic: "XETR",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, profile_enriched_at, updated_at
+          )
+          VALUES ('equity-boerse', NULL, '2026-01-01T00:00:00Z')
+        `,
+      ).run();
+
+      const result = await service.enrichAssets(["equity-boerse"]);
+
+      expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(requests.map((request) => request.url)).toEqual([
+        "https://api.live.deutsche-boerse.com/v1/tradingview/search?query=BAS&limit=5",
+        "https://api.live.deutsche-boerse.com/v1/tradingview/symbols?symbol=XETR%3ADE000BASF111",
+      ]);
+      expect(requests.every((request) => request.userAgent?.includes("Chrome/"))).toBe(true);
+      expect(service.getAssetProfile("equity-boerse")).toMatchObject({
+        name: "BASF SE",
+        metadata: null,
+        quoteCcy: "EUR",
+        instrumentType: "EQUITY",
+      });
+      expect(readSyncState(db, "equity-boerse")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];

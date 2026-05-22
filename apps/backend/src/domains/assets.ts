@@ -184,6 +184,10 @@ const VALID_ASSET_KINDS = new Set([
 ]);
 const VALID_QUOTE_MODES = new Set(["MARKET", "MANUAL"]);
 const VALID_INSTRUMENT_TYPES = new Set(["EQUITY", "CRYPTO", "FX", "OPTION", "METAL", "BOND"]);
+const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
+const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
+const BOERSE_FRANKFURT_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const OPENFIGI_PROVIDER = "OPENFIGI";
 const OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping";
 const yahooCrumbCache = new WeakMap<typeof fetch, { cookie: string; crumb: string }>();
@@ -757,6 +761,9 @@ async function fetchAssetProviderProfile(
   options: AssetServiceOptions,
 ): Promise<AssetProviderProfile | null> {
   const provider = preferredProviderId(asset.provider_config);
+  if (shouldFetchBoerseProfile(asset, provider)) {
+    return fetchBoerseProfile(asset, options.fetch ?? fetch);
+  }
   if (shouldFetchOpenFigiProfile(asset, provider)) {
     return fetchOpenFigiBondProfile(asset.instrument_symbol?.trim() ?? "", options.fetch ?? fetch);
   }
@@ -776,6 +783,13 @@ function shouldFetchYahooProfile(provider: string | null): boolean {
 
 function shouldFetchOpenFigiProfile(asset: AssetRow, provider: string | null): boolean {
   return (provider === null || provider === OPENFIGI_PROVIDER) && asset.instrument_type === "BOND";
+}
+
+function shouldFetchBoerseProfile(asset: AssetRow, provider: string | null): boolean {
+  return (
+    provider === BOERSE_FRANKFURT_PROVIDER &&
+    (asset.instrument_type === "EQUITY" || asset.instrument_type === "BOND")
+  );
 }
 
 function yahooProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {
@@ -895,6 +909,122 @@ async function fetchOpenFigiMapping(
     return [];
   }
   return first.data.filter(isRecord);
+}
+
+async function fetchBoerseProfile(
+  asset: AssetRow,
+  fetchImpl: typeof fetch,
+): Promise<AssetProviderProfile> {
+  const identity = boerseProfileIdentity(asset);
+  const isin = await resolveBoerseProfileIsin(identity.symbol, identity.mic, fetchImpl);
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/symbols`);
+  url.searchParams.set("symbol", `${identity.mic}:${isin}`);
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  if (!isRecord(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: invalid profile response`);
+  }
+  const name = optionalString(payload.description);
+  if (!name) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: No name found for ${isin}`);
+  }
+  return { source: BOERSE_FRANKFURT_PROVIDER, name };
+}
+
+function boerseProfileIdentity(asset: AssetRow): { mic: string; symbol: string } {
+  if (asset.instrument_type === "BOND") {
+    const symbol =
+      providerOverrideSymbol(asset.provider_config, BOERSE_FRANKFURT_PROVIDER) ??
+      metadataIdentifier(asset.metadata, "isin") ??
+      asset.instrument_symbol;
+    if (!symbol) {
+      throw new Error("Bond has no ISIN");
+    }
+    return parseBoerseMicSymbol(symbol, "XFRA");
+  }
+  if (asset.instrument_type === "EQUITY") {
+    const symbol =
+      providerOverrideSymbol(asset.provider_config, BOERSE_FRANKFURT_PROVIDER) ??
+      asset.instrument_symbol;
+    if (!symbol) {
+      throw new Error("Asset cannot be mapped to a Boerse Frankfurt symbol");
+    }
+    return parseBoerseMicSymbol(symbol, asset.instrument_exchange_mic ?? "XETR");
+  }
+  throw new Error(`Boerse Frankfurt does not support ${asset.instrument_type ?? "unknown"} assets`);
+}
+
+async function resolveBoerseProfileIsin(
+  symbol: string,
+  mic: string,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const trimmedSymbol = symbol.trim();
+  if (looksLikeIsin(trimmedSymbol)) {
+    return trimmedSymbol;
+  }
+
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/search`);
+  url.searchParams.set("query", trimmedSymbol);
+  url.searchParams.set("limit", "5");
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  if (!Array.isArray(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: Search JSON parse error`);
+  }
+  for (const item of payload) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const instrumentType = optionalString(item.type);
+    const rawResultSymbol = optionalString(item.symbol);
+    if (!instrumentType || !rawResultSymbol || !boerseSupportedGermanType(instrumentType)) {
+      continue;
+    }
+    const [resultMic, resultIsin] = splitBoerseMicSymbol(rawResultSymbol);
+    if (resultMic === mic && resultIsin) {
+      return resultIsin;
+    }
+  }
+  throw new Error(`Symbol not found: ${trimmedSymbol}@${mic}`);
+}
+
+async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: { "User-Agent": BOERSE_FRANKFURT_USER_AGENT },
+    });
+  } catch (error) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${response.status}`);
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: JSON parse error: ${errorMessage(error)}`);
+  }
+}
+
+function parseBoerseMicSymbol(value: string, fallbackMic: string): { mic: string; symbol: string } {
+  const trimmed = value.trim();
+  const [mic, symbol] = splitBoerseMicSymbol(trimmed);
+  if (mic && symbol) {
+    return { mic, symbol };
+  }
+  return { mic: fallbackMic.trim().toUpperCase() || "XETR", symbol: trimmed };
+}
+
+function splitBoerseMicSymbol(value: string): [string | null, string | null] {
+  const separator = value.indexOf(":");
+  if (separator <= 0 || separator === value.length - 1) {
+    return [null, null];
+  }
+  return [value.slice(0, separator).trim().toUpperCase(), value.slice(separator + 1).trim()];
+}
+
+function boerseSupportedGermanType(value: string): boolean {
+  return value === "Aktie" || value === "ETP" || value === "Anleihe" || value === "Fonds";
 }
 
 async function fetchYahooSearchProfileFromEndpoint(
@@ -2068,6 +2198,40 @@ function preferredProviderId(providerConfig: string | null): string | null {
   }
   const value = parsed.preferred_provider ?? parsed.preferredProvider;
   return typeof value === "string" && value.trim() !== "" ? value.trim().toUpperCase() : null;
+}
+
+function providerOverrideSymbol(providerConfig: string | null, provider: string): string | null {
+  const override = providerOverrideRecord(providerConfig, provider);
+  if (!override) {
+    return null;
+  }
+  const type = optionalString(override.type);
+  const symbol = optionalString(override.symbol);
+  if (symbol && type !== "crypto_pair" && type !== "fx_pair") {
+    return symbol;
+  }
+  const from = optionalString(override.from);
+  const to = optionalString(override.to);
+  if (type === "fx_pair" && from && to) {
+    return `${from}${to}=X`;
+  }
+  const market = optionalString(override.market);
+  if (type === "crypto_pair" && symbol && market) {
+    return `${symbol}-${market}`;
+  }
+  return null;
+}
+
+function providerOverrideRecord(
+  providerConfig: string | null,
+  provider: string,
+): Record<string, unknown> | null {
+  const parsed = parseJsonValue(providerConfig);
+  if (!isRecord(parsed) || !isRecord(parsed.overrides)) {
+    return null;
+  }
+  const override = parsed.overrides[provider];
+  return isRecord(override) ? override : null;
 }
 
 function optionalString(value: unknown): string | null {

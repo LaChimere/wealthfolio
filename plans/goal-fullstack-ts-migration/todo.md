@@ -2918,6 +2918,15 @@ contract:
   the default TS profile provider for market-priced BOND assets without an
   explicit provider, including OpenFIGI profile lookup before US Treasury bond
   metadata enrichment like Rust's provider order.
+- `pr5-boerse-frankfurt-profile-enrichment`: verification passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "Boerse Frankfurt equity profiles|OpenFIGI bond profiles|US Treasury bond metadata"`,
+  `bun test apps/backend/src/domains/assets.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes explicit
+  Boerse Frankfurt equity profile enrichment through TradingView search and
+  symbols endpoints, Rust-compatible MIC venue matching, user-agent use,
+  provider description name updates, profile-enriched marking, and metadata
+  preservation for name-only provider profiles.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
