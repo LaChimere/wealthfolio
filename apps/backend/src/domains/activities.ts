@@ -221,12 +221,14 @@ interface ImportActivitiesResult {
   summary: ImportActivitiesSummary;
 }
 
+type ActivityExchangeMetadata = Pick<ExchangeMetadata, "currencyByMic" | "yahooSuffixToMic">;
+
 export interface ActivityServiceOptions {
   eventBus?: BackendEventBus;
   ensureFxPairs?: (pairs: Array<[string, string]>) => Promise<void> | void;
   queueSyncEvent?: (event: ActivitySyncEvent) => void;
   symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
-  exchangeMetadata?: Pick<ExchangeMetadata, "currencyByMic" | "yahooSuffixToMic">;
+  exchangeMetadata?: ActivityExchangeMetadata;
 }
 
 export type ActivitySyncOperation = "Create" | "Update" | "Delete";
@@ -528,6 +530,7 @@ interface ActivityAssetResolutionContext {
   pendingAssetsById: Map<string, PendingActivityAsset>;
   pendingAssetIdByKey: Map<string, string>;
   createdAssetIds: Set<string>;
+  exchangeMetadata?: ActivityExchangeMetadata;
 }
 
 interface ActivityCreateRowInput {
@@ -631,7 +634,7 @@ export function createActivityService(
     createActivity(input) {
       if (options.ensureFxPairs) {
         return (async () => {
-          const assetContext = createActivityAssetResolutionContext();
+          const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
           const activity = normalizeActivityCreateInput(db, input, assetContext);
           ensureActivityCreateIsUnique(db, activity);
           const fxPairs = collectActivityFxPairs(db, activity, assetContext);
@@ -651,7 +654,7 @@ export function createActivityService(
       }
 
       const outcome = db.transaction(() => {
-        const assetContext = createActivityAssetResolutionContext();
+        const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
         const activity = normalizeActivityCreateInput(db, input, assetContext);
         ensureActivityCreateIsUnique(db, activity);
         return persistPreparedActivityCreate(db, activity, assetContext);
@@ -665,7 +668,7 @@ export function createActivityService(
     updateActivity(input) {
       if (options.ensureFxPairs) {
         return (async () => {
-          const assetContext = createActivityAssetResolutionContext();
+          const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
           const activityId = requiredNonEmptyString(input.id, "id");
           const existing = readActivityRow(db, activityId);
           const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
@@ -697,7 +700,7 @@ export function createActivityService(
       }
 
       const result = db.transaction(() => {
-        const assetContext = createActivityAssetResolutionContext();
+        const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
         const activityId = requiredNonEmptyString(input.id, "id");
         const existing = readActivityRow(db, activityId);
         const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
@@ -724,7 +727,7 @@ export function createActivityService(
     bulkMutateActivities(input) {
       if (options.ensureFxPairs) {
         return (async () => {
-          const prepared = prepareBulkActivityMutation(db, input);
+          const prepared = prepareBulkActivityMutation(db, input, options.exchangeMetadata);
           if (prepared.errors.length > 0) {
             return emptyBulkMutationResult(prepared.errors);
           }
@@ -742,7 +745,7 @@ export function createActivityService(
         })();
       }
 
-      const prepared = prepareBulkActivityMutation(db, input);
+      const prepared = prepareBulkActivityMutation(db, input, options.exchangeMetadata);
       const outcome =
         prepared.errors.length > 0
           ? {
@@ -2238,7 +2241,7 @@ async function checkActivitiesImportRows(
   activities: unknown[],
   options: ActivityServiceOptions,
 ): Promise<Array<Record<string, unknown>>> {
-  const assetContext = createActivityAssetResolutionContext();
+  const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
   const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
   const resolvedActivities = await Promise.all(
     activities.map((activity) =>
@@ -2614,7 +2617,7 @@ async function importActivityRows(
   const total = activities.length;
   const ordered: Array<Record<string, unknown> | null> = Array.from({ length: total }, () => null);
   const validInputs: Array<{ index: number; activity: Record<string, unknown> }> = [];
-  const assetContext = createActivityAssetResolutionContext();
+  const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
   const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
   let hasValidationErrors = false;
 
@@ -3353,8 +3356,9 @@ function persistPreparedActivityUpdate(
 function prepareBulkActivityMutation(
   db: Database,
   input: Record<string, unknown>,
+  exchangeMetadata?: ActivityExchangeMetadata,
 ): PreparedBulkActivityMutation {
-  const assetContext = createActivityAssetResolutionContext();
+  const assetContext = createActivityAssetResolutionContext(exchangeMetadata);
   const creates = recordArrayField(input, "creates");
   const updates = recordArrayField(input, "updates");
   const deleteIds = stringArrayField(input, "deleteIds");
@@ -3751,11 +3755,14 @@ function activityAssetQuoteModeFromRecord(input: Record<string, unknown>): strin
   return normalizeRequestedQuoteMode(activityAssetInputFromRecord(input)?.quoteMode);
 }
 
-function createActivityAssetResolutionContext(): ActivityAssetResolutionContext {
+function createActivityAssetResolutionContext(
+  exchangeMetadata?: ActivityExchangeMetadata,
+): ActivityAssetResolutionContext {
   return {
     pendingAssetsById: new Map(),
     pendingAssetIdByKey: new Map(),
     createdAssetIds: new Set(),
+    exchangeMetadata,
   };
 }
 
@@ -3777,7 +3784,12 @@ function stageActivityAsset(
   assetContext: ActivityAssetResolutionContext,
   activityMetadata?: unknown,
 ): string {
-  const pending = pendingActivityAssetFromInput(asset, fallbackCurrencies, activityMetadata);
+  const pending = pendingActivityAssetFromInput(
+    asset,
+    fallbackCurrencies,
+    activityMetadata,
+    assetContext.exchangeMetadata,
+  );
   const key = generatedActivityInstrumentKey(pending);
   const existingPendingId = assetContext.pendingAssetIdByKey.get(key);
   if (existingPendingId) {
@@ -3798,6 +3810,7 @@ function pendingActivityAssetFromInput(
   asset: ActivityAssetInput,
   fallbackCurrencies: string[],
   activityMetadata?: unknown,
+  exchangeMetadata?: ActivityExchangeMetadata,
 ): PendingActivityAsset {
   const rawSymbol = asset.symbol?.trim();
   if (!rawSymbol) {
@@ -3814,9 +3827,17 @@ function pendingActivityAssetFromInput(
   }
 
   const quoteMode = normalizeRequestedQuoteMode(asset.quoteMode) ?? "MARKET";
-  let instrumentSymbol = rawSymbol.trim().toUpperCase();
-  let displayCode = instrumentSymbol;
+  let symbolForStorage = rawSymbol.trim();
   let exchangeMic = asset.exchangeMic?.trim().toUpperCase() || null;
+  if (isMicBackedActivityInstrument(instrumentType) && exchangeMetadata) {
+    const parsed = parseActivitySymbolWithExchangeSuffix(symbolForStorage, exchangeMetadata);
+    symbolForStorage = parsed.baseSymbol;
+    if (!exchangeMic && parsed.mic) {
+      exchangeMic = parsed.mic.toUpperCase();
+    }
+  }
+  let instrumentSymbol = symbolForStorage.toUpperCase();
+  let displayCode = instrumentSymbol;
   let parsedQuoteCcy: string | undefined;
 
   if (instrumentType === "CRYPTO") {
@@ -3849,6 +3870,7 @@ function pendingActivityAssetFromInput(
   const quoteCcy = normalizeActivityAssetQuoteCcyForNewAsset(
     parsedQuoteCcy,
     asset.quoteCcy,
+    exchangeMetadata && exchangeMic ? exchangeMetadata.currencyByMic.get(exchangeMic) : undefined,
     [...fallbackCurrencies],
     instrumentType,
     quoteMode,
@@ -3952,11 +3974,12 @@ function normalizeActivityAssetKind(kind: string | undefined, instrumentType: st
 function normalizeActivityAssetQuoteCcyForNewAsset(
   parsedQuoteCcy: string | undefined,
   quoteCcy: string | undefined,
+  micQuoteCcy: string | undefined,
   fallbackCurrencies: string[],
   instrumentType: string,
   quoteMode: string,
 ): string {
-  const explicitQuoteCcy = parsedQuoteCcy ?? quoteCcy;
+  const explicitQuoteCcy = parsedQuoteCcy ?? quoteCcy ?? micQuoteCcy;
   if (explicitQuoteCcy !== undefined) {
     const normalized = normalizeImportQuoteCurrency(explicitQuoteCcy);
     if (!normalized) {
@@ -3970,6 +3993,30 @@ function normalizeActivityAssetQuoteCcyForNewAsset(
   }
 
   return normalizeActivityAssetQuoteCcy(undefined, fallbackCurrencies);
+}
+
+function isMicBackedActivityInstrument(instrumentType: string): boolean {
+  return instrumentType === "EQUITY" || instrumentType === "OPTION" || instrumentType === "METAL";
+}
+
+function parseActivitySymbolWithExchangeSuffix(
+  symbol: string,
+  exchangeMetadata: ActivityExchangeMetadata,
+): { baseSymbol: string; mic: string | null } {
+  const trimmed = symbol.trim();
+  const suffixes = [...exchangeMetadata.yahooSuffixToMic.entries()].sort(
+    ([left], [right]) => right.length - left.length,
+  );
+  for (const [suffix, mic] of suffixes) {
+    const dottedSuffix = `.${suffix}`;
+    if (
+      trimmed.length >= dottedSuffix.length &&
+      trimmed.slice(trimmed.length - dottedSuffix.length).toUpperCase() === dottedSuffix
+    ) {
+      return { baseSymbol: trimmed.slice(0, -dottedSuffix.length), mic };
+    }
+  }
+  return { baseSymbol: trimmed, mic: null };
 }
 
 function normalizeActivityAssetQuoteCcy(

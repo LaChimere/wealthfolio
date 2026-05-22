@@ -2136,6 +2136,46 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("parses Yahoo exchange suffixes for activity-created market assets like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          symbol: "de000basf111.de",
+          instrumentType: "EQUITY",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "EUR",
+      }) as Activity;
+
+      expect(readAssetById(db, created.assetId ?? "")).toMatchObject({
+        display_code: "DE000BASF111",
+        quote_mode: "MARKET",
+        quote_ccy: "EUR",
+        instrument_type: "EQUITY",
+        instrument_symbol: "DE000BASF111",
+        instrument_exchange_mic: "XETR",
+        provider_config: '{"preferred_provider":"BOERSE_FRANKFURT"}',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("stores structured metadata for direct activity-created option and bond assets like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
