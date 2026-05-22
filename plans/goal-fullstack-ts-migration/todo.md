@@ -2886,6 +2886,13 @@ contract:
   `git diff --check`. Coverage includes an initialized converter using a newly
   updated manual FX quote immediately after mutation instead of stale
   pre-mutation graph data.
+- `pr5-rust-fx-converter-refresh-alignment`: verification passed:
+  `cargo test -p wealthfolio-core fx::fx_service::tests --quiet`,
+  `cargo check -p wealthfolio-core --quiet`,
+  `bun test apps/backend/src/domains/exchange-rates.test.ts --test-name-pattern "manual rate mutations"`,
+  and `bun run --cwd apps/backend type-check`. Coverage includes Rust
+  `FxService` refreshing its initialized converter after add/update saves so it
+  matches the TS exchange-rate refresh behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
