@@ -3757,6 +3757,96 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("search falls back to Boerse Frankfurt after OpenFIGI has no results", async () => {
+    const db = createMarketDataDb();
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("https://query")) {
+        calls.push({ url, body: null });
+        return Promise.resolve(Response.json({ quotes: [] }));
+      }
+      if (url === "https://api.openfigi.com/v3/search") {
+        const body = JSON.parse(String(init?.body)) as unknown;
+        calls.push({ url, body });
+        return Promise.resolve(Response.json({ data: [] }));
+      }
+      if (url.startsWith("https://api.live.deutsche-boerse.com/v1/tradingview/search?")) {
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("query")).toBe("SAP");
+        expect(parsed.searchParams.get("limit")).toBe("10");
+        expect((init?.headers as Record<string, string>)["User-Agent"]).toContain("Mozilla");
+        calls.push({ url, body: null });
+        return Promise.resolve(
+          Response.json([
+            {
+              symbol: "XETR:DE0007164600",
+              description: "SAP SE",
+              exchange: "Xetra",
+              type: "Aktie",
+            },
+            {
+              symbol: "XETR:DAX",
+              description: "DAX",
+              exchange: "Xetra",
+              type: "Index",
+            },
+          ]),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const baseCatalog = JSON.parse(testExchangeCatalogJson()) as {
+      exchanges: Array<Record<string, unknown>>;
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: JSON.stringify({
+        exchanges: [
+          ...baseCatalog.exchanges,
+          {
+            mic: "XETR",
+            name: "Xetra",
+            currency: "EUR",
+            timezone: "Europe/Berlin",
+            close: [17, 30],
+          },
+        ],
+      }),
+      fetch: fetchImpl,
+    });
+
+    try {
+      expect(await service.searchSymbol?.("SAP")).toEqual([
+        {
+          symbol: "DE0007164600",
+          shortName: "SAP SE",
+          longName: "SAP SE",
+          exchange: "Xetra",
+          exchangeMic: "XETR",
+          exchangeName: "Xetra",
+          quoteType: "EQUITY",
+          typeDisplay: "",
+          currency: "EUR",
+          currencySource: "exchange_inferred",
+          dataSource: "BOERSE_FRANKFURT",
+          isExisting: false,
+          existingAssetId: null,
+          index: "",
+          score: 0,
+        },
+      ]);
+      expect(calls.map(({ url }) => url)).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SAP",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=SAP",
+        "https://api.openfigi.com/v3/search",
+        expect.stringContaining("https://api.live.deutsche-boerse.com/v1/tradingview/search?"),
+      ]);
+      expect(calls[2]?.body).toEqual({ query: "SAP" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves Yahoo quote summary with suffix stripping and auth retry", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];

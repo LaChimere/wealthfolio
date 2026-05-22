@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 257
+turns_used: 258
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T11:06:59+08:00"
+updated_at: "2026-05-22T11:21:21+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1635,6 +1635,12 @@ updated_at: "2026-05-22T11:06:59+08:00"
   sync-event callback path, preserving generated `instrument_key` omission while
   leaving profile-enriched quote-sync state marking as a separate local update.
   Focused asset enrichment tests and backend type-check passed.
+- Turn 258: Added Börse Frankfurt symbol search fallback parity: market-data
+  search now tries Rust-ordered Börse Frankfurt TradingView search after Yahoo,
+  Finnhub, Alpha Vantage, and OpenFIGI fallbacks, maps supported German security
+  types to core quote types, preserves provider MIC/ISIN results, and infers
+  exchange currency from the catalog. Focused market-data search tests, backend
+  type-check, backend test suite, and full `bun run check` passed.
 
 ## Deferred items
 
@@ -1878,12 +1884,13 @@ updated_at: "2026-05-22T11:06:59+08:00"
   targeted custom-provider latest sync, targeted Yahoo sync, bounded broad Yahoo
   sync/history, explicit/general-purpose custom-provider history and latest
   fallback sync, Börse Frankfurt historical/latest sync and quote resolution,
-  MarketData.app history/latest sync and quote resolution, market-sync result
-  payloads, quote-triggered portfolio jobs, and bounded portfolio
-  valuation/TOTAL recalculation have TS runtime coverage, while remaining
-  provider breadth, background orchestration, automatic/background FX quote
-  fetching, and remaining complex activity-derived snapshot behavior must move
-  with dedicated market-data and portfolio parity slices.
+  Börse Frankfurt symbol search fallback, MarketData.app history/latest sync and
+  quote resolution, market-sync result payloads, quote-triggered portfolio jobs,
+  and bounded portfolio valuation/TOTAL recalculation have TS runtime coverage,
+  while remaining provider breadth, background orchestration,
+  automatic/background FX quote fetching, and remaining complex activity-derived
+  snapshot behavior must move with dedicated market-data and portfolio parity
+  slices.
 
 ## Blockers
 

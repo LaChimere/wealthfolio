@@ -194,16 +194,17 @@
     history/latest sync and quote resolution, Metal Price API metal
     history/latest sync and quote resolution, US Treasury calculated bond
     history/latest sync and quote resolution, OpenFIGI bond search fallback,
-    Finnhub/Alpha Vantage search fallbacks, provider-backed activity import
-    asset preview symbol resolution, provider-backed activity import check
-    resolution, provider-backed direct holdings snapshot write resolution,
-    ISIN-first activity import check resolution, ISIN-first activity import
-    asset preview resolution, and provider-backed preview type/quote-currency
-    inference now have TS runtime parity, while remaining provider breadth and
-    background orchestration remain deferred to market-data/portfolio parity
-    slices; market-sync result accounting, portfolio `market:sync-complete`
-    failure/skipped-reason payloads, and market-data quote/sync portfolio job
-    side effects now have TS parity; activity mutation event production,
+    Finnhub/Alpha Vantage search fallbacks, Börse Frankfurt search fallback,
+    provider-backed activity import asset preview symbol resolution,
+    provider-backed activity import check resolution, provider-backed direct
+    holdings snapshot write resolution, ISIN-first activity import check
+    resolution, ISIN-first activity import asset preview resolution, and
+    provider-backed preview type/quote-currency inference now have TS runtime
+    parity, while remaining provider breadth and background orchestration remain
+    deferred to market-data/portfolio parity slices; market-sync result
+    accounting, portfolio `market:sync-complete` failure/skipped-reason
+    payloads, and market-data quote/sync portfolio job side effects now have TS
+    parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -2364,6 +2365,14 @@ contract:
   `SYMBOL_SEARCH` request/API error handling, type/currency/score/region
   mapping, and continued OpenFIGI fallback after provider API fallbacks are
   empty.
+- `pr5-market-data-boerse-search-fallback`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Boerse Frankfurt after OpenFIGI|search falls back|searches OpenFIGI"`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes Rust-ordered Börse Frankfurt
+  fallback after empty Yahoo/OpenFIGI results, TradingView search request
+  headers/limit, supported German type mapping, unsupported type filtering,
+  provider MIC/ISIN preservation, exchange-catalog currency inference, and
+  `BOERSE_FRANKFURT` data-source tagging.
 - `pr5-activities-import-preview-provider-resolution`: verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, full `bun run check`, rubber-duck

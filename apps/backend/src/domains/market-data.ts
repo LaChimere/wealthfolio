@@ -1492,6 +1492,7 @@ function providerSearchFallbacks(
       : searchAlphaVantageSymbols(query, exchangeCatalog, fetchImpl, apiKey);
   });
   fallbacks.push((query) => searchOpenFigiSymbols(query, exchangeCatalog, fetchImpl));
+  fallbacks.push((query) => searchBoerseSymbols(query, exchangeCatalog, fetchImpl));
   return fallbacks;
 }
 
@@ -1806,6 +1807,83 @@ function alphaVantageSearchAssetType(assetType: string): string {
       return "MUTUALFUND";
     default:
       return assetType.toUpperCase();
+  }
+}
+
+async function searchBoerseSymbols(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+  fetchImpl: typeof fetch,
+): Promise<SymbolSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+  const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/search`);
+  url.searchParams.set("query", trimmed);
+  url.searchParams.set("limit", "10");
+  const payload = await fetchBoerseJson(url, fetchImpl);
+  if (!Array.isArray(payload)) {
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: Search JSON parse error`);
+  }
+  return payload
+    .filter(isRecord)
+    .map((item) => boerseSearchItemToResult(item, exchangeCatalog))
+    .filter((result): result is SymbolSearchResult => result !== null);
+}
+
+function boerseSearchItemToResult(
+  item: Record<string, unknown>,
+  exchangeCatalog: ExchangeCatalog,
+): SymbolSearchResult | null {
+  const rawSymbol = optionalString(item.symbol);
+  const description = optionalString(item.description);
+  const rawType = optionalString(item.type);
+  if (!rawSymbol || !description || !rawType) {
+    return null;
+  }
+  const quoteType = boerseSearchAssetType(rawType);
+  if (!quoteType) {
+    return null;
+  }
+  const [rawMic, isin] = splitBoerseMicSymbol(rawSymbol);
+  if (!rawMic || !isin) {
+    return null;
+  }
+  const exchangeMic = rawMic.toUpperCase();
+  const exchangeName = exchangeCatalog.nameByMic.get(exchangeMic) ?? null;
+  const currency = exchangeCatalog.currencyByMic.get(exchangeMic) ?? null;
+  return {
+    symbol: isin,
+    shortName: description,
+    longName: description,
+    exchange: optionalString(item.exchange) ?? "",
+    exchangeMic,
+    exchangeName,
+    quoteType,
+    typeDisplay: "",
+    currency,
+    currencySource: currency ? "exchange_inferred" : null,
+    dataSource: BOERSE_FRANKFURT_PROVIDER,
+    isExisting: false,
+    existingAssetId: null,
+    index: "",
+    score: 0,
+  };
+}
+
+function boerseSearchAssetType(value: string): string | null {
+  switch (value) {
+    case "Aktie":
+      return "EQUITY";
+    case "ETP":
+      return "ETF";
+    case "Anleihe":
+      return "BOND";
+    case "Fonds":
+      return "MUTUALFUND";
+    default:
+      return null;
   }
 }
 
