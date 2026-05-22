@@ -2943,6 +2943,15 @@ contract:
   provider override symbol precedence, `X-Finnhub-Token` requests,
   Rust-compatible profile metadata mapping and market-cap scaling, and no-key or
   empty-profile skip behavior that leaves assets unmarked.
+- `pr5-alpha-vantage-profile-enrichment`: verification passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "Alpha Vantage equity profiles|unsupported market profiles"`,
+  `bun test apps/backend/src/domains/assets.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes explicit Alpha
+  Vantage EQUITY/ETF profile enrichment with runtime secret-service API keys,
+  provider override symbol precedence, exchange suffix metadata, `OVERVIEW` plus
+  `ETF_PROFILE` requests, Rust-compatible profile metadata and metric mapping,
+  and no-key skip behavior that leaves assets unmarked.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

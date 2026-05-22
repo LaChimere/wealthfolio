@@ -919,6 +919,170 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("enriches explicit Alpha Vantage equity profiles with secret API keys", async () => {
+    const db = createAssetsDb();
+    const secretKeys: string[] = [];
+    const requests: Array<{
+      functionName: string | null;
+      symbol: string | null;
+      apiKey: string | null;
+    }> = [];
+    const service = createAssetService(db, {
+      exchangeMetadata: testExchangeMetadata(),
+      now: () => "2026-05-22T00:00:00.000Z",
+      secretService: {
+        setSecret() {},
+        getSecret(secretKey) {
+          secretKeys.push(secretKey);
+          return secretKey === "ALPHA_VANTAGE" ? "alpha-key" : null;
+        },
+        deleteSecret() {},
+      },
+      fetch: ((input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        requests.push({
+          functionName: url.searchParams.get("function"),
+          symbol: url.searchParams.get("symbol"),
+          apiKey: url.searchParams.get("apikey"),
+        });
+        const functionName = url.searchParams.get("function");
+        const symbol = url.searchParams.get("symbol");
+        if (functionName === "OVERVIEW" && symbol === "AAPL.US") {
+          return Promise.resolve(
+            Response.json({
+              Symbol: "AAPL.US",
+              AssetType: "Common Stock",
+              Name: "Apple Inc",
+              Description: "Designs consumer devices.",
+              Country: "US",
+              Sector: "Technology",
+              Industry: "Consumer Electronics",
+              MarketCapitalization: "2800000000000",
+              PERatio: "29.5",
+              TrailingPE: "30.5",
+              DividendYield: "0.005",
+              "52WeekHigh": "200.00",
+              "52WeekLow": "150.00",
+            }),
+          );
+        }
+        if (functionName === "OVERVIEW" && symbol === "VTI") {
+          return Promise.resolve(
+            Response.json({
+              Symbol: "VTI",
+              AssetType: "ETF",
+              Name: "Vanguard Total Stock Market ETF",
+              Description: "Tracks the US equity market.",
+              Country: "US",
+              Sector: "Financial Services",
+              DividendYield: "0",
+            }),
+          );
+        }
+        if (functionName === "ETF_PROFILE" && symbol === "VTI") {
+          return Promise.resolve(
+            Response.json({
+              sectors: [
+                { sector: "Technology", weight: "51.1%" },
+                { sector: "Healthcare", weight: "0.46%" },
+              ],
+              dividend_yield: "1.50%",
+            }),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url.toString()}`));
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-alpha",
+        kind: "INVESTMENT",
+        name: "Old Apple",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "ALPHA_VANTAGE",
+          overrides: { ALPHA_VANTAGE: { symbol: "AAPL.US" } },
+        }),
+      });
+      insertAsset(db, {
+        id: "etf-alpha",
+        kind: "INVESTMENT",
+        name: "Old ETF",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "VTI",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+      db.exec(`
+        INSERT INTO quote_sync_state (
+          asset_id, profile_enriched_at, updated_at
+        )
+        VALUES
+          ('equity-alpha', NULL, '2026-01-01T00:00:00Z'),
+          ('etf-alpha', NULL, '2026-01-01T00:00:00Z');
+      `);
+
+      const result = await service.enrichAssets(["equity-alpha", "etf-alpha"]);
+
+      expect(result).toEqual({ enriched: 2, skipped: 0, failed: 0 });
+      expect(secretKeys).toEqual(["ALPHA_VANTAGE", "ALPHA_VANTAGE"]);
+      expect(requests).toEqual([
+        { functionName: "OVERVIEW", symbol: "AAPL.US", apiKey: "alpha-key" },
+        { functionName: "OVERVIEW", symbol: "VTI", apiKey: "alpha-key" },
+        { functionName: "ETF_PROFILE", symbol: "VTI", apiKey: "alpha-key" },
+      ]);
+      expect(service.getAssetProfile("equity-alpha")).toMatchObject({
+        name: "Apple Inc",
+        notes: "Designs consumer devices.",
+        metadata: {
+          profile: {
+            quoteType: "EQUITY",
+            sectors: JSON.stringify([{ name: "Technology", weight: 1 }]),
+            industry: "Consumer Electronics",
+            countries: JSON.stringify([{ name: "US", weight: 1 }]),
+            marketCap: 2_800_000_000_000,
+            peRatio: 29.5,
+            dividendYield: 0.005,
+            week52High: 200,
+            week52Low: 150,
+          },
+        },
+        instrumentType: "EQUITY",
+      });
+      expect(service.getAssetProfile("etf-alpha")).toMatchObject({
+        name: "Vanguard Total Stock Market ETF",
+        notes: "Tracks the US equity market.",
+        metadata: {
+          profile: {
+            quoteType: "ETF",
+            sectors: JSON.stringify([
+              { name: "Technology", weight: 0.511 },
+              { name: "Healthcare", weight: 0.0046 },
+            ]),
+            countries: JSON.stringify([{ name: "US", weight: 1 }]),
+            dividendYield: 0.015,
+          },
+        },
+        instrumentType: "EQUITY",
+      });
+      expect(readSyncState(db, "equity-alpha")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+      expect(readSyncState(db, "etf-alpha")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
@@ -1465,6 +1629,15 @@ describe("TS assets domain", () => {
         instrument_symbol: "AAPL",
         provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
       });
+      insertAsset(db, {
+        id: "alpha-no-key",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
       db.exec(`
         INSERT INTO quote_sync_state (
           asset_id, profile_enriched_at, updated_at
@@ -1472,9 +1645,14 @@ describe("TS assets domain", () => {
         VALUES ('bond-1', '2026-05-21T00:00:00Z', '2026-05-21T00:00:00Z');
       `);
 
-      const result = await service.enrichAssets(["bond-1", "equity-1", "finnhub-no-key"]);
+      const result = await service.enrichAssets([
+        "bond-1",
+        "equity-1",
+        "finnhub-no-key",
+        "alpha-no-key",
+      ]);
 
-      expect(result).toEqual({ enriched: 0, skipped: 3, failed: 0 });
+      expect(result).toEqual({ enriched: 0, skipped: 4, failed: 0 });
       expect(fetched).toEqual([]);
       expect(readSyncState(db, "bond-1")).toMatchObject({
         profile_enriched_at: "2026-05-21T00:00:00Z",
@@ -1683,12 +1861,14 @@ function testExchangeMetadata() {
           name: "NASDAQ",
           currency: "USD",
           yahoo: { suffix: "" },
+          alpha_vantage: { suffix: "" },
         },
         {
           mic: "XTSE",
           name: "TSX",
           currency: "CAD",
           yahoo: { suffix: "TO" },
+          alpha_vantage: { suffix: ".TRT" },
         },
         {
           mic: "XETR",

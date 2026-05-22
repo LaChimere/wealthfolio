@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 314
+turns_used: 315
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T22:54:10+08:00"
+updated_at: "2026-05-22T23:10:33+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1983,6 +1983,13 @@ updated_at: "2026-05-22T22:54:10+08:00"
   paths without marking assets enriched. Focused/full assets tests, backend
   type-check, backend test suite, full `bun run check`, and `git diff --check`
   passed.
+- Turn 315: Added explicit Alpha Vantage equity/ETF profile enrichment parity:
+  TS asset enrichment now reads the Alpha Vantage API key from the runtime
+  secret service, honors provider override symbols and exchange suffix metadata,
+  fetches `OVERVIEW` plus ETF sector profiles, maps Rust-shaped profile metadata
+  and metrics, and skips no-key paths without marking assets enriched.
+  Focused/full assets tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check` passed.
 
 ## Deferred items
 

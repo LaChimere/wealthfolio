@@ -169,6 +169,7 @@ export interface ExchangeMetadata {
   nameByMic: ReadonlyMap<string, string>;
   currencyByMic: ReadonlyMap<string, string>;
   yahooSuffixToMic: ReadonlyMap<string, string>;
+  alphaVantageSuffixByMic: ReadonlyMap<string, string>;
 }
 
 const ASSETS_CREATED_EVENT = "assets_created";
@@ -186,6 +187,8 @@ const VALID_ASSET_KINDS = new Set([
 ]);
 const VALID_QUOTE_MODES = new Set(["MARKET", "MANUAL"]);
 const VALID_INSTRUMENT_TYPES = new Set(["EQUITY", "CRYPTO", "FX", "OPTION", "METAL", "BOND"]);
+const ALPHA_VANTAGE_PROVIDER = "ALPHA_VANTAGE";
+const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 const BOERSE_FRANKFURT_PROVIDER = "BOERSE_FRANKFURT";
 const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
@@ -411,6 +414,7 @@ export function parseExchangeMetadataLookup(json: string): ExchangeMetadata {
   const nameByMic = new Map<string, string>();
   const currencyByMic = new Map<string, string>();
   const yahooSuffixToMic = new Map<string, string>();
+  const alphaVantageSuffixByMic = new Map<string, string>();
   for (const entry of parsed.exchanges) {
     if (!isRecord(entry) || typeof entry.mic !== "string") {
       continue;
@@ -428,8 +432,14 @@ export function parseExchangeMetadataLookup(json: string): ExchangeMetadata {
         yahooSuffixToMic.set(suffix.replace(/^\./, "").toUpperCase(), mic);
       }
     }
+    if (isRecord(entry.alpha_vantage) && typeof entry.alpha_vantage.suffix === "string") {
+      const suffix = entry.alpha_vantage.suffix.trim();
+      if (suffix) {
+        alphaVantageSuffixByMic.set(mic, suffix);
+      }
+    }
   }
-  return { nameByMic, currencyByMic, yahooSuffixToMic };
+  return { nameByMic, currencyByMic, yahooSuffixToMic, alphaVantageSuffixByMic };
 }
 
 function normalizeNewAsset(asset: NewAsset, exchangeMetadata: ExchangeMetadata): NewAsset {
@@ -765,6 +775,9 @@ async function fetchAssetProviderProfile(
   options: AssetServiceOptions,
 ): Promise<AssetProviderProfile | null> {
   const provider = preferredProviderId(asset.provider_config);
+  if (shouldFetchAlphaVantageProfile(asset, provider)) {
+    return fetchAlphaVantageProfile(asset, options);
+  }
   if (shouldFetchBoerseProfile(asset, provider)) {
     return fetchBoerseProfile(asset, options.fetch ?? fetch);
   }
@@ -790,6 +803,10 @@ function shouldFetchYahooProfile(provider: string | null): boolean {
 
 function shouldFetchOpenFigiProfile(asset: AssetRow, provider: string | null): boolean {
   return (provider === null || provider === OPENFIGI_PROVIDER) && asset.instrument_type === "BOND";
+}
+
+function shouldFetchAlphaVantageProfile(asset: AssetRow, provider: string | null): boolean {
+  return provider === ALPHA_VANTAGE_PROVIDER && asset.instrument_type === "EQUITY";
 }
 
 function openFigiProfileSymbol(asset: AssetRow): string {
@@ -851,6 +868,25 @@ function yahooSuffixForMic(mic: string | null, options: AssetServiceOptions): st
   return null;
 }
 
+function alphaVantageProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {
+  const override = providerOverrideSymbol(asset.provider_config, ALPHA_VANTAGE_PROVIDER);
+  if (override) {
+    return override;
+  }
+  const symbol = optionalString(asset.instrument_symbol)?.toUpperCase();
+  if (!symbol) {
+    return null;
+  }
+  const mic = optionalString(asset.instrument_exchange_mic)?.toUpperCase();
+  if (!mic) {
+    return symbol;
+  }
+  const exchangeMetadata =
+    options.exchangeMetadata ?? exchangeNameMetadata(options.exchangeNameByMic);
+  const suffix = exchangeMetadata.alphaVantageSuffixByMic.get(mic);
+  return suffix ? `${symbol}${suffix}` : symbol;
+}
+
 async function fetchYahooSearchProfile(
   symbol: string,
   fetchImpl: typeof fetch,
@@ -872,6 +908,217 @@ async function fetchYahooSearchProfile(
     throw new Error(`Symbol not found: ${symbol}`);
   }
   return query1Profile;
+}
+
+async function fetchAlphaVantageProfile(
+  asset: AssetRow,
+  options: AssetServiceOptions,
+): Promise<AssetProviderProfile | null> {
+  const apiKey = await providerApiKey(options.secretService, ALPHA_VANTAGE_PROVIDER);
+  const symbol = alphaVantageProfileSymbol(asset, options);
+  if (!apiKey || !symbol) {
+    return null;
+  }
+  const overviewPayload = await fetchAlphaVantageJson(
+    [
+      ["function", "OVERVIEW"],
+      ["symbol", symbol],
+    ],
+    options.fetch ?? fetch,
+    apiKey,
+  );
+  let profile = alphaVantageOverviewProfile(overviewPayload, symbol);
+  if (profile.assetType === "ETF" || profile.assetType === "MUTUALFUND") {
+    try {
+      const etfPayload = await fetchAlphaVantageJson(
+        [
+          ["function", "ETF_PROFILE"],
+          ["symbol", symbol],
+        ],
+        options.fetch ?? fetch,
+        apiKey,
+      );
+      const etfProfile = alphaVantageEtfProfile(etfPayload, symbol);
+      profile = {
+        ...profile,
+        sectors: etfProfile.sectors ?? profile.sectors,
+        dividendYield: etfProfile.dividendYield ?? profile.dividendYield,
+      };
+    } catch (error) {
+      options.warn?.(
+        `Alpha Vantage ETF_PROFILE failed for ${symbol}, using OVERVIEW only: ${errorMessage(error)}`,
+      );
+    }
+  }
+  return profile;
+}
+
+async function fetchAlphaVantageJson(
+  params: Array<[string, string]>,
+  fetchImpl: typeof fetch,
+  apiKey: string,
+): Promise<unknown> {
+  const url = new URL(ALPHA_VANTAGE_BASE_URL);
+  for (const [key, value] of params) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("apikey", apiKey);
+  let response: Response;
+  try {
+    response = await fetchImpl(url);
+  } catch (error) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Request failed: ${errorMessage(error)}`);
+  }
+  if (response.status === 429) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
+  }
+  if (!response.ok) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
+  }
+}
+
+function alphaVantageOverviewProfile(payload: unknown, symbol: string): AssetProviderProfile {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse company overview response`);
+  }
+  checkAlphaVantageApiError(payload);
+  if (optionalString(payload.Information)?.includes("demo") || !optionalString(payload.Symbol)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: No company overview data for symbol: ${symbol}`);
+  }
+
+  const profile: AssetProviderProfile = {
+    source: ALPHA_VANTAGE_PROVIDER,
+  };
+  const assetType = alphaVantageAssetType(optionalString(payload.AssetType));
+  if (assetType) {
+    profile.assetType = assetType;
+  }
+  const name = optionalString(payload.Name);
+  if (name) {
+    profile.name = name;
+  }
+  const sector = optionalString(payload.Sector);
+  if (sector) {
+    profile.sectors = weightedProfileJson(sector, 1);
+  }
+  const industry = optionalString(payload.Industry);
+  if (industry) {
+    profile.industry = industry;
+  }
+  const country = optionalString(payload.Country);
+  if (country) {
+    profile.countries = weightedProfileJson(country, 1);
+  }
+  const description = optionalString(payload.Description);
+  if (description) {
+    profile.notes = description;
+  }
+  const marketCap = alphaVantageNumber(payload.MarketCapitalization);
+  if (marketCap !== null) {
+    profile.marketCap = marketCap;
+  }
+  const peRatio = alphaVantageNumber(payload.PERatio) ?? alphaVantageNumber(payload.TrailingPE);
+  if (peRatio !== null) {
+    profile.peRatio = peRatio;
+  }
+  const dividendYield = alphaVantageNumber(payload.DividendYield);
+  if (dividendYield !== null) {
+    profile.dividendYield = dividendYield;
+  }
+  const week52High = alphaVantageNumber(payload["52WeekHigh"]);
+  if (week52High !== null) {
+    profile.week52High = week52High;
+  }
+  const week52Low = alphaVantageNumber(payload["52WeekLow"]);
+  if (week52Low !== null) {
+    profile.week52Low = week52Low;
+  }
+  return profile;
+}
+
+function alphaVantageEtfProfile(payload: unknown, symbol: string): Partial<AssetProviderProfile> {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse ETF profile response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const sectorsPayload = payload.sectors;
+  if (!Array.isArray(sectorsPayload) || sectorsPayload.length === 0) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: No ETF profile data for symbol: ${symbol}`);
+  }
+  const sectors: Array<{ name: string; weight: number }> = [];
+  for (const sectorPayload of sectorsPayload) {
+    if (!isRecord(sectorPayload)) {
+      continue;
+    }
+    const name = optionalString(sectorPayload.sector);
+    const weight = alphaVantageWeight(sectorPayload.weight);
+    if (name && weight !== null) {
+      sectors.push({ name, weight });
+    }
+  }
+  return {
+    sectors: sectors.length > 0 ? JSON.stringify(sectors) : undefined,
+    dividendYield: alphaVantageWeight(payload.dividend_yield) ?? undefined,
+  };
+}
+
+function checkAlphaVantageApiError(payload: Record<string, unknown>): void {
+  const apiError = optionalString(payload["Error Message"]);
+  if (apiError) {
+    if (apiError.includes("Invalid API call") || apiError.includes("not found")) {
+      throw new Error(`Symbol not found: ${apiError}`);
+    }
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: ${apiError}`);
+  }
+  for (const key of ["Note", "Information"]) {
+    const message = optionalString(payload[key]);
+    if (message && alphaVantageRateLimitedMessage(message)) {
+      throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
+    }
+  }
+}
+
+function alphaVantageAssetType(value: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const upper = value.toUpperCase();
+  switch (upper) {
+    case "COMMON STOCK":
+      return "EQUITY";
+    case "MUTUAL FUND":
+      return "MUTUALFUND";
+    default:
+      return upper;
+  }
+}
+
+function alphaVantageNumber(value: unknown): number | null {
+  const text = optionalString(value);
+  if (!text || text === "None" || text === "-" || text === "0") {
+    return null;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function alphaVantageWeight(value: unknown): number | null {
+  const text = optionalString(value);
+  if (!text) {
+    return null;
+  }
+  const parsed = text.endsWith("%") ? Number(text.slice(0, -1)) / 100 : Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function alphaVantageRateLimitedMessage(message: string): boolean {
+  return message.includes("API call frequency") || message.includes("rate limit");
 }
 
 async function fetchOpenFigiBondProfile(
@@ -2624,6 +2871,7 @@ function exchangeNameMetadata(lookup: AssetServiceOptions["exchangeNameByMic"]):
     nameByMic: normalizeExchangeLookup(lookup),
     currencyByMic: new Map(),
     yahooSuffixToMic: new Map(),
+    alphaVantageSuffixByMic: new Map(),
   };
 }
 
