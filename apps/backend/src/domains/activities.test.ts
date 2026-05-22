@@ -1633,6 +1633,92 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("validates empty import symbols for asset-backed activity rows like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+
+      const checked = await service.checkActivitiesImport?.([
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 1,
+        },
+        {
+          accountId: "account-1",
+          activityType: "SPLIT",
+          date: "2025-01-16",
+          symbol: "   ",
+          amount: "2",
+          currency: "USD",
+          lineNumber: 2,
+        },
+        {
+          accountId: "account-1",
+          activityType: "DIVIDEND",
+          subtype: "DRIP",
+          date: "2025-01-17",
+          symbol: "",
+          quantity: "1",
+          unitPrice: "1",
+          amount: "1",
+          currency: "USD",
+          lineNumber: 3,
+        },
+        {
+          accountId: "account-1",
+          assetId: "AAPL",
+          activityType: "BUY",
+          date: "2025-01-18",
+          symbol: "",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+          lineNumber: 4,
+        },
+      ]);
+
+      expect(checked?.[0]).toMatchObject({
+        isValid: false,
+        errors: { symbol: ["Symbol is required for BUY activities."] },
+      });
+      expect(checked?.[1]).toMatchObject({
+        isValid: false,
+        errors: { symbol: ["Symbol is required for SPLIT activities."] },
+      });
+      expect(checked?.[2]).toMatchObject({
+        isValid: false,
+        errors: { symbol: ["Symbol is required for DIVIDEND activities."] },
+      });
+      expect(checked?.[3]).toMatchObject({
+        assetId: "AAPL",
+        symbol: "AAPL",
+        isValid: true,
+      });
+      expect(checked?.[3]).not.toHaveProperty("errors");
+    } finally {
+      db.close();
+    }
+  });
+
   test("classifies import symbols with Rust-compatible optional asset rules", async () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

@@ -2511,6 +2511,12 @@ function checkActivityImportRow(
     return { activity, idempotencyKey: null };
   }
   const needsAsset = disposition.kind === "resolve";
+  if (needsAsset && !symbol && !assetId) {
+    addFieldMessage(errors, "symbol", `Symbol is required for ${activityType} activities.`);
+    activity.isValid = false;
+    activity.errors = errors;
+    return { activity, idempotencyKey: null };
+  }
   if (needsAsset && symbol && !assetId && isGarbageSymbol(symbol)) {
     addFieldMessage(errors, "symbol", `Invalid symbol '${symbol}'. Please correct or remove it.`);
     activity.isValid = false;
