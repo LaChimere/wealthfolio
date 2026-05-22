@@ -924,15 +924,28 @@ fn extract_table_rows(
         None => return Vec::new(),
     };
 
+    let thead_th_sel = scraper::Selector::parse("thead th").expect("valid CSS selector 'thead th'");
+    let th_sel = scraper::Selector::parse("th").expect("valid CSS selector 'th'");
+    let mut headers_seen = table_el.select(&thead_th_sel).next().is_some();
     let date_fmt = source.date_format.as_deref();
     let mut rows = Vec::new();
 
-    for tr in table_el.select(&tr_sel) {
+    for (row_idx, tr) in table_el.select(&tr_sel).enumerate() {
         let cells: Vec<String> = tr
             .select(&td_sel)
             .map(|el| extract_first_text_content(el))
             .collect();
-        if cells.is_empty() || close_col >= cells.len() {
+        if cells.is_empty() {
+            if !headers_seen && tr.select(&th_sel).next().is_some() {
+                headers_seen = true;
+            }
+            continue;
+        }
+        if !headers_seen && row_idx == 0 {
+            headers_seen = true;
+            continue;
+        }
+        if close_col >= cells.len() {
             continue;
         }
 
@@ -1274,6 +1287,31 @@ mod tests {
             Some("2026-02-01"),
         );
         assert_eq!(currency, "CAD");
+    }
+
+    #[test]
+    fn extract_table_rows_skips_numeric_td_header_row() {
+        let body = r#"
+            <table>
+              <tr><td>999</td><td>888</td><td>777</td></tr>
+              <tr><td>2026-05-04</td><td>794.70</td><td>1589</td></tr>
+              <tr><td>2026-04-30</td><td>798.89</td><td>0</td></tr>
+            </table>
+        "#;
+        let mut source = json_source("0:1");
+        source.format = "html_table".to_string();
+        source.date_path = Some("0:0".to_string());
+        source.volume_path = Some("0:2".to_string());
+
+        let rows = extract_table_rows(body, &source, None);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].date, Some(ymd(2026, 5, 4)));
+        assert_eq!(rows[0].close, 794.70);
+        assert_eq!(rows[0].volume, Some(1589.0));
+        assert_eq!(rows[1].date, Some(ymd(2026, 4, 30)));
+        assert_eq!(rows[1].close, 798.89);
+        assert_eq!(rows[1].volume, Some(0.0));
     }
 
     #[test]

@@ -2813,6 +2813,13 @@ contract:
   after network and HTTP 5xx fetch failures before returning an error or
   applying configured `defaultPrice`, while 4xx responses and redirect behavior
   remain unchanged.
+- `pr5-custom-provider-html-table-header-parity`: verification passed:
+  `cargo test -p wealthfolio-core quotes::custom_scraper_provider --quiet`,
+  `cargo test -p wealthfolio-core --quiet`,
+  `cargo check -p wealthfolio-core --quiet`, full `bun run check`, and
+  `git diff --check`. Coverage includes Rust runtime HTML-table extraction
+  skipping a first `<td>` header row even when the header cells are
+  numeric-looking, matching the TS backend table extraction path.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
