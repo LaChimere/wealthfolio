@@ -275,7 +275,7 @@ describe("TS market data domain", () => {
             low: null,
             volume: null,
             currency: "CAD",
-            date: "2026-01-10",
+            date: "2026-01-10T23:00:00-05:00",
             error: null,
             rawResponse: null,
             detectedElements: null,
@@ -330,6 +330,92 @@ describe("TS market data domain", () => {
         data_source: "CUSTOM_SCRAPER:my-feed",
         error_count: 0,
         last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to now for custom provider dates with invalid ISO prefixes", async () => {
+    const db = createMarketDataDb();
+    const latestSource: CustomProviderSource = {
+      id: "source-latest",
+      providerId: "my-feed",
+      kind: "latest",
+      format: "json",
+      url: "https://prices.example.test/latest/{SYMBOL}",
+      pricePath: "$.price",
+      datePath: "$.date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-15T23:00:00Z"),
+      customProviderService: {
+        getSourceByKind() {
+          return latestSource;
+        },
+        testSource() {
+          return {
+            success: true,
+            statusCode: 200,
+            price: 14.25,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: "2026-01-10 closing price",
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-custom",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({
+          preferred_provider: "CUSTOM_SCRAPER",
+          custom_provider_code: "my-feed",
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-custom"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        quotesSynced: 1,
+      });
+
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-10")).toBeNull();
+      expect(readQuoteByDay(db, "asset-custom", "2026-01-15")).toMatchObject({
+        id: "asset-custom_2026-01-15_CUSTOM_SCRAPER:my-feed",
+        close: "14.25",
+        currency: "CAD",
+        timestamp: "2026-01-15T23:00:00.000Z",
       });
     } finally {
       db.close();

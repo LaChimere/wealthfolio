@@ -414,6 +414,11 @@ const BOERSE_FRANKFURT_BASE_URL = "https://api.live.deutsche-boerse.com/v1";
 const BOERSE_FRANKFURT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const CUSTOM_SCRAPER_PROVIDER = "CUSTOM_SCRAPER";
+const CUSTOM_PROVIDER_ISO_DATE_RE = /^(\d{4}-\d{2}-\d{2})$/;
+const CUSTOM_PROVIDER_RFC3339_DATETIME_RE =
+  /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+const CUSTOM_PROVIDER_NAIVE_DATETIME_RE =
+  /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?$/;
 const MINOR_CURRENCY_MAJOR: Record<string, string> = {
   GBp: "GBP",
   GBX: "GBP",
@@ -2938,9 +2943,9 @@ function parseCustomProviderDate(value: string, explicitFormat: string | null): 
   if (numericDate) {
     return numericDate;
   }
-  const isoDateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(trimmed);
-  if (isoDateMatch?.[1] && isIsoDate(isoDateMatch[1])) {
-    return isoDateMatch[1];
+  const isoDateTime = parseCustomProviderIsoDateTime(trimmed);
+  if (isoDateTime) {
+    return isoDateTime;
   }
   for (const format of [
     "%d/%m/%Y",
@@ -2960,6 +2965,25 @@ function parseCustomProviderDate(value: string, explicitFormat: string | null): 
       return parsed;
     }
   }
+  return null;
+}
+
+function parseCustomProviderIsoDateTime(value: string): string | null {
+  const dateOnlyMatch = CUSTOM_PROVIDER_ISO_DATE_RE.exec(value);
+  if (dateOnlyMatch?.[1] && isIsoDate(dateOnlyMatch[1])) {
+    return dateOnlyMatch[1];
+  }
+
+  const rfc3339Match = CUSTOM_PROVIDER_RFC3339_DATETIME_RE.exec(value);
+  if (rfc3339Match?.[1] && isIsoDate(rfc3339Match[1])) {
+    return rfc3339Match[1];
+  }
+
+  const naiveDateTimeMatch = CUSTOM_PROVIDER_NAIVE_DATETIME_RE.exec(value);
+  if (naiveDateTimeMatch?.[1] && isIsoDate(naiveDateTimeMatch[1])) {
+    return naiveDateTimeMatch[1];
+  }
+
   return null;
 }
 

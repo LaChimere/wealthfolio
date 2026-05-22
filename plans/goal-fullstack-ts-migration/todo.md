@@ -2774,6 +2774,14 @@ contract:
   URL fallback without fetching, network and HTTP failure fallback to the
   configured static price/currency, historical row fallback for
   `fetchSourceRows`, and unchanged CSV/HTML/table extraction behavior.
+- `pr5-custom-provider-date-parse-strictness`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "targeted custom provider latest|invalid ISO prefixes|custom provider"`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes RFC3339 offset
+  datetimes preserving the source-local date before `dateTimezone` conversion
+  and invalid ISO-prefixed strings falling back to `now` like Rust instead of
+  being accepted as valid quote dates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
