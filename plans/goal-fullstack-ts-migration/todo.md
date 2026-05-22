@@ -258,8 +258,9 @@
     market-data sync, targeted `migrate_classifications` dispatch into the
     taxonomy migration seam, and service-level `migrate_legacy_classifications`
     dispatch, bounded price-staleness Health Center checks, bounded quote-sync
-    error checks, and bounded FX integrity issue generation, bounded
-    negative-balance data-consistency checks, and Rust-compatible health
+    error checks, bounded FX integrity issue generation, bounded
+    negative-balance data-consistency checks, orphan activity account/asset
+    checks, negative latest-position checks, and Rust-compatible health
     dismissal hash carryover now have TS runtime parity; market-data no-op sync
     modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync,
     custom-provider latest/history/fallback sync, Börse Frankfurt provider sync,

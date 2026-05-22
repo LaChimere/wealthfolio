@@ -1113,6 +1113,167 @@ describe("TS health domain", () => {
     }
   });
 
+  test("adds data consistency issues for orphan activity references", async () => {
+    const db = createHealthConsistencyDb();
+    db.prepare("INSERT INTO accounts (id) VALUES (?)").run("account-existing");
+    db.prepare("INSERT INTO assets (id, kind, name, display_code) VALUES (?, ?, ?, ?)").run(
+      "asset-existing",
+      "SECURITY",
+      "Existing Asset",
+      "EXIST",
+    );
+    db.prepare("INSERT INTO activities (id, account_id, asset_id) VALUES (?, ?, ?)").run(
+      "activity-orphan-account",
+      "account-missing",
+      "asset-existing",
+    );
+    db.prepare("INSERT INTO activities (id, account_id, asset_id) VALUES (?, ?, ?)").run(
+      "activity-orphan-asset",
+      "account-existing",
+      "asset-missing",
+    );
+    db.prepare("INSERT INTO activities (id, account_id, asset_id) VALUES (?, ?, ?)").run(
+      "activity-cash",
+      "account-existing",
+      null,
+    );
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: "orphan_activity_account:8dac4c7dc8b329e2",
+          dataHash: "8dac4c7dc8b329e2",
+          severity: "ERROR",
+          category: "DATA_CONSISTENCY",
+          title: "Transaction references missing account",
+          message:
+            "Some transactions point to accounts that no longer exist. This may cause calculation errors.",
+          affectedCount: 1,
+          navigateAction: {
+            route: "/activities",
+            query: { filter: "orphan" },
+            label: "View Activities",
+          },
+        }),
+        expect.objectContaining({
+          id: "orphan_activity_asset:e1a62fa3f711bdf",
+          dataHash: "e1a62fa3f711bdf",
+          severity: "ERROR",
+          category: "DATA_CONSISTENCY",
+          title: "Transaction references missing asset",
+          message:
+            "Some transactions point to assets that no longer exist. This may cause calculation errors.",
+          affectedCount: 1,
+          navigateAction: {
+            route: "/activities",
+            query: { filter: "orphan" },
+            label: "View Activities",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("adds data consistency issues for negative latest positions", async () => {
+    const db = createHealthConsistencyDb();
+    db.prepare("INSERT INTO accounts (id) VALUES (?), (?)").run("account-a", "account-b");
+    db.prepare("INSERT INTO assets (id, kind, name, display_code) VALUES (?, ?, ?, ?)").run(
+      "asset-a",
+      "SECURITY",
+      "Asset A",
+      "A",
+    );
+    db.prepare("INSERT INTO assets (id, kind, name, display_code) VALUES (?, ?, ?, ?)").run(
+      "asset-b",
+      "PROPERTY",
+      "Asset B",
+      "B",
+    );
+    db.prepare("INSERT INTO assets (id, kind, name, display_code) VALUES (?, ?, ?, ?)").run(
+      "liability-a",
+      "LIABILITY",
+      "Liability A",
+      "L",
+    );
+    db.prepare(
+      "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, positions) VALUES (?, ?, ?, ?)",
+    ).run(
+      "account-a_2026-05-17",
+      "account-a",
+      "2026-05-17",
+      JSON.stringify({
+        "asset-a": { assetId: "asset-a", quantity: "-1" },
+      }),
+    );
+    db.prepare(
+      "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, positions) VALUES (?, ?, ?, ?)",
+    ).run(
+      "account-a_2026-05-18",
+      "account-a",
+      "2026-05-18",
+      JSON.stringify({
+        "asset-a": { assetId: "asset-a", quantity: "2" },
+      }),
+    );
+    db.prepare(
+      "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, positions) VALUES (?, ?, ?, ?)",
+    ).run(
+      "account-b_2026-05-18",
+      "account-b",
+      "2026-05-18",
+      JSON.stringify({
+        "asset-b": { assetId: "asset-b", quantity: "-0.5" },
+        "liability-a": { assetId: "liability-a", quantity: "-100" },
+      }),
+    );
+    db.prepare(
+      "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, positions) VALUES (?, ?, ?, ?)",
+    ).run(
+      "TOTAL_2026-05-18",
+      "TOTAL",
+      "2026-05-18",
+      JSON.stringify({
+        "asset-a": { assetId: "asset-a", quantity: "-10" },
+      }),
+    );
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          id: "negative_position:a9ce6c1ac0b78e7d",
+          dataHash: "a9ce6c1ac0b78e7d",
+          severity: "WARNING",
+          category: "DATA_CONSISTENCY",
+          title: "Holding has negative quantity",
+          message:
+            "Some holdings show negative quantities, which usually indicates missing or incorrect transactions.",
+          affectedCount: 1,
+          navigateAction: {
+            route: "/holdings",
+            query: { filter: "negative" },
+            label: "View Holdings",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("continues data consistency checks when negative balance lookups fail", async () => {
     const db = createHealthDb();
     const warnings: string[] = [];
@@ -1612,6 +1773,36 @@ function createHealthDb(): Database {
       issue_id TEXT NOT NULL PRIMARY KEY,
       dismissed_at TEXT NOT NULL,
       data_hash TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+function createHealthConsistencyDb(): Database {
+  const db = createHealthDb();
+  db.exec(`
+    CREATE TABLE accounts (
+      id TEXT PRIMARY KEY NOT NULL
+    );
+
+    CREATE TABLE assets (
+      id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT,
+      display_code TEXT
+    );
+
+    CREATE TABLE activities (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      asset_id TEXT
+    );
+
+    CREATE TABLE holdings_snapshots (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      snapshot_date TEXT NOT NULL,
+      positions TEXT NOT NULL DEFAULT '{}'
     );
   `);
   return db;

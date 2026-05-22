@@ -115,11 +115,18 @@ export interface NegativeBalanceProvider {
   ): Promise<NegativeAccountBalanceInfo[]> | NegativeAccountBalanceInfo[];
 }
 
+export interface DataConsistencyRecordIssue {
+  recordId: string;
+}
+
 export interface HealthRepository {
   saveDismissal(issueId: string, dataHash: string): IssueDismissal;
   removeDismissal(issueId: string): void;
   getDismissals(): IssueDismissal[];
   getDismissal(issueId: string): IssueDismissal | null;
+  getOrphanActivityAccountIssues(): DataConsistencyRecordIssue[];
+  getOrphanActivityAssetIssues(): DataConsistencyRecordIssue[];
+  getNegativePositionIssues(): DataConsistencyRecordIssue[];
 }
 
 export interface HealthService {
@@ -151,6 +158,10 @@ interface DismissalRow {
   issue_id: string;
   dismissed_at: string;
   data_hash: string;
+}
+
+interface DataConsistencyRecordIssueRow {
+  record_id: string;
 }
 
 export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
@@ -213,6 +224,75 @@ export function createHealthRepository(db: Database): HealthRepository {
         )
         .get(issueId);
       return row ? dismissalFromRow(row) : null;
+    },
+    getOrphanActivityAccountIssues() {
+      if (!tablesExist(db, ["activities", "accounts"])) {
+        return [];
+      }
+      return db
+        .query<DataConsistencyRecordIssueRow, []>(
+          `
+            SELECT a.id AS record_id
+            FROM activities a
+            LEFT JOIN accounts account ON account.id = a.account_id
+            WHERE account.id IS NULL
+            ORDER BY a.id
+          `,
+        )
+        .all()
+        .map(dataConsistencyRecordIssueFromRow);
+    },
+    getOrphanActivityAssetIssues() {
+      if (!tablesExist(db, ["activities", "assets"])) {
+        return [];
+      }
+      return db
+        .query<DataConsistencyRecordIssueRow, []>(
+          `
+            SELECT a.id AS record_id
+            FROM activities a
+            LEFT JOIN assets asset ON asset.id = a.asset_id
+            WHERE a.asset_id IS NOT NULL
+              AND asset.id IS NULL
+            ORDER BY a.id
+          `,
+        )
+        .all()
+        .map(dataConsistencyRecordIssueFromRow);
+    },
+    getNegativePositionIssues() {
+      if (!tablesExist(db, ["holdings_snapshots", "assets"])) {
+        return [];
+      }
+      return db
+        .query<DataConsistencyRecordIssueRow, []>(
+          `
+            WITH latest_snapshots AS (
+              SELECT account_id, MAX(snapshot_date) AS snapshot_date
+              FROM holdings_snapshots
+              WHERE account_id <> 'TOTAL'
+              GROUP BY account_id
+            )
+            SELECT
+              (CASE
+                WHEN asset.kind IN ('PROPERTY', 'VEHICLE', 'COLLECTIBLE', 'PRECIOUS_METAL', 'OTHER')
+                THEN 'ALT'
+                ELSE 'SEC'
+              END) || '-' || snapshot.account_id || '-' || asset.id AS record_id
+            FROM holdings_snapshots snapshot
+            INNER JOIN latest_snapshots latest
+              ON latest.account_id = snapshot.account_id
+              AND latest.snapshot_date = snapshot.snapshot_date
+            INNER JOIN json_each(snapshot.positions) position
+            INNER JOIN assets asset
+              ON asset.id = COALESCE(NULLIF(json_extract(position.value, '$.assetId'), ''), position.key)
+            WHERE asset.kind <> 'LIABILITY'
+              AND CAST(json_extract(position.value, '$.quantity') AS REAL) < 0
+            ORDER BY snapshot.account_id, asset.id
+          `,
+        )
+        .all()
+        .map(dataConsistencyRecordIssueFromRow);
     },
   };
 }
@@ -393,7 +473,7 @@ async function runChecks(
       ...(await analyzePriceStaleness(options, config, checkedAt)),
       ...(await analyzeQuoteSyncErrors(options, config, checkedAt)),
       ...(await analyzeFxIntegrity(options, config, checkedAt)),
-      ...(await analyzeDataConsistency(options, checkedAt)),
+      ...(await analyzeDataConsistency(repository, options, checkedAt)),
       ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
       ...analyzeTimezone(options, clientTimezone, checkedAt),
     ],
@@ -1227,15 +1307,63 @@ interface NegativeBalanceIssue {
 }
 
 async function analyzeDataConsistency(
+  repository: HealthRepository,
   options: HealthServiceOptions,
   timestamp: Date,
 ): Promise<HealthIssue[]> {
+  const orphanActivityAccountIssues = getDataConsistencyRecordIssues(
+    () => repository.getOrphanActivityAccountIssues(),
+    options.warn,
+    "orphan activity account references",
+  );
+  const orphanActivityAssetIssues = getDataConsistencyRecordIssues(
+    () => repository.getOrphanActivityAssetIssues(),
+    options.warn,
+    "orphan activity asset references",
+  );
+  const negativePositionIssues = getDataConsistencyRecordIssues(
+    () => repository.getNegativePositionIssues(),
+    options.warn,
+    "negative positions",
+  );
+  const { negativeInvestmentAccounts, negativeCashAccounts } =
+    await getNegativeBalanceGroups(options);
+
+  return [
+    ...buildOrphanActivityIssues({
+      issues: orphanActivityAccountIssues,
+      issueLevel: "account",
+      timestamp,
+    }),
+    ...buildOrphanActivityIssues({
+      issues: orphanActivityAssetIssues,
+      issueLevel: "asset",
+      timestamp,
+    }),
+    ...buildNegativePositionIssues({ issues: negativePositionIssues, timestamp }),
+    ...buildNegativeBalanceIssues({
+      issues: negativeInvestmentAccounts,
+      issueLevel: "account",
+      timestamp,
+    }),
+    ...buildNegativeBalanceIssues({
+      issues: negativeCashAccounts,
+      issueLevel: "cash",
+      timestamp,
+    }),
+  ];
+}
+
+async function getNegativeBalanceGroups(options: HealthServiceOptions): Promise<{
+  negativeInvestmentAccounts: NegativeBalanceIssue[];
+  negativeCashAccounts: NegativeBalanceIssue[];
+}> {
   if (!options.valuationProvider?.getAccountsWithNegativeBalance) {
-    return [];
+    return { negativeInvestmentAccounts: [], negativeCashAccounts: [] };
   }
   const accounts = getPortfolioHealthAccounts(options);
   if (!accounts) {
-    return [];
+    return { negativeInvestmentAccounts: [], negativeCashAccounts: [] };
   }
   const accountNameById = new Map(accounts.map((account) => [account.id, account.name]));
   const investmentAccountIds = accounts
@@ -1261,17 +1389,93 @@ async function analyzeDataConsistency(
     ),
   ]);
 
+  return { negativeInvestmentAccounts, negativeCashAccounts };
+}
+
+function getDataConsistencyRecordIssues(
+  readIssues: () => DataConsistencyRecordIssue[],
+  warn: ((message: string) => void) | undefined,
+  failureLabel: string,
+): DataConsistencyRecordIssue[] {
+  try {
+    return readIssues();
+  } catch (error) {
+    warn?.(`Failed to check for ${failureLabel}: ${formatErrorMessage(error)}`);
+    return [];
+  }
+}
+
+function buildOrphanActivityIssues(input: {
+  issues: DataConsistencyRecordIssue[];
+  issueLevel: "account" | "asset";
+  timestamp: Date;
+}): HealthIssue[] {
+  if (input.issues.length === 0) {
+    return [];
+  }
+  const recordIds = input.issues.map((issue) => issue.recordId);
+  const dataHash = computeDataHash(recordIds);
+  const count = input.issues.length;
+  const isAccount = input.issueLevel === "account";
+
   return [
-    ...buildNegativeBalanceIssues({
-      issues: negativeInvestmentAccounts,
-      issueLevel: "account",
-      timestamp,
-    }),
-    ...buildNegativeBalanceIssues({
-      issues: negativeCashAccounts,
-      issueLevel: "cash",
-      timestamp,
-    }),
+    {
+      id: `orphan_activity_${input.issueLevel}:${dataHash}`,
+      severity: "ERROR",
+      category: "DATA_CONSISTENCY",
+      title: isAccount
+        ? count === 1
+          ? "Transaction references missing account"
+          : `${count} transactions reference missing accounts`
+        : count === 1
+          ? "Transaction references missing asset"
+          : `${count} transactions reference missing assets`,
+      message: isAccount
+        ? "Some transactions point to accounts that no longer exist. This may cause calculation errors."
+        : "Some transactions point to assets that no longer exist. This may cause calculation errors.",
+      affectedCount: count,
+      navigateAction: {
+        route: "/activities",
+        query: { filter: "orphan" },
+        label: "View Activities",
+      },
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
+  ];
+}
+
+function buildNegativePositionIssues(input: {
+  issues: DataConsistencyRecordIssue[];
+  timestamp: Date;
+}): HealthIssue[] {
+  if (input.issues.length === 0) {
+    return [];
+  }
+  const recordIds = input.issues.map((issue) => issue.recordId);
+  const dataHash = computeDataHash(recordIds);
+  const count = input.issues.length;
+
+  return [
+    {
+      id: `negative_position:${dataHash}`,
+      severity: "WARNING",
+      category: "DATA_CONSISTENCY",
+      title:
+        count === 1
+          ? "Holding has negative quantity"
+          : `${count} holdings have negative quantities`,
+      message:
+        "Some holdings show negative quantities, which usually indicates missing or incorrect transactions.",
+      affectedCount: count,
+      navigateAction: {
+        route: "/holdings",
+        query: { filter: "negative" },
+        label: "View Holdings",
+      },
+      dataHash,
+      timestamp: input.timestamp.toISOString(),
+    },
   ];
 }
 
@@ -1401,6 +1605,26 @@ function formatHealthDecimal(value: Decimal): string {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function dataConsistencyRecordIssueFromRow(
+  row: DataConsistencyRecordIssueRow,
+): DataConsistencyRecordIssue {
+  return { recordId: row.record_id };
+}
+
+function tablesExist(db: Database, tableNames: string[]): boolean {
+  return tableNames.every((tableName) => tableExists(db, tableName));
+}
+
+function tableExists(db: Database, tableName: string): boolean {
+  const row = db
+    .query<
+      { count: number },
+      [string]
+    >("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName);
+  return (row?.count ?? 0) > 0;
 }
 
 async function analyzeLegacyClassificationMigration(
