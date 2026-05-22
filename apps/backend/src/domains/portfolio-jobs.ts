@@ -2074,10 +2074,13 @@ function sortPositionLots(position: ActivityRebuildPosition): void {
 }
 
 function updatePositionInceptionFromLots(position: ActivityRebuildPosition): void {
-  const earliestLot = position.lots.at(0);
-  if (earliestLot && earliestLot.acquisitionDate < position.inceptionDate) {
+  const earliestLot = position.lots.reduce<RebuildLot | null>(
+    (earliest, lot) =>
+      earliest === null || lot.acquisitionDate < earliest.acquisitionDate ? lot : earliest,
+    null,
+  );
+  if (earliestLot) {
     position.inceptionDate = earliestLot.acquisitionDate;
-    position.createdAt = earliestLot.acquisitionDate;
   }
 }
 
@@ -2174,6 +2177,7 @@ function recalculateActivityPosition(position: ActivityRebuildPosition, updatedA
   position.averageCost = position.quantity.isZero()
     ? new Decimal(0)
     : position.totalCostBasis.div(position.quantity);
+  updatePositionInceptionFromLots(position);
   position.lastUpdated = updatedAt;
 }
 

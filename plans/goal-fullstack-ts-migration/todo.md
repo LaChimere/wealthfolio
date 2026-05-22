@@ -2782,6 +2782,13 @@ contract:
   datetimes preserving the source-local date before `dateTimezone` conversion
   and invalid ISO-prefixed strings falling back to `now` like Rust instead of
   being accepted as valid quote dates.
+- `pr5-portfolio-position-inception-recalc`: verification passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts --test-name-pattern "FIFO sells|paired same-day asset transfers|cross-currency sell|invalid activity dates|user timezone"`,
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes FIFO sell
+  removal of the oldest lot advancing `inceptionDate` to the next remaining lot,
+  unchanged `createdAt` semantics, and transferred-lot inception preservation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

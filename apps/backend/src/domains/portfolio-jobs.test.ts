@@ -1081,6 +1081,81 @@ describe("TS portfolio job route config", () => {
     }
   });
 
+  test("updates inception date from remaining lots after FIFO sells", async () => {
+    const db = createPortfolioJobTestDb();
+    try {
+      seedAccount(db, "account-1", false, "USD", "TRANSACTIONS");
+      seedAsset(db, "asset-1", "USD");
+      seedActivity(db, {
+        id: "buy-old",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-10T10:00:00Z",
+        quantity: "1",
+        unitPrice: "10",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "buy-new",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "BUY",
+        date: "2026-05-11T10:00:00Z",
+        quantity: "1",
+        unitPrice: "12",
+        currency: "USD",
+      });
+      seedActivity(db, {
+        id: "sell-old",
+        accountId: "account-1",
+        assetId: "asset-1",
+        type: "SELL",
+        date: "2026-05-12T10:00:00Z",
+        quantity: "1",
+        unitPrice: "15",
+        currency: "USD",
+      });
+      seedQuote(db, "asset-1", "2026-05-10", "10", "USD");
+      seedQuote(db, "asset-1", "2026-05-11", "12", "USD");
+      seedQuote(db, "asset-1", "2026-05-12", "15", "USD");
+      const service = createLocalPortfolioJobService(db, {
+        now: () => new Date("2026-05-13T00:00:00Z"),
+      });
+
+      await service.enqueuePortfolioJob({
+        ...buildPortfolioRecalculateConfig({ accountIds: ["account-1"] }),
+        marketSyncMode: { type: "none" },
+      });
+
+      expect(readSnapshotPositions(db, "account-1", "2026-05-11")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "2",
+          inceptionDate: "2026-05-10T10:00:00Z",
+          createdAt: "2026-05-10T10:00:00Z",
+        }),
+      });
+      expect(readSnapshotPositions(db, "account-1", "2026-05-12")).toMatchObject({
+        "asset-1": expect.objectContaining({
+          quantity: "1",
+          totalCostBasis: "12",
+          averageCost: "12",
+          inceptionDate: "2026-05-11T10:00:00Z",
+          createdAt: "2026-05-10T10:00:00Z",
+          lots: [
+            expect.objectContaining({
+              id: "buy-new",
+              acquisitionDate: "2026-05-11T10:00:00Z",
+              costBasis: "12",
+            }),
+          ],
+        }),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("books option sell proceeds when the sold position is missing like Rust", async () => {
     const db = createPortfolioJobTestDb();
     const warnings: string[] = [];
@@ -1424,6 +1499,8 @@ describe("TS portfolio job route config", () => {
         "asset-1": expect.objectContaining({
           quantity: "1",
           totalCostBasis: "10",
+          inceptionDate: "2026-05-10T12:00:00Z",
+          createdAt: "2026-05-12T12:00:00Z",
           lots: [
             expect.objectContaining({
               id: "transfer-in-1",
