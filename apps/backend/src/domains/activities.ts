@@ -2457,7 +2457,6 @@ function checkActivityImportRow(
   const accountId = optionalTrimmedString(activity.accountId);
   const activityType = optionalTrimmedString(activity.activityType);
   const subtype = optionalTrimmedString(activity.subtype);
-  const symbol = optionalTrimmedString(activity.symbol);
   const assetId = optionalTrimmedString(activity.assetId);
   let account: AccountRow | null = null;
 
@@ -2479,6 +2478,12 @@ function checkActivityImportRow(
   if (!activityType) {
     addFieldMessage(errors, "activityType", "Activity type is required.");
   }
+  if (assetId) {
+    const existingAsset = findAssetRowById(db, assetId);
+    if (existingAsset) {
+      hydrateImportActivityFromAssetRow(activity, existingAsset);
+    }
+  }
 
   if (Object.keys(errors).length > 0 || !accountId || !activityType) {
     activity.isValid = false;
@@ -2486,6 +2491,7 @@ function checkActivityImportRow(
     return { activity, idempotencyKey: null };
   }
 
+  const symbol = optionalTrimmedString(activity.symbol);
   const quantity = parseOptionalImportDecimal(activity.quantity);
   const unitPrice = parseOptionalImportDecimal(activity.unitPrice);
   const disposition = importSymbolDisposition(
@@ -2542,6 +2548,18 @@ function checkActivityImportRow(
     activity.fee = normalized.fee?.toString() ?? null;
     activity.fxRate = normalized.fxRate?.toString() ?? null;
     activity.assetId = normalized.assetId ?? undefined;
+    if (normalized.assetId) {
+      const existingAsset = findAssetRowById(db, normalized.assetId);
+      if (existingAsset) {
+        const normalizedAssetInput = symbol
+          ? normalizeActivityAssetInputForLookup(
+              activityAssetInputFromImportFields(activity, undefined, symbol),
+              assetContext.exchangeMetadata,
+            )
+          : undefined;
+        hydrateImportActivityFromAssetRow(activity, existingAsset, normalizedAssetInput?.symbol);
+      }
+    }
     if (normalized.assetId === null && !needsAsset) {
       activity.symbol = "";
       activity.exchangeMic = undefined;
@@ -2556,6 +2574,40 @@ function checkActivityImportRow(
     activity.isValid = false;
     activity.errors = errors;
     return { activity, idempotencyKey: null };
+  }
+}
+
+function hydrateImportActivityFromAssetRow(
+  activity: Record<string, unknown>,
+  asset: AssetRow,
+  normalizedSymbol?: string,
+): void {
+  const symbol =
+    normalizedSymbol ??
+    optionalTrimmedString(activity.symbol) ??
+    asset.display_code ??
+    asset.instrument_symbol ??
+    undefined;
+  if (normalizedSymbol || !optionalTrimmedString(activity.symbol)) {
+    activity.symbol = symbol;
+  }
+  if (!optionalTrimmedString(activity.symbolName) && asset.name) {
+    activity.symbolName = asset.name;
+  }
+  if (!optionalTrimmedString(activity.exchangeMic) && asset.instrument_exchange_mic) {
+    activity.exchangeMic = asset.instrument_exchange_mic;
+  }
+  if (!optionalTrimmedString(activity.quoteCcy)) {
+    activity.quoteCcy = asset.quote_ccy;
+  }
+  if (!optionalTrimmedString(activity.instrumentType) && asset.instrument_type) {
+    activity.instrumentType = asset.instrument_type;
+  }
+  if (!optionalTrimmedString(activity.quoteMode)) {
+    activity.quoteMode = asset.quote_mode;
+  }
+  if (!optionalTrimmedString(activity.currency)) {
+    activity.currency = asset.quote_ccy;
   }
 }
 

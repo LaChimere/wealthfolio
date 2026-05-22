@@ -228,8 +228,9 @@
     inference for XETR/XFRA ISIN equities, Yahoo suffix-to-MIC canonicalization
     with MIC quote-currency fallback plus existing-asset lookup normalization
     across direct activity, import asset preview, and import check/apply paths,
-    and Rust-compatible quote-currency errors for incomplete market securities,
-    now have TS runtime parity, while broader provider-backed asset resolution
+    Rust-compatible asset-id hydration for import validation, and
+    Rust-compatible quote-currency errors for incomplete market securities, now
+    have TS runtime parity, while broader provider-backed asset resolution
     outside the activity preview/check/apply round-trip and remaining quote sync
     outbox follow-ups outside migrated alternative-asset and market-data quote
     paths, device-sync push/pull runtime wiring, and remaining device-sync side
@@ -2579,6 +2580,14 @@ contract:
   configured Yahoo suffixes before provider search, enriching checked rows from
   the local existing asset, importing against that existing asset, and avoiding
   duplicate asset creation for known MIC-backed XETR/XFRA-style symbols.
+- `pr5-activities-import-asset-id-hydration`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts --test-name-pattern "hydrates import activities from existing asset ids like Rust"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes import validation hydrating
+  missing symbol, symbol name, exchange MIC, instrument type, quote mode, quote
+  currency, and activity currency from the referenced existing asset before
+  validation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
