@@ -224,7 +224,8 @@
     with provider-profile taxonomy assignment and asset Update sync callbacks,
     plus direct activity-created crypto/FX/option/security instrument inference,
     structured OPTION/BOND metadata, Rust-shaped import preview draft
-    serialization for existing/new assets, and Rust-compatible quote-currency
+    serialization for existing/new assets, Börse Frankfurt provider preference
+    inference for XETR/XFRA ISIN equities, and Rust-compatible quote-currency
     errors for incomplete market securities, now have TS runtime parity, while
     broader provider-backed asset resolution outside the activity
     preview/check/apply round-trip and remaining quote sync outbox follow-ups

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 262
+turns_used: 263
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T12:44:04+08:00"
+updated_at: "2026-05-22T12:52:37+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1665,6 +1665,12 @@ updated_at: "2026-05-22T12:44:04+08:00"
   plus notes, and new provider-resolved drafts now include Rust-compatible
   explicit `id`, `providerConfig`, `notes`, and `metadata` nulls. Activity
   preview tests, activity domain tests, and backend type-check passed.
+- Turn 263: Matched activity-created German ISIN equity provider routing:
+  pending TS assets now infer Rust-compatible `BOERSE_FRANKFURT` provider config
+  for XETR/XFRA ISIN equities while preserving Yahoo defaults for other market
+  assets and null provider config for bonds/manual assets. Focused provider
+  config test, activity domain tests, backend type-check, backend test suite,
+  and full `bun run check` passed.
 
 ## Deferred items
 

@@ -4495,11 +4495,7 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
   ];
   if (assetTableColumns(db).has("provider_config")) {
     columns.push("provider_config");
-    values.push(
-      asset.quoteMode === "MARKET" && asset.instrumentType !== "BOND"
-        ? JSON.stringify({ preferred_provider: "YAHOO" })
-        : null,
-    );
+    values.push(activityProviderConfigForPendingAsset(asset));
   }
 
   db.query(
@@ -4508,6 +4504,24 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
       VALUES (${columns.map(() => "?").join(", ")})
     `,
   ).run(...values);
+}
+
+function activityProviderConfigForPendingAsset(asset: PendingActivityAsset): string | null {
+  if (asset.quoteMode !== "MARKET" || asset.instrumentType === "BOND") {
+    return null;
+  }
+  if (
+    asset.instrumentType === "EQUITY" &&
+    (asset.instrumentExchangeMic === "XETR" || asset.instrumentExchangeMic === "XFRA") &&
+    looksLikeActivityIsin(asset.instrumentSymbol)
+  ) {
+    return JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" });
+  }
+  return JSON.stringify({ preferred_provider: "YAHOO" });
+}
+
+function looksLikeActivityIsin(value: string): boolean {
+  return /^[A-Z]{2}[A-Z0-9]{9}\d$/u.test(value.trim().toUpperCase());
 }
 
 function assetTableColumns(db: Database): Set<string> {
