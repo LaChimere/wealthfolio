@@ -2503,6 +2503,14 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage explicitly proves
   space-padded `MANUAL` import-preview candidates produce Rust-compatible
   missing-exchange feedback instead of auto-resolving as manual assets.
+- `pr5-activities-import-preview-lowercase-quote-mode`: verification passed:
+  focused import preview test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`
+  rerun after the known sync-outbox flake, full `bun run check`, and
+  `git diff --check`. Coverage proves lowercase `manual` preview hints skip the
+  missing-exchange error like Rust while still producing a MARKET draft unless
+  the raw value is exactly `MANUAL`.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

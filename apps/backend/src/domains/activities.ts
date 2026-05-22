@@ -1859,9 +1859,9 @@ async function previewImportAsset(
   const isin = normalizeIsinKey(optionalTrimmedString(candidate.isin));
   const exchangeMic = optionalTrimmedString(candidate.exchangeMic)?.toUpperCase();
   const instrumentType = normalizeInstrumentType(optionalTrimmedString(candidate.instrumentType));
-  const quoteMode = normalizeQuoteMode(
-    typeof candidate.quoteMode === "string" ? candidate.quoteMode : undefined,
-  );
+  const rawQuoteMode = typeof candidate.quoteMode === "string" ? candidate.quoteMode : undefined;
+  const isManualPreviewQuoteMode = rawQuoteMode?.toUpperCase() === "MANUAL";
+  const draftQuoteMode = rawQuoteMode === "MANUAL" ? "MANUAL" : "MARKET";
   const quoteCcy = normalizeImportQuoteCurrency(
     optionalTrimmedString(candidate.quoteCcy) ?? optionalTrimmedString(candidate.currency),
   );
@@ -1918,7 +1918,7 @@ async function previewImportAsset(
   let resolvedQuoteCcy = previewAssetInput.quoteCcy;
   let resolvedName: string | undefined;
   const shouldResolveWithProvider =
-    quoteMode !== "MANUAL" &&
+    !isManualPreviewQuoteMode &&
     (!resolvedInstrumentType ||
       !resolvedQuoteCcy ||
       (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic));
@@ -1955,10 +1955,10 @@ async function previewImportAsset(
     quoteCcy: resolvedQuoteCcy,
     instrumentType: resolvedInstrumentType,
     exchangeMic: resolvedExchangeMic,
-    quoteMode: quoteMode ?? "MARKET",
+    quoteMode: draftQuoteMode,
     name: resolvedName,
   });
-  if (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic && quoteMode !== "MANUAL") {
+  if (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic && !isManualPreviewQuoteMode) {
     addFieldMessage(
       errors,
       "symbol",

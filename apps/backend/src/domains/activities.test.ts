@@ -285,6 +285,14 @@ describe("TS activities import domain", () => {
             quoteMode: "MANUAL",
           },
           {
+            key: "manual-lowercase",
+            accountId: "account-1",
+            symbol: "PRIVATE_LOWER",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            quoteMode: "manual",
+          },
+          {
             key: "manual-padded",
             accountId: "account-1",
             symbol: "PRIVATE_PADDED",
@@ -347,6 +355,16 @@ describe("TS activities import domain", () => {
           draft: expect.objectContaining({
             displayCode: "PRIVATE",
             quoteMode: "MANUAL",
+            instrumentType: "EQUITY",
+          }),
+        },
+        {
+          key: "manual-lowercase",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            displayCode: "PRIVATE_LOWER",
+            quoteMode: "MARKET",
             instrumentType: "EQUITY",
           }),
         },
