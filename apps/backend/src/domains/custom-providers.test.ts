@@ -413,6 +413,28 @@ describe("TS custom providers domain", () => {
       oversizedDb.close();
     }
 
+    const invalidUtf8Db = createCustomProvidersDb();
+    const invalidUtf8Service = createCustomProviderService(
+      createCustomProviderRepository(invalidUtf8Db),
+      {
+        fetchImpl: (() =>
+          Promise.resolve(
+            new Response(new Uint8Array([0xff]), { status: 200 }),
+          )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      },
+    );
+    try {
+      const result = await invalidUtf8Service.testSource(baseTestSourceRequest());
+      expect(result).toMatchObject({
+        success: false,
+        statusCode: 200,
+        rawResponse: null,
+      });
+      expect(result.error).toStartWith("Response body is not valid UTF-8:");
+    } finally {
+      invalidUtf8Db.close();
+    }
+
     const redirectDb = createCustomProvidersDb();
     const redirectCalls: string[] = [];
     const redirectService = createCustomProviderService(
@@ -456,6 +478,9 @@ describe("TS custom providers domain", () => {
       fetchImpl: ((input) => {
         const url = input.toString();
         calls.push(url);
+        if (url.includes("invalid-utf8")) {
+          return Promise.resolve(new Response(new Uint8Array([0xff]), { status: 200 }));
+        }
         if (url.includes("network")) {
           return Promise.reject(new Error("connection refused"));
         }
@@ -530,7 +555,25 @@ describe("TS custom providers domain", () => {
         rawResponse: null,
       });
 
-      expect(calls).toEqual(["https://example.test/network", "https://example.test/http"]);
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          url: "https://example.test/invalid-utf8",
+          defaultPrice: 7.25,
+          currency: "AUD",
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        statusCode: 200,
+        price: 7.25,
+        currency: "AUD",
+      });
+
+      expect(calls).toEqual([
+        "https://example.test/network",
+        "https://example.test/http",
+        "https://example.test/invalid-utf8",
+      ]);
     } finally {
       db.close();
     }

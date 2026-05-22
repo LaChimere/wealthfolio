@@ -635,7 +635,20 @@ async function fetchCustomProviderSourceBody(
       error: `Response body too large (${bodyBytes.byteLength} bytes, max ${options.responseSizeLimitBytes})`,
     });
   }
-  const body = new TextDecoder().decode(bodyBytes);
+  let body: string;
+  try {
+    body = new TextDecoder("utf-8", { fatal: true }).decode(bodyBytes);
+  } catch (error) {
+    const fallback = defaultPriceResult(payload, statusCode);
+    if (fallback) {
+      return fallback;
+    }
+    return testSourceResult({
+      success: false,
+      statusCode,
+      error: `Response body is not valid UTF-8: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
 
   if (!response.ok) {
     return testSourceResult({

@@ -2798,6 +2798,13 @@ contract:
   `git diff --check`. Coverage includes archived `NOT_SET` accounts no longer
   contributing to Rust account-configuration health issues, matching the TS
   runtime's active non-archived account setup check.
+- `pr5-custom-provider-utf8-response-parity`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts --test-name-pattern "source fetch|default prices"`,
+  `bun test apps/backend/src/domains/custom-providers.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes invalid UTF-8
+  response bodies returning a Rust-compatible source-test error and invalid-body
+  fetch failures falling back to configured `defaultPrice`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
