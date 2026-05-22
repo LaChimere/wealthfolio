@@ -2474,6 +2474,14 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes explicit
   instrument type taking precedence over conflicting alternative-kind hints for
   activity-created assets, matching Rust's `kind_from_instrument_type` behavior.
+- `pr5-activities-direct-instrument-type-trim`: verification passed: focused
+  trimmed instrument-type test,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes direct
+  activity-created asset `instrumentType` hints being trimmed before alias
+  normalization so space-padded `FX` inputs follow Rust's explicit instrument
+  type path instead of falling through to default security inference.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

@@ -2176,7 +2176,7 @@ function newAssetDraftFromImport(input: {
 }
 
 function normalizeInstrumentType(value: string | undefined): string | undefined {
-  switch (value?.toUpperCase()) {
+  switch (value?.trim().toUpperCase()) {
     case "EQUITY":
     case "STOCK":
     case "ETF":

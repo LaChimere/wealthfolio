@@ -2650,7 +2650,7 @@ describe("TS activities import domain", () => {
     }
   });
 
-  test("derives direct activity-created asset kind from instrument type like Rust", () => {
+  test("derives direct activity-created asset kind from trimmed instrument type like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);
 
@@ -2683,7 +2683,7 @@ describe("TS activities import domain", () => {
         asset: {
           symbol: "EUR/USD",
           kind: "PROPERTY",
-          instrumentType: "FX",
+          instrumentType: " FX ",
         },
         activityType: "BUY",
         activityDate: "2025-01-22",
