@@ -767,6 +767,74 @@ describe("TS custom providers domain", () => {
       db.close();
     }
   });
+
+  test("fetches HTML rows using lang locale fallback like Rust runtime", async () => {
+    const db = createCustomProvidersDb();
+    const service = createCustomProviderService(createCustomProviderRepository(db), {
+      fetchImpl: ((input) =>
+        Promise.resolve(
+          new Response(
+            input.toString().endsWith("/table")
+              ? `<html lang="de-DE"><body><table>
+                <tr><td>Datum</td><td>Schluss</td><td>Volumen</td></tr>
+                <tr><td>2026-05-04</td><td>4,832 €</td><td>1.234</td></tr>
+              </table></body></html>`
+              : `<html lang="de-DE"><body><strong id="price">4,832 €</strong></body></html>`,
+            { status: 200 },
+          ),
+        )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+    });
+
+    try {
+      await expect(
+        service.fetchSourceRows({
+          ...baseTestSourceRequest(),
+          format: "html",
+          url: "https://example.test/quote",
+          pricePath: "#price",
+        }),
+      ).resolves.toEqual({
+        statusCode: 200,
+        currency: null,
+        rows: [
+          {
+            price: 4.832,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            date: null,
+          },
+        ],
+      });
+
+      await expect(
+        service.fetchSourceRows({
+          ...baseTestSourceRequest(),
+          format: "html_table",
+          url: "https://example.test/table",
+          pricePath: "0:1",
+          datePath: "0:0",
+          volumePath: "0:2",
+        }),
+      ).resolves.toEqual({
+        statusCode: 200,
+        currency: null,
+        rows: [
+          {
+            price: 4.832,
+            open: null,
+            high: null,
+            low: null,
+            volume: 1234,
+            date: "2026-05-04",
+          },
+        ],
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createCustomProvidersDb(): Database {

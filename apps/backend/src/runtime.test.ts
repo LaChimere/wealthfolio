@@ -1016,6 +1016,8 @@ describe("TS backend runtime composition", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      marketDataFetch: (() =>
+        Promise.reject(new Error("unexpected market data fetch"))) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
     });

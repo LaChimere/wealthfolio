@@ -517,14 +517,15 @@ async function fetchCustomProviderSourceRows(
     };
   }
   if (payload.format === "html_table") {
+    const locale = runtimeHtmlLocale(payload, body);
     return {
       statusCode,
       currency: payload.currency ?? null,
-      rows: extractHtmlTableRows(body, payload),
+      rows: extractHtmlTableRows(body, payload, locale),
     };
   }
   if (payload.format === "html") {
-    const result = testHtmlSource(payload, statusCode, body);
+    const result = testHtmlSource(payload, statusCode, body, runtimeHtmlLocale(payload, body));
     return {
       statusCode,
       currency: payload.currency ?? null,
@@ -707,9 +708,10 @@ function testHtmlSource(
   payload: TestSourceRequest,
   statusCode: number,
   body: string,
+  locale: string | undefined = payload.locale ?? undefined,
 ): TestSourceResult {
-  const detectedElements = detectHtmlElements(body, payload.locale ?? undefined);
-  const price = extractHtmlValue(body, payload.pricePath, payload.locale ?? undefined);
+  const detectedElements = detectHtmlElements(body, locale);
+  const price = extractHtmlValue(body, payload.pricePath, locale);
   if (price === null) {
     return testSourceResult({
       success: false,
@@ -723,11 +725,9 @@ function testHtmlSource(
     success: true,
     statusCode,
     price: applyTestFactorInvert(price, payload),
-    high: extractOptionalHtmlNumber(body, payload.highPath, payload),
-    low: extractOptionalHtmlNumber(body, payload.lowPath, payload),
-    volume: payload.volumePath
-      ? extractHtmlValue(body, payload.volumePath, payload.locale ?? undefined)
-      : null,
+    high: extractOptionalHtmlNumber(body, payload.highPath, payload, locale),
+    low: extractOptionalHtmlNumber(body, payload.lowPath, payload, locale),
+    volume: payload.volumePath ? extractHtmlValue(body, payload.volumePath, locale) : null,
     detectedElements,
   });
 }
@@ -736,11 +736,10 @@ function testHtmlTableSource(
   payload: TestSourceRequest,
   statusCode: number,
   body: string,
+  locale: string | undefined = payload.locale ?? undefined,
 ): TestSourceResult {
   const detectedTables = detectHtmlTables(body);
-  const price = payload.pricePath
-    ? extractTableValue(body, payload.pricePath, payload.locale ?? undefined)
-    : null;
+  const price = payload.pricePath ? extractTableValue(body, payload.pricePath, locale) : null;
   if (price === null) {
     return testSourceResult({
       success: detectedTables.length > 0,
@@ -754,12 +753,10 @@ function testHtmlTableSource(
     success: true,
     statusCode,
     price: applyTestFactorInvert(price, payload),
-    open: extractOptionalTableNumber(body, payload.openPath, payload),
-    high: extractOptionalTableNumber(body, payload.highPath, payload),
-    low: extractOptionalTableNumber(body, payload.lowPath, payload),
-    volume: payload.volumePath
-      ? extractTableValue(body, payload.volumePath, payload.locale ?? undefined)
-      : null,
+    open: extractOptionalTableNumber(body, payload.openPath, payload, locale),
+    high: extractOptionalTableNumber(body, payload.highPath, payload, locale),
+    low: extractOptionalTableNumber(body, payload.lowPath, payload, locale),
+    volume: payload.volumePath ? extractTableValue(body, payload.volumePath, locale) : null,
     date: payload.datePath ? extractTableString(body, payload.datePath) : null,
     detectedTables,
   });
@@ -931,7 +928,11 @@ function extractCsvRows(body: string, payload: TestSourceRequest): CustomProvide
   });
 }
 
-function extractHtmlTableRows(body: string, payload: TestSourceRequest): CustomProviderQuoteRow[] {
+function extractHtmlTableRows(
+  body: string,
+  payload: TestSourceRequest,
+  locale: string | undefined = payload.locale ?? undefined,
+): CustomProviderQuoteRow[] {
   const pricePath = parseTablePath(payload.pricePath);
   if (!pricePath) {
     return [];
@@ -946,17 +947,17 @@ function extractHtmlTableRows(body: string, payload: TestSourceRequest): CustomP
     ? (parseTablePath(payload.volumePath)?.[1] ?? null)
     : null;
   return rows.flatMap((row) => {
-    const price = parseOptionalRowNumber(row, closeColumn, payload.locale ?? undefined);
+    const price = parseOptionalRowNumber(row, closeColumn, locale);
     if (price === null) {
       return [];
     }
     return [
       {
         price: applyTestFactorInvert(price, payload),
-        open: parseOptionalRowNumber(row, openColumn, payload.locale ?? undefined, payload),
-        high: parseOptionalRowNumber(row, highColumn, payload.locale ?? undefined, payload),
-        low: parseOptionalRowNumber(row, lowColumn, payload.locale ?? undefined, payload),
-        volume: parseOptionalRowNumber(row, volumeColumn, payload.locale ?? undefined),
+        open: parseOptionalRowNumber(row, openColumn, locale, payload),
+        high: parseOptionalRowNumber(row, highColumn, locale, payload),
+        low: parseOptionalRowNumber(row, lowColumn, locale, payload),
+        volume: parseOptionalRowNumber(row, volumeColumn, locale),
         date: dateColumn === null ? null : row[dateColumn]?.trim() || null,
       },
     ];
@@ -1321,11 +1322,12 @@ function extractOptionalHtmlNumber(
   body: string,
   selector: string | null | undefined,
   payload: TestSourceRequest,
+  locale: string | undefined = payload.locale ?? undefined,
 ): number | null {
   if (!selector) {
     return null;
   }
-  const value = extractHtmlValue(body, selector, payload.locale ?? undefined);
+  const value = extractHtmlValue(body, selector, locale);
   return value === null ? null : applyTestFactorInvert(value, payload);
 }
 
@@ -1487,12 +1489,22 @@ function extractOptionalTableNumber(
   body: string,
   path: string | null | undefined,
   payload: TestSourceRequest,
+  locale: string | undefined = payload.locale ?? undefined,
 ): number | null {
   if (!path) {
     return null;
   }
-  const value = extractTableValue(body, path, payload.locale ?? undefined);
+  const value = extractTableValue(body, path, locale);
   return value === null ? null : applyTestFactorInvert(value, payload);
+}
+
+function runtimeHtmlLocale(payload: TestSourceRequest, body: string): string | undefined {
+  return payload.locale ?? detectHtmlLocale(body) ?? undefined;
+}
+
+function detectHtmlLocale(body: string): string | undefined {
+  const lang = load(body)("html").attr("lang");
+  return lang === undefined ? undefined : lang.slice(0, Math.min(2, lang.length)).toLowerCase();
 }
 
 function detectHtmlTables(body: string): DetectedHtmlTable[] {

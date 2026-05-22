@@ -2820,6 +2820,14 @@ contract:
   `git diff --check`. Coverage includes Rust runtime HTML-table extraction
   skipping a first `<td>` header row even when the header cells are
   numeric-looking, matching the TS backend table extraction path.
+- `pr5-custom-provider-html-lang-locale-parity`: verification passed:
+  `bun test apps/backend/src/domains/custom-providers.test.ts` and
+  `bun run --cwd apps/backend type-check`; final validation passed with
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes runtime HTML and HTML-table source row
+  fetching without an explicit locale using `<html lang>` for European decimal
+  parsing, matching Rust custom scraper runtime behavior, plus deterministic
+  account-FX runtime test cleanup with market-data fetches stubbed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
