@@ -775,7 +775,7 @@ function shouldFetchYahooProfile(provider: string | null): boolean {
 }
 
 function shouldFetchOpenFigiProfile(asset: AssetRow, provider: string | null): boolean {
-  return provider === OPENFIGI_PROVIDER && asset.instrument_type === "BOND";
+  return (provider === null || provider === OPENFIGI_PROVIDER) && asset.instrument_type === "BOND";
 }
 
 function yahooProfileSymbol(asset: AssetRow, options: AssetServiceOptions): string | null {

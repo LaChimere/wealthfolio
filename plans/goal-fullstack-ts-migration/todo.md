@@ -2910,6 +2910,14 @@ contract:
   OpenFIGI BOND profile enrichment through the mapping API with `ID_ISIN`,
   Rust-compatible `name - ticker` formatting, profile-enriched marking, and
   metadata preservation for name-only provider profiles.
+- `pr5-openfigi-default-bond-profile`: verification passed:
+  `bun test apps/backend/src/domains/assets.test.ts --test-name-pattern "OpenFIGI bond profiles|US Treasury bond metadata|unsupported market profiles"`,
+  `bun test apps/backend/src/domains/assets.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes OpenFIGI as
+  the default TS profile provider for market-priced BOND assets without an
+  explicit provider, including OpenFIGI profile lookup before US Treasury bond
+  metadata enrichment like Rust's provider order.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

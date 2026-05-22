@@ -645,8 +645,29 @@ describe("TS assets domain", () => {
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
+    const profileRequests: Array<{ url: string; body: unknown }> = [];
     const service = createAssetService(db, {
       now: () => "2026-05-22T00:00:00.000Z",
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+        profileRequests.push({ url, body });
+        if (url === "https://api.openfigi.com/v3/mapping") {
+          return Promise.resolve(
+            Response.json([
+              {
+                data: [
+                  {
+                    name: "US TREASURY N/B",
+                    ticker: "T 4.5 05/15/43",
+                  },
+                ],
+              },
+            ]),
+          );
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      }) as typeof fetch,
       fetchTreasuryBondDetails(isin) {
         fetched.push(isin);
         return {
@@ -680,15 +701,24 @@ describe("TS assets domain", () => {
       const result = await service.enrichAssets(["bond-1", "bond-1"]);
 
       expect(result).toEqual({ enriched: 1, skipped: 0, failed: 0 });
+      expect(profileRequests).toEqual([
+        {
+          url: "https://api.openfigi.com/v3/mapping",
+          body: [{ idType: "ID_ISIN", idValue: "US912810TH14" }],
+        },
+      ]);
       expect(fetched).toEqual(["US912810TH14"]);
-      expect(service.getAssetProfile("bond-1").metadata).toEqual({
-        identifiers: { isin: "US912810TH14" },
-        bond: {
-          isin: "US912810TH14",
-          couponRate: 0.045,
-          maturityDate: "2043-05-15",
-          faceValue: 1000,
-          couponFrequency: "SEMI_ANNUAL",
+      expect(service.getAssetProfile("bond-1")).toMatchObject({
+        name: "US TREASURY N/B - T 4.5 05/15/43",
+        metadata: {
+          identifiers: { isin: "US912810TH14" },
+          bond: {
+            isin: "US912810TH14",
+            couponRate: 0.045,
+            maturityDate: "2043-05-15",
+            faceValue: 1000,
+            couponFrequency: "SEMI_ANNUAL",
+          },
         },
       });
       expect(readSyncState(db, "bond-1")).toMatchObject({
