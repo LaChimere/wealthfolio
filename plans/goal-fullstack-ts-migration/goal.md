@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 307
+turns_used: 308
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-22T21:03:21+08:00"
+updated_at: "2026-05-22T21:20:34+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -1942,6 +1942,13 @@ updated_at: "2026-05-22T21:03:21+08:00"
   saving a rate, so both runtimes use newly persisted FX quotes for immediate
   post-mutation conversions. Focused Rust FX service tests, Rust core check,
   focused TS exchange-rate test, and backend type-check passed.
+- Turn 308: Tightened custom-provider historical latest fallback parity: TS
+  custom-provider latest quote resolution and latest sync now fetch historical
+  source rows through the runtime row extraction path and select the latest
+  dated row, matching Rust's historical fallback instead of treating a
+  historical source as a single test-source preview. Focused market-data tests,
+  full market-data tests, runtime tests, backend type-check, backend test suite,
+  and full `bun run check` passed.
 
 ## Deferred items
 

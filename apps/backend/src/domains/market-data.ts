@@ -2713,13 +2713,12 @@ async function fetchCustomProviderQuote(
   customProviderService: MarketDataCustomProviderService,
   now: Date,
 ): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
-  for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
-    const source = await Promise.resolve(customProviderService.getSourceByKind(providerCode, kind));
-    if (!source) {
-      continue;
-    }
+  const latestSource = await Promise.resolve(
+    customProviderService.getSourceByKind(providerCode, "latest"),
+  );
+  if (latestSource) {
     const quote = await fetchCustomProviderSourceQuote(
-      source,
+      latestSource,
       symbol,
       quoteCcy,
       customProviderService,
@@ -2728,6 +2727,19 @@ async function fetchCustomProviderQuote(
     if (quote) {
       return quote;
     }
+  }
+
+  const historicalSource = await Promise.resolve(
+    customProviderService.getSourceByKind(providerCode, "historical"),
+  );
+  if (historicalSource) {
+    return fetchCustomProviderHistoricalSourceQuote(
+      historicalSource,
+      symbol,
+      quoteCcy,
+      customProviderService,
+      now,
+    );
   }
   return null;
 }
@@ -2905,22 +2917,38 @@ async function fetchGeneralPurposeCustomProviderQuote(
   if (!providers) {
     throw new Error("Custom provider service cannot list general-purpose sources for market sync");
   }
-  for (const kind of ["latest", "historical"] satisfies CustomProviderSourceKind[]) {
-    for (const source of generalPurposeCustomProviderSources(providers, kind)) {
-      const symbol = customProviderSourceSymbol(asset, source);
-      if (symbol === null) {
-        continue;
-      }
-      const quote = await fetchCustomProviderSourceQuote(
-        source,
-        symbol,
-        asset.quote_ccy || null,
-        customProviderService,
-        now,
-      );
-      if (quote) {
-        return quote;
-      }
+
+  for (const source of generalPurposeCustomProviderSources(providers, "latest")) {
+    const symbol = customProviderSourceSymbol(asset, source);
+    if (symbol === null) {
+      continue;
+    }
+    const quote = await fetchCustomProviderSourceQuote(
+      source,
+      symbol,
+      asset.quote_ccy || null,
+      customProviderService,
+      now,
+    );
+    if (quote) {
+      return quote;
+    }
+  }
+
+  for (const source of generalPurposeCustomProviderSources(providers, "historical")) {
+    const symbol = customProviderSourceSymbol(asset, source);
+    if (symbol === null) {
+      continue;
+    }
+    const quote = await fetchCustomProviderHistoricalSourceQuote(
+      source,
+      symbol,
+      asset.quote_ccy || null,
+      customProviderService,
+      now,
+    );
+    if (quote) {
+      return quote;
     }
   }
   return null;
@@ -2957,6 +2985,74 @@ async function fetchCustomProviderSourceQuote(
   } catch {
     return null;
   }
+}
+
+async function fetchCustomProviderHistoricalSourceQuote(
+  source: CustomProviderSource,
+  symbol: string,
+  quoteCcy: string | null,
+  customProviderService: MarketDataCustomProviderService,
+  now: Date,
+): Promise<{ source: CustomProviderSource; result: TestSourceResult } | null> {
+  if (!customProviderService.fetchSourceRows) {
+    return null;
+  }
+  try {
+    const result = await Promise.resolve(
+      customProviderService.fetchSourceRows(
+        customProviderTestSourceRequest(source, symbol, quoteCcy, now),
+      ),
+    );
+    const latestRow = latestCustomProviderQuoteRow(source, result, now);
+    if (!latestRow) {
+      return null;
+    }
+    return {
+      source,
+      result: customProviderQuoteRowToTestResult(latestRow, result),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function latestCustomProviderQuoteRow(
+  source: CustomProviderSource,
+  result: CustomProviderRowsResult,
+  now: Date,
+): CustomProviderQuoteRow | null {
+  let latest: { row: CustomProviderQuoteRow; timestamp: string } | null = null;
+  for (const row of result.rows) {
+    if (!Number.isFinite(row.price)) {
+      continue;
+    }
+    const timestamp = customProviderQuoteTimestamp(row.date, source, now);
+    if (!latest || timestamp >= latest.timestamp) {
+      latest = { row, timestamp };
+    }
+  }
+  return latest?.row ?? null;
+}
+
+function customProviderQuoteRowToTestResult(
+  row: CustomProviderQuoteRow,
+  result: CustomProviderRowsResult,
+): TestSourceResult {
+  return {
+    success: true,
+    statusCode: result.statusCode,
+    price: row.price,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    volume: row.volume,
+    currency: result.currency,
+    date: row.date,
+    error: null,
+    rawResponse: null,
+    detectedElements: null,
+    detectedTables: null,
+  };
 }
 
 function customProviderTestSourceRequest(

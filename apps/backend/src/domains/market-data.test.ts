@@ -1294,6 +1294,129 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs general-purpose latest quotes from latest historical custom rows", async () => {
+    const db = createMarketDataDb();
+    const requests: TestSourceRequest[] = [];
+    const historicalSource: CustomProviderSource = {
+      id: "history-source",
+      providerId: "history-feed",
+      kind: "historical",
+      format: "json",
+      url: "https://prices.example.test/history/{SYMBOL}?from={FROM}&to={TO}",
+      pricePath: "$.prices[*].close",
+      datePath: "$.prices[*].date",
+      dateFormat: null,
+      currencyPath: "$.currency",
+      factor: null,
+      invert: null,
+      locale: null,
+      headers: null,
+      openPath: null,
+      highPath: null,
+      lowPath: null,
+      volumePath: null,
+      defaultPrice: null,
+      dateTimezone: null,
+    };
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => {
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-10T00:00:00Z"),
+      customProviderService: {
+        getAll(): CustomProviderWithSources[] {
+          return [
+            {
+              id: "history-feed",
+              name: "History Feed",
+              description: "",
+              enabled: true,
+              priority: 1,
+              sources: [historicalSource],
+            },
+          ];
+        },
+        getSourceByKind() {
+          throw new Error("getSourceByKind should not be called for general-purpose sync");
+        },
+        testSource() {
+          throw new Error("historical latest fallback should use row fetches");
+        },
+        fetchSourceRows(request) {
+          requests.push(request);
+          return {
+            statusCode: 200,
+            currency: "CAD",
+            rows: [
+              {
+                price: 20.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-08",
+              },
+              {
+                price: 22.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-09",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-general-history",
+        display_code: "FUND",
+        quote_ccy: "CAD",
+        instrument_symbol: "FUND",
+        instrument_exchange_mic: "XTSE",
+        provider_config: JSON.stringify({ preferred_provider: "CUSTOM_SCRAPER" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-general-history"] }),
+      ).resolves.toEqual({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+        skippedReasons: [],
+      });
+
+      expect(requests).toEqual([
+        expect.objectContaining({
+          url: historicalSource.url,
+          symbol: "FUND",
+          currency: "CAD",
+          from: "2025-10-12",
+          to: "2026-01-10",
+        }),
+      ]);
+      expect(readQuoteByDay(db, "asset-general-history", "2026-01-09")).toMatchObject({
+        id: "asset-general-history_2026-01-09_CUSTOM_SCRAPER:history-feed",
+        source: "CUSTOM_SCRAPER:history-feed",
+        close: "22.5",
+        currency: "CAD",
+      });
+      expect(readSyncState(db, "asset-general-history")).toMatchObject({
+        data_source: "CUSTOM_SCRAPER:history-feed",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs broad history for inactive referenced assets without catalog quote purges", async () => {
     const db = createMarketDataDb();
     const fetchImpl = yahooHistoryFetchBySymbol({
@@ -4369,6 +4492,7 @@ describe("TS market data domain", () => {
         },
         testSource(request) {
           requests.push(request);
+          expect(request.url).toBe(latestSource.url);
           if (request.url === latestSource.url) {
             return {
               success: false,
@@ -4387,6 +4511,10 @@ describe("TS market data domain", () => {
             };
           }
 
+          throw new Error("historical source should use row fetches");
+        },
+        fetchSourceRows(request) {
+          requests.push(request);
           expect(request).toMatchObject({
             format: "json",
             url: "https://prices.example.test/history/{SYMBOL}",
@@ -4397,19 +4525,34 @@ describe("TS market data domain", () => {
             to: "2026-01-10",
           });
           return {
-            success: true,
             statusCode: 200,
-            price: 41.5,
-            open: null,
-            high: null,
-            low: null,
-            volume: null,
             currency: "CAD",
-            date: "2026-01-09",
-            error: null,
-            rawResponse: null,
-            detectedElements: null,
-            detectedTables: null,
+            rows: [
+              {
+                price: 39.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-07",
+              },
+              {
+                price: 41.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-09",
+              },
+              {
+                price: 40.5,
+                open: null,
+                high: null,
+                low: null,
+                volume: null,
+                date: "2026-01-08",
+              },
+            ],
           };
         },
       },

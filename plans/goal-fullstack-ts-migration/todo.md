@@ -2893,6 +2893,15 @@ contract:
   and `bun run --cwd apps/backend type-check`. Coverage includes Rust
   `FxService` refreshing its initialized converter after add/update saves so it
   matches the TS exchange-rate refresh behavior.
+- `pr5-custom-provider-historical-latest-fallback`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "historical custom provider sources for quote summaries|general-purpose latest quotes from latest historical custom rows"`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes explicit custom-provider quote
+  summaries and general-purpose latest sync using historical row extraction with
+  a 90-day range and choosing the newest dated row, matching Rust's
+  latest-from-historical fallback behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
