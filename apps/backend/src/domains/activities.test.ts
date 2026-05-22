@@ -1325,6 +1325,20 @@ describe("TS activities import domain", () => {
           currency: "CAD",
           lineNumber: 1,
         },
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-16",
+          symbol: "PADDED",
+          instrumentType: "EQUITY",
+          quoteCcy: "CAD",
+          quoteMode: " MANUAL ",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "CAD",
+          lineNumber: 2,
+        },
       ])) as Array<Record<string, unknown>>;
 
       expect(checked[0]).toMatchObject({
@@ -1333,7 +1347,17 @@ describe("TS activities import domain", () => {
         isValid: true,
       });
       expect(checked[0]?.assetId).toBeString();
-      expect(calls).toEqual([]);
+      expect(checked[1]).toMatchObject({
+        symbol: "PADDED",
+        quoteMode: " MANUAL ",
+        isValid: false,
+        errors: {
+          symbol: [
+            "Could not find 'PADDED' in market data. Please search for the correct ticker symbol.",
+          ],
+        },
+      });
+      expect(calls).toEqual(["PADDED"]);
     } finally {
       db.close();
     }
@@ -2199,6 +2223,46 @@ describe("TS activities import domain", () => {
           earliest: "2025-01-15T00:00:00.000Z",
         }),
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("imports space-padded quote mode as market like Rust", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-1",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "MSFT",
+          exchangeMic: "XNAS",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          quoteMode: " MANUAL ",
+          quantity: "1",
+          unitPrice: "100",
+          amount: "100",
+          currency: "USD",
+          lineNumber: 1,
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      const assetId = result.activities[0]?.assetId as string;
+      expect(result.summary).toMatchObject({ success: true, assetsCreated: 1 });
+      expect(readAssetById(db, assetId)).toMatchObject({
+        display_code: "MSFT",
+        quote_mode: "MARKET",
+      });
+      expect(readQuoteByAssetDay(db, assetId, "2025-01-15", "MANUAL")).toBeNull();
     } finally {
       db.close();
     }

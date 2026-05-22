@@ -1859,7 +1859,9 @@ async function previewImportAsset(
   const isin = normalizeIsinKey(optionalTrimmedString(candidate.isin));
   const exchangeMic = optionalTrimmedString(candidate.exchangeMic)?.toUpperCase();
   const instrumentType = normalizeInstrumentType(optionalTrimmedString(candidate.instrumentType));
-  const quoteMode = normalizeQuoteMode(optionalTrimmedString(candidate.quoteMode));
+  const quoteMode = normalizeQuoteMode(
+    typeof candidate.quoteMode === "string" ? candidate.quoteMode : undefined,
+  );
   const quoteCcy = normalizeImportQuoteCurrency(
     optionalTrimmedString(candidate.quoteCcy) ?? optionalTrimmedString(candidate.currency),
   );
@@ -2317,7 +2319,9 @@ async function activityImportInputWithProviderResolution(
   const symbol = optionalTrimmedString(input.symbol);
   const assetId = optionalTrimmedString(input.assetId);
   const exchangeMic = optionalTrimmedString(input.exchangeMic);
-  const quoteMode = normalizeQuoteMode(optionalTrimmedString(input.quoteMode));
+  const quoteMode = normalizeQuoteMode(
+    typeof input.quoteMode === "string" ? input.quoteMode : undefined,
+  );
   const disposition: ImportSymbolDisposition =
     activityType && symbol
       ? importSymbolDisposition(
@@ -3078,7 +3082,7 @@ function activityAssetInputFromImportFields(
     exchangeMic: optionalTrimmedString(activity.exchangeMic),
     instrumentType: optionalTrimmedString(activity.instrumentType),
     quoteCcy: optionalTrimmedString(activity.quoteCcy),
-    quoteMode: optionalTrimmedString(activity.quoteMode),
+    quoteMode: typeof activity.quoteMode === "string" ? activity.quoteMode : undefined,
     kind: optionalTrimmedString(activity.assetKind) ?? optionalTrimmedString(activity.kind),
     name:
       optionalTrimmedString(activity.assetName) ??

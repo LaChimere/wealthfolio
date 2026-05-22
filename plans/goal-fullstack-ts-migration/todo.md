@@ -2489,6 +2489,13 @@ contract:
   activity-created asset `quoteMode` hints preserving raw whitespace before
   direct quote-mode normalization so space-padded `manual` falls through like
   Rust instead of creating MANUAL assets and fallback quotes.
+- `pr5-activities-import-quote-mode-trim`: verification passed: focused import
+  quote-mode tests, `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes import
+  preview/check/apply paths preserving raw `quoteMode` whitespace before
+  quote-mode normalization so space-padded `MANUAL` values do not skip provider
+  resolution or create manual assets/quotes unlike Rust.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
