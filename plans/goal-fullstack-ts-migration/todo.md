@@ -2452,6 +2452,12 @@ contract:
   symbol/kind heuristics, preserving activity-created asset sync payload shape,
   and rejecting incomplete market security symbols with Rust's quote-currency
   re-selection error.
+- `pr5-activities-direct-crypto-inference-quotes`: verification passed: focused
+  crypto inference test, `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes implicit
+  crypto-pair inference only for Rust's supported quote-code set while
+  preserving explicit `kind: CRYPTO` pair parsing for wider broker symbols.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,

@@ -2612,6 +2612,37 @@ describe("TS activities import domain", () => {
         instrument_exchange_mic: null,
         provider_config: '{"preferred_provider":"YAHOO"}',
       });
+
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "acme-foo" },
+          activityType: "BUY",
+          activityDate: "2025-01-19",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+        }),
+      ).toThrow("Quote currency is required. Please re-select the symbol.");
+
+      const explicitCrypto = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "acme-foo", kind: "CRYPTO" },
+        activityType: "BUY",
+        activityDate: "2025-01-20",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+      expect(readAssetById(db, explicitCrypto.assetId ?? "")).toMatchObject({
+        display_code: "ACME",
+        quote_ccy: "FOO",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "ACME",
+        instrument_exchange_mic: null,
+      });
     } finally {
       db.close();
     }

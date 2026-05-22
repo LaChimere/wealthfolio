@@ -4164,7 +4164,8 @@ function inferActivityInstrumentType(
   }
 
   const upperSymbol = rawSymbol.trim().toUpperCase();
-  if (parseActivityCryptoPairSymbol(upperSymbol)) {
+  const cryptoPair = parseActivityCryptoPairSymbol(upperSymbol);
+  if (cryptoPair && isActivityCryptoPairInferenceQuote(cryptoPair.quote)) {
     return "CRYPTO";
   }
   if (looksLikeActivityOccSymbol(upperSymbol)) {
@@ -4695,6 +4696,43 @@ function isCommonCryptoSymbol(symbol: string): boolean {
     "SUSHI",
     "CRV",
   ].includes(symbol);
+}
+
+function isActivityCryptoPairInferenceQuote(quote: string): boolean {
+  return [
+    "USD",
+    "CAD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CHF",
+    "AUD",
+    "NZD",
+    "HKD",
+    "SGD",
+    "CNY",
+    "SEK",
+    "NOK",
+    "DKK",
+    "PLN",
+    "CZK",
+    "HUF",
+    "TRY",
+    "MXN",
+    "BRL",
+    "KRW",
+    "INR",
+    "ZAR",
+    "BTC",
+    "ETH",
+    "USDT",
+    "USDC",
+    "DAI",
+    "BUSD",
+    "USDP",
+    "TUSD",
+    "FDUSD",
+  ].includes(quote.trim().toUpperCase());
 }
 
 function generatedActivityInstrumentKey(asset: PendingActivityAsset): string {
