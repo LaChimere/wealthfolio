@@ -938,6 +938,77 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("checks and imports yahoo-suffixed symbols by matching existing assets before providers", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-eur", name: "Euro", currency: "EUR" });
+      insertAsset(db, {
+        id: "BASF",
+        displayCode: "BASF",
+        name: "BASF SE",
+        quoteCcy: "EUR",
+        instrumentSymbol: "DE000BASF111",
+        exchangeMic: "XETR",
+        instrumentType: "EQUITY",
+      });
+
+      const checked = (await service.checkActivitiesImport?.([
+        {
+          accountId: "account-eur",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "de000basf111.de",
+          quantity: "1",
+          unitPrice: "50",
+          amount: "50",
+          currency: "EUR",
+          lineNumber: 1,
+        },
+      ])) as Array<Record<string, unknown>>;
+
+      expect(checked).toHaveLength(1);
+      expect(checked[0]).toMatchObject({
+        assetId: "BASF",
+        symbol: "de000basf111",
+        symbolName: "BASF SE",
+        exchangeMic: "XETR",
+        instrumentType: "EQUITY",
+        quoteCcy: "EUR",
+        isValid: true,
+      });
+      expect(checked[0]).not.toHaveProperty("errors");
+      expect(calls).toEqual([]);
+
+      const result = (await service.importActivities?.(checked)) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({
+        imported: 1,
+        assetsCreated: 0,
+        success: true,
+      });
+      expect(result.activities[0]?.assetId).toBe("BASF");
+      expect(readAssetCount(db)).toBe(1);
+      expect(calls).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("imports symbol-only activities with provider-backed exchange resolution", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];

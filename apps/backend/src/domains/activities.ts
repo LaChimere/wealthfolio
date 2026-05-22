@@ -1993,6 +1993,7 @@ function importAssetPreviewItem(
 }
 
 interface ImportAssetSymbolResolution {
+  symbol?: string;
   exchangeMic: string;
   instrumentType?: string;
   name?: string;
@@ -2363,14 +2364,23 @@ async function activityImportInputWithProviderResolution(
     }
   } else {
     try {
-      if (
-        findExistingAssetBySymbol(db, {
+      const existingAssetInput = normalizeActivityAssetInputForLookup(
+        {
           symbol,
           instrumentType: normalizeInstrumentType(optionalTrimmedString(input.instrumentType)),
           quoteCcy: normalizeImportQuoteCurrency(optionalTrimmedString(input.quoteCcy)),
-        })
-      ) {
-        return input;
+        },
+        options.exchangeMetadata,
+      );
+      const existingAsset = findExistingAssetBySymbol(db, existingAssetInput);
+      if (existingAsset) {
+        const existingResolution = importAssetSymbolResolutionFromAsset(
+          existingAsset,
+          existingAssetInput.symbol,
+        );
+        return existingResolution
+          ? importInputWithSymbolResolution(input, existingResolution, preferredCurrency)
+          : input;
       }
     } catch (error) {
       if (!errorMessage(error).startsWith("Multiple existing assets match symbol ")) {
@@ -2405,6 +2415,7 @@ function importInputWithSymbolResolution(
 ): Record<string, unknown> {
   return {
     ...input,
+    ...(resolution.symbol ? { symbol: resolution.symbol } : {}),
     exchangeMic: resolution.exchangeMic,
     instrumentType:
       optionalTrimmedString(input.instrumentType) ?? resolution.instrumentType ?? "EQUITY",
@@ -2418,12 +2429,16 @@ function importInputWithSymbolResolution(
   };
 }
 
-function importAssetSymbolResolutionFromAsset(asset: AssetRow): ImportAssetSymbolResolution | null {
+function importAssetSymbolResolutionFromAsset(
+  asset: AssetRow,
+  symbol?: string,
+): ImportAssetSymbolResolution | null {
   const exchangeMic = asset.instrument_exchange_mic?.trim().toUpperCase();
   if (!exchangeMic) {
     return null;
   }
   return {
+    symbol,
     exchangeMic,
     instrumentType: normalizeInstrumentType(asset.instrument_type ?? undefined),
     name: asset.name ?? undefined,
