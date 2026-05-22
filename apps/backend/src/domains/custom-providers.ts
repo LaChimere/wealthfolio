@@ -2014,6 +2014,7 @@ function parseSources(
     return [];
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.sources)) {
+    warn(options, `Failed to parse config JSON for provider '${providerCode}': invalid sources`);
     return [];
   }
   const sources: NewCustomProviderSource[] = [];

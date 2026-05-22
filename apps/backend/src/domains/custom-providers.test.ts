@@ -62,10 +62,18 @@ describe("TS custom providers domain", () => {
           ],
         }),
       });
+      seedCustomProvider(db, {
+        id: "uuid-invalid-shape",
+        code: "invalid-shape",
+        name: "Invalid Shape",
+        priority: 18,
+        config: JSON.stringify({ source: [] }),
+      });
 
       expect(service.getAll()).toEqual([
         expect.objectContaining({ id: "low", sources: [] }),
         expect.objectContaining({ id: "mixed", sources: [] }),
+        expect.objectContaining({ id: "invalid-shape", sources: [] }),
         expect.objectContaining({
           id: "high",
           sources: [
@@ -81,6 +89,7 @@ describe("TS custom providers domain", () => {
       expect(warnings).toEqual([
         expect.stringContaining("Failed to parse config JSON for provider 'low'"),
         expect.stringContaining("Failed to parse config JSON for provider 'mixed'"),
+        expect.stringContaining("Failed to parse config JSON for provider 'invalid-shape'"),
       ]);
       expect(service.getSourceByKind("high", "latest")).toEqual(
         expect.objectContaining({ id: "high:latest" }),
