@@ -3978,7 +3978,8 @@ function activityAssetInputFromRecord(input: Record<string, unknown>): ActivityA
     ? optionalTrimmedString(assetRecord.instrumentType)
     : undefined;
   const quoteCcy = assetRecord ? optionalTrimmedString(assetRecord.quoteCcy) : undefined;
-  const quoteMode = assetRecord ? optionalTrimmedString(assetRecord.quoteMode) : undefined;
+  const quoteMode =
+    assetRecord && typeof assetRecord.quoteMode === "string" ? assetRecord.quoteMode : undefined;
   const kind = assetRecord ? optionalTrimmedString(assetRecord.kind) : undefined;
   const name = assetRecord ? optionalTrimmedString(assetRecord.name) : undefined;
   return id || symbol
@@ -4264,7 +4265,7 @@ function normalizeActivityAssetQuoteCcy(
 }
 
 function normalizeRequestedQuoteMode(value: string | undefined): string | null {
-  switch (value?.trim().toUpperCase()) {
+  switch (value?.toUpperCase()) {
     case "MANUAL":
       return "MANUAL";
     case "MARKET":

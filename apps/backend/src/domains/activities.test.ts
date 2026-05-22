@@ -2701,6 +2701,37 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("does not trim direct activity-created quote mode hints like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const activity = service.createActivity?.({
+        accountId: "account-1",
+        asset: {
+          symbol: "BTC-USD",
+          quoteMode: " manual ",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-23",
+        quantity: "0.1",
+        unitPrice: "100000",
+        amount: "10000",
+        currency: "USD",
+      }) as Activity;
+
+      expect(readAssetById(db, activity.assetId ?? "")).toMatchObject({
+        quote_mode: "MARKET",
+        instrument_type: "CRYPTO",
+      });
+      expect(readQuoteByAssetDay(db, activity.assetId ?? "", "2025-01-23", "MANUAL")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("infers Börse Frankfurt provider config for activity-created German ISIN equities", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

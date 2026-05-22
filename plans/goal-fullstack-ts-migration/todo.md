@@ -2482,6 +2482,13 @@ contract:
   activity-created asset `instrumentType` hints being trimmed before alias
   normalization so space-padded `FX` inputs follow Rust's explicit instrument
   type path instead of falling through to default security inference.
+- `pr5-activities-direct-quote-mode-trim`: verification passed: focused
+  quote-mode hint test, `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes direct
+  activity-created asset `quoteMode` hints preserving raw whitespace before
+  direct quote-mode normalization so space-padded `manual` falls through like
+  Rust instead of creating MANUAL assets and fallback quotes.
 - `pr5-activities-direct-asset-metadata`: focused verification passed:
   `bun test apps/backend/src/domains/activities.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
