@@ -215,54 +215,54 @@
     callbacks, import template/account-template callbacks, holdings snapshot
     callbacks, quote-sync position lifecycle reconciliation around portfolio
     jobs, activity snapshot cash contribution/cash-total/cost-basis FX parity,
-    domain-event planning/batch processing/worker helper, standalone runtime
-    domain-event worker wiring to local portfolio jobs, post-portfolio active
-    goal-summary refresh, broker-sync failure continuation, and bounded
-    asset-enrichment execution for US Treasury bond metadata plus Yahoo
-    quoteSummary/search profile enrichment with provider-profile taxonomy
-    assignment and asset Update sync callbacks now have TS runtime parity, while
-    provider-backed asset resolution outside the activity preview/check
-    round-trip and remaining quote sync outbox follow-ups outside migrated
-    alternative-asset and market-data quote paths, device-sync push/pull runtime
-    wiring, and remaining device-sync side effects are deferred to
-    activities/import/device-sync runtime parity slices; AI chat persistence,
-    tag persistence, tool-result mutation, local AI chat sync_outbox callbacks,
-    native/fallback text/reasoning provider streaming, generated thread titles,
-    OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
-    built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
-    `search_activities`, `get_performance`, `get_income`,
-    `get_valuation_history`, `get_asset_allocation`, `get_health_status`,
-    `record_activity`, `record_activities`, and `import_csv`, text/CSV
-    attachment prompt injection, Anthropic/Gemini image/PDF native media
-    payloads, OpenAI-compatible image/PDF media payloads, and Ollama image media
-    payloads now have TS runtime parity, while Ollama PDF attachment payloads
-    remain unsupported by the documented `/api/chat` images-only API;
-    device-sync integration for sync crypto is deferred to device-sync runtime
-    parity slices; bounded account/timezone health status/checks, cache
-    behavior, legacy-classification health issues and affected items,
-    classification migration health-fix dispatch, `sync_prices`/`retry_sync`
-    dispatch into the market-data sync seam, `fetch_fx` dispatch into
-    exchange-rate pair registration and targeted market-data sync, targeted
-    `migrate_classifications` dispatch into the taxonomy migration seam, and
-    service-level `migrate_legacy_classifications` dispatch, bounded
-    price-staleness Health Center checks, bounded quote-sync error checks, and
-    bounded FX integrity issue generation, bounded negative-balance
-    data-consistency checks, and Rust-compatible health dismissal hash carryover
-    now have TS runtime parity; market-data no-op sync modes plus targeted and
-    bounded broad Yahoo provider-backed asset/FX sync, custom-provider
-    latest/history/fallback sync, Börse Frankfurt provider sync, MarketData.app
-    provider sync, Finnhub equity provider sync, Alpha Vantage equity/FX/crypto
-    provider sync, Metal Price API metal provider sync, US Treasury calculated
-    bond provider sync, and OpenFIGI bond search fallback now execute in TS,
-    including market-sync failure/skipped-reason payload propagation, while
-    remaining provider breadth, background orchestration, automatic/background
-    FX quote fetching, and portfolio recalculation remain deferred; remaining
-    calculation-heavy health checks are deferred to health/calculation parity
-    slices; disabled Connect feature-flag responses, local Connect
-    synced-account/platform/sync-state/import-run reads, local broker sync
-    profile persistence, and disabled device-sync route responses now have TS
-    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
-    broker sync orchestration, subscription entitlement checks, event
+    domain-event planning/batch processing/worker helper, asset-enrichment
+    chunk/failure continuation, standalone runtime domain-event worker wiring to
+    local portfolio jobs, post-portfolio active goal-summary refresh,
+    broker-sync failure continuation, and bounded asset-enrichment execution for
+    US Treasury bond metadata plus Yahoo quoteSummary/search profile enrichment
+    with provider-profile taxonomy assignment and asset Update sync callbacks
+    now have TS runtime parity, while provider-backed asset resolution outside
+    the activity preview/check round-trip and remaining quote sync outbox
+    follow-ups outside migrated alternative-asset and market-data quote paths,
+    device-sync push/pull runtime wiring, and remaining device-sync side effects
+    are deferred to activities/import/device-sync runtime parity slices; AI chat
+    persistence, tag persistence, tool-result mutation, local AI chat
+    sync_outbox callbacks, native/fallback text/reasoning provider streaming,
+    generated thread titles, OpenAI-compatible/Ollama/Anthropic/Gemini injected
+    tool-call execution, built-in `get_accounts`, `get_holdings`,
+    `get_cash_balances`, `get_goals`, `search_activities`, `get_performance`,
+    `get_income`, `get_valuation_history`, `get_asset_allocation`,
+    `get_health_status`, `record_activity`, `record_activities`, and
+    `import_csv`, text/CSV attachment prompt injection, Anthropic/Gemini
+    image/PDF native media payloads, OpenAI-compatible image/PDF media payloads,
+    and Ollama image media payloads now have TS runtime parity, while Ollama PDF
+    attachment payloads remain unsupported by the documented `/api/chat`
+    images-only API; device-sync integration for sync crypto is deferred to
+    device-sync runtime parity slices; bounded account/timezone health
+    status/checks, cache behavior, legacy-classification health issues and
+    affected items, classification migration health-fix dispatch,
+    `sync_prices`/`retry_sync` dispatch into the market-data sync seam,
+    `fetch_fx` dispatch into exchange-rate pair registration and targeted
+    market-data sync, targeted `migrate_classifications` dispatch into the
+    taxonomy migration seam, and service-level `migrate_legacy_classifications`
+    dispatch, bounded price-staleness Health Center checks, bounded quote-sync
+    error checks, and bounded FX integrity issue generation, bounded
+    negative-balance data-consistency checks, and Rust-compatible health
+    dismissal hash carryover now have TS runtime parity; market-data no-op sync
+    modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync,
+    custom-provider latest/history/fallback sync, Börse Frankfurt provider sync,
+    MarketData.app provider sync, Finnhub equity provider sync, Alpha Vantage
+    equity/FX/crypto provider sync, Metal Price API metal provider sync, US
+    Treasury calculated bond provider sync, and OpenFIGI bond search fallback
+    now execute in TS, including market-sync failure/skipped-reason payload
+    propagation, while remaining provider breadth, background orchestration,
+    automatic/background FX quote fetching, and portfolio recalculation remain
+    deferred; remaining calculation-heavy health checks are deferred to
+    health/calculation parity slices; disabled Connect feature-flag responses,
+    local Connect synced-account/platform/sync-state/import-run reads, local
+    broker sync profile persistence, and disabled device-sync route responses
+    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
+    clients, broker sync orchestration, subscription entitlement checks, event
     production, E2EE enrollment, sync engine, snapshot/upload runtime,
     background workers, device-sync cloud clients, token lifecycle, team-key
     operations, key material handling, pairing flows, freshness gate
@@ -1985,6 +1985,14 @@ contract:
   and `asset:enrichment-complete` publishing around asset enrichment callbacks
   plus runtime worker propagation of the shared event bus into processor
   options.
+- `pr5-domain-event-asset-enrichment-continuation`: targeted checks passed:
+  `bun test apps/backend/src/domain-events/processor.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  and full `bun run check`. Coverage includes Rust-compatible enrichment
+  chunking in groups of five, per-chunk timeout plumbing, warning/error-hook
+  reporting for failed chunks, failed-asset counting, per-chunk progress events,
+  and portfolio-job plus goal-refresh continuation after enrichment chunk
+  failures.
 - `pr5-domain-event-portfolio-failure-continuation`: targeted checks passed:
   `bun test apps/backend/src/domain-events/processor.test.ts --test-name-pattern "Rust queue-worker order|continues goal refresh and broker sync when a portfolio job fails|logs portfolio job failures when no explicit error hook is provided|continues broker sync when goal summary refresh fails"`
   and `bun run --filter @wealthfolio/backend type-check -- --pretty false`.

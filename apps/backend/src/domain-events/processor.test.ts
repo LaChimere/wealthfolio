@@ -324,19 +324,64 @@ describe("TS domain event batch processor", () => {
     ]);
   });
 
-  test("propagates asset enrichment failures instead of reporting success", async () => {
-    await expect(
-      processDomainEventBatch([event(ASSETS_CREATED_EVENT, { asset_ids: ["asset-1"] })], {
-        enrichAssets() {
-          throw new Error("enrichment failed");
+  test("continues after asset enrichment chunk failures like Rust", async () => {
+    const eventBus = createEventBus();
+    const published: BackendEvent[] = [];
+    const calls: string[] = [];
+    eventBus.subscribe((backendEvent) => {
+      published.push(backendEvent);
+    });
+
+    const plan = await processDomainEventBatch(
+      [
+        event(ASSETS_CREATED_EVENT, {
+          asset_ids: ["asset-1", "asset-2", "asset-3", "asset-4", "asset-5", "asset-6"],
+        }),
+        event(ACTIVITIES_CHANGED_EVENT, {
+          account_ids: ["account-1"],
+          asset_ids: ["activity-asset"],
+        }),
+      ],
+      {
+        assetEnrichmentChunkSize: 5,
+        enrichAssets(assetIds) {
+          calls.push(`enrich:${assetIds.join(",")}`);
+          if (assetIds.includes("asset-1")) {
+            throw new Error("enrichment failed");
+          }
+          return { enriched: 1, skipped: 0, failed: 0 };
+        },
+        eventBus,
+        onAssetEnrichmentError(error, assetIds) {
+          calls.push(
+            `enrich-error:${assetIds.join(",")}:${error instanceof Error ? error.message : String(error)}`,
+          );
         },
         portfolioJobService: {
-          enqueuePortfolioJob() {
-            throw new Error("should not run after enrichment failure");
+          enqueuePortfolioJob(config) {
+            calls.push(`portfolio:${config.accountIds?.join(",") ?? "all"}`);
           },
         },
-      }),
-    ).rejects.toThrow("enrichment failed");
+        refreshGoalSummaries() {
+          calls.push("goals:refresh");
+        },
+      },
+    );
+
+    expect(calls).toEqual([
+      "enrich:asset-1,asset-2,asset-3,asset-4,asset-5",
+      "enrich-error:asset-1,asset-2,asset-3,asset-4,asset-5:enrichment failed",
+      "enrich:asset-6",
+      "portfolio:account-1",
+      "goals:refresh",
+    ]);
+    expect(plan.portfolioJob).toMatchObject({ accountIds: ["account-1"] });
+    expect(published).toEqual([
+      { name: "asset:enrichment-start", payload: { total: 6 } },
+      { name: "asset:enrichment-progress", payload: { completed: 5, total: 6 } },
+      { name: "asset:enrichment-progress", payload: { completed: 6, total: 6 } },
+      { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 0, failed: 5 } },
+    ]);
   });
 });
 
