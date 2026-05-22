@@ -272,6 +272,14 @@ interface AssetMarketSyncRow {
   metadata: string | null;
 }
 
+interface ProviderQuoteValidationInput {
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string;
+  volume: string | null;
+}
+
 type MarketSyncScope = "targeted" | "broad";
 
 interface YahooHistoricalQuote {
@@ -627,7 +635,7 @@ function addMarketSyncSkip(result: MarketDataSyncResult, assetId: string, reason
 }
 
 function validatedProviderQuoteWrite(asset: AssetMarketSyncRow, quote: QuoteWrite): QuoteWrite {
-  const error = providerQuoteValidationError(asset, quote);
+  const error = providerQuoteValidationError(asset.instrument_type, quote);
   if (error !== null) {
     throw new Error(`Quote validation failed: ${error}`);
   }
@@ -638,14 +646,67 @@ function validatedProviderQuoteWrites(
   asset: AssetMarketSyncRow,
   quotes: QuoteWrite[],
 ): QuoteWrite[] {
-  const validQuotes = quotes.filter((quote) => providerQuoteValidationError(asset, quote) === null);
+  const validQuotes = quotes.filter(
+    (quote) => providerQuoteValidationError(asset.instrument_type, quote) === null,
+  );
   if (validQuotes.length === 0 && quotes.length > 0) {
     throw new Error("All quotes failed validation");
   }
   return validQuotes;
 }
 
-function providerQuoteValidationError(asset: AssetMarketSyncRow, quote: QuoteWrite): string | null {
+function resolvedProviderQuoteFromHistoricalQuote(
+  instrumentType: string | null | undefined,
+  quote: YahooHistoricalQuote,
+  resolvedProviderId: string,
+): ResolvedQuote {
+  const error = providerQuoteValidationError(instrumentType, quote);
+  if (error !== null) {
+    throw new Error(`Quote validation failed: ${error}`);
+  }
+  return {
+    currency: quote.currency,
+    price: quote.close === "0" ? null : Number(quote.close),
+    resolvedProviderId,
+  };
+}
+
+function validateResolvedProviderQuote(
+  instrumentType: string | null | undefined,
+  quote: ResolvedQuote,
+): ResolvedQuote {
+  if (quote.price === null) {
+    return quote;
+  }
+  const error = providerQuoteValidationError(instrumentType, {
+    open: null,
+    high: null,
+    low: null,
+    close: storedNumber(quote.price),
+    volume: null,
+  });
+  if (error !== null) {
+    throw new Error(`Quote validation failed: ${error}`);
+  }
+  return quote;
+}
+
+function providerQuoteValidationInputFromCustomResult(
+  result: TestSourceResult,
+): ProviderQuoteValidationInput {
+  return {
+    open: result.open === null ? null : storedNumber(result.open),
+    high: result.high === null ? null : storedNumber(result.high),
+    low: result.low === null ? null : storedNumber(result.low),
+    close: storedNumber(result.price ?? 0),
+    volume: result.volume === null ? null : storedNumber(result.volume),
+  };
+}
+
+function providerQuoteValidationError(
+  instrumentType: string | null | undefined,
+  quote: ProviderQuoteValidationInput,
+): string | null {
   const errors: string[] = [];
   if (compareDecimals(quote.close, "0") < 0) {
     errors.push(`Negative close price: ${quote.close}`);
@@ -671,7 +732,7 @@ function providerQuoteValidationError(asset: AssetMarketSyncRow, quote: QuoteWri
   }
 
   if (
-    asset.instrument_type?.toUpperCase() !== "FX" &&
+    instrumentType?.toUpperCase() !== "FX" &&
     quote.volume !== null &&
     compareDecimals(quote.volume, "0") < 0
   ) {
@@ -2380,6 +2441,9 @@ async function resolveSymbolQuote(
   }
 
   const preferredProvider = normalizePreferredProvider(request.providerId);
+  const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
+  const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
+  const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
   if (preferredProvider?.startsWith("CUSTOM:")) {
     const customProviderCode = preferredProvider.slice("CUSTOM:".length).trim();
     if (!customProviderCode) {
@@ -2388,14 +2452,12 @@ async function resolveSymbolQuote(
     return resolveCustomProviderSymbolQuote(
       customProviderCode,
       trimmedSymbol,
-      optionalString(request.quoteCcy)?.toUpperCase() ?? null,
+      requestedQuoteCcy,
+      instrumentType,
       customProviderService,
       now,
     );
   }
-  const instrumentType = normalizeInstrumentType(request.instrumentType) ?? "EQUITY";
-  const exchangeMic = optionalString(request.exchangeMic)?.toUpperCase() ?? null;
-  const requestedQuoteCcy = optionalString(request.quoteCcy)?.toUpperCase() ?? null;
   if (preferredProvider === US_TREASURY_CALC_PROVIDER) {
     if (instrumentType !== "BOND") {
       return defaultResolvedQuote();
@@ -2416,11 +2478,11 @@ async function resolveSymbolQuote(
         usTreasuryCurveCache,
         now,
       );
-      return {
-        currency: quote.currency,
-        price: quote.close === "0" ? null : Number(quote.close),
-        resolvedProviderId: US_TREASURY_CALC_PROVIDER,
-      };
+      return resolvedProviderQuoteFromHistoricalQuote(
+        instrumentType,
+        quote,
+        US_TREASURY_CALC_PROVIDER,
+      );
     } catch {
       return defaultResolvedQuote();
     }
@@ -2447,11 +2509,11 @@ async function resolveSymbolQuote(
         fetchImpl,
         apiKey,
       );
-      return {
-        currency: quote.currency,
-        price: quote.close === "0" ? null : Number(quote.close),
-        resolvedProviderId: ALPHA_VANTAGE_PROVIDER,
-      };
+      return resolvedProviderQuoteFromHistoricalQuote(
+        instrumentType,
+        quote,
+        ALPHA_VANTAGE_PROVIDER,
+      );
     } catch {
       return defaultResolvedQuote();
     }
@@ -2473,11 +2535,11 @@ async function resolveSymbolQuote(
         apiKey,
         now,
       );
-      return {
-        currency: quote.currency,
-        price: quote.close === "0" ? null : Number(quote.close),
-        resolvedProviderId: METAL_PRICE_API_PROVIDER,
-      };
+      return resolvedProviderQuoteFromHistoricalQuote(
+        instrumentType,
+        quote,
+        METAL_PRICE_API_PROVIDER,
+      );
     } catch {
       return defaultResolvedQuote();
     }
@@ -2500,11 +2562,11 @@ async function resolveSymbolQuote(
           fetchImpl,
           apiKey,
         );
-        return {
-          currency: quote.currency,
-          price: quote.close === "0" ? null : Number(quote.close),
-          resolvedProviderId: MARKETDATA_APP_PROVIDER,
-        };
+        return resolvedProviderQuoteFromHistoricalQuote(
+          instrumentType,
+          quote,
+          MARKETDATA_APP_PROVIDER,
+        );
       } catch {
         continue;
       }
@@ -2530,11 +2592,7 @@ async function resolveSymbolQuote(
           apiKey,
           now,
         );
-        return {
-          currency: quote.currency,
-          price: quote.close === "0" ? null : Number(quote.close),
-          resolvedProviderId: FINNHUB_PROVIDER,
-        };
+        return resolvedProviderQuoteFromHistoricalQuote(instrumentType, quote, FINNHUB_PROVIDER);
       } catch {
         continue;
       }
@@ -2549,11 +2607,14 @@ async function resolveSymbolQuote(
     const boerseIsinCache = new Map<string, string>();
     for (const candidate of symbolResolutionCandidates(cleanSymbol)) {
       try {
-        return await fetchBoerseResolvedQuote(
-          boerseInstrumentIdentityFromSymbol(candidate, exchangeMic, instrumentType),
-          requestedQuoteCcy,
-          fetchImpl,
-          boerseIsinCache,
+        return validateResolvedProviderQuote(
+          instrumentType,
+          await fetchBoerseResolvedQuote(
+            boerseInstrumentIdentityFromSymbol(candidate, exchangeMic, instrumentType),
+            requestedQuoteCcy,
+            fetchImpl,
+            boerseIsinCache,
+          ),
         );
       } catch {
         continue;
@@ -2592,11 +2653,9 @@ async function resolveSymbolQuote(
 
     for (const retry of [0, 1]) {
       try {
-        return await fetchYahooResolvedQuote(
-          yahooSymbol,
-          canonical.quoteCcy,
-          fetchImpl,
-          crumbCache,
+        return validateResolvedProviderQuote(
+          instrumentType,
+          await fetchYahooResolvedQuote(yahooSymbol, canonical.quoteCcy, fetchImpl, crumbCache),
         );
       } catch (error) {
         if (error instanceof YahooUnauthorizedError && retry === 0) {
@@ -2614,6 +2673,7 @@ async function resolveCustomProviderSymbolQuote(
   providerCode: string,
   symbol: string,
   quoteCcy: string | null,
+  instrumentType: string | null,
   customProviderService: MarketDataCustomProviderService | undefined,
   now: Date,
 ): Promise<ResolvedQuote> {
@@ -2629,6 +2689,14 @@ async function resolveCustomProviderSymbolQuote(
     now,
   );
   if (!resolved) {
+    return defaultResolvedQuote();
+  }
+  if (
+    providerQuoteValidationError(
+      instrumentType,
+      providerQuoteValidationInputFromCustomResult(resolved.result),
+    ) !== null
+  ) {
     return defaultResolvedQuote();
   }
   return {

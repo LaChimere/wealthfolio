@@ -4118,6 +4118,54 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("rejects invalid Yahoo quote summaries like Rust validation", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://fc.yahoo.com") {
+        return new Response(null, {
+          headers: { "set-cookie": "B=resolve-cookie;" },
+        });
+      }
+      if (url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/NEG?")) {
+        return Response.json({
+          quoteSummary: {
+            result: [
+              {
+                price: {
+                  currency: "USD",
+                  regularMarketPrice: { raw: -12.34 },
+                },
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "NEG",
+          instrumentType: "equity",
+          quoteCcy: "USD",
+          providerId: "YAHOO",
+        }),
+      ).resolves.toEqual({
+        currency: null,
+        price: null,
+        resolvedProviderId: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves custom provider quote summaries without falling back to Yahoo", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -4193,6 +4241,80 @@ describe("TS market data domain", () => {
         currency: "CAD",
         price: 42.25,
         resolvedProviderId: "CUSTOM_SCRAPER:my-feed",
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects invalid custom provider quote summaries like Rust validation", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      fetch: (() => {
+        calls.push("yahoo");
+        throw new Error("Yahoo should not be called");
+      }) as typeof fetch,
+      now: () => new Date("2026-01-10T00:00:00Z"),
+      customProviderService: {
+        getSourceByKind(providerCode, kind) {
+          expect(providerCode).toBe("my-feed");
+          expect(kind).toBe("latest");
+          return {
+            id: "source-1",
+            providerId: "my-feed",
+            kind: "latest",
+            format: "json",
+            url: "https://prices.example.test/{SYMBOL}",
+            pricePath: "$.price",
+            datePath: null,
+            dateFormat: null,
+            currencyPath: "$.currency",
+            factor: null,
+            invert: null,
+            locale: null,
+            headers: null,
+            openPath: null,
+            highPath: null,
+            lowPath: null,
+            volumePath: null,
+            defaultPrice: null,
+            dateTimezone: null,
+          };
+        },
+        testSource() {
+          return {
+            success: true,
+            statusCode: 200,
+            price: -42.25,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            currency: "CAD",
+            date: null,
+            error: null,
+            rawResponse: null,
+            detectedElements: null,
+            detectedTables: null,
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "FUND",
+          instrumentType: "EQUITY",
+          quoteCcy: "cad",
+          providerId: "CUSTOM:my-feed",
+        }),
+      ).resolves.toEqual({
+        currency: null,
+        price: null,
+        resolvedProviderId: null,
       });
       expect(calls).toEqual([]);
     } finally {

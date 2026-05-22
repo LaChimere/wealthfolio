@@ -2867,6 +2867,16 @@ contract:
   negative-close rejection without persistence, sync-state failure recording,
   historical invalid-row filtering before persistence, and provider write
   validation applying Rust's hard negative-price/OHLC/non-FX-volume checks.
+- `pr5-market-data-resolved-quote-validation`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "invalid Yahoo quote summaries|invalid custom provider quote summaries|resolves Yahoo quote summary|custom provider quote summaries"`,
+  `bun run --cwd apps/backend type-check`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes invalid latest Yahoo and custom-provider
+  quote summaries resolving to no quote instead of surfacing negative prices,
+  while the shared validation helper applies the same hard provider quote checks
+  to all provider-backed `resolveSymbolQuote` paths.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
