@@ -154,7 +154,7 @@ describe("TS app utility domain", () => {
     db.query("UPDATE entries SET value = ? WHERE id = ?").run("after", "entry-1");
     db.close();
 
-    await service.restoreDatabase?.(`file://${backup.path}`);
+    await service.restoreDatabase(`file://${backup.path}`);
 
     const restored = openSqliteDatabase(dbPath);
     try {
@@ -180,7 +180,7 @@ describe("TS app utility domain", () => {
       },
     });
 
-    await expect(service.restoreDatabase?.("/tmp/wealthfolio-missing-backup.db")).rejects.toThrow(
+    await expect(service.restoreDatabase("/tmp/wealthfolio-missing-backup.db")).rejects.toThrow(
       "Backup file not found",
     );
   });

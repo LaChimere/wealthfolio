@@ -1536,14 +1536,8 @@ function routeAppUtilityRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/utilities/database/restore") {
-    if (!appUtilityService.restoreDatabase) {
-      return jsonResponse(
-        { code: 501, message: "Database restore is not available in the TS backend yet" },
-        501,
-      );
-    }
     return handleJsonMutationNoContent(request, parseRestoreDatabaseRequest, async (input) => {
-      await appUtilityService.restoreDatabase?.(input.backupFilePath);
+      await appUtilityService.restoreDatabase(input.backupFilePath);
     });
   }
 

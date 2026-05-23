@@ -33,7 +33,7 @@ export interface AppUtilityService {
   checkUpdate(force: boolean): Promise<UpdateCheckResponse> | UpdateCheckResponse;
   backupDatabase(): Promise<BackupDatabaseResponse> | BackupDatabaseResponse;
   backupDatabaseToPath(backupDir: string): Promise<BackupToPathResponse> | BackupToPathResponse;
-  restoreDatabase?(backupFilePath: string): Promise<void> | void;
+  restoreDatabase(backupFilePath: string): Promise<void> | void;
 }
 
 export interface AppUtilityServiceOptions {

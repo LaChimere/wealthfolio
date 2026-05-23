@@ -3003,6 +3003,13 @@ contract:
   extraction rejecting archives with more than 10,000 entries and rejecting
   archives whose declared uncompressed file content exceeds 50MB, matching TS
   add-on runtime hardening.
+- `pr5-app-utility-restore-route-parity`: verification passed:
+  `bun test apps/backend/src/domains/app-utilities.test.ts apps/backend/src/http.test.ts -t "database|app utility"`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes the TS
+  database restore HTTP route dispatching to the required restore service
+  directly instead of retaining the stale 501 deferred branch, matching Rust's
+  always-wired restore route.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
