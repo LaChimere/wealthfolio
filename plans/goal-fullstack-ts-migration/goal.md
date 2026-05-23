@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 325
+turns_used: 326
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-23T21:48:37+08:00"
+updated_at: "2026-05-23T21:52:20+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2052,6 +2052,12 @@ updated_at: "2026-05-23T21:48:37+08:00"
   fallbacks for methods the runtime always implements. Focused taxonomy HTTP and
   domain tests, backend type-check, backend test suite, full `bun run check`,
   and `git diff --check` passed.
+- Turn 326: Strengthened Health Center timezone parity evidence: TS health tests
+  now cover Rust's Australian offset-equivalence cases, proving
+  Australia/Melbourne and Australia/Sydney do not emit a timezone warning while
+  Australia/Melbourne and Australia/Perth still emit the warning. Focused health
+  timezone test, full health tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check` passed.
 
 ## Deferred items
 

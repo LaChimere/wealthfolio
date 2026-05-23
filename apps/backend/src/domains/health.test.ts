@@ -1359,6 +1359,21 @@ describe("TS health domain", () => {
         issues: [],
       });
 
+      const australianEquivalentTimezoneService = createHealthService(
+        createHealthRepository(db),
+        DEFAULT_HEALTH_CONFIG,
+        {
+          settingsProvider: { getSettings: () => settings({ timezone: "Australia/Melbourne" }) },
+          now: () => new Date("2026-01-01T12:00:00.000Z"),
+        },
+      );
+      const australianEquivalentStatus =
+        await australianEquivalentTimezoneService.runHealthChecks("Australia/Sydney");
+      expect(australianEquivalentStatus).toMatchObject({
+        overallSeverity: "INFO",
+        issues: [],
+      });
+
       const mismatchTimezoneService = createHealthService(
         createHealthRepository(db),
         DEFAULT_HEALTH_CONFIG,
@@ -1369,6 +1384,22 @@ describe("TS health domain", () => {
       );
       const mismatchStatus = await mismatchTimezoneService.runHealthChecks?.("America/Toronto");
       expect(mismatchStatus?.issues[0]).toMatchObject({
+        id: expect.stringMatching(/^timezone_mismatch:/),
+        severity: "WARNING",
+        title: "Browser and app timezones differ",
+      });
+
+      const australianMismatchTimezoneService = createHealthService(
+        createHealthRepository(db),
+        DEFAULT_HEALTH_CONFIG,
+        {
+          settingsProvider: { getSettings: () => settings({ timezone: "Australia/Melbourne" }) },
+          now: () => new Date("2026-01-01T12:00:00.000Z"),
+        },
+      );
+      const australianMismatchStatus =
+        await australianMismatchTimezoneService.runHealthChecks("Australia/Perth");
+      expect(australianMismatchStatus.issues[0]).toMatchObject({
         id: expect.stringMatching(/^timezone_mismatch:/),
         severity: "WARNING",
         title: "Browser and app timezones differ",
