@@ -206,7 +206,7 @@ function noUpdateResponse(version: string): UpdateCheckResponse {
 function updateHeaders(instanceId: string | undefined): HeadersInit {
   return {
     "X-Client-Runtime": WEB_RUNTIME_TARGET,
-    ...(instanceId ? { "X-Instance-Id": instanceId } : {}),
+    "X-Instance-Id": instanceId ?? "",
   };
 }
 

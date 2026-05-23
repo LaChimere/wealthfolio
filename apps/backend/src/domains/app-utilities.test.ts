@@ -89,6 +89,28 @@ describe("TS app utility domain", () => {
     ]);
   });
 
+  test("sends an empty instance-id update header like Rust", async () => {
+    const service = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async (_input, init) => {
+        expect(init?.headers).toMatchObject({
+          "X-Client-Runtime": "web-docker",
+          "X-Instance-Id": "",
+        });
+        return new Response(null, { status: 404 });
+      },
+      instanceId: "",
+      logsDir: "/tmp/wealthfolio-data/logs",
+    });
+
+    await expect(service.checkUpdate(false)).resolves.toMatchObject({
+      updateAvailable: false,
+      latestVersion: "3.4.0",
+    });
+  });
+
   test("creates base64 and path backups from the configured app data dir", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-"));
     const dbPath = path.join(appDataDir, "app.db");

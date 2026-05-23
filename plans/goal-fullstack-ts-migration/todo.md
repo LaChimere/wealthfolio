@@ -3050,6 +3050,12 @@ contract:
   search/write/import/template/duplicate service methods with direct HTTP
   dispatch, removing stale optional 404 guards for runtime methods that are
   always implemented.
+- `pr5-app-utility-instance-header-parity`: verification passed:
+  `bun test apps/backend/src/domains/app-utilities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes TS update
+  checks always sending `X-Instance-Id`, including the empty-string case,
+  matching Rust's update-check request headers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
