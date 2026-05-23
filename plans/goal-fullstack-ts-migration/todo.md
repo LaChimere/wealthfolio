@@ -2987,6 +2987,14 @@ contract:
   match without an explicit MIC, ignoring legacy rows without `instrument_type`,
   and still matching typed no-MIC existing assets, mirroring Rust's asset lookup
   rules.
+- `pr5-activity-yahoo-futures-suffix-parity`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts -t "futures suffix"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes direct
+  activity-created asset normalization stripping Yahoo `=F` futures suffixes
+  before existing-asset lookup, matching Rust `strip_yahoo_suffix` behavior and
+  preventing duplicate `GC=F` assets when canonical `GC` already exists.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

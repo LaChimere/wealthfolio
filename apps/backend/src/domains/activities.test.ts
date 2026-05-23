@@ -3043,6 +3043,44 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("matches existing assets after Yahoo futures suffix canonicalization like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map(),
+        yahooSuffixToMic: new Map(),
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "gold-future",
+        displayCode: "GC",
+        name: "Gold Future",
+        quoteCcy: "USD",
+        instrumentSymbol: "GC",
+        instrumentType: "METAL",
+      });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "gc=f", instrumentType: "METAL" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "2600",
+        amount: "2600",
+        currency: "USD",
+      }) as Activity;
+
+      expect(created.assetId).toBe("gold-future");
+      expect(readAssetCount(db)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("stores structured metadata for direct activity-created option and bond assets like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db);

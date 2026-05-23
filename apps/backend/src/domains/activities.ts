@@ -4237,6 +4237,9 @@ function parseActivitySymbolWithExchangeSuffix(
   exchangeMetadata: ActivityExchangeMetadata,
 ): { baseSymbol: string; mic: string | null } {
   const trimmed = symbol.trim();
+  if (trimmed.length >= 2 && trimmed.slice(-2).toUpperCase() === "=F") {
+    return { baseSymbol: trimmed.slice(0, -2), mic: null };
+  }
   const suffixes = [...exchangeMetadata.yahooSuffixToMic.entries()].sort(
     ([left], [right]) => right.length - left.length,
   );
