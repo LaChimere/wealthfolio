@@ -286,48 +286,48 @@ export interface ActivityImportAccountTemplateSyncEvent {
 }
 
 export interface ActivityService {
-  searchActivities?(
+  searchActivities(
     request: ActivitySearchRequest,
   ): Promise<ActivitySearchResponse> | ActivitySearchResponse;
-  createActivity?(activity: Record<string, unknown>): Promise<Activity> | Activity;
-  updateActivity?(activity: Record<string, unknown>): Promise<Activity> | Activity;
-  bulkMutateActivities?(
+  createActivity(activity: Record<string, unknown>): Promise<Activity> | Activity;
+  updateActivity(activity: Record<string, unknown>): Promise<Activity> | Activity;
+  bulkMutateActivities(
     request: Record<string, unknown>,
   ): Promise<ActivityBulkMutationResult> | ActivityBulkMutationResult;
-  deleteActivity?(id: string): Promise<Activity> | Activity;
-  linkTransferActivities?(
+  deleteActivity(id: string): Promise<Activity> | Activity;
+  linkTransferActivities(
     activityAId: string,
     activityBId: string,
   ): Promise<[Activity, Activity]> | [Activity, Activity];
-  unlinkTransferActivities?(
+  unlinkTransferActivities(
     activityAId: string,
     activityBId: string,
   ): Promise<[Activity, Activity]> | [Activity, Activity];
-  checkActivitiesImport?(activities: unknown[]): Promise<unknown[]> | unknown[];
-  previewImportAssets?(candidates: unknown[]): Promise<unknown[]> | unknown[];
-  importActivities?(activities: unknown[]): Promise<unknown> | unknown;
-  parseCsv?(request: ActivityParseCsvRequest): Promise<unknown> | unknown;
-  getImportMapping?(accountId: string, contextKind: string): Promise<ImportMappingData>;
-  saveImportMapping?(mapping: Record<string, unknown>): Promise<ImportMappingData>;
-  listImportTemplates?(): Promise<ImportTemplateData[]> | ImportTemplateData[];
-  getImportTemplate?(id: string): Promise<ImportTemplateData> | ImportTemplateData;
-  saveImportTemplate?(
+  checkActivitiesImport(activities: unknown[]): Promise<unknown[]> | unknown[];
+  previewImportAssets(candidates: unknown[]): Promise<unknown[]> | unknown[];
+  importActivities(activities: unknown[]): Promise<unknown> | unknown;
+  parseCsv(request: ActivityParseCsvRequest): Promise<unknown> | unknown;
+  getImportMapping(accountId: string, contextKind: string): Promise<ImportMappingData>;
+  saveImportMapping(mapping: Record<string, unknown>): Promise<ImportMappingData>;
+  listImportTemplates(): Promise<ImportTemplateData[]> | ImportTemplateData[];
+  getImportTemplate(id: string): Promise<ImportTemplateData> | ImportTemplateData;
+  saveImportTemplate(
     template: Record<string, unknown>,
   ): Promise<ImportTemplateData> | ImportTemplateData;
-  deleteImportTemplate?(id: string): Promise<void> | void;
-  getBrokerSyncProfile?(
+  deleteImportTemplate(id: string): Promise<void> | void;
+  getBrokerSyncProfile(
     accountId: string,
     sourceSystem: string,
   ): Promise<BrokerSyncProfileData> | BrokerSyncProfileData;
-  saveBrokerSyncProfileRules?(
+  saveBrokerSyncProfileRules(
     request: Record<string, unknown>,
   ): Promise<BrokerSyncProfileData> | BrokerSyncProfileData;
-  linkAccountTemplate?(
+  linkAccountTemplate(
     accountId: string,
     templateId: string,
     contextKind: string,
   ): Promise<void> | void;
-  checkExistingDuplicates?(
+  checkExistingDuplicates(
     idempotencyKeys: string[],
   ): Promise<Record<string, string>> | Record<string, string>;
 }

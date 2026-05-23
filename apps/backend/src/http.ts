@@ -479,199 +479,133 @@ function routeActivityRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/search") {
-    const searchActivities = activityService.searchActivities;
-    if (!searchActivities) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseActivitySearchRequest, (input) =>
-      Promise.resolve(searchActivities(input)),
+      Promise.resolve(activityService.searchActivities(input)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities") {
-    const createActivity = activityService.createActivity;
-    if (!createActivity) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, passThroughObject, (activity) =>
-      Promise.resolve(createActivity(activity)),
+      Promise.resolve(activityService.createActivity(activity)),
     );
   }
 
   if (request.method === "PUT" && url.pathname === "/api/v1/activities") {
-    const updateActivity = activityService.updateActivity;
-    if (!updateActivity) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, passThroughObject, (activity) =>
-      Promise.resolve(updateActivity(activity)),
+      Promise.resolve(activityService.updateActivity(activity)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/bulk") {
-    const bulkMutateActivities = activityService.bulkMutateActivities;
-    if (!bulkMutateActivities) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, passThroughObject, (input) =>
-      Promise.resolve(bulkMutateActivities(input)),
+      Promise.resolve(activityService.bulkMutateActivities(input)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/link") {
-    const linkTransferActivities = activityService.linkTransferActivities;
-    if (!linkTransferActivities) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseTransferActivitiesRequest, (input) =>
-      Promise.resolve(linkTransferActivities(input.activityAId, input.activityBId)),
+      Promise.resolve(activityService.linkTransferActivities(input.activityAId, input.activityBId)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/unlink") {
-    const unlinkTransferActivities = activityService.unlinkTransferActivities;
-    if (!unlinkTransferActivities) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseTransferActivitiesRequest, (input) =>
-      Promise.resolve(unlinkTransferActivities(input.activityAId, input.activityBId)),
+      Promise.resolve(
+        activityService.unlinkTransferActivities(input.activityAId, input.activityBId),
+      ),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/check") {
-    const checkActivitiesImport = activityService.checkActivitiesImport;
-    if (!checkActivitiesImport) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseActivitiesArrayRequest, (input) =>
-      Promise.resolve(checkActivitiesImport(input.activities)),
+      Promise.resolve(activityService.checkActivitiesImport(input.activities)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/assets/preview") {
-    const previewImportAssets = activityService.previewImportAssets;
-    if (!previewImportAssets) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseImportCandidatesRequest, (input) =>
-      Promise.resolve(previewImportAssets(input.candidates)),
+      Promise.resolve(activityService.previewImportAssets(input.candidates)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import") {
-    const importActivities = activityService.importActivities;
-    if (!importActivities) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseActivitiesArrayRequest, (input) =>
-      Promise.resolve(importActivities(input.activities)),
+      Promise.resolve(activityService.importActivities(input.activities)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/parse") {
-    const parseCsv = activityService.parseCsv;
-    if (!parseCsv) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
-    return handleActivityCsvParseRequest(request, parseCsv);
+    return handleActivityCsvParseRequest(request, activityService.parseCsv);
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/activities/import/mapping") {
-    const getImportMapping = activityService.getImportMapping;
-    if (!getImportMapping) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     const input = parseActivityImportMappingQuery(url);
     if (input instanceof Response) {
       return input;
     }
-    return Promise.resolve(getImportMapping(input.accountId, input.contextKind))
+    return Promise.resolve(activityService.getImportMapping(input.accountId, input.contextKind))
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/mapping") {
-    const saveImportMapping = activityService.saveImportMapping;
-    if (!saveImportMapping) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseWrappedObject("mapping"), (input) =>
-      Promise.resolve(saveImportMapping(input.mapping)),
+      Promise.resolve(activityService.saveImportMapping(input.mapping)),
     );
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/activities/import/templates") {
-    const listImportTemplates = activityService.listImportTemplates;
-    if (!listImportTemplates) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
-    return Promise.resolve(listImportTemplates()).then(jsonResponse).catch(domainErrorResponse);
+    return Promise.resolve(activityService.listImportTemplates())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/templates") {
-    const saveImportTemplate = activityService.saveImportTemplate;
-    if (!saveImportTemplate) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseWrappedObject("template"), (input) =>
-      Promise.resolve(saveImportTemplate(input.template)),
+      Promise.resolve(activityService.saveImportTemplate(input.template)),
     );
   }
 
   if (request.method === "DELETE" && url.pathname === "/api/v1/activities/import/templates") {
-    const deleteImportTemplate = activityService.deleteImportTemplate;
-    if (!deleteImportTemplate) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     const id = parseRequiredQueryString(url, "id");
     if (id instanceof Response) {
       return id;
     }
-    return Promise.resolve(deleteImportTemplate(id))
+    return Promise.resolve(activityService.deleteImportTemplate(id))
       .then(() => jsonResponse({ success: true }))
       .catch(domainErrorResponse);
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/activities/import/templates/item") {
-    const getImportTemplate = activityService.getImportTemplate;
-    if (!getImportTemplate) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     const id = parseRequiredQueryString(url, "id");
     if (id instanceof Response) {
       return id;
     }
-    return Promise.resolve(getImportTemplate(id)).then(jsonResponse).catch(domainErrorResponse);
+    return Promise.resolve(activityService.getImportTemplate(id))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/templates/link") {
-    const linkAccountTemplate = activityService.linkAccountTemplate;
-    if (!linkAccountTemplate) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseLinkAccountTemplateRequest, async (input) => {
-      await linkAccountTemplate(input.accountId, input.templateId, input.contextKind);
+      await activityService.linkAccountTemplate(
+        input.accountId,
+        input.templateId,
+        input.contextKind,
+      );
       return { success: true };
     });
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/check-duplicates") {
-    const checkExistingDuplicates = activityService.checkExistingDuplicates;
-    if (!checkExistingDuplicates) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return handleJsonMutation(request, parseCheckDuplicatesRequest, async (input) => ({
-      duplicates: await checkExistingDuplicates(input.idempotencyKeys),
+      duplicates: await activityService.checkExistingDuplicates(input.idempotencyKeys),
     }));
   }
 
   const activityId = activityIdFromPath(url.pathname);
   if (request.method === "DELETE" && activityId !== undefined) {
-    const deleteActivity = activityService.deleteActivity;
-    if (!deleteActivity) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
-    return Promise.resolve(deleteActivity(activityId))
+    return Promise.resolve(activityService.deleteActivity(activityId))
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
