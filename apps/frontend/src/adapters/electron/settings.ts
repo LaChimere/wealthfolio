@@ -49,6 +49,30 @@ export const backupDatabaseToPath = async (backupDir: string): Promise<string> =
   }
 };
 
+export interface DatabaseBackup {
+  filename: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export const listDatabaseBackups = (): Promise<DatabaseBackup[]> =>
+  Promise.reject(new Error("Listing server-side database backups is only supported in web mode"));
+
+export const deleteDatabaseBackup = (_filename: string): Promise<void> =>
+  Promise.reject(new Error("Deleting server-side database backups is only supported in web mode"));
+
+export const getDatabaseBackupDownloadUrl = (_filename: string): string => {
+  throw new Error("Downloading server-side database backups is only supported in web mode");
+};
+
+export interface PendingExport {
+  relativePath: string;
+  filename: string;
+}
+
+export const backupDatabaseToPendingExport = (): Promise<PendingExport> =>
+  Promise.reject(new Error("Pending backup exports are only supported on mobile"));
+
 export const restoreDatabase = async (backupFilePath: string): Promise<void> => {
   try {
     await invoke<void>("restore_database", { backupFilePath });

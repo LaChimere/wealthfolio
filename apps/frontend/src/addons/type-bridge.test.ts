@@ -1,6 +1,4 @@
 import { vi, describe, it, expect } from "vitest";
-import goalProgressManifest from "../../../../addons/goal-progress-tracker/manifest.json";
-import investmentFeesManifest from "../../../../addons/investment-fees-tracker/manifest.json";
 import {
   buildAllowedAddonPermissionPaths,
   createAddonPermissionGuard,
@@ -8,6 +6,23 @@ import {
   type InternalHostAPI,
   type RuntimeAddonPermission,
 } from "./type-bridge";
+
+const goalProgressManifest = {
+  id: "goal-progress-tracker",
+  permissions: [
+    declaredPermission("accounts", ["getAll"]),
+    declaredPermission("portfolio", ["getLatestValuations"]),
+    declaredPermission("goals", ["getAll", "getFunding"]),
+  ],
+};
+
+const investmentFeesManifest = {
+  id: "investment-fees-tracker",
+  permissions: [
+    declaredPermission("exchangeRates", ["getAll"]),
+    declaredPermission("settings", ["get"]),
+  ],
+};
 
 function declaredPermission(category: string, functions: string[]): RuntimeAddonPermission {
   return {

@@ -24,6 +24,7 @@ export type {
   BackendSyncReconcileReadyResult,
   BackendSyncSnapshotUploadResult,
   BackendSyncStateResult,
+  DataExportResult,
   EphemeralKeyPair,
   ExtractedAddon,
   FunctionPermission,
@@ -57,6 +58,7 @@ export * from "../shared/accounts";
 export * from "../shared/activities";
 export { parseCsv } from "./activities";
 export * from "../shared/portfolio";
+export * from "../shared/portfolios";
 export * from "../shared/market-data";
 export * from "../shared/custom-provider";
 export * from "../shared/goals";
@@ -73,15 +75,20 @@ export * from "../shared/health";
 export {
   backupDatabase,
   backupDatabaseToPath,
+  backupDatabaseToPendingExport,
   checkForUpdates,
+  deleteDatabaseBackup,
+  getDatabaseBackupDownloadUrl,
   getAppInfo,
   getPlatform,
   getSettings,
   installUpdate,
   isAutoUpdateCheckEnabled,
+  listDatabaseBackups,
   restoreDatabase,
   updateSettings,
 } from "./settings";
+export type { DatabaseBackup } from "./settings";
 
 export {
   getWindowTheme,
@@ -144,7 +151,9 @@ export {
   openFileSaveDialog,
   openFolderDialog,
   openUrlInBrowser,
+  saveAppDataFileViaPicker,
 } from "./files";
+export { exportDataFile } from "./exports";
 
 export {
   syncComputeSas,

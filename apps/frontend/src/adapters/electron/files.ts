@@ -42,3 +42,10 @@ export const openFileSaveDialog = async (
 export const openUrlInBrowser = (url: string): Promise<void> => {
   return getElectronApi().openExternalUrl(url);
 };
+
+export const saveAppDataFileViaPicker = (
+  _relativePath: string,
+  _fileName: string,
+): Promise<boolean> => {
+  return Promise.reject(new Error("Pending app data file exports are only supported on mobile"));
+};

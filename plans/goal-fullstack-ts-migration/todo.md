@@ -3072,6 +3072,14 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes generated
   TOTAL snapshot holdings weights summing to 1.0 and splitting as 0.8 security /
   0.2 cash for the bounded portfolio valuation fixture.
+- `rebase-origin-main-2026-05-23`: verification passed: `git fetch origin main`,
+  `git rebase origin/main`, full `bun run check`, and `git diff --check`.
+  Conflict resolution kept Bun/Electron/TS migration choices, respected upstream
+  deletion of local sample add-ons and pnpm workspace files, removed legacy
+  Tauri runtime paths during the Tauri-removal commit, regenerated `Cargo.lock`,
+  restored Electron adapter exports required by frontend consumers, and replaced
+  deleted sample-addon manifest imports in type-bridge tests with inline
+  permission fixtures.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
