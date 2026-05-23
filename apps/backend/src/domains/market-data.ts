@@ -134,27 +134,27 @@ export interface MarketDataSyncResult {
 }
 
 export interface MarketDataService {
-  getExchanges?(): Promise<ExchangeInfo[]> | ExchangeInfo[];
-  searchSymbol?(query: string): Promise<SymbolSearchResult[]> | SymbolSearchResult[];
-  resolveSymbolQuote?(request: ResolveSymbolQuoteRequest): Promise<ResolvedQuote> | ResolvedQuote;
-  getQuoteHistory?(symbol: string): Promise<Quote[]> | Quote[];
-  fetchYahooDividends?(symbol: string): Promise<YahooDividend[]> | YahooDividend[];
-  getLatestQuotes?(
+  getExchanges(): Promise<ExchangeInfo[]> | ExchangeInfo[];
+  searchSymbol(query: string): Promise<SymbolSearchResult[]> | SymbolSearchResult[];
+  resolveSymbolQuote(request: ResolveSymbolQuoteRequest): Promise<ResolvedQuote> | ResolvedQuote;
+  getQuoteHistory(symbol: string): Promise<Quote[]> | Quote[];
+  fetchYahooDividends(symbol: string): Promise<YahooDividend[]> | YahooDividend[];
+  getLatestQuotes(
     assetIds: string[],
   ): Promise<Record<string, LatestQuoteSnapshot>> | Record<string, LatestQuoteSnapshot>;
   getQuoteSyncErrorSnapshots?(): Promise<QuoteSyncErrorSnapshot[]> | QuoteSyncErrorSnapshot[];
-  updateQuote?(symbol: string, quote: Record<string, unknown>): Promise<void> | void;
-  deleteQuote?(id: string): Promise<void> | void;
-  checkQuotesImport?(
+  updateQuote(symbol: string, quote: Record<string, unknown>): Promise<void> | void;
+  deleteQuote(id: string): Promise<void> | void;
+  checkQuotesImport(
     content: Uint8Array,
     hasHeaderRow: boolean,
   ): Promise<QuoteImport[]> | QuoteImport[];
-  importQuotesCsv?(
+  importQuotesCsv(
     quotes: unknown[],
     overwriteExisting: boolean,
   ): Promise<QuoteImport[]> | QuoteImport[];
-  syncHistoryQuotes?(): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
-  syncMarketData?(
+  syncHistoryQuotes(): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
+  syncMarketData(
     marketSyncMode: MarketSyncMode,
   ): Promise<MarketDataSyncResult | void> | MarketDataSyncResult | void;
   updatePositionStatusFromHoldings?(

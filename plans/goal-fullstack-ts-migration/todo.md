@@ -3056,6 +3056,15 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes TS update
   checks always sending `X-Instance-Id`, including the empty-string case,
   matching Rust's update-check request headers.
+- `pr5-market-data-required-methods`: verification passed:
+  `bun run --cwd apps/backend type-check`,
+  `bun test apps/backend/src/http.test.ts -t "market data"`,
+  `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes required TS market-data
+  exchange/search/resolve/quote/import/sync service methods with direct HTTP
+  dispatch, removing stale optional 404 guards for runtime methods that are
+  always implemented.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
