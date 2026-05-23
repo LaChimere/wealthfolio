@@ -256,8 +256,18 @@ describe("TS activities import domain", () => {
         exchangeMic: "XNAS",
         instrumentType: "EQUITY",
       });
-      insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
-      insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
+      insertAsset(db, {
+        id: "dup-1",
+        displayCode: "DUP",
+        name: "Duplicate One",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, {
+        id: "dup-2",
+        displayCode: "DUP",
+        name: "Duplicate Two",
+        instrumentType: "EQUITY",
+      });
 
       expect(
         await service.previewImportAssets?.([
@@ -3389,6 +3399,40 @@ describe("TS activities import domain", () => {
           currency: "USD",
         }),
       ).toThrow("Quote currency is required. Please re-select the symbol.");
+      insertAsset(db, {
+        id: "aapl-xnas",
+        displayCode: "AAPL",
+        name: "Apple",
+        quoteCcy: "USD",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+        instrumentType: "EQUITY",
+      });
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "AAPL", quoteCcy: "USD" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+        }),
+      ).toThrow("Exchange MIC is required to create market asset AAPL");
+      insertAsset(db, { id: "legacy-no-type", displayCode: "LEGACY", name: "Legacy Asset" });
+      expect(() =>
+        service.createActivity?.({
+          accountId: "account-1",
+          asset: { symbol: "LEGACY", quoteCcy: "USD" },
+          activityType: "BUY",
+          activityDate: "2025-01-15",
+          quantity: "1",
+          unitPrice: "10",
+          amount: "10",
+          currency: "USD",
+        }),
+      ).toThrow("Exchange MIC is required to create market asset LEGACY");
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",
@@ -3417,8 +3461,18 @@ describe("TS activities import domain", () => {
           currency: "USD",
         }),
       ).toThrow("Invalid symbol '----'. Please search for a valid ticker.");
-      insertAsset(db, { id: "dup-1", displayCode: "DUP", name: "Duplicate One" });
-      insertAsset(db, { id: "dup-2", displayCode: "DUP", name: "Duplicate Two" });
+      insertAsset(db, {
+        id: "dup-1",
+        displayCode: "DUP",
+        name: "Duplicate One",
+        instrumentType: "EQUITY",
+      });
+      insertAsset(db, {
+        id: "dup-2",
+        displayCode: "DUP",
+        name: "Duplicate Two",
+        instrumentType: "EQUITY",
+      });
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",
@@ -3451,6 +3505,38 @@ describe("TS activities import domain", () => {
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()?.count,
       ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches bare direct activity symbols only to no-MIC market assets like Rust", () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "tsla-no-mic",
+        displayCode: "TSLA",
+        name: "Tesla",
+        quoteCcy: "USD",
+        instrumentSymbol: "TSLA",
+        instrumentType: "EQUITY",
+      });
+
+      const created = service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "TSLA" },
+        activityType: "BUY",
+        activityDate: "2025-01-15",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "10",
+        currency: "USD",
+      }) as Activity;
+
+      expect(created.assetId).toBe("tsla-no-mic");
     } finally {
       db.close();
     }

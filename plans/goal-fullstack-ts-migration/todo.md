@@ -2978,6 +2978,15 @@ contract:
   runtime asset profile and quote-mode mutations publishing `assets_updated` and
   the domain-event worker triggering market-sync plus portfolio-update events,
   matching Rust's asset-update portfolio side-effect path.
+- `pr5-activity-bare-symbol-mic-parity`: verification passed:
+  `bun test apps/backend/src/domains/activities.test.ts -t "rejects unsupported or invalid activity creates before persistence|matches bare direct activity symbols"`,
+  `bun test apps/backend/src/domains/activities.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  focused code review, full `bun run check`, and `git diff --check`. Coverage
+  includes direct activity bare-symbol lookup rejecting a MIC-qualified equity
+  match without an explicit MIC, ignoring legacy rows without `instrument_type`,
+  and still matching typed no-MIC existing assets, mirroring Rust's asset lookup
+  rules.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4959,6 +4959,8 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
   const quoteCcy = asset.quoteCcy ? normalizedCurrencyCode(asset.quoteCcy.trim()) : undefined;
   const clauses = [
     "(UPPER(COALESCE(instrument_symbol, '')) = UPPER(?) OR UPPER(COALESCE(display_code, '')) = UPPER(?) OR id = ?)",
+    "instrument_symbol IS NOT NULL AND TRIM(instrument_symbol) != ''",
+    "instrument_type IS NOT NULL AND TRIM(instrument_type) != ''",
   ];
   const params: string[] = [symbol, symbol, symbol];
 
@@ -4969,6 +4971,12 @@ function findExistingAssetBySymbol(db: Database, asset: ActivityAssetInput): Ass
   if (exchangeMic) {
     clauses.push("UPPER(COALESCE(instrument_exchange_mic, '')) = ?");
     params.push(exchangeMic);
+  } else if (instrumentType && instrumentType !== "OPTION") {
+    clauses.push("(instrument_exchange_mic IS NULL OR TRIM(instrument_exchange_mic) = '')");
+  } else if (!instrumentType) {
+    clauses.push(
+      "(UPPER(COALESCE(instrument_type, '')) = 'OPTION' OR instrument_exchange_mic IS NULL OR TRIM(instrument_exchange_mic) = '')",
+    );
   }
   if (quoteCcy) {
     clauses.push("UPPER(quote_ccy) = UPPER(?)");
