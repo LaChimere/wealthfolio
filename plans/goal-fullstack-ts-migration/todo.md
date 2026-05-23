@@ -3017,6 +3017,14 @@ contract:
   portfolio performance and income service methods with direct HTTP dispatch,
   removing stale per-method 501 guards for runtime methods that are always
   implemented.
+- `pr5-health-required-methods`: verification passed:
+  `bun run --cwd apps/backend type-check`,
+  `bun test apps/backend/src/http.test.ts -t "health"`,
+  `bun test apps/backend/src/domains/health.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes required TS health status/check/fix
+  service methods with direct HTTP dispatch, removing stale optional 404 guards
+  for runtime methods that are always implemented.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

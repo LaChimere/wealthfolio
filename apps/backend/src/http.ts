@@ -384,7 +384,7 @@ async function routeRequest(
   }
 
   if (options.healthService && url.pathname.startsWith("/api/v1/health")) {
-    return routeHealthRequest(request, url, config, options.healthService, options.taxonomyService);
+    return routeHealthRequest(request, url, config, options.healthService);
   }
 
   if (
@@ -2139,25 +2139,18 @@ function routeHealthRequest(
   url: URL,
   config: BackendRuntimeConfig,
   healthService: HealthService,
-  taxonomyService?: TaxonomyService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/health/status") {
-    if (!healthService.getHealthStatus) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return Promise.resolve(healthService.getHealthStatus(extractClientTimezone(request.headers)))
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/health/check") {
-    if (!healthService.runHealthChecks) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return Promise.resolve(healthService.runHealthChecks(extractClientTimezone(request.headers)))
       .then(jsonResponse)
       .catch(domainErrorResponse);
@@ -2190,11 +2183,7 @@ function routeHealthRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/health/fix") {
-    const canRunClassificationMigration = Boolean(taxonomyService?.migrateLegacyClassifications);
-    if (!healthService.executeFix && !canRunClassificationMigration) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
-    return handleHealthFixRequest(request, healthService, taxonomyService);
+    return handleHealthFixRequest(request, healthService);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -2203,7 +2192,6 @@ function routeHealthRequest(
 async function handleHealthFixRequest(
   request: Request,
   healthService: HealthService,
-  taxonomyService?: TaxonomyService,
 ): Promise<Response> {
   const payload = await parseJsonBody(request);
   if (payload instanceof Response) {
@@ -2215,16 +2203,6 @@ async function handleHealthFixRequest(
   }
 
   try {
-    if (!healthService.executeFix) {
-      if (
-        action.id === "migrate_legacy_classifications" &&
-        taxonomyService?.migrateLegacyClassifications
-      ) {
-        await taxonomyService.migrateLegacyClassifications();
-        return new Response(null, { status: 200 });
-      }
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     await healthService.executeFix(action);
     return new Response(null, { status: 200 });
   } catch (error) {

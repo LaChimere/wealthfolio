@@ -137,9 +137,9 @@ export interface HealthService {
   updateConfig(config: HealthConfig): Promise<void>;
   clearCache(): void;
   getCachedHealthStatus?(clientTimezone?: string): HealthStatus | null;
-  getHealthStatus?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
-  runHealthChecks?(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
-  executeFix?(action: HealthFixAction): Promise<void> | void;
+  getHealthStatus(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
+  runHealthChecks(clientTimezone?: string): Promise<HealthStatus> | HealthStatus;
+  executeFix(action: HealthFixAction): Promise<void> | void;
 }
 
 class HealthFixError extends Error {
