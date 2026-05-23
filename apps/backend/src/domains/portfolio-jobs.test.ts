@@ -10,6 +10,7 @@ import {
   createLocalPortfolioJobService,
   type PortfolioJobConfig,
 } from "./portfolio-jobs";
+import { createHoldingsService } from "./holdings";
 
 describe("TS portfolio job route config", () => {
   test("builds update jobs with Rust-compatible incremental defaults", () => {
@@ -67,6 +68,7 @@ describe("TS portfolio job route config", () => {
     try {
       seedAccount(db, "account-1", false);
       seedAccount(db, "archived-account", true);
+      seedAsset(db, "asset-1", "USD");
       seedSnapshot(db, {
         accountId: "account-1",
         date: "2026-05-16",
@@ -175,6 +177,14 @@ describe("TS portfolio job route config", () => {
       expect(readSnapshotPositions(db, "TOTAL", "2026-05-16")).toMatchObject({
         "asset-1": expect.objectContaining({ quantity: "2" }),
       });
+      const totalHoldings = await Promise.resolve(createHoldingsService(db).getHoldings("TOTAL"));
+      expect(totalHoldings.reduce((sum, holding) => sum + holding.weight, 0)).toBeCloseTo(1, 8);
+      expect(totalHoldings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "SEC-TOTAL-asset-1", weight: 0.8 }),
+          expect.objectContaining({ id: "CASH-TOTAL-USD", weight: 0.2 }),
+        ]),
+      );
     } finally {
       db.close();
     }
@@ -2477,8 +2487,16 @@ function createPortfolioJobTestDb(): Database {
     CREATE TABLE assets (
       id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL DEFAULT 'INVESTMENT',
+      name TEXT,
+      display_code TEXT,
+      notes TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      quote_mode TEXT NOT NULL DEFAULT 'MARKET',
       quote_ccy TEXT,
       instrument_type TEXT,
+      instrument_symbol TEXT,
+      instrument_exchange_mic TEXT,
+      provider_config TEXT,
       metadata TEXT
     );
     CREATE TABLE activities (
@@ -2563,13 +2581,19 @@ function seedAsset(
 ): void {
   db.query(
     `
-      INSERT INTO assets (id, kind, quote_ccy, instrument_type, metadata)
-      VALUES (?, 'INVESTMENT', ?, ?, ?)
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, is_active, quote_mode, quote_ccy,
+        instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, metadata
+      )
+      VALUES (?, 'INVESTMENT', ?, ?, NULL, 1, 'MARKET', ?, ?, ?, NULL, NULL, ?)
     `,
   ).run(
     assetId,
+    assetId,
+    assetId,
     quoteCurrency,
     options.instrumentType ?? null,
+    assetId,
     options.metadata ? JSON.stringify(options.metadata) : null,
   );
 }

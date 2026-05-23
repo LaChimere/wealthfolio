@@ -3065,6 +3065,13 @@ contract:
   exchange/search/resolve/quote/import/sync service methods with direct HTTP
   dispatch, removing stale optional 404 guards for runtime methods that are
   always implemented.
+- `pr5-total-holdings-weight-evidence`: verification passed:
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts -t "bounded portfolio valuation"`,
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes generated
+  TOTAL snapshot holdings weights summing to 1.0 and splitting as 0.8 security /
+  0.2 cash for the bounded portfolio valuation fixture.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
