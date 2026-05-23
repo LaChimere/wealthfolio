@@ -24,20 +24,20 @@ protocols:
 
 mac:
   category: public.app-category.finance
-  icon: ../tauri/icons/icon.icns
+  icon: ../../assets/brand/app-icon.icns
   minimumSystemVersion: "10.13"
   target:
     - dmg
     - zip
 
 win:
-  icon: ../tauri/icons/icon.ico
+  icon: ../../assets/brand/app-icon.ico
   target:
     - nsis
 
 linux:
   category: Finance
-  icon: ../tauri/icons/icon.png
+  icon: ../../assets/brand/icon.png
   target:
     - AppImage
     - deb

@@ -3080,6 +3080,11 @@ contract:
   restored Electron adapter exports required by frontend consumers, and replaced
   deleted sample-addon manifest imports in type-bridge tests with inline
   permission fixtures.
+- `pr5-electron-brand-icon-paths`: verification passed:
+  `test -f assets/brand/app-icon.icns`, `test -f assets/brand/app-icon.ico`,
+  `test -f assets/brand/icon.png`, `bun run --cwd apps/electron type-check`,
+  full `bun run check`, and `git diff --check`. Coverage includes Electron
+  builder icon paths no longer referencing deleted `apps/tauri/icons` files.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
