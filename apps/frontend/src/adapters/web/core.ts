@@ -4,7 +4,7 @@
 import { notifyUnauthorized } from "@/lib/auth-token";
 import type { Logger } from "../types";
 
-/** True when running in the desktop (Tauri) environment */
+/** True when running in a desktop environment */
 export const isDesktop = false;
 
 /** True when running in the web environment */

@@ -3089,6 +3089,10 @@ contract:
   `bash -n scripts/ci-check.sh`, full `bun run check`, and `git diff --check`.
   Coverage includes local CI preparing a generic frontend `dist/index.html`
   placeholder without the stale `ensure_tauri_dist` helper name.
+- `pr5-web-adapter-tauri-wording-cleanup`: verification passed:
+  `bun run --cwd apps/frontend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes web adapter unsupported-operation
+  messages no longer referring users to the removed Tauri app.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
