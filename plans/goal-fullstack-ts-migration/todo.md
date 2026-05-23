@@ -3085,6 +3085,10 @@ contract:
   `test -f assets/brand/icon.png`, `bun run --cwd apps/electron type-check`,
   full `bun run check`, and `git diff --check`. Coverage includes Electron
   builder icon paths no longer referencing deleted `apps/tauri/icons` files.
+- `pr5-ci-check-tauri-name-cleanup`: verification passed:
+  `bash -n scripts/ci-check.sh`, full `bun run check`, and `git diff --check`.
+  Coverage includes local CI preparing a generic frontend `dist/index.html`
+  placeholder without the stale `ensure_tauri_dist` helper name.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -108,7 +108,7 @@ if [[ "$RUN_RUST" == "false" && "$RUN_FRONTEND" == "false" ]]; then
   exit 0
 fi
 
-ensure_tauri_dist() {
+ensure_frontend_dist() {
   if [[ ! -f dist/index.html ]]; then
     mkdir -p dist
     echo '<!DOCTYPE html><html><head></head><body></body></html>' > dist/index.html
@@ -116,7 +116,7 @@ ensure_tauri_dist() {
 }
 
 if [[ "$RUN_RUST" == "true" ]]; then
-  ensure_tauri_dist
+  ensure_frontend_dist
 
   echo "=== cargo fmt ===" >&2
   cargo fmt --all -- --check
