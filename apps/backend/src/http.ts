@@ -1579,55 +1579,36 @@ function routePortfolioMetricsRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/performance/accounts/simple") {
-    const calculateAccountsSimplePerformance =
-      portfolioMetricsService.calculateAccountsSimplePerformance;
-    if (!calculateAccountsSimplePerformance) {
-      return deferredPortfolioMetricsResponse("Portfolio performance is not available yet");
-    }
     return handleJsonMutation(request, parseAccountsSimplePerformanceRequest, (input) => {
       if (input.accountIds?.length === 0) {
         return Promise.resolve([]);
       }
-      return Promise.resolve(calculateAccountsSimplePerformance(input.accountIds));
+      return Promise.resolve(
+        portfolioMetricsService.calculateAccountsSimplePerformance(input.accountIds),
+      );
     });
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/performance/history") {
-    const calculatePerformanceHistory = portfolioMetricsService.calculatePerformanceHistory;
-    if (!calculatePerformanceHistory) {
-      return deferredPortfolioMetricsResponse("Portfolio performance history is not available yet");
-    }
     return handleJsonMutation(request, parsePerformanceRequest, (input) =>
-      Promise.resolve(calculatePerformanceHistory(input)),
+      Promise.resolve(portfolioMetricsService.calculatePerformanceHistory(input)),
     );
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/performance/summary") {
-    const calculatePerformanceSummary = portfolioMetricsService.calculatePerformanceSummary;
-    if (!calculatePerformanceSummary) {
-      return deferredPortfolioMetricsResponse("Portfolio performance summary is not available yet");
-    }
     return handleJsonMutation(request, parsePerformanceRequest, (input) =>
-      Promise.resolve(calculatePerformanceSummary(input)),
+      Promise.resolve(portfolioMetricsService.calculatePerformanceSummary(input)),
     );
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/income/summary") {
-    const getIncomeSummary = portfolioMetricsService.getIncomeSummary;
-    if (!getIncomeSummary) {
-      return deferredPortfolioMetricsResponse("Income summary is not available yet");
-    }
     const accountId = url.searchParams.get("accountId") ?? undefined;
-    return Promise.resolve(getIncomeSummary(accountId))
+    return Promise.resolve(portfolioMetricsService.getIncomeSummary(accountId))
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
-}
-
-function deferredPortfolioMetricsResponse(message: string): Response {
-  return jsonResponse({ code: 501, message }, 501);
 }
 
 function routeHoldingsRequest(

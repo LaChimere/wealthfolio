@@ -3010,6 +3010,13 @@ contract:
   database restore HTTP route dispatching to the required restore service
   directly instead of retaining the stale 501 deferred branch, matching Rust's
   always-wired restore route.
+- `pr5-portfolio-metrics-required-methods`: verification passed:
+  `bun test apps/backend/src/http.test.ts -t "portfolio metrics"`,
+  `bun run --cwd apps/backend type-check`, `bun run --cwd apps/backend test`,
+  full `bun run check`, and `git diff --check`. Coverage includes required TS
+  portfolio performance and income service methods with direct HTTP dispatch,
+  removing stale per-method 501 guards for runtime methods that are always
+  implemented.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

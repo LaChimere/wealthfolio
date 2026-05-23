@@ -17,10 +17,10 @@ export interface PerformanceRequest {
 export interface PortfolioMetricsService {
   getNetWorth(date?: string): Promise<unknown> | unknown;
   getNetWorthHistory(startDate: string, endDate: string): Promise<unknown[]> | unknown[];
-  calculateAccountsSimplePerformance?(accountIds?: string[]): SimplePerformanceMetrics[];
-  calculatePerformanceHistory?(request: PerformanceRequest): PerformanceMetrics;
-  calculatePerformanceSummary?(request: PerformanceRequest): PerformanceMetrics;
-  getIncomeSummary?(accountId?: string): Promise<unknown[]> | unknown[];
+  calculateAccountsSimplePerformance(accountIds?: string[]): SimplePerformanceMetrics[];
+  calculatePerformanceHistory(request: PerformanceRequest): PerformanceMetrics;
+  calculatePerformanceSummary(request: PerformanceRequest): PerformanceMetrics;
+  getIncomeSummary(accountId?: string): Promise<unknown[]> | unknown[];
 }
 
 export class PortfolioMetricsNotImplementedError extends Error {
