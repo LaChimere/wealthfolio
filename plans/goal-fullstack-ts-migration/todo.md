@@ -2995,6 +2995,14 @@ contract:
   activity-created asset normalization stripping Yahoo `=F` futures suffixes
   before existing-asset lookup, matching Rust `strip_yahoo_suffix` behavior and
   preventing duplicate `GC=F` assets when canonical `GC` already exists.
+- `pr5-addon-zip-bound-parity`: verification passed:
+  `cargo test -p wealthfolio-core test_extract_addon_zip_rejects --quiet`,
+  `cargo test -p wealthfolio-core addons::tests --quiet`,
+  `cargo check -p wealthfolio-core --quiet`, focused code review, full
+  `bun run check`, and `git diff --check`. Coverage includes Rust add-on ZIP
+  extraction rejecting archives with more than 10,000 entries and rejecting
+  archives whose declared uncompressed file content exceeds 50MB, matching TS
+  add-on runtime hardening.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
