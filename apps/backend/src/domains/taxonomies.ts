@@ -196,11 +196,11 @@ export interface TaxonomyService extends TaxonomyReadService {
   removeAssetAssignment(id: string): Promise<number>;
   importTaxonomyJson(jsonStr: string): Promise<Taxonomy>;
   exportTaxonomyJson(id: string): string;
-  getMigrationStatus?(): Promise<ClassificationMigrationStatus> | ClassificationMigrationStatus;
-  getLegacyClassificationMigrationDetails?():
+  getMigrationStatus(): Promise<ClassificationMigrationStatus> | ClassificationMigrationStatus;
+  getLegacyClassificationMigrationDetails():
     | Promise<ClassificationMigrationDetails>
     | ClassificationMigrationDetails;
-  migrateLegacyClassifications?(
+  migrateLegacyClassifications(
     assetIds?: readonly string[],
   ): Promise<ClassificationMigrationResult> | ClassificationMigrationResult;
 }

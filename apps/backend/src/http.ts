@@ -2800,18 +2800,12 @@ function routeTaxonomyRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/taxonomies/migration/status") {
-    if (!taxonomyService.getMigrationStatus) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return Promise.resolve(taxonomyService.getMigrationStatus())
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/taxonomies/migration/run") {
-    if (!taxonomyService.migrateLegacyClassifications) {
-      return jsonResponse({ code: 404, message: "Not Found" }, 404);
-    }
     return Promise.resolve(taxonomyService.migrateLegacyClassifications())
       .then(jsonResponse)
       .catch(domainErrorResponse);
