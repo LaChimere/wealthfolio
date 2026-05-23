@@ -3093,6 +3093,12 @@ contract:
   `bun run --cwd apps/frontend type-check`, full `bun run check`, and
   `git diff --check`. Coverage includes web adapter unsupported-operation
   messages no longer referring users to the removed Tauri app.
+- `pr5-docker-ts-backend-cutover`: verification passed:
+  `bun test apps/backend/src/config.test.ts apps/backend/src/http.test.ts -t "static|sidecar profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes `WF_STATIC_DIR` config parsing, TS
+  backend static asset serving with SPA fallback outside `/api/*`, and the
+  Dockerfile no longer building or running `wealthfolio-server` from Rust.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

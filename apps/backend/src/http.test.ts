@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
@@ -68,6 +72,30 @@ describe("TS backend HTTP skeleton", () => {
     await expect(
       (await handler(new Request("http://127.0.0.1/api/v1/auth/status"))).json(),
     ).resolves.toEqual({ requiresPassword: true });
+  });
+
+  test("serves static frontend assets with SPA fallback", async () => {
+    const staticDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-static-"));
+    mkdirSync(path.join(staticDir, "assets"), { recursive: true });
+    writeFileSync(path.join(staticDir, "index.html"), '<!doctype html><div id="root"></div>');
+    writeFileSync(path.join(staticDir, "assets", "app.js"), "console.log('ok');");
+    const handler = createBackendRequestHandler({ ...config, staticDir });
+
+    const index = await handler(new Request("http://127.0.0.1/"));
+    expect(index.status).toBe(200);
+    expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    await expect(index.text()).resolves.toContain("root");
+
+    const asset = await handler(new Request("http://127.0.0.1/assets/app.js"));
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    await expect(asset.text()).resolves.toBe("console.log('ok');");
+
+    await expect(
+      (await handler(new Request("http://127.0.0.1/settings/profile"))).text(),
+    ).resolves.toContain("root");
+    expect((await handler(new Request("http://127.0.0.1/api/v1/missing"))).status).toBe(404);
+    expect((await handler(new Request("http://127.0.0.1/../package.json"))).status).toBe(404);
   });
 
   test("returns restart-required while database restore is still settling", async () => {

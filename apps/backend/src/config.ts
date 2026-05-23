@@ -14,6 +14,7 @@ export interface BackendRuntimeConfig {
   secretKey: Uint8Array;
   sidecarToken?: string;
   authPasswordHash?: string;
+  staticDir?: string;
 }
 
 const DEFAULT_LISTEN_ADDR = "0.0.0.0:8088";
@@ -31,6 +32,7 @@ export function loadBackendConfigFromEnv(
     env.WF_AUTH_PASSWORD_HASH,
     "WF_AUTH_PASSWORD_HASH",
   );
+  const staticDir = parseOptionalNonEmpty(env.WF_STATIC_DIR, "WF_STATIC_DIR");
   const authRequired = env.WF_AUTH_REQUIRED?.trim().toLowerCase() !== "false";
 
   if (sidecarToken && !isLoopbackHost(listen.host)) {
@@ -58,6 +60,7 @@ export function loadBackendConfigFromEnv(
     secretKey,
     sidecarToken,
     authPasswordHash,
+    staticDir,
   };
 }
 

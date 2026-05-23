@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { BackendRuntimeConfig } from "./config";
 import type { AccountService, AccountUpdate, NewAccount } from "./domains/accounts";
 import type {
@@ -462,6 +464,17 @@ async function routeRequest(
         return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
       }
       return jsonResponse({ ok: true });
+    }
+  }
+
+  if (
+    config.staticDir &&
+    !url.pathname.startsWith("/api/") &&
+    (request.method === "GET" || request.method === "HEAD")
+  ) {
+    const staticResponse = await serveStaticFile(config.staticDir, url.pathname, request.method);
+    if (staticResponse) {
+      return staticResponse;
     }
   }
 
@@ -3140,6 +3153,79 @@ function taxonomyAssignmentIdFromPath(pathname: string): string | undefined {
 function exportTaxonomyIdFromPath(pathname: string): string | undefined {
   const match = /^\/api\/v1\/taxonomies\/([^/]+)\/export$/.exec(pathname);
   return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+async function serveStaticFile(
+  staticDir: string,
+  pathname: string,
+  method: string,
+): Promise<Response | null> {
+  const root = path.resolve(staticDir);
+  const requested = safeStaticPath(root, pathname);
+  if (requested === null) {
+    return null;
+  }
+
+  const direct = Bun.file(requested);
+  if (await direct.exists()) {
+    return staticFileResponse(direct, requested, method);
+  }
+
+  if (path.extname(requested) !== "") {
+    return null;
+  }
+
+  const indexPath = path.join(root, "index.html");
+  const index = Bun.file(indexPath);
+  return (await index.exists()) ? staticFileResponse(index, indexPath, method) : null;
+}
+
+function safeStaticPath(root: string, pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.includes("\0")) {
+    return null;
+  }
+  const relative = decoded.replace(/^\/+/, "") || "index.html";
+  const resolved = path.resolve(root, relative);
+  return resolved === root || resolved.startsWith(`${root}${path.sep}`) ? resolved : null;
+}
+
+function staticFileResponse(file: Bun.BunFile, filePath: string, method: string): Response {
+  const headers = new Headers();
+  const contentType = contentTypeForPath(filePath);
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
+  return new Response(method === "HEAD" ? null : file, { headers });
+}
+
+function contentTypeForPath(filePath: string): string | null {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".webp":
+      return "image/webp";
+    case ".ico":
+      return "image/x-icon";
+    default:
+      return null;
+  }
 }
 
 function applyCors(response: Response, request: Request, config: BackendRuntimeConfig): Response {

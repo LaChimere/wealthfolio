@@ -12,11 +12,13 @@ describe("TS backend config", () => {
       WF_SECRET_KEY: secretKey,
       WF_SIDECAR_TOKEN: "sidecar-token",
       WF_CORS_ALLOW_ORIGINS: "http://localhost:1420,http://127.0.0.1:1420",
+      WF_STATIC_DIR: "/app/dist",
     });
 
     expect(config.listen).toEqual({ host: "127.0.0.1", port: 0 });
     expect(config.secretKey).toHaveLength(32);
     expect(config.sidecarToken).toBe("sidecar-token");
+    expect(config.staticDir).toBe("/app/dist");
     expect(config.cors.allowOrigins).toEqual(["http://localhost:1420", "http://127.0.0.1:1420"]);
   });
 

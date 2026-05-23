@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 334
+turns_used: 335
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-05-23T22:55:49+08:00"
+updated_at: "2026-05-23T23:04:04+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2102,6 +2102,12 @@ updated_at: "2026-05-23T22:55:49+08:00"
   unsupported local backup and pending export paths now refer to desktop/native
   app support instead of the removed Tauri app. Frontend type-check, full
   `bun run check`, and `git diff --check` passed.
+- Turn 335: Cut the Docker image from the Rust Axum server to the Bun TypeScript
+  backend. The TS backend now supports `WF_STATIC_DIR` and serves the built
+  frontend with SPA fallback outside `/api/*`, while the Dockerfile builds
+  frontend assets and runs `bun apps/backend/src/main.ts` with only the runtime
+  catalog/migration assets it needs. Focused static-server tests, backend
+  type-check, full `bun run check`, and `git diff --check` passed.
 
 ## Deferred items
 
