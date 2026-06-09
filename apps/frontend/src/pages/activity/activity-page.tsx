@@ -396,13 +396,12 @@ const ActivityPage = () => {
 
   // Reset page index when filters or search change (only for datagrid)
   useEffect(() => {
-    if (isDatagridView && pageIndex !== 0) {
+    if (isDatagridView) {
       setPageIndex(0);
     }
   }, [
     effectiveInvestmentAccountIds,
     isDatagridView,
-    pageIndex,
     effectiveActivityTypes,
     selectedInstrumentTypes,
     statusFilter,
