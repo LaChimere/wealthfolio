@@ -113,6 +113,7 @@ describe("DashboardContent", () => {
           cashCurrencySplit: [],
           sourceDataAsOf: "2026-06-01T12:30:00Z",
           calculatedAt: "2026-06-01T13:00:00Z",
+          warnings: [],
         },
         accounts: [],
       },

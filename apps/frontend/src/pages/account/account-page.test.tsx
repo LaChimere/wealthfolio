@@ -69,12 +69,15 @@ vi.mock("@/pages/dashboard/portfolio-update-trigger", () => ({
   PortfolioUpdateTrigger: ({
     children,
     lastCalculatedAt,
+    notices,
   }: {
     children: React.ReactNode;
     lastCalculatedAt?: string;
+    notices?: string[];
   }) => (
     <div>
       <div data-testid="account-as-of">{lastCalculatedAt ?? ""}</div>
+      <div data-testid="account-notices">{JSON.stringify(notices ?? [])}</div>
       {children}
     </div>
   ),
@@ -295,6 +298,38 @@ describe("AccountPage", () => {
 
     expect(screen.getByTestId("account-as-of")).toHaveTextContent("");
   });
+
+  it("uses account-level current valuation notices in the account header", () => {
+    mockUseValuationHistory.mockReturnValue({
+      valuationHistory: [createHistoricalValuation({ totalValue: 100 })],
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useValuationHistory>);
+    mockUseCurrentValuation.mockReturnValue({
+      currentValuation: {
+        summary: {
+          ...createCurrentSummary({ totalValueBase: 125 }),
+          warnings: ["Summary notice"],
+        },
+        accounts: [
+          createCurrentAccountValuation({
+            totalValue: 125,
+            warnings: ["Some exchange rates are missing, so this value may be approximate."],
+          }),
+        ],
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    } as unknown as ReturnType<typeof useCurrentValuation>);
+
+    render(<AccountPage />);
+
+    expect(screen.getByTestId("account-notices")).toHaveTextContent(
+      "Some exchange rates are missing, so this value may be approximate.",
+    );
+    expect(screen.getByTestId("account-notices")).not.toHaveTextContent("Summary notice");
+  });
 });
 
 function createSettings(): Settings {
@@ -382,6 +417,7 @@ function createCurrentAccountValuation(
     totalValueBase: overrides.totalValueBase ?? overrides.totalValue ?? 125,
     sourceDataAsOf: overrides.sourceDataAsOf ?? "2026-03-17T12:00:00Z",
     calculatedAt: "2026-03-17T12:05:00Z",
+    warnings: [],
     ...overrides,
   };
 }
@@ -403,6 +439,7 @@ function createCurrentSummary(overrides: {
     cashCurrencySplit: [],
     sourceDataAsOf: overrides.sourceDataAsOf ?? "2026-03-17T12:00:00Z",
     calculatedAt: "2026-03-17T12:05:00Z",
+    warnings: [],
   };
 }
 

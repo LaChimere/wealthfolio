@@ -136,6 +136,7 @@ describe("allocation dashboard derivations", () => {
       cashCurrencySplit: [{ currency: "USD", valueBase: 25, valueLocal: 25, percentage: 100 }],
       sourceDataAsOf: "2026-06-01T12:30:00Z",
       calculatedAt: "2026-06-01T13:00:00Z",
+      warnings: [],
     });
 
     expect(data.total).toBe(125);

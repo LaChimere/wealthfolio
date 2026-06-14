@@ -422,12 +422,17 @@ const AccountPage = () => {
     currentAccountValuation?.accountCurrency ??
     currentValuation?.accountCurrency ??
     baseCurrency;
-  const displayedTotalValue = currentAccountValuation?.totalValue ?? 0;
+  const displayedTotalValue =
+    currentAccountValuation?.totalValue ??
+    (!isCurrentValuationLoading && !currentValuationError ? currentValuation?.totalValue : 0) ??
+    0;
   const displayedSourceDataAsOf =
     currentAccountValuation?.sourceDataAsOf ??
     (!currentAccountValuation && !isCurrentValuationLoading && !currentValuationError
       ? currentValuation?.calculatedAt
       : undefined);
+  const displayedValuationNotices =
+    currentAccountValuation?.warnings ?? liveCurrentValuation?.summary.warnings;
   const isCurrentValuationUnavailable =
     !isCurrentValuationLoading && !currentAccountValuation && Boolean(currentValuationError);
   const performanceCurrency = accountPerformance?.scope.currency ?? baseCurrency;
@@ -706,7 +711,10 @@ const AccountPage = () => {
               <Card className="col-span-1 md:col-span-2">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-md">
-                    <PortfolioUpdateTrigger lastCalculatedAt={displayedSourceDataAsOf}>
+                    <PortfolioUpdateTrigger
+                      lastCalculatedAt={displayedSourceDataAsOf}
+                      notices={displayedValuationNotices}
+                    >
                       <div className="flex items-start gap-2">
                         <div>
                           <p className="pt-3 text-xl font-bold">

@@ -109,6 +109,7 @@ pub struct CurrentAccountValuation {
     pub total_value_base: Decimal,
     pub source_data_as_of: Option<DateTime<Utc>>,
     pub calculated_at: DateTime<Utc>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -134,6 +135,7 @@ pub struct CurrentValuationSummary {
     pub cash_currency_split: Vec<CurrentValuationSplit>,
     pub source_data_as_of: Option<DateTime<Utc>>,
     pub calculated_at: DateTime<Utc>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

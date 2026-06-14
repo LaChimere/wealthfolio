@@ -177,6 +177,7 @@ function createCurrentValuation(
     totalValueBase: overrides.totalValueBase ?? overrides.totalValue ?? 0,
     sourceDataAsOf: overrides.sourceDataAsOf ?? "2026-03-17T11:59:00Z",
     calculatedAt: overrides.calculatedAt ?? "2026-03-17T12:00:00Z",
+    warnings: overrides.warnings ?? [],
   };
 }
 

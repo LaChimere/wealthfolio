@@ -4,7 +4,7 @@ import { useAccountsSimplePerformance } from "@/hooks/use-accounts-simple-perfor
 import { useDrillDownState } from "@/hooks/use-drill-down-state";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { Account } from "@/lib/types";
+import type { Account, AccountValueSource } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import {
   Card,
@@ -22,13 +22,6 @@ interface DrillableAccountChartProps {
   accountIds?: string[];
   accountValuations?: AccountValueSource[];
   onAccountClick?: (accountId: string, accountName: string) => void;
-}
-
-interface AccountValueSource {
-  accountId: string;
-  totalValue?: number | null;
-  totalValueBase?: number | null;
-  fxRateToBase?: number | null;
 }
 
 /**
@@ -77,14 +70,13 @@ export function DrillableAccountChart({
             ? Number(valuation.totalValueBase) || 0
             : (Number(valuation.totalValue) || 0) * (Number(valuation.fxRateToBase) || 1);
         if (valueBase <= 0) return null;
-        const currency = account.currency || baseCurrency;
 
         return {
           id: account.id,
           name: account.name,
           group: account.group || account.name, // Use name as group if no group
           value: valueBase,
-          currency,
+          currency: baseCurrency,
         };
       })
       .filter((a): a is NonNullable<typeof a> => a !== null);

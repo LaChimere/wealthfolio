@@ -179,7 +179,10 @@ export function DashboardContent() {
   return (
     <div className="flex min-h-full flex-col">
       <div className="px-4 pb-1 pt-2 md:px-6 lg:px-8">
-        <PortfolioUpdateTrigger lastCalculatedAt={portfolioSourceDataAsOf}>
+        <PortfolioUpdateTrigger
+          lastCalculatedAt={portfolioSourceDataAsOf}
+          notices={portfolioCurrentValuation?.summary.warnings}
+        >
           <div className="flex items-start gap-2">
             <div>
               <Balance

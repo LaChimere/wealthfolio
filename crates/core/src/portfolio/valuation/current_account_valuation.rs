@@ -19,6 +19,13 @@ use crate::{
     utils::occ_symbol::parse_occ_symbol,
 };
 
+const MISSING_ASSET_WARNING: &str =
+    "Some asset details are missing, so this value may be incomplete.";
+const MISSING_QUOTE_WARNING: &str =
+    "Some market prices are missing, so this value may be incomplete.";
+const MISSING_FX_WARNING: &str =
+    "Some exchange rates are missing, so this value may be approximate.";
+
 pub struct CurrentAccountValuationService<'a> {
     account_service: &'a dyn AccountServiceTrait,
     snapshot_repository: &'a dyn SnapshotRepositoryTrait,
@@ -85,7 +92,8 @@ impl<'a> CurrentAccountValuationService<'a> {
         let snapshots =
             self.latest_snapshots_with_positions(&account_ids, latest_snapshot_cutoff)?;
         let assets_by_id = self.load_assets_by_id(&snapshots).await?;
-        let latest_quote_pairs = self.load_latest_quotes(&snapshots, &assets_by_id)?;
+        let latest_quote_pairs =
+            self.load_latest_quotes(&snapshots, &assets_by_id, latest_snapshot_cutoff)?;
         let mut fx_cache = FxRateCache::new(self.fx_service);
 
         Ok(calculate_current_valuation_response_from_snapshots(
@@ -165,18 +173,47 @@ impl<'a> CurrentAccountValuationService<'a> {
         &self,
         snapshots: &HashMap<String, AccountStateSnapshot>,
         assets_by_id: &HashMap<String, Asset>,
+        latest_snapshot_cutoff: NaiveDate,
     ) -> Result<HashMap<String, LatestQuotePair>> {
         let asset_ids = quoted_asset_ids(snapshots, assets_by_id);
         if asset_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        self.quote_service.get_latest_quotes_pair(&asset_ids)
+        Ok(self
+            .quote_service
+            .get_latest_quotes_as_of(&asset_ids, latest_snapshot_cutoff)?
+            .into_iter()
+            .map(|(asset_id, latest)| {
+                (
+                    asset_id,
+                    LatestQuotePair {
+                        latest,
+                        previous: None,
+                    },
+                )
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CurrentValuationRate {
+    pub rate: Decimal,
+    pub warning: Option<String>,
+}
+
+impl From<Decimal> for CurrentValuationRate {
+    fn from(rate: Decimal) -> Self {
+        Self {
+            rate,
+            warning: None,
+        }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn calculate_current_valuation_response_from_snapshots<F>(
+pub fn calculate_current_valuation_response_from_snapshots<F, R>(
     scope_id: &str,
     accounts: &[Account],
     snapshots: &HashMap<String, AccountStateSnapshot>,
@@ -188,7 +225,8 @@ pub fn calculate_current_valuation_response_from_snapshots<F>(
     mut latest_rate: F,
 ) -> CurrentValuationResponse
 where
-    F: FnMut(&str, &str) -> Decimal,
+    F: FnMut(&str, &str) -> R,
+    R: Into<CurrentValuationRate>,
 {
     let mut summary = CurrentValuationSummary {
         scope_id: scope_id.to_string(),
@@ -202,6 +240,7 @@ where
         cash_currency_split: Vec::new(),
         source_data_as_of: None,
         calculated_at,
+        warnings: Vec::new(),
     };
     let mut currency_base_totals: HashMap<String, Decimal> = HashMap::new();
     let mut cash_base_totals: HashMap<String, Decimal> = HashMap::new();
@@ -225,6 +264,7 @@ where
                 currency_base_totals: HashMap::new(),
                 cash_base_totals: HashMap::new(),
                 cash_local_totals: HashMap::new(),
+                summary_warnings: Vec::new(),
             },
         };
 
@@ -239,6 +279,7 @@ where
         merge_totals(&mut currency_base_totals, computation.currency_base_totals);
         merge_totals(&mut cash_base_totals, computation.cash_base_totals);
         merge_totals(&mut cash_local_totals, computation.cash_local_totals);
+        summary.warnings.extend(computation.summary_warnings);
 
         if include_accounts {
             account_valuations.push(computation.valuation);
@@ -251,6 +292,8 @@ where
         cash_base_totals,
         summary.cash_balance_base,
     );
+    summary.warnings.sort();
+    summary.warnings.dedup();
 
     CurrentValuationResponse {
         summary,
@@ -308,9 +351,10 @@ struct AccountValuationComputation {
     currency_base_totals: HashMap<String, Decimal>,
     cash_base_totals: HashMap<String, Decimal>,
     cash_local_totals: HashMap<String, Decimal>,
+    summary_warnings: Vec<String>,
 }
 
-fn calculate_account_snapshot_valuation_with_contributions<F>(
+fn calculate_account_snapshot_valuation_with_contributions<F, R>(
     account: &Account,
     snapshot: &AccountStateSnapshot,
     assets_by_id: &HashMap<String, Asset>,
@@ -320,7 +364,8 @@ fn calculate_account_snapshot_valuation_with_contributions<F>(
     latest_rate: &mut F,
 ) -> AccountValuationComputation
 where
-    F: FnMut(&str, &str) -> Decimal,
+    F: FnMut(&str, &str) -> R,
+    R: Into<CurrentValuationRate>,
 {
     let mut valuation = zero_current_account_valuation(account, base_currency, calculated_at);
     valuation.source_data_as_of = Some(snapshot_source_data_as_of(snapshot));
@@ -328,13 +373,26 @@ where
     let mut currency_base_totals: HashMap<String, Decimal> = HashMap::new();
     let mut cash_base_totals: HashMap<String, Decimal> = HashMap::new();
     let mut cash_local_totals: HashMap<String, Decimal> = HashMap::new();
+    let mut summary_warnings = Vec::new();
+    let mut account_warnings = Vec::new();
 
     for (cash_currency, amount) in &snapshot.cash_balances {
         let (normalized_amount, normalized_cash_currency) =
             normalize_amount(*amount, cash_currency);
-        let account_value =
-            normalized_amount * latest_rate(normalized_cash_currency, &account.currency);
-        let base_value = normalized_amount * latest_rate(normalized_cash_currency, base_currency);
+        let account_value = normalized_amount
+            * rate_for(
+                &mut account_warnings,
+                latest_rate,
+                normalized_cash_currency,
+                &account.currency,
+            );
+        let base_value = normalized_amount
+            * rate_for(
+                &mut summary_warnings,
+                latest_rate,
+                normalized_cash_currency,
+                base_currency,
+            );
         valuation.cash_balance += account_value;
         valuation.cash_balance_base += base_value;
 
@@ -364,6 +422,8 @@ where
                 "Skipping current valuation for position {} in account {} because asset metadata is missing",
                 asset_id, account.id
             );
+            summary_warnings.push(MISSING_ASSET_WARNING.to_string());
+            account_warnings.push(MISSING_ASSET_WARNING.to_string());
             continue;
         };
         if asset.is_alternative() {
@@ -373,15 +433,16 @@ where
             continue;
         }
 
-        holdings_count += 1;
-
         let Some(quote_pair) = latest_quote_pairs.get(asset_id) else {
             warn!(
                 "Missing latest quote for asset {} in account {}. Current market value treated as zero.",
                 asset_id, account.id
             );
+            summary_warnings.push(MISSING_QUOTE_WARNING.to_string());
+            account_warnings.push(MISSING_QUOTE_WARNING.to_string());
             continue;
         };
+        holdings_count += 1;
         valuation.source_data_as_of = latest_datetime(
             valuation.source_data_as_of,
             Some(quote_pair.latest.timestamp),
@@ -391,11 +452,21 @@ where
             normalize_amount(quote_pair.latest.close, &quote_pair.latest.currency);
         let market_value_quote =
             normalized_price * position.quantity * position.contract_multiplier;
-        let market_value_base =
-            market_value_quote * latest_rate(normalized_quote_currency, base_currency);
+        let market_value_base = market_value_quote
+            * rate_for(
+                &mut summary_warnings,
+                latest_rate,
+                normalized_quote_currency,
+                base_currency,
+            );
 
-        valuation.investment_market_value +=
-            market_value_quote * latest_rate(normalized_quote_currency, &account.currency);
+        valuation.investment_market_value += market_value_quote
+            * rate_for(
+                &mut account_warnings,
+                latest_rate,
+                normalized_quote_currency,
+                &account.currency,
+            );
         valuation.investment_market_value_base += market_value_base;
         add_total(
             &mut currency_base_totals,
@@ -407,13 +478,32 @@ where
     valuation.total_value = valuation.cash_balance + valuation.investment_market_value;
     valuation.total_value_base =
         valuation.cash_balance_base + valuation.investment_market_value_base;
+    summary_warnings.sort();
+    summary_warnings.dedup();
+    account_warnings.sort();
+    account_warnings.dedup();
+    valuation.warnings = account_warnings;
+
     AccountValuationComputation {
         valuation,
         holdings_count,
         currency_base_totals,
         cash_base_totals,
         cash_local_totals,
+        summary_warnings,
     }
+}
+
+fn rate_for<F, R>(warnings: &mut Vec<String>, latest_rate: &mut F, from: &str, to: &str) -> Decimal
+where
+    F: FnMut(&str, &str) -> R,
+    R: Into<CurrentValuationRate>,
+{
+    let lookup = latest_rate(from, to).into();
+    if let Some(warning) = lookup.warning {
+        warnings.push(warning);
+    }
+    lookup.rate
 }
 
 fn zero_current_account_valuation(
@@ -433,6 +523,7 @@ fn zero_current_account_valuation(
         total_value_base: Decimal::ZERO,
         source_data_as_of: None,
         calculated_at,
+        warnings: Vec::new(),
     }
 }
 
@@ -488,6 +579,7 @@ fn empty_current_valuation_response(
             cash_currency_split: Vec::new(),
             source_data_as_of: None,
             calculated_at,
+            warnings: Vec::new(),
         },
         accounts: Vec::new(),
     }
@@ -611,7 +703,7 @@ fn is_expired_option_asset(asset: &Asset, today: NaiveDate) -> bool {
 
 struct FxRateCache<'a> {
     fx_service: &'a dyn FxServiceTrait,
-    rates: HashMap<(String, String), Decimal>,
+    rates: HashMap<(String, String), CurrentValuationRate>,
 }
 
 impl<'a> FxRateCache<'a> {
@@ -622,27 +714,28 @@ impl<'a> FxRateCache<'a> {
         }
     }
 
-    fn get(&mut self, from: &str, to: &str) -> Decimal {
+    fn get(&mut self, from: &str, to: &str) -> CurrentValuationRate {
         if from == to {
-            return Decimal::ONE;
+            return Decimal::ONE.into();
         }
 
         let key = (from.to_string(), to.to_string());
         if let Some(rate) = self.rates.get(&key) {
-            return *rate;
+            return rate.clone();
         }
 
-        let rate = match self.fx_service.get_latest_exchange_rate(from, to) {
-            Ok(rate) => rate,
+        let (rate, warning) = match self.fx_service.get_latest_exchange_rate(from, to) {
+            Ok(rate) => (rate, None),
             Err(error) => {
                 warn!(
                     "Falling back to FX rate 1 while calculating current valuation from {} to {}: {}",
                     from, to, error
                 );
-                Decimal::ONE
+                (Decimal::ONE, Some(MISSING_FX_WARNING.to_string()))
             }
         };
-        self.rates.insert(key, rate);
-        rate
+        let latest_rate = CurrentValuationRate { rate, warning };
+        self.rates.insert(key, latest_rate.clone());
+        latest_rate
     }
 }

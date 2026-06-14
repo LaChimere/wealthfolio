@@ -1,5 +1,11 @@
 import { useAccountsSimplePerformance } from "@/hooks/use-accounts-simple-performance";
-import type { Account, Holding, PortfolioAllocations, TaxonomyAllocation } from "@/lib/types";
+import type {
+  Account,
+  AccountValueSource,
+  Holding,
+  PortfolioAllocations,
+  TaxonomyAllocation,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Card, Icons, PrivacyAmount, Skeleton } from "@wealthfolio/ui";
 import { useMemo, useState } from "react";
@@ -9,7 +15,6 @@ import {
   currencyLensItems,
   OTHER_COLOR,
   toBreakdownNodes,
-  type AccountValueSource,
   type BreakdownNode,
 } from "./allocation-derivations";
 

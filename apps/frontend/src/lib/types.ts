@@ -1005,6 +1005,7 @@ export interface CurrentAccountValuation {
   totalValueBase: number;
   sourceDataAsOf: string | null;
   calculatedAt: string;
+  warnings: string[];
 }
 
 export interface CurrentValuationSplit {
@@ -1026,11 +1027,19 @@ export interface CurrentValuationSummary {
   cashCurrencySplit: CurrentValuationSplit[];
   sourceDataAsOf: string | null;
   calculatedAt: string;
+  warnings: string[];
 }
 
 export interface CurrentValuationResponse {
   summary: CurrentValuationSummary;
   accounts: CurrentAccountValuation[];
+}
+
+export interface AccountValueSource {
+  accountId: string;
+  totalValue?: number | null;
+  totalValueBase?: number | null;
+  fxRateToBase?: number | null;
 }
 
 export interface AccountSummaryView {

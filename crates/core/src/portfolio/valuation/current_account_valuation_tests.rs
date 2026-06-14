@@ -10,7 +10,7 @@ use crate::{
         snapshot::{AccountStateSnapshot, Position, SnapshotSource},
         valuation::{
             calculate_current_valuation_response_from_snapshots, filter_current_valuation_accounts,
-            unique_account_ids, DailyAccountValuation, ExternalFlowSource,
+            unique_account_ids, CurrentValuationRate, DailyAccountValuation, ExternalFlowSource,
         },
     },
     quotes::{LatestQuotePair, Quote},
@@ -414,6 +414,154 @@ fn current_account_valuation_returns_zero_for_no_snapshot() {
     assert_eq!(current[0].total_value, Decimal::ZERO);
     assert_eq!(current[0].total_value_base, Decimal::ZERO);
     assert_eq!(current[0].source_data_as_of, None);
+}
+
+#[test]
+fn current_valuation_warns_and_excludes_unpriced_positions_from_holding_count() {
+    let account = account("acc-1", "USD");
+    let calculated_at = DateTime::<Utc>::from_timestamp(1_776_480_000, 0).unwrap();
+    let snapshots = HashMap::from([(
+        "acc-1".to_string(),
+        snapshot(
+            "acc-1",
+            "USD",
+            HashMap::from([(
+                "AAPL".to_string(),
+                position("acc-1", "AAPL", dec!(2), "USD", false),
+            )]),
+            HashMap::new(),
+        ),
+    )]);
+    let assets = HashMap::from([("AAPL".to_string(), asset("AAPL", AssetKind::Investment))]);
+
+    let response = calculate_current_valuation_response_from_snapshots(
+        "account:acc-1",
+        &[account],
+        &snapshots,
+        &assets,
+        &HashMap::new(),
+        "USD",
+        calculated_at,
+        true,
+        latest_rate,
+    );
+
+    assert_eq!(response.summary.holdings_count, 0);
+    assert_eq!(response.summary.investment_market_value_base, Decimal::ZERO);
+    assert!(response.summary.warnings.iter().any(
+        |warning| warning == "Some market prices are missing, so this value may be incomplete."
+    ));
+    assert!(response.accounts[0].warnings.iter().any(
+        |warning| warning == "Some market prices are missing, so this value may be incomplete."
+    ));
+}
+
+#[test]
+fn current_valuation_surfaces_fx_fallback_warnings() {
+    let account = account("acc-1", "USD");
+    let calculated_at = DateTime::<Utc>::from_timestamp(1_776_480_000, 0).unwrap();
+    let snapshots = HashMap::from([(
+        "acc-1".to_string(),
+        snapshot(
+            "acc-1",
+            "USD",
+            HashMap::from([(
+                "AAPL".to_string(),
+                position("acc-1", "AAPL", dec!(2), "EUR", false),
+            )]),
+            HashMap::new(),
+        ),
+    )]);
+    let assets = HashMap::from([("AAPL".to_string(), asset("AAPL", AssetKind::Investment))]);
+    let quotes = HashMap::from([("AAPL".to_string(), quote_pair("AAPL", dec!(50), "EUR"))]);
+
+    let response = calculate_current_valuation_response_from_snapshots(
+        "account:acc-1",
+        &[account],
+        &snapshots,
+        &assets,
+        &quotes,
+        "USD",
+        calculated_at,
+        true,
+        |from, to| {
+            if from == to {
+                CurrentValuationRate {
+                    rate: Decimal::ONE,
+                    warning: None,
+                }
+            } else {
+                CurrentValuationRate {
+                    rate: Decimal::ONE,
+                    warning: Some(
+                        "Some exchange rates are missing, so this value may be approximate."
+                            .to_string(),
+                    ),
+                }
+            }
+        },
+    );
+
+    assert_eq!(response.summary.total_value_base, dec!(100));
+    assert!(response.summary.warnings.contains(
+        &"Some exchange rates are missing, so this value may be approximate.".to_string()
+    ));
+    assert!(response.accounts[0].warnings.contains(
+        &"Some exchange rates are missing, so this value may be approximate.".to_string()
+    ));
+}
+
+#[test]
+fn current_valuation_keeps_account_currency_fx_warnings_off_summary() {
+    let account = account("acc-1", "CAD");
+    let calculated_at = DateTime::<Utc>::from_timestamp(1_776_480_000, 0).unwrap();
+    let snapshots = HashMap::from([(
+        "acc-1".to_string(),
+        snapshot(
+            "acc-1",
+            "CAD",
+            HashMap::from([(
+                "AAPL".to_string(),
+                position("acc-1", "AAPL", dec!(2), "USD", false),
+            )]),
+            HashMap::new(),
+        ),
+    )]);
+    let assets = HashMap::from([("AAPL".to_string(), asset("AAPL", AssetKind::Investment))]);
+    let quotes = HashMap::from([("AAPL".to_string(), quote_pair("AAPL", dec!(50), "USD"))]);
+
+    let response = calculate_current_valuation_response_from_snapshots(
+        "account:acc-1",
+        &[account],
+        &snapshots,
+        &assets,
+        &quotes,
+        "USD",
+        calculated_at,
+        true,
+        |from, to| {
+            if from == to {
+                CurrentValuationRate {
+                    rate: Decimal::ONE,
+                    warning: None,
+                }
+            } else {
+                CurrentValuationRate {
+                    rate: Decimal::ONE,
+                    warning: Some(
+                        "Some exchange rates are missing, so this value may be approximate."
+                            .to_string(),
+                    ),
+                }
+            }
+        },
+    );
+
+    assert_eq!(response.summary.total_value_base, dec!(100));
+    assert!(response.summary.warnings.is_empty());
+    assert!(response.accounts[0].warnings.contains(
+        &"Some exchange rates are missing, so this value may be approximate.".to_string()
+    ));
 }
 
 #[test]

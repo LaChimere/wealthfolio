@@ -1,12 +1,10 @@
-import type { Account, CategoryAllocation, CurrentValuationSummary, Holding } from "@/lib/types";
-
-/** Minimal per-account valuation shape (matches the accounts simple-performance metrics). */
-export interface AccountValueSource {
-  accountId: string;
-  totalValue?: number | null;
-  totalValueBase?: number | null;
-  fxRateToBase?: number | null;
-}
+import type {
+  Account,
+  AccountValueSource,
+  CategoryAllocation,
+  CurrentValuationSummary,
+  Holding,
+} from "@/lib/types";
 
 /** Cycling palette built from the theme chart tokens (retargeted to the allocation palette). */
 export const CHART_PALETTE = [
