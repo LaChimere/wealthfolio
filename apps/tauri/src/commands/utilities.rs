@@ -415,10 +415,73 @@ pub async fn open_external_url(app_handle: AppHandle, url: String) -> Result<(),
 
 #[allow(deprecated)]
 fn open_external_link(app_handle: &AppHandle, url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_some() {
+        return open_external_link_from_appimage(url);
+    }
+
     app_handle
         .shell()
         .open(url, None)
         .map_err(|e| format!("Failed to open external link: {}", e))
+}
+
+#[cfg(target_os = "linux")]
+fn open_external_link_from_appimage(url: &str) -> Result<(), String> {
+    let openers: [(&str, &[&str]); 4] = [
+        ("/usr/bin/xdg-open", &[url]),
+        ("/usr/bin/gio", &["open", url]),
+        ("xdg-open", &[url]),
+        ("gio", &["open", url]),
+    ];
+
+    let mut errors = Vec::new();
+    for (program, args) in openers {
+        if program.starts_with('/') && !std::path::Path::new(program).is_file() {
+            continue;
+        }
+
+        let mut command = std::process::Command::new(program);
+        command
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        sanitize_appimage_child_environment(&mut command);
+
+        match command.spawn() {
+            Ok(_) => return Ok(()),
+            Err(err) => errors.push(format!("{program}: {err}")),
+        }
+    }
+
+    Err(format!(
+        "Failed to open external link from AppImage: {}",
+        errors.join("; ")
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn sanitize_appimage_child_environment(command: &mut std::process::Command) {
+    for key in [
+        "APPIMAGE",
+        "APPDIR",
+        "ARGV0",
+        "OWD",
+        "LD_LIBRARY_PATH",
+        "GIO_MODULE_DIR",
+        "GSETTINGS_SCHEMA_DIR",
+        "GTK_PATH",
+        "GDK_PIXBUF_MODULE_FILE",
+        "GDK_PIXBUF_MODULEDIR",
+        "QT_PLUGIN_PATH",
+        "QT_QPA_PLATFORM_PLUGIN_PATH",
+        "QML2_IMPORT_PATH",
+        "XDG_CONFIG_DIRS",
+        "XDG_DATA_DIRS",
+    ] {
+        command.env_remove(key);
+    }
 }
 
 #[tauri::command]
