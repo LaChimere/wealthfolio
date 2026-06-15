@@ -233,4 +233,95 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("fetches authenticated plans and maps user info with restored access tokens", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test",
+        CONNECT_API_URL: "https://api.example.test",
+      },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        expect(init?.headers).toMatchObject({
+          authorization: "Bearer access-token",
+          "content-type": "application/json",
+        });
+        if (String(input).endsWith("/api/v1/subscription/plans")) {
+          return Response.json({ plans: [{ id: "pro" }] });
+        }
+        return Response.json({
+          id: "user-1",
+          fullName: "Ada Lovelace",
+          email: "ada@example.test",
+          avatarUrl: "https://example.test/avatar.png",
+          locale: "en",
+          weekStartsOnMonday: true,
+          timezone: "UTC",
+          timezoneAutoSync: false,
+          timeFormat: 24,
+          dateFormat: "yyyy-MM-dd",
+          teamId: "team-1",
+          teamRole: "owner",
+          team: {
+            id: "team-1",
+            name: null,
+            logoUrl: null,
+            plan: "pro",
+            subscriptionStatus: "active",
+            subscriptionCurrentPeriodEnd: "2026-07-01T00:00:00Z",
+            subscriptionCancelAtPeriodEnd: false,
+            canceledAt: null,
+            countryCode: "US",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).resolves.toEqual({ plans: [{ id: "pro" }] });
+      await expect(service.getUserInfo()).resolves.toMatchObject({
+        id: "user-1",
+        full_name: "Ada Lovelace",
+        avatar_url: "https://example.test/avatar.png",
+        week_starts_on_monday: true,
+        timezone_auto_sync: false,
+        time_format: 24,
+        date_format: "yyyy-MM-dd",
+        team_id: "team-1",
+        team_role: "owner",
+        team: {
+          id: "team-1",
+          name: "",
+          subscription_status: "active",
+          subscription_current_period_end: "2026-07-01T00:00:00Z",
+          subscription_cancel_at_period_end: false,
+          country_code: "US",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      });
+      expect(requests).toEqual([
+        "POST https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/subscription/plans",
+        "POST https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/user/me",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

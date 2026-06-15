@@ -203,6 +203,25 @@ export function createLocalConnectService({
     async getSubscriptionPlansPublic() {
       return await fetchPublicSubscriptionPlans(env, fetchImpl);
     },
+    async getSubscriptionPlans() {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      return await fetchAuthenticatedConnectJson(
+        secretService,
+        env,
+        fetchImpl,
+        "/api/v1/subscription/plans",
+      );
+    },
+    async getUserInfo() {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      return userInfoFromApi(
+        await fetchAuthenticatedConnectJson(secretService, env, fetchImpl, "/api/v1/user/me"),
+      );
+    },
     getSyncedAccounts() {
       return accountService
         .getAllAccounts()
@@ -612,6 +631,107 @@ async function fetchPublicSubscriptionPlans(
       500,
     );
   }
+}
+
+async function fetchAuthenticatedConnectJson(
+  secretService: SecretService,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+): Promise<unknown> {
+  const { accessToken } = await restoreLocalSyncSession(secretService, env, fetchImpl);
+  const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
+  const url = `${baseUrl}${path}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+    });
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", `Request failed: ${errorMessage(error)}`, 500);
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to read response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!response.ok) {
+    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
+  }
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+}
+
+function userInfoFromApi(value: unknown): unknown {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "No user info returned", 500);
+  }
+  const team = isRecord(value.team) ? value.team : null;
+  return {
+    id: stringValue(value.id),
+    full_name: optionalString(value.fullName ?? value.full_name),
+    email: optionalString(value.email),
+    avatar_url: optionalString(value.avatarUrl ?? value.avatar_url),
+    locale: optionalString(value.locale),
+    week_starts_on_monday: optionalBoolean(value.weekStartsOnMonday ?? value.week_starts_on_monday),
+    timezone: optionalString(value.timezone),
+    timezone_auto_sync: optionalBoolean(value.timezoneAutoSync ?? value.timezone_auto_sync),
+    time_format: optionalNumber(value.timeFormat ?? value.time_format),
+    date_format: optionalString(value.dateFormat ?? value.date_format),
+    team_id: optionalString(value.teamId ?? value.team_id),
+    team_role: optionalString(value.teamRole ?? value.team_role),
+    team: team
+      ? {
+          id: stringValue(team.id),
+          name: optionalString(team.name) ?? "",
+          logo_url: optionalString(team.logoUrl ?? team.logo_url),
+          plan: optionalString(team.plan),
+          subscription_status: optionalString(team.subscriptionStatus ?? team.subscription_status),
+          subscription_current_period_end: optionalString(
+            team.subscriptionCurrentPeriodEnd ?? team.subscription_current_period_end,
+          ),
+          subscription_cancel_at_period_end: optionalBoolean(
+            team.subscriptionCancelAtPeriodEnd ?? team.subscription_cancel_at_period_end,
+          ),
+          canceled_at: optionalString(team.canceledAt ?? team.canceled_at),
+          country_code: optionalString(team.countryCode ?? team.country_code),
+          created_at: optionalString(team.createdAt ?? team.created_at),
+        }
+      : null,
+  };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function normalizeConnectApiUrl(value: string | undefined): string {

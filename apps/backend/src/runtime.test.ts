@@ -1200,6 +1200,12 @@ describe("TS backend runtime composition", () => {
       env: { CONNECT_API_URL: "https://api.example.test" },
       marketDataFetch: (async (input) => {
         publicPlanRequests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return Response.json({ id: "user-1", email: "user@example.test" });
+        }
         return Response.json({ plans: [{ id: "free" }] });
       }) as typeof fetch,
       repositoryRoot,
@@ -1220,8 +1226,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/sync/connections`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/plans`),
-        new Request(`${server.baseUrl}/api/v1/connect/user`),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
@@ -1231,6 +1235,31 @@ describe("TS backend runtime composition", () => {
       expect(publicPlansResponse.status).toBe(200);
       await expect(publicPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
       expect(publicPlanRequests).toEqual(["https://api.example.test/api/v1/subscription/plans"]);
+      publicPlanRequests.length = 0;
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const authenticatedPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans`);
+      expect(authenticatedPlansResponse.status).toBe(200);
+      await expect(authenticatedPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
+
+      const userInfoResponse = await fetch(`${server.baseUrl}/api/v1/connect/user`);
+      expect(userInfoResponse.status).toBe(200);
+      await expect(userInfoResponse.json()).resolves.toMatchObject({
+        id: "user-1",
+        email: "user@example.test",
+      });
+      expect(publicPlanRequests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/subscription/plans",
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/user/me",
+      ]);
 
       const syncResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync`, {
         method: "POST",
