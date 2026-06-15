@@ -50,7 +50,7 @@ provider paths support safe native PDF payloads.
 │                         Transport Layer                                      │
 │                                                                              │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │   Electron (Desktop)        │    │   Axum (Web Server)                 │ │
+│  │   Electron (Desktop)        │    │   Bun TS Backend (Web)              │ │
 │  │   - IPC-mediated streaming  │    │   - NDJSON HTTP streaming           │ │
 │  │   - DesktopAiEnvironment    │    │   - ServerAiEnvironment             │ │
 │  └─────────────────────────────┘    └─────────────────────────────────────┘ │
@@ -228,7 +228,7 @@ async fn persistence_actor(
 
 ### AiEnvironment Trait
 
-Dependency injection interface implemented by desktop and Axum runtimes:
+Dependency injection interface implemented by desktop and web backend runtimes:
 
 ```rust
 pub trait AiEnvironment: Send + Sync {

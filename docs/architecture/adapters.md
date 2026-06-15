@@ -7,10 +7,10 @@ desktop builds and browser/web builds with the same feature-level imports.
 
 - **Electron desktop**: `@/adapters` resolves to
   `apps/frontend/src/adapters/electron` and commands cross the secure preload
-  IPC bridge before Electron main proxies Rust-backed operations to the
-  authenticated sidecar.
+  IPC bridge before Electron main proxies backend operations to the
+  authenticated Bun/TypeScript sidecar.
 - **Web**: `@/adapters` resolves to `apps/frontend/src/adapters/web` and
-  commands call REST endpoints on the Axum server.
+  commands call REST endpoints on the Bun/TypeScript backend.
 
 ## Build-time resolution
 
@@ -59,8 +59,10 @@ and renderer code does not gain raw Node.js access.
    needed, the matching web adapter export.
 2. Register Electron IPC metadata in `apps/electron/src/shared/ipc.ts` and route
    it through `apps/electron/src/main/commands.ts`.
-3. Add or reuse the Axum sidecar/web endpoint under `apps/server/src/api/`.
-4. Keep business logic in `crates/core` or the relevant shared Rust crate.
+3. Add or reuse the backend route under `apps/backend/src/http.ts` and the
+   relevant domain service under `apps/backend/src/domains/`.
+4. Keep business logic in the TypeScript backend domain layer or a shared
+   TypeScript package.
 5. Add/update adapter parity tests so Electron IPC, web mappings, and frontend
    invocations stay aligned.
 

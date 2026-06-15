@@ -7,22 +7,23 @@ shell with Electron.
 
 - Keep the React/Vite UI and adapter contract stable while the desktop runtime
   changes.
-- Reuse the existing Rust business logic, SQLite storage, sync, AI, and market
-  data services instead of rewriting financial logic in TypeScript.
+- Run the Bun/TypeScript backend locally while preserving behavior from the
+  legacy Rust business logic, SQLite storage, sync, AI, and market data
+  services.
 - Preserve local desktop data and secrets from earlier desktop releases.
 - Keep web mode separate and functional throughout the migration.
 
 ## Runtime shape
 
 Electron runs as a thin desktop shell around the existing frontend and a managed
-local Rust sidecar.
+local Bun/TypeScript backend sidecar.
 
 ```text
 Renderer (React)
   -> secure preload API
   -> Electron main IPC
-  -> loopback Rust sidecar
-  -> existing Rust services
+  -> loopback Bun/TypeScript sidecar
+  -> TypeScript backend services
   -> SQLite/keyring/network providers
 ```
 
@@ -30,37 +31,37 @@ The renderer must not receive raw Node.js access, backend tokens, or the sidecar
 base URL. Electron main owns sidecar lifecycle, native desktop integration, and
 sidecar credentials.
 
-## Rust sidecar profile
+## TypeScript backend sidecar profile
 
-The sidecar is based on the existing Axum server/service graph with a dedicated
-desktop startup profile:
+The sidecar is based on the Bun backend runtime with a dedicated desktop startup
+profile:
 
 - bind to loopback only, preferably on an ephemeral port;
 - require a per-run secret or token known only to Electron main;
 - restrict CORS to the Electron origin or Vite dev origin;
 - use the resolved desktop data root instead of server defaults;
-- use Rust keyring-backed secrets instead of the server `secrets.json` store;
+- use keyring-backed desktop secrets instead of the server `secrets.json` store;
 - expose domain events through SSE or an equivalent main-mediated event bridge.
 
-The current web server defaults are intentionally different: `apps/server` reads
-`WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_BACKEND`, `WF_SECRET_FILE`, auth, and
-CORS from environment variables for self-hosted deployments.
+The current web server defaults are intentionally different: `apps/backend`
+reads `WF_DB_PATH`, `WF_SECRET_KEY`, `WF_SECRET_BACKEND`, `WF_SECRET_FILE`,
+auth, and CORS from environment variables for self-hosted deployments.
 
-The initial Electron sidecar profile uses `WF_SIDECAR_TOKEN` to enable a
-fail-closed bearer-token middleware on protected API routes. When that variable
-is set, the server refuses non-loopback `WF_LISTEN_ADDR` values and rejects
-empty tokens. Electron main generates the token per run, keeps the base URL and
-token out of the renderer, and starts the server through `cargo run` only in
-development. Packaged Electron builds launch a bundled `wealthfolio-server`
-binary from Electron's `resources/sidecars` directory.
+The Electron sidecar profile uses `WF_SIDECAR_TOKEN` to enable a fail-closed
+bearer-token middleware on protected API routes. When that variable is set, the
+backend refuses non-loopback `WF_LISTEN_ADDR` values and rejects empty tokens.
+Electron main generates the token per run, keeps the base URL and token out of
+the renderer, starts the backend through `bun run --cwd apps/backend start` in
+development, and launches a bundled `wealthfolio-backend` executable from
+Electron's `resources/sidecars` directory in packaged builds.
 
-The Electron sidecar sets `WF_SECRET_BACKEND=keyring` and starts the server with
-the `keyring-backend` feature so desktop provider secrets are durable. Packaged
-Electron builds stay in the same OS keyring namespace as earlier desktop
-releases, while unpackaged Electron development sets `WF_SECRET_NAMESPACE=dev`
-so dev provider credentials remain isolated. Electron still generates a per-run
-`WF_SECRET_KEY` for the sidecar's server profile, but provider secret storage no
-longer uses `WF_SECRET_FILE` in desktop mode.
+The Electron sidecar sets `WF_SECRET_BACKEND=keyring` so desktop provider
+secrets are durable through the TypeScript backend's native keyring binding.
+Packaged Electron builds stay in the same OS keyring namespace as earlier
+desktop releases, while unpackaged Electron development sets
+`WF_SECRET_NAMESPACE=dev` so dev provider credentials remain isolated. Electron
+still generates a per-run `WF_SECRET_KEY` for the backend profile, but provider
+secret storage no longer uses `WF_SECRET_FILE` in desktop mode.
 
 ## Data root compatibility
 
@@ -110,11 +111,9 @@ Development secrets use `wealthfolio_dev_<service>` keyring service IDs through
 
 The server file-backed secret store remains valid for web/self-hosted mode and
 is still the default when `WF_SECRET_BACKEND` is unset or set to `file`.
-`WF_SECRET_BACKEND=keyring` is a desktop mode. Rust sidecars require a server
-binary compiled with the `keyring-backend` Cargo feature; the TS runtime now
-wires the same service IDs through the native keyring binding. Unavailable OS
-keyring providers or native bindings surface errors instead of falling back to
-disk.
+`WF_SECRET_BACKEND=keyring` is a desktop mode. The TS runtime wires the same
+service IDs through the native keyring binding. Unavailable OS keyring providers
+or native bindings surface errors instead of falling back to disk.
 
 ## Frontend adapter strategy
 
@@ -154,23 +153,23 @@ management, team reset, pairing, composite pairing transfer/bootstrap, and
 pairing-flow coordinator commands proxy through the sidecar sync endpoints with
 path identifiers encoded in Electron main. Snapshot management, holdings CSV
 import, activity CSV parsing, and database backup/restore also proxy through the
-sidecar so manual/imported holdings updates and utility operations stay in Rust.
-Add-on zip payloads are validated as byte arrays in Electron main and forwarded
-to the sidecar as base64 JSON fields. AI chat NDJSON streaming uses dedicated
-start/cancel IPC channels because it cannot safely use the request/response JSON
-command proxy; Electron main owns the sidecar fetch, streams parsed events only
-to the originating `webContents`, and aborts streams when the owner closes or
-navigates. Electron update checks and installation are handled in Electron main
-through `electron-updater`, not the Rust sidecar, because Electron updater
-metadata is incompatible with the legacy Tauri update endpoint. The renderer
-still calls the typed preload IPC bridge, Electron main validates each command
-against an explicit allowlist, waits for sidecar readiness when a command needs
-Rust services, and proxies those requests to the loopback sidecar with the
-per-run bearer token. Sidecar base URLs and tokens must stay confined to
-Electron main; public runtime status and command errors must redact loopback
-URLs and token-shaped values before crossing IPC. Electron app info must use
-sanitized runtime metadata and must not expose desktop DB or log paths to the
-renderer. JSON request bodies must be sent with
+sidecar so manual/imported holdings updates and utility operations stay in the
+backend. Add-on zip payloads are validated as byte arrays in Electron main and
+forwarded to the sidecar as base64 JSON fields. AI chat NDJSON streaming uses
+dedicated start/cancel IPC channels because it cannot safely use the
+request/response JSON command proxy; Electron main owns the sidecar fetch,
+streams parsed events only to the originating `webContents`, and aborts streams
+when the owner closes or navigates. Electron update checks and installation are
+handled in Electron main through `electron-updater`, not the backend sidecar,
+because Electron updater metadata is incompatible with the legacy Tauri update
+endpoint. The renderer still calls the typed preload IPC bridge, Electron main
+validates each command against an explicit allowlist, waits for sidecar
+readiness when a command needs backend services, and proxies those requests to
+the loopback sidecar with the per-run bearer token. Sidecar base URLs and tokens
+must stay confined to Electron main; public runtime status and command errors
+must redact loopback URLs and token-shaped values before crossing IPC. Electron
+app info must use sanitized runtime metadata and must not expose desktop DB or
+log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 
@@ -236,16 +235,16 @@ Use Electron-native release tooling for desktop artifacts. The intended stack is
 `electron-builder` for packaging/signing and `electron-updater` for update
 metadata and install flow, unless later platform testing disproves that choice.
 
-The initial Electron packaging path stages the Vite renderer into
-`apps/electron/dist/renderer`, builds the Rust sidecar with the server
-`keyring-backend` feature, stages it in
+The Electron packaging path stages the Vite renderer into
+`apps/electron/dist/renderer`, Bun-compiles `apps/backend/src/main.ts` into a
+`wealthfolio-backend` executable, stages it with `backend-assets` in
 `apps/electron/resources/sidecars/<platform>-<arch>`, and packages the app with
-`electron-builder`. The `afterPack` hook copies the matching staged sidecar into
-the packaged app's `resources/sidecars` directory for each Electron target
-architecture. The packaged main process resolves the renderer from the asar app
-path and resolves the sidecar from `process.resourcesPath`, so it no longer
-depends on the repository checkout at runtime. Use `bun run package:electron`
-for the full local packaging flow.
+`electron-builder`. The `afterPack` hook copies the matching staged backend
+binary and assets into the packaged app's `resources/sidecars` directory for
+each Electron target architecture. The packaged main process resolves the
+renderer from the asar app path and resolves the sidecar from
+`process.resourcesPath`, so it no longer depends on the repository checkout at
+runtime. Use `bun run package:electron` for the full local packaging flow.
 
 Electron update checks and installs are main-process only. The renderer invokes
 the existing `check_for_updates` and `install_app_update` command names through
@@ -273,7 +272,7 @@ protocol callback handled by Electron main. Callback URLs must start with
 `wealthfolio://`, are never logged with query strings, and are delivered through
 the `listenDeepLink` adapter only after the renderer has registered a dedicated
 listener. The existing Wealthfolio Connect provider parses the forwarded URL and
-stores refresh tokens through the Rust sidecar/keyring path.
+stores refresh tokens through the TypeScript sidecar/keyring path.
 
 ## Validation expectations
 

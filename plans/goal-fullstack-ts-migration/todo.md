@@ -3185,6 +3185,14 @@ contract:
   only the TypeScript/Bun backend runtime, rejecting `WF_BACKEND_RUNTIME=rust`,
   and removing Electron main helpers that constructed `cargo run apps/server` or
   packaged `wealthfolio-server` commands.
+- `pr5-architecture-docs-ts-backend-refresh`: verification passed: targeted `rg`
+  checks against `docs/architecture/adapters.md`,
+  `docs/architecture/electron-migration.md`, and
+  `docs/architecture/ai-assistant-architecture.md`, full `bun run check`, and
+  `git diff --check`. Coverage includes adapter, Electron desktop, and AI
+  assistant architecture docs describing the Bun/TypeScript backend runtime,
+  packaged TS backend assets, and TypeScript keyring sidecar behavior instead of
+  stale Axum/Rust sidecar paths.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
