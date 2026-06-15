@@ -1655,8 +1655,15 @@ describe("TS backend runtime composition", () => {
         }),
       );
 
+      const syncStateWithoutSessionResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/sync-state`,
+      );
+      expect(syncStateWithoutSessionResponse.status).toBe(403);
+      await expect(syncStateWithoutSessionResponse.json()).resolves.toMatchObject({
+        message: "No sync session configured",
+      });
+
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/device/sync-state`),
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),

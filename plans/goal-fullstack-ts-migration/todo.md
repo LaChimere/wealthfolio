@@ -3557,6 +3557,16 @@ contract:
   fields such as `tagline`, `isAvailable`, `isComingSoon`, `badge`,
   `yearlyDiscountPercent`, and `pricing.yearlyPerMonth` rejecting malformed
   scalar types like Rust serde instead of being silently defaulted or nulled.
+- `pr5-connect-device-sync-state-fresh`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "sync state|device sync local|Connect session"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/connect/device/sync-state` returning Rust-compatible `FRESH` when a valid
+  Connect session exists but no sync identity is configured, or the identity has
+  a nonce without device ID; missing Connect sessions return forbidden before
+  local state checks, and device-ID-present states remain feature-gated pending
+  cloud device verification.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

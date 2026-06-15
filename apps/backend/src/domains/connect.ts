@@ -26,6 +26,8 @@ export interface LocalConnectServiceDependencies {
 export interface LocalConnectDeviceSyncServiceDependencies {
   db: Database;
   secretService?: SecretService;
+  env?: NodeJS.ProcessEnv;
+  fetch?: typeof fetch;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -2086,10 +2088,19 @@ interface SyncDeviceConfigRow {
 export function createLocalConnectDeviceSyncService({
   db,
   secretService,
+  env = process.env,
+  fetch: fetchImpl = fetch,
 }: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
   const disabledService = createDisabledConnectDeviceSyncService();
   return {
     ...disabledService,
+    async getDeviceSyncState() {
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      return getLocalDeviceSyncFreshStateOrThrow(secretService);
+    },
     getDeviceSyncEngineStatus() {
       return getLocalDeviceSyncEngineStatus(db);
     },
@@ -2135,6 +2146,42 @@ export function createLocalConnectDeviceSyncService({
   };
 }
 
+async function getLocalDeviceSyncFreshStateOrThrow(
+  secretService: SecretService,
+): Promise<Record<string, unknown>> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
+    return freshDeviceSyncState();
+  }
+  let identity: unknown;
+  try {
+    identity = JSON.parse(rawIdentity);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse identity: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  const parsed = parseSyncIdentity(identity);
+  if (!parsed.deviceNonce || !parsed.deviceId) {
+    return freshDeviceSyncState();
+  }
+  throw deviceSyncDisabled();
+}
+
+function freshDeviceSyncState(): Record<string, unknown> {
+  return {
+    state: "FRESH",
+    deviceId: null,
+    deviceName: null,
+    keyVersion: null,
+    serverKeyVersion: null,
+    isTrusted: false,
+    trustedDevices: [],
+  };
+}
+
 async function clearLocalDeviceSyncData(db: Database, secretService: SecretService): Promise<void> {
   await clearLocalSyncIdentity(secretService);
   resetLocalSyncSession(db);
@@ -2172,6 +2219,15 @@ async function clearLocalSyncIdentity(secretService: SecretService): Promise<voi
 }
 
 function parseSyncIdentityDeviceNonce(identity: unknown): string | null {
+  return parseSyncIdentity(identity).deviceNonce;
+}
+
+function parseSyncIdentity(identity: unknown): {
+  deviceNonce: string | null;
+  deviceId: string | null;
+  rootKey: string | null;
+  keyVersion: number | null;
+} {
   if (!isRecord(identity)) {
     throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
   }
@@ -2182,7 +2238,12 @@ function parseSyncIdentityDeviceNonce(identity: unknown): string | null {
   assertOptionalNumberField(identity, "keyVersion");
   assertOptionalStringField(identity, "deviceSecretKey");
   assertOptionalStringField(identity, "devicePublicKey");
-  return optionalString(identity.deviceNonce);
+  return {
+    deviceNonce: optionalString(identity.deviceNonce),
+    deviceId: optionalString(identity.deviceId),
+    rootKey: optionalString(identity.rootKey),
+    keyVersion: optionalNumber(identity.keyVersion),
+  };
 }
 
 function assertOptionalStringField(record: Record<string, unknown>, key: string): void {

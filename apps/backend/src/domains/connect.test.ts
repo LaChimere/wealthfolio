@@ -1922,6 +1922,87 @@ describe("TS Connect local session service", () => {
 });
 
 describe("TS Connect device sync local service", () => {
+  test("returns local FRESH sync state after restoring a Connect session without sync identity", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ access_token: "access-token" });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toEqual({
+        state: "FRESH",
+        deviceId: null,
+        deviceName: null,
+        keyVersion: null,
+        serverKeyVersion: null,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+      expect(requests).toEqual([
+        "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns local FRESH sync state when identity has nonce but no device id", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1" }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "FRESH",
+        deviceId: null,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requires a Connect session before local device sync state checks", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads local sync engine status and bootstrap requirement", () => {
     const db = new Database(":memory:");
     db.exec(`
