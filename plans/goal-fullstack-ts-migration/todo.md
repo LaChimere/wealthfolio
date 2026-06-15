@@ -3422,6 +3422,15 @@ contract:
   every activity lacks a non-blank `id`, finalizing sync success with zero
   upserts like Rust's `map_broker_activity` skip path, and preserving the
   explicit mapper feature gate for pages containing mappable activity IDs.
+- `pr5-connect-activity-pagination`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "activity pages|broker activity|transaction-mode"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/connect/sync/activities` following Rust-compatible activity page pagination
+  via `has_more`/`total`/`limit`, advancing offsets by received rows, continuing
+  over non-empty unmappable pages, recording per-account fetch failures on any
+  page, and preserving the mapper feature gate for the first mappable activity
+  page.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

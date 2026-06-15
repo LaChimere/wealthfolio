@@ -1128,15 +1128,23 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
     const service = createLocalConnectService({
       db,
       secretService,
       fetch: async (input) => {
+        requests.push(String(input));
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
+        if (String(input).includes("offset=0")) {
+          return Response.json({
+            data: [{ description: "missing id" }, { id: "   ", description: "blank id" }],
+            pagination: { has_more: true },
+          });
+        }
         return Response.json({
-          data: [{ description: "missing id" }, { id: "   ", description: "blank id" }],
+          data: [],
           pagination: { has_more: false },
         });
       },
@@ -1192,6 +1200,12 @@ describe("TS Connect local session service", () => {
         sync_status: "IDLE",
         last_error: null,
       });
+      const activityRequests = requests.filter((request) =>
+        request.includes("/api/v1/sync/brokerage/accounts/provider-account/activities?"),
+      );
+      expect(activityRequests).toHaveLength(2);
+      expect(activityRequests[0]).toContain("offset=0");
+      expect(activityRequests[1]).toContain("offset=2");
     } finally {
       db.close();
     }

@@ -1079,6 +1079,7 @@ async function syncEmptyTransactionActivityPages(
     newAssetIds: [] as string[],
   };
   const endDate = dateOnly(new Date());
+  const pageLimit = 1000;
   for (const account of accounts) {
     if (!account.providerAccountId) {
       continue;
@@ -1086,28 +1087,85 @@ async function syncEmptyTransactionActivityPages(
     upsertBrokerSyncAttempt(db, account.id);
     const { accessToken } = await restoreSession();
     const startDate = brokerActivitySyncStartDate(db, account.id, endDate);
-    const path = brokerActivitiesPath(account.providerAccountId, startDate, endDate, 0, 1000);
-    let page: unknown;
-    try {
-      page = await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
-    } catch (error) {
-      const message = errorMessage(error);
-      upsertBrokerSyncFailure(db, account.id, message);
-      summary.accountsFailed += 1;
-      continue;
-    }
-    const data = isRecord(page) && Array.isArray(page.data) ? page.data : [];
-    if (data.length > 0) {
+    let offset = 0;
+    let accountFailed = false;
+    for (;;) {
+      const path = brokerActivitiesPath(
+        account.providerAccountId,
+        startDate,
+        endDate,
+        offset,
+        pageLimit,
+      );
+      let page: unknown;
+      try {
+        page = await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
+      } catch (error) {
+        const message = errorMessage(error);
+        upsertBrokerSyncFailure(db, account.id, message);
+        summary.accountsFailed += 1;
+        accountFailed = true;
+        break;
+      }
+      const data = brokerActivityPageData(page);
+      const received = data.length;
+      if (received === 0) {
+        break;
+      }
       if (data.some(hasBrokerActivityMappableId)) {
         const message = "Broker activity mapping is not yet available in the TS backend runtime";
         upsertBrokerSyncFailure(db, account.id, message);
         throw new ConnectNotImplementedError(message);
       }
+      offset += received;
+      if (!brokerActivityPageHasMore(page, received, offset, pageLimit)) {
+        break;
+      }
+    }
+    if (accountFailed) {
+      continue;
     }
     upsertBrokerSyncSuccess(db, account.id);
     summary.accountsSynced += 1;
   }
   return summary;
+}
+
+function brokerActivityPageData(page: unknown): unknown[] {
+  return isRecord(page) && Array.isArray(page.data) ? page.data : [];
+}
+
+function brokerActivityPageHasMore(
+  page: unknown,
+  received: number,
+  nextOffset: number,
+  pageLimit: number,
+): boolean {
+  const pagination = brokerActivityPagePagination(page);
+  if (!pagination) {
+    return received >= pageLimit;
+  }
+  const hasMore = optionalBoolean(pagination.has_more ?? pagination.hasMore);
+  if (hasMore !== null) {
+    return hasMore;
+  }
+  const total = optionalNumber(pagination.total);
+  if (total !== null) {
+    return nextOffset < total;
+  }
+  const limit = optionalNumber(pagination.limit);
+  if (limit !== null) {
+    return received >= limit;
+  }
+  return received >= pageLimit;
+}
+
+function brokerActivityPagePagination(page: unknown): Record<string, unknown> | null {
+  if (!isRecord(page)) {
+    return null;
+  }
+  const pagination = page.pagination ?? page.paginationDetails ?? page.page;
+  return isRecord(pagination) ? pagination : null;
 }
 
 function hasBrokerActivityMappableId(activity: unknown): boolean {
