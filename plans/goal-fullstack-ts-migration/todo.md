@@ -3140,6 +3140,12 @@ contract:
   `git diff --check`. Coverage includes local Connect broker-sync profile
   read/write delegation to required `ActivityService` methods without
   unreachable TS runtime 501 guards.
+- `pr5-backend-electron-test-ci-wiring`: verification passed:
+  `bash -n scripts/ci-check.sh`, `bun run test:backend`,
+  `bun run test:electron`, full `bun run check`, and `git diff --check`.
+  Coverage includes root scripts, PR CI, and local full-check wiring for TS
+  backend and Electron tests so migration regressions are no longer hidden
+  behind frontend-only `bun run test`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

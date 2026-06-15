@@ -153,6 +153,12 @@ if [[ "$RUN_FRONTEND" == "true" ]]; then
     echo "=== bun test ===" >&2
     bun run test
 
+    echo "=== bun test:backend ===" >&2
+    bun run test:backend
+
+    echo "=== bun test:electron ===" >&2
+    bun run test:electron
+
     echo "=== bun build ===" >&2
     bun run build
   fi

@@ -48,6 +48,12 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Run backend tests
+        run: bun run test:backend
+
+      - name: Run Electron tests
+        run: bun run test:electron
+
       - name: Build frontend
         run: bun run build
 
