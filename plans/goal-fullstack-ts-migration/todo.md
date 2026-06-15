@@ -3334,6 +3334,14 @@ contract:
   Rust-compatible empty summary when all synced broker accounts are
   HOLDINGS-mode and keeping TRANSACTIONS-mode broker activity mapping
   feature-gated until the full mapper lands.
+- `pr5-device-sync-background-noop-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "background engine|device sync local"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local `/connect/device/start-background`
+  returning Rust-compatible `skipped` when no sync identity is configured,
+  `/connect/device/stop-background` returning `stopped`, and keeping
+  cloud/push/pull mutations feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

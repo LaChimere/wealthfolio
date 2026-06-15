@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 367
+turns_used: 368
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T03:37:11+08:00"
+updated_at: "2026-06-16T03:42:52+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2301,6 +2301,11 @@ updated_at: "2026-06-16T03:37:11+08:00"
   HOLDINGS-mode and keeps TRANSACTIONS-mode activity mapping feature-gated until
   the full broker activity mapper lands. Verified with Connect domain/runtime
   tests, backend type-check, full `bun run check`, and `git diff --check`.
+- Turn 368: Ported local device-sync background-engine start/stop responses into
+  the standalone TS runtime. Start returns Rust-compatible `skipped` when no
+  sync identity is configured, stop returns `stopped`, and cloud/push/pull
+  mutations remain feature-gated. Verified with Connect domain/runtime tests,
+  backend type-check, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

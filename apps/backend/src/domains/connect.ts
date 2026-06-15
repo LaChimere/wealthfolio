@@ -1439,6 +1439,18 @@ export function createLocalConnectDeviceSyncService({
     getDeviceSyncBootstrapOverwriteCheck() {
       return getLocalDeviceSyncBootstrapOverwriteCheck(db);
     },
+    startDeviceSyncBackgroundEngine() {
+      return {
+        status: "skipped",
+        message: "Background engine not started because sync identity is not configured",
+      };
+    },
+    stopDeviceSyncBackgroundEngine() {
+      return {
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      };
+    },
   };
 }
 

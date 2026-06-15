@@ -968,4 +968,22 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("returns local background engine start and stop no-op responses", () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(service.startDeviceSyncBackgroundEngine()).toEqual({
+        status: "skipped",
+        message: "Background engine not started because sync identity is not configured",
+      });
+      expect(service.stopDeviceSyncBackgroundEngine()).toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

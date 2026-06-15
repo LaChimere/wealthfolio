@@ -1560,10 +1560,6 @@ describe("TS backend runtime composition", () => {
           method: "POST",
         }),
         new Request(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/start-background`, {
-          method: "POST",
-        }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/stop-background`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/generate-snapshot`, {
           method: "POST",
         }),
@@ -1659,6 +1655,26 @@ describe("TS backend runtime composition", () => {
         hasLocalData: false,
         localRows: 0,
         nonEmptyTables: [],
+      });
+
+      const startBackgroundResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/start-background`,
+        { method: "POST" },
+      );
+      expect(startBackgroundResponse.status).toBe(200);
+      await expect(startBackgroundResponse.json()).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started because sync identity is not configured",
+      });
+
+      const stopBackgroundResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/stop-background`,
+        { method: "POST" },
+      );
+      expect(stopBackgroundResponse.status).toBe(200);
+      await expect(stopBackgroundResponse.json()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
       });
     } finally {
       server.stop();
