@@ -3235,6 +3235,13 @@ contract:
   not yet available in the TS backend runtime" responses with a configuration
   error when the AI provider service is missing, while preserving explicit 501s
   for unsupported attachment/provider combinations.
+- `pr5-readme-keyring-runtime-refresh`: verification passed:
+  `rg "keyring-backend|shared Rust \`keyring\` backend|Complete Rust development
+  setup|Rust sidecar|prebuild fallback|sidecar fallback" README.md`, full `bun
+  run check`, and `git diff --check`. Coverage includes README prerequisites,
+  DevContainer features, backend technology summary, folder structure, and API
+  key/keyring storage text reflecting the Bun/TypeScript backend plus legacy
+  Rust compatibility tooling.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

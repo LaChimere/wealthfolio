@@ -131,7 +131,8 @@ Ensure you have the following installed on your machine:
 
 - [Node.js](https://nodejs.org/)
 - [Bun](https://bun.com/)
-- [Rust](https://www.rust-lang.org/)
+- [Rust](https://www.rust-lang.org/) only when working on legacy compatibility
+  crates or Rust parity checks
 
 ### Building from Source
 
@@ -258,8 +259,8 @@ All configuration is done via environment variables in `.env.web`.
     absent)
   - `false` - never set `Secure` (plain HTTP without a reverse proxy)
 - `WF_SECRET_BACKEND` - **Optional** secret-store backend: `file` for
-  web/self-hosted mode (default), or `keyring` for desktop sidecar builds
-  compiled with the `keyring-backend` Cargo feature
+  web/self-hosted mode (default), or `keyring` for desktop sidecar builds using
+  the packaged TypeScript backend's native keyring binding
 - `WF_SECRET_FILE` - **Optional** path to encrypted file-backed secrets storage
   (default: `<data-root>/secrets.json`; ignored when
   `WF_SECRET_BACKEND=keyring`)
@@ -511,7 +512,8 @@ steps and provides an isolated environment with all necessary dependencies.
 
 - Pre-configured desktop/web development environment
 - X11 virtual display with VNC access (port 5900)
-- Complete Rust development setup
+- TypeScript/Bun development setup with legacy Rust tooling for compatibility
+  checks
 - GPU support (via Docker's --gpus=all flag)
 - Persistent data and build caches
 - Essential VS Code extensions pre-installed
@@ -614,9 +616,10 @@ for maintained addon examples including:
 - **Electron**: Desktop shell, native integrations, packaging, and updates.
 - **Bun TypeScript backend**: Local web, Docker, packaged Electron sidecar, and
   standalone prebuild runtime.
-- **Rust**: Systems programming language for legacy core services and the
-  temporary compatibility fallback.
-- **Axum**: HTTP framework used by the temporary Rust compatibility server.
+- **Rust**: Systems programming language for legacy compatibility crates that
+  still act as migration references.
+- **Axum**: HTTP framework used by the temporary Rust compatibility server
+  during migration.
 - **SQLite**: Embedded database for local data storage.
 - **Diesel**: Safe, extensible ORM and query builder for Rust.
 
@@ -674,7 +677,7 @@ wealthfolio/
 │   └── architecture/            # Architecture docs
 ├── e2e/                         # End-to-end tests
 ├── scripts/                     # Build and dev scripts
-├── Cargo.toml                   # Rust workspace config
+├── Cargo.toml                   # Legacy Rust compatibility workspace config
 ├── package.json                 # JavaScript workspace and scripts
 ├── bun.lock                     # Bun lockfile
 └── tsconfig.json                # TypeScript config
@@ -699,7 +702,7 @@ dependencies:
 #### API Keys & Secrets
 
 Desktop API credentials are securely stored using the operating system keyring
-through the shared Rust `keyring` backend:
+through the TypeScript backend's native keyring binding:
 
 - **Core App**: Use `set_secret` and `get_secret` commands for external services
 - **Addons**: Use the Secrets API (`ctx.api.secrets`) for addon-specific
