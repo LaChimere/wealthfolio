@@ -851,6 +851,7 @@ function brokerConnectionFromApi(value: unknown): unknown {
 function brokerageFromApi(value: Record<string, unknown>): unknown | null {
   const nested = isRecord(value.brokerage) ? value.brokerage : null;
   if (nested) {
+    validateBrokerageFromApi(nested);
     const name = optionalString(nested.name);
     return {
       id: optionalString(nested.id),
@@ -863,6 +864,10 @@ function brokerageFromApi(value: Record<string, unknown>): unknown | null {
       ),
     };
   }
+  assertOptionalConnectStringField(value, "brokerage_name", "connection response");
+  assertOptionalConnectStringField(value, "brokerageName", "connection response");
+  assertOptionalConnectStringField(value, "brokerage_slug", "connection response");
+  assertOptionalConnectStringField(value, "brokerageSlug", "connection response");
   const brokerageName = optionalString(value.brokerage_name ?? value.brokerageName);
   const brokerageSlug = optionalString(value.brokerage_slug ?? value.brokerageSlug);
   if (brokerageName !== null || brokerageSlug !== null) {
@@ -876,6 +881,22 @@ function brokerageFromApi(value: Record<string, unknown>): unknown | null {
     };
   }
   return null;
+}
+
+function validateBrokerageFromApi(brokerage: Record<string, unknown>): void {
+  for (const field of [
+    "id",
+    "slug",
+    "name",
+    "display_name",
+    "displayName",
+    "aws_s3_logo_url",
+    "awsS3LogoUrl",
+    "aws_s3_square_logo_url",
+    "awsS3SquareLogoUrl",
+  ]) {
+    assertOptionalConnectStringField(brokerage, field, "brokerage response");
+  }
 }
 
 function brokerAccountsFromApi(value: unknown): unknown[] {

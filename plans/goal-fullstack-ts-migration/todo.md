@@ -3513,6 +3513,13 @@ contract:
   reads rejecting non-string values for Rust `Option<String>` account fields and
   non-boolean values for boolean account flags instead of silently dropping
   invalid values during TS mapping.
+- `pr5-connect-brokerage-scalar-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connection|brokerage fields|malformed broker"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes nested and fallback
+  brokerage fields rejecting invalid non-string scalar values like Rust serde
+  would, instead of silently nulling malformed brokerage IDs, names, slugs, or
+  logo URLs during TS mapping.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
