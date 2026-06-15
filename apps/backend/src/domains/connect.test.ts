@@ -25,6 +25,18 @@ describe("TS Connect local session service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_access_token", "legacy-access");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 1, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+    `);
     const service = createLocalConnectService({
       db,
       secretService,
@@ -45,6 +57,14 @@ describe("TS Connect local session service", () => {
       await service.clearSyncSession();
       expect(secretService.entries.has("sync_refresh_token")).toBe(false);
       expect(secretService.entries.has("sync_access_token")).toBe(false);
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
       await expect(service.getSyncSessionStatus()).resolves.toEqual({ isConfigured: false });
     } finally {
       db.close();

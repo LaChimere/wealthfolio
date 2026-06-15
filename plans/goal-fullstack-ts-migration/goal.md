@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 376
+turns_used: 377
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T04:37:26+08:00"
+updated_at: "2026-06-16T05:04:21+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2358,6 +2358,13 @@ updated_at: "2026-06-16T04:37:26+08:00"
   local device-sync throws now reject asynchronously so HTTP routes return JSON
   domain errors. Verified with focused Connect device-sync tests, backend
   type-check, full `bun run check`, and `git diff --check`.
+- Turn 377: Ported Connect session-clear freshness-gate side effects into the
+  standalone TS runtime. `DELETE /connect/session` now clears
+  `sync_device_config.min_snapshot_created_at` for all local device configs
+  after removing refresh/access tokens, matching Rust logout/reset behavior
+  without deleting device config rows. Verified with focused Connect session
+  tests, backend type-check, backend test suite, full `bun run check`, and
+  `git diff --check`.
 
 ## Deferred items
 
@@ -2558,11 +2565,12 @@ updated_at: "2026-06-16T04:37:26+08:00"
   persistence, while real runtime behavior must move with dedicated
   Connect/device-sync parity slices.
 - Real device-sync token minting, E2EE enrollment, sync engine, trusted-device
-  snapshot/upload runtime, background workers, and remaining secret side effects
-  remain active follow-ups. reason=the standalone TS backend now wires local
-  status/precondition/no-op and clear-data behavior for `/connect/device/*`,
-  while cloud runtime behavior must move with dedicated Connect/device-sync
-  parity slices.
+  snapshot/upload runtime, background workers, and remaining secret/freshness
+  side effects remain active follow-ups. reason=the standalone TS backend now
+  wires local status/precondition/no-op and clear-data behavior for
+  `/connect/device/*`, plus Connect session-clear freshness-gate cleanup, while
+  cloud runtime behavior must move with dedicated Connect/device-sync parity
+  slices.
 - Real device-sync cloud clients, token lifecycle, device-id secret storage,
   enrollment side effects, team-key operations, pairing flows, and E2EE runtime
   remain active follow-ups. reason=the standalone TS backend now wires disabled

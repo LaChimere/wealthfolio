@@ -3406,6 +3406,14 @@ contract:
   state, clearing sync control-plane tables, preserving app data, returning JSON
   `null`, and ensuring migrated local device-sync route errors are catchable
   HTTP domain rejections.
+- `pr5-connect-session-freshness-clear`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts apps/backend/src/runtime.test.ts -t "Connect refresh sessions|stores Connect refresh sessions|stores, reports"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `DELETE /connect/session` clearing local
+  `sync_device_config.min_snapshot_created_at` after refresh/access token
+  cleanup without deleting device config rows, matching Rust logout/reset
+  freshness-gate cleanup.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -3436,6 +3444,6 @@ contract:
   subscription entitlement checks, event production, E2EE enrollment, sync
   engine, trusted-device snapshot/upload runtime, feature-flag errors,
   background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, freshness gate persistence,
-  bootstrap transfer, and remaining secret side effects move with
+  operations, key material handling, pairing flows, remaining freshness gate
+  persistence, bootstrap transfer, and remaining secret side effects move with
   Connect/device-sync parity slices.

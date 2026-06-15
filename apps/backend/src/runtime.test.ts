@@ -138,6 +138,22 @@ describe("TS backend runtime composition", () => {
       expect(refreshRequests).toEqual([
         "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
       ]);
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO sync_device_config (
+                device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+              ) VALUES (
+                'device-session', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'
+              )
+            `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
 
       const clearResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
         method: "DELETE",
@@ -147,6 +163,19 @@ describe("TS backend runtime composition", () => {
       const clearedStatusResponse = await fetch(`${server.baseUrl}/api/v1/connect/session/status`);
       expect(clearedStatusResponse.status).toBe(200);
       await expect(clearedStatusResponse.json()).resolves.toEqual({ isConfigured: false });
+      const clearedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          clearedDb
+            .query<
+              { min_snapshot_created_at: string | null },
+              []
+            >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-session'")
+            .get(),
+        ).toEqual({ min_snapshot_created_at: null });
+      } finally {
+        clearedDb.close();
+      }
     } finally {
       server.stop();
       await runtime.close();

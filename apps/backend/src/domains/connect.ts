@@ -208,6 +208,7 @@ export function createLocalConnectService({
       sessionGeneration += 1;
       await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+      clearAllDeviceSyncFreshnessGates(db);
     },
     async getSyncSessionStatus() {
       if (!secretService) {
@@ -1797,6 +1798,13 @@ function resetLocalSyncSession(db: Database): void {
   })();
 }
 
+function clearAllDeviceSyncFreshnessGates(db: Database): void {
+  if (!sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    return;
+  }
+  db.prepare("UPDATE sync_device_config SET min_snapshot_created_at = NULL").run();
+}
+
 function getLocalDeviceSyncEngineStatus(db: Database): Record<string, unknown> {
   const cursor =
     db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
@@ -2049,6 +2057,16 @@ function sqliteTableExists(db: Database, tableName: string): boolean {
       >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(tableName) !== null
   );
+}
+
+function sqliteColumnExists(db: Database, tableName: string, columnName: string): boolean {
+  if (!sqliteTableExists(db, tableName)) {
+    return false;
+  }
+  return db
+    .query<{ name: string }, [string]>("SELECT name FROM pragma_table_info(?)")
+    .all(tableName)
+    .some((column) => column.name === columnName);
 }
 
 function deviceSyncDisabled(): ConnectNotImplementedError {
