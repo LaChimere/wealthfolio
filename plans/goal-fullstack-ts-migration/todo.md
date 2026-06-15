@@ -3454,6 +3454,11 @@ contract:
   `activities`, `universalActivities`, and `universal_activities` like Rust's
   serde aliases, preventing aliased non-empty pages from being mistaken as empty
   and preserving the mapper feature gate for aliased mappable activity rows.
+- `pr5-addon-sdk-desktop-wording-cleanup`: verification passed:
+  `rg "desktop \\(Tauri\\)|Tauri app|Tauri-compatible|Tauri" packages/addon-sdk/README.md`,
+  full `bun run check`, and `git diff --check`. Coverage includes the add-on SDK
+  `activities.getAll` tip now describing desktop and web runtimes generically
+  while preserving intentional compatibility names elsewhere.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

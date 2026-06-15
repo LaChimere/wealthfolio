@@ -791,8 +791,8 @@ ctx.api.logger.debug('Debug info:', debugData);
 | `query.getClient()`                             | Get shared QueryClient instance                           | None                 |
 
 > Tip: `activities.getAll` accepts an optional account ID string to scope
-> results to a single account. The SDK normalizes this for both desktop (Tauri)
-> and web runtimes—no need to wrap it in an array.
+> results to a single account. The SDK normalizes this for both desktop and web
+> runtimes—no need to wrap it in an array.
 
 ### Activity search filters
 
