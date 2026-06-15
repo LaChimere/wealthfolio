@@ -3567,6 +3567,12 @@ contract:
   a nonce without device ID; missing Connect sessions return forbidden before
   local state checks, and device-ID-present states remain feature-gated pending
   cloud device verification.
+- `pr5-connect-device-sync-state-identity-errors`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "sync state|device sync local|Connect session|malformed sync identity"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes malformed local
+  sync identity JSON/field types surfacing parse errors after Connect session
+  restore in `/connect/device/sync-state`, instead of falling through to FRESH.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

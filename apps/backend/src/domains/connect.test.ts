@@ -1984,6 +1984,28 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("rejects malformed sync identity during local device sync state checks", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("requires a Connect session before local device sync state checks", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
