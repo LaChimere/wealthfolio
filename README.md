@@ -205,7 +205,7 @@ bun run package:electron
 
 ### Web Mode (Browser + REST API server)
 
-Run the web UI with a local Axum server with one command.
+Run the web UI with a local Bun TypeScript backend with one command.
 
 #### Quick Start
 
@@ -227,7 +227,7 @@ Run the web UI with a local Axum server with one command.
    ```
 
    The Vite dev server runs at `http://localhost:1420` and proxies API calls to
-   the Axum backend server.
+   the Bun TypeScript backend server.
 
 #### Configuration
 
@@ -327,10 +327,11 @@ All configuration is done via environment variables in `.env.web`.
 
 ### Server Only
 
-Run just the HTTP server without the Vite dev server (from repo root):
+Run just the Bun TypeScript HTTP backend without the Vite dev server (from repo
+root):
 
 ```bash
-cargo run --manifest-path apps/server/Cargo.toml
+bun run --cwd apps/backend start
 ```
 
 The server accepts the same `WF_*` environment variables as documented in the
@@ -338,7 +339,7 @@ The server accepts the same `WF_*` environment variables as documented in the
 or via `.env.web`:
 
 ```bash
-WF_LISTEN_ADDR=127.0.0.1:8080 WF_DB_PATH=./db/app.db cargo run --manifest-path apps/server/Cargo.toml
+WF_LISTEN_ADDR=127.0.0.1:8080 WF_DB_PATH=./db/app.db bun run --cwd apps/backend start
 ```
 
 See [Web Mode Configuration](#configuration) for a complete list of supported
@@ -374,13 +375,13 @@ docker build -t wealthfolio .
 The build process:
 
 1. Builds frontend assets from source (`bun install` + `bun run build`)
-2. Compiles Rust backend from source (`cargo build --release`)
+2. Installs Bun TypeScript backend production dependencies
 3. Creates minimal Alpine-based image with only the runtime artifacts
 
 The final image includes:
 
 - Compiled frontend assets in `/app/dist`
-- `wealthfolio-server` binary at `/usr/local/bin/wealthfolio-server`
+- Bun TypeScript backend in `/app/apps/backend`
 - Alpine Linux base (small footprint)
 
 ### Configuration

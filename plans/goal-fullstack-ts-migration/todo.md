@@ -3116,6 +3116,11 @@ contract:
   `git diff --check`. Coverage includes `scripts/dev-web.mjs --file-log`
   deriving log names from `WF_DB_PATH` or `app.db`, without the Rust-era
   `DATABASE_URL` fallback.
+- `pr5-readme-web-docker-ts-backend`: verification passed:
+  `grep -n "Axum server\\|Axum backend\\|cargo run --manifest-path apps/server\\|cargo build --release\\|wealthfolio-server binary\\|/usr/local/bin/wealthfolio-server" README.md`,
+  full `bun run check`, and `git diff --check`. Coverage includes README web
+  mode and Docker sections documenting the Bun TypeScript backend instead of the
+  Rust Axum server path.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
