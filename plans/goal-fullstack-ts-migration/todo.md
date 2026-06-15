@@ -3099,6 +3099,12 @@ contract:
   `git diff --check`. Coverage includes `WF_STATIC_DIR` config parsing, TS
   backend static asset serving with SPA fallback outside `/api/*`, and the
   Dockerfile no longer building or running `wealthfolio-server` from Rust.
+- `pr5-dev-web-ts-backend-cutover`: verification passed:
+  `node --check scripts/dev-web.mjs`, full `bun run check`, and
+  `git diff --check`. Coverage includes `bun run dev:web` launching the Bun
+  TypeScript backend instead of
+  `cargo run --manifest-path apps/server/Cargo.toml` and `.env.web.example`
+  documenting the Bun backend.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

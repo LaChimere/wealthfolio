@@ -32,6 +32,11 @@ loadDotenvFile(".env.web");
 // Set build target for web mode
 process.env.BUILD_TARGET = "web";
 
+process.env.WF_LISTEN_ADDR ||= "127.0.0.1:8080";
+process.env.WF_SECRET_KEY ||= "wealthfolio-dev-secret-key-000000";
+process.env.WF_AUTH_REQUIRED ||= process.env.WF_AUTH_PASSWORD_HASH?.trim() ? "true" : "false";
+process.env.VITE_API_TARGET ||= `http://${process.env.WF_LISTEN_ADDR}`;
+
 const fileLog = process.argv.includes("--file-log");
 let logStream = null;
 
@@ -126,5 +131,5 @@ process.on("SIGTERM", () => shutdownAndExit(143));
 
 // Start backend and Vite
 process.env.WF_ENABLE_VITE_PROXY = "true";
-spawnNamed("server", "cargo", ["run", "--manifest-path", "apps/server/Cargo.toml"]);
+spawnNamed("backend", "bun", ["run", "--cwd", "apps/backend", "start"]);
 spawnNamed("vite", "bun", ["run", "--cwd", "apps/frontend", "dev"]);
