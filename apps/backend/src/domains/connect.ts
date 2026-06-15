@@ -711,6 +711,15 @@ async function fetchAuthenticatedConnectJson(
   path: string,
 ): Promise<unknown> {
   const { accessToken } = await restoreSession();
+  return await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
+}
+
+async function fetchConnectJsonWithAccessToken(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+): Promise<unknown> {
   const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
   const url = `${baseUrl}${path}`;
   let response: Response;
@@ -1071,9 +1080,18 @@ async function syncEmptyTransactionActivityPages(
       continue;
     }
     upsertBrokerSyncAttempt(db, account.id);
+    const { accessToken } = await restoreSession();
     const startDate = brokerActivitySyncStartDate(db, account.id, endDate);
     const path = brokerActivitiesPath(account.providerAccountId, startDate, endDate, 0, 1000);
-    const page = await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, path);
+    let page: unknown;
+    try {
+      page = await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
+    } catch (error) {
+      const message = errorMessage(error);
+      upsertBrokerSyncFailure(db, account.id, message);
+      summary.accountsFailed += 1;
+      continue;
+    }
     const data = isRecord(page) && Array.isArray(page.data) ? page.data : [];
     if (data.length > 0) {
       const message = "Broker activity mapping is not yet available in the TS backend runtime";

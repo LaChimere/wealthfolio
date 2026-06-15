@@ -1088,6 +1088,91 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("records per-account failure when broker activity page fetch fails", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ message: "upstream unavailable" }, { status: 503 });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 1,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "FAILED",
+        last_error: "API error 503",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe("TS Connect device sync local service", () => {
