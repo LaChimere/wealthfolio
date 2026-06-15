@@ -3438,6 +3438,14 @@ contract:
   comments, sync crypto comments, add-on manifest permission comments, and AI
   activity payload compatibility comments now using neutral backend wording
   while preserving intentional Tauri-compatible event/API names.
+- `pr5-server-readme-legacy-refresh`: verification passed:
+  `rg "src-server|src-core|Pull the latest published server image|This crate runs the HTTP API|Current local web, Docker|apps/backend" apps/server/README.md`,
+  full `bun run check`, and `git diff --check`. Coverage includes
+  `apps/server/README.md` describing the Rust server as a legacy Axum
+  compatibility/reference crate, pointing current web/Docker/Electron runtime
+  usage to `apps/backend` and the root README, fixing old
+  `src-server`/`src-core` paths, and scoping environment variables to explicit
+  legacy reference runs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
