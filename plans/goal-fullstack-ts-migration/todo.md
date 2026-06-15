@@ -3228,6 +3228,13 @@ contract:
   backend runtime yet" goal/retirement valuation route responses with an
   explicit configuration error while the standalone runtime continues to provide
   the valuation provider.
+- `pr5-ai-chat-config-error-cleanup`: verification passed:
+  `bun test apps/backend/src/domains/ai-chat.test.ts -t "configuration error|unsupported attachments|missing API keys"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes replacing stale "AI chat streaming is
+  not yet available in the TS backend runtime" responses with a configuration
+  error when the AI provider service is missing, while preserving explicit 501s
+  for unsupported attachment/provider combinations.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

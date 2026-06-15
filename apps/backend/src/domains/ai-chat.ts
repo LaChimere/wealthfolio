@@ -304,9 +304,9 @@ export function createAiChatService(
     async sendMessage(rawRequest) {
       if (!options.aiProviderService) {
         throw aiChatError(
-          "not_implemented",
-          "AI chat streaming is not yet available in the TS backend runtime",
-          501,
+          "configuration_error",
+          "AI provider service is required for AI chat streaming",
+          500,
         );
       }
 

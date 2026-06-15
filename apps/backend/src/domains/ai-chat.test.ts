@@ -2178,14 +2178,14 @@ describe("TS AI chat domain", () => {
     }
   });
 
-  test("reports streaming as a bounded deferred runtime", async () => {
+  test("reports missing provider service as a configuration error", async () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
 
     try {
       await expect(service.sendMessage({ message: "hello" })).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "configuration_error",
+        status: 500,
       });
     } finally {
       db.close();
