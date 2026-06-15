@@ -1672,14 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        jsonRequest("/api/v1/sync/pairing", {
-          codeHash: "hash",
-          ephemeralPublicKey: "public-key",
-        }),
-        jsonRequest("/api/v1/sync/pairing/claim", {
-          code: "123456",
-          ephemeralPublicKey: "public-key",
-        }),
         jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
           pairingId: "pairing-1",
           encryptedKeyBundle: "bundle",
@@ -1697,20 +1689,6 @@ describe("TS backend runtime composition", () => {
         jsonRequest("/api/v1/sync/pairing/flow/state", { flowId: "flow-1" }),
         jsonRequest("/api/v1/sync/pairing/flow/approve-overwrite", { flowId: "flow-1" }),
         jsonRequest("/api/v1/sync/pairing/flow/cancel", { flowId: "flow-1" }),
-        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/messages`),
-        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/approve`, {
-          method: "POST",
-        }),
-        jsonRequest("/api/v1/sync/pairing/pairing-1/complete", {
-          encryptedKeyBundle: "bundle",
-          sasProof: {},
-          signature: "signature",
-        }),
-        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/cancel`, {
-          method: "POST",
-        }),
-        jsonRequest("/api/v1/sync/pairing/pairing-1/confirm", { proof: "proof" }),
-        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1`),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
@@ -1763,6 +1741,37 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
         jsonRequest("/api/v1/sync/team/reset", { reason: "test" }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No sync session configured",
+        });
+      }
+
+      for (const request of [
+        jsonRequest("/api/v1/sync/pairing", {
+          codeHash: "hash",
+          ephemeralPublicKey: "public-key",
+        }),
+        jsonRequest("/api/v1/sync/pairing/claim", {
+          code: "123456",
+          ephemeralPublicKey: "public-key",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/messages`),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/approve`, {
+          method: "POST",
+        }),
+        jsonRequest("/api/v1/sync/pairing/pairing-1/complete", {
+          encryptedKeyBundle: "bundle",
+          sasProof: {},
+          signature: "signature",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/cancel`, {
+          method: "POST",
+        }),
+        jsonRequest("/api/v1/sync/pairing/pairing-1/confirm", { proof: "proof" }),
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1`),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(403);

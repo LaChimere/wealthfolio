@@ -291,6 +291,38 @@ export function createLocalDeviceSyncService({
       await restoreSessionOrDisabled(connectService);
       throw deviceSyncDisabled();
     },
+    async createPairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async getPairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async approvePairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async completePairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async cancelPairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async claimPairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async getPairingMessages() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async confirmPairing() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
   };
 }
 

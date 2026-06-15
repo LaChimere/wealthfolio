@@ -3639,6 +3639,15 @@ contract:
   Rust-compatible `400 No device ID configured` when no local device ID exists,
   reset-team-sync restoring session first, and all paths remaining feature-gated
   after prerequisites are satisfied.
+- `pr5-device-sync-pairing-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes core
+  `/api/v1/sync/pairing*` issuer/claimer routes creating/getting/approving/
+  completing/canceling/claiming/messaging/confirming pairing after restoring
+  Connect session, reporting Rust-compatible missing-device-ID errors before
+  cloud calls, and remaining feature-gated after prerequisites are satisfied.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

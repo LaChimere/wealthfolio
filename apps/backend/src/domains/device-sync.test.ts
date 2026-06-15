@@ -197,4 +197,64 @@ describe("TS local device sync service", () => {
       status: 501,
     });
   });
+
+  test("reports missing device id for pairing operations after session restore", async () => {
+    const secretService = createMemorySecretService();
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(
+      service.createPairing?.({ codeHash: "hash", ephemeralPublicKey: "public-key" }),
+    ).rejects.toMatchObject({ code: "bad_request", status: 400 });
+    await expect(service.getPairing?.("pairing-1")).rejects.toMatchObject({
+      code: "bad_request",
+    });
+    await expect(service.approvePairing?.("pairing-1")).rejects.toMatchObject({
+      code: "bad_request",
+    });
+    await expect(
+      service.completePairing?.("pairing-1", {
+        encryptedKeyBundle: "bundle",
+        sasProof: {},
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+    await expect(service.cancelPairing?.("pairing-1")).rejects.toMatchObject({
+      code: "bad_request",
+    });
+    await expect(
+      service.claimPairing?.({ code: "123456", ephemeralPublicKey: "public-key" }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+    await expect(service.getPairingMessages?.("pairing-1")).rejects.toMatchObject({
+      code: "bad_request",
+    });
+    await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
+      code: "bad_request",
+    });
+  });
+
+  test("keeps pairing operations feature-gated when device id is configured", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(
+      service.createPairing?.({ codeHash: "hash", ephemeralPublicKey: "public-key" }),
+    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+    await expect(service.getPairing?.("pairing-1")).rejects.toMatchObject({
+      code: "not_implemented",
+    });
+    await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
+      code: "not_implemented",
+    });
+  });
 });
