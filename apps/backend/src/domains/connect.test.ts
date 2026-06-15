@@ -2025,8 +2025,19 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("reads local sync engine status and bootstrap requirement", () => {
+  test("reads local sync engine status and bootstrap requirement", async () => {
     const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 7,
+      }),
+    );
     db.exec(`
       CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
       CREATE TABLE sync_engine_state (
@@ -2057,10 +2068,10 @@ describe("TS Connect device sync local service", () => {
       INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
       VALUES ('device-1', 7, 'trusted', '2026-01-01T00:00:00Z');
     `);
-    const service = createLocalConnectDeviceSyncService({ db });
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
 
     try {
-      expect(service.getDeviceSyncEngineStatus()).toEqual({
+      await expect(service.getDeviceSyncEngineStatus()).resolves.toEqual({
         cursor: 42,
         lastPushAt: "2026-01-02T00:00:00Z",
         lastPullAt: "2026-01-03T00:00:00Z",
@@ -2076,8 +2087,10 @@ describe("TS Connect device sync local service", () => {
       db.prepare(
         "UPDATE sync_engine_state SET last_cycle_status = 'stale_cursor' WHERE id = 1",
       ).run();
-      expect(service.getDeviceSyncEngineStatus()).toMatchObject({ bootstrapRequired: true });
-      expect(service.getDeviceSyncBootstrapOverwriteCheck()).toEqual({
+      await expect(service.getDeviceSyncEngineStatus()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
         bootstrapRequired: true,
         hasLocalData: false,
         localRows: 0,
@@ -2088,7 +2101,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("summarizes local overwrite risk rows for bootstrap checks", () => {
+  test("summarizes local overwrite risk rows for bootstrap checks", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
@@ -2123,7 +2136,7 @@ describe("TS Connect device sync local service", () => {
     const service = createLocalConnectDeviceSyncService({ db });
 
     try {
-      expect(service.getDeviceSyncBootstrapOverwriteCheck()).toEqual({
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
         bootstrapRequired: true,
         hasLocalData: true,
         localRows: 4,

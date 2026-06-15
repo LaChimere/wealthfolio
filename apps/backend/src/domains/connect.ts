@@ -2101,11 +2101,11 @@ export function createLocalConnectDeviceSyncService({
       await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
       return getLocalDeviceSyncFreshStateOrThrow(secretService);
     },
-    getDeviceSyncEngineStatus() {
-      return getLocalDeviceSyncEngineStatus(db);
+    async getDeviceSyncEngineStatus() {
+      return getLocalDeviceSyncEngineStatus(db, secretService);
     },
-    getDeviceSyncBootstrapOverwriteCheck() {
-      return getLocalDeviceSyncBootstrapOverwriteCheck(db);
+    async getDeviceSyncBootstrapOverwriteCheck() {
+      return getLocalDeviceSyncBootstrapOverwriteCheck(db, secretService);
     },
     async clearDeviceSyncData() {
       if (!secretService) {
@@ -2164,6 +2164,23 @@ async function localSyncIdentityCanRunBackground(
     return parsed.deviceId !== null && parsed.rootKey !== null;
   } catch {
     return false;
+  }
+}
+
+async function localSyncIdentityDeviceId(
+  secretService: SecretService | undefined,
+): Promise<string | null> {
+  if (!secretService) {
+    return null;
+  }
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
+    return null;
+  }
+  try {
+    return parseSyncIdentity(JSON.parse(rawIdentity) as unknown).deviceId;
+  } catch {
+    return null;
   }
 }
 
@@ -2336,7 +2353,10 @@ function clearAllDeviceSyncFreshnessGates(db: Database): void {
   db.prepare("UPDATE sync_device_config SET min_snapshot_created_at = NULL").run();
 }
 
-function getLocalDeviceSyncEngineStatus(db: Database): Record<string, unknown> {
+async function getLocalDeviceSyncEngineStatus(
+  db: Database,
+  secretService: SecretService | undefined,
+): Promise<Record<string, unknown>> {
   const cursor =
     db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
   const state = db
@@ -2350,16 +2370,18 @@ function getLocalDeviceSyncEngineStatus(db: Database): Record<string, unknown> {
     `,
     )
     .get();
-  const deviceConfig = db
-    .query<SyncDeviceConfigRow, []>(
-      `
-      SELECT device_id, last_bootstrap_at
-      FROM sync_device_config
-      ORDER BY device_id
-      LIMIT 1
-    `,
-    )
-    .get();
+  const deviceId = await localSyncIdentityDeviceId(secretService);
+  const deviceConfig = deviceId
+    ? db
+        .query<SyncDeviceConfigRow, [string]>(
+          `
+            SELECT device_id, last_bootstrap_at
+            FROM sync_device_config
+            WHERE device_id = ?
+          `,
+        )
+        .get(deviceId)
+    : null;
   const staleCursor = state?.last_cycle_status === "stale_cursor";
   return {
     cursor,
@@ -2404,8 +2426,11 @@ const OVERWRITE_RISK_TABLE_COUNTS: ReadonlyArray<readonly [string, string | null
   ["goals_allocation", null],
 ];
 
-function getLocalDeviceSyncBootstrapOverwriteCheck(db: Database): Record<string, unknown> {
-  const engineStatus = getLocalDeviceSyncEngineStatus(db);
+async function getLocalDeviceSyncBootstrapOverwriteCheck(
+  db: Database,
+  secretService: SecretService | undefined,
+): Promise<Record<string, unknown>> {
+  const engineStatus = await getLocalDeviceSyncEngineStatus(db, secretService);
   const bootstrapRequired = engineStatus.bootstrapRequired === true;
   if (!bootstrapRequired) {
     return {

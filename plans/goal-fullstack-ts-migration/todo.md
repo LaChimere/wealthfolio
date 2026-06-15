@@ -3581,6 +3581,14 @@ contract:
   `/connect/device/start-background` returning local `skipped` only when sync
   identity is absent or not runnable, while a local identity with both device ID
   and root key remains feature-gated until background engine runtime lands.
+- `pr5-connect-device-sync-engine-identity-bootstrap`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "engine status|overwrite risk|bootstrap requirement"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes engine-status and
+  bootstrap-overwrite checks requiring bootstrap when sync identity is missing
+  or malformed, and using `sync_device_config` only for the current identity
+  device ID instead of any stale config row.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
