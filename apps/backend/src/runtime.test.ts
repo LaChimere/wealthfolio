@@ -1554,7 +1554,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/pairing-source-status`),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
         new Request(`${server.baseUrl}/api/v1/connect/device/bootstrap-snapshot`, {
           method: "POST",
@@ -1644,6 +1643,14 @@ describe("TS backend runtime composition", () => {
         cursor: 0,
         backgroundRunning: false,
         bootstrapRequired: true,
+      });
+
+      const pairingSourceResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/pairing-source-status`,
+      );
+      expect(pairingSourceResponse.status).toBe(500);
+      await expect(pairingSourceResponse.json()).resolves.toMatchObject({
+        message: "No sync identity configured. Please enable sync first.",
       });
 
       const overwriteCheckResponse = await fetch(

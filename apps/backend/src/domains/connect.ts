@@ -1642,6 +1642,9 @@ export function createLocalConnectDeviceSyncService({
     getDeviceSyncBootstrapOverwriteCheck() {
       return getLocalDeviceSyncBootstrapOverwriteCheck(db);
     },
+    getDeviceSyncPairingSourceStatus() {
+      return getLocalDeviceSyncPairingSourceStatus(db);
+    },
     startDeviceSyncBackgroundEngine() {
       return {
         status: "skipped",
@@ -1743,6 +1746,34 @@ function getLocalDeviceSyncBootstrapOverwriteCheck(db: Database): Record<string,
     localRows: summary.totalRows,
     nonEmptyTables: summary.nonEmptyTables,
   };
+}
+
+function getLocalDeviceSyncPairingSourceStatus(db: Database): Record<string, unknown> {
+  const config = db
+    .query<{ device_id: string; trust_state: string }, []>(
+      `
+        SELECT device_id, trust_state
+        FROM sync_device_config
+        ORDER BY device_id
+        LIMIT 1
+      `,
+    )
+    .get();
+  if (!config) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "No sync identity configured. Please enable sync first.",
+      500,
+    );
+  }
+  if (config.trust_state !== "trusted") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Current device is not ready to connect another device yet.",
+      500,
+    );
+  }
+  throw deviceSyncDisabled();
 }
 
 function localOverwriteRiskSummary(db: Database): {

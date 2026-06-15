@@ -1307,4 +1307,31 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("reports local pairing source status preconditions before cloud cursor checks", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(() => service.getDeviceSyncPairingSourceStatus()).toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+      db.prepare(
+        "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('device-1', 1, 'untrusted', NULL)",
+      ).run();
+      expect(() => service.getDeviceSyncPairingSourceStatus()).toThrow(
+        "Current device is not ready to connect another device yet.",
+      );
+    } finally {
+      db.close();
+    }
+  });
 });
