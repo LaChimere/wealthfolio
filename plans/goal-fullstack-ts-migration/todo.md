@@ -3485,6 +3485,13 @@ contract:
   requests and public plans fetch parsing JSON error bodies to include
   cloud-provided `message`/`error` text in `API error <status>: ...` messages,
   so broker activity sync failures persist more actionable `last_error` values.
+- `pr5-connect-broker-list-default-arrays`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connection|broker account|empty lists"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes authenticated
+  broker connection/account reads treating missing `connections` or `accounts`
+  fields as empty arrays like Rust serde defaults, while still rejecting
+  non-object responses and non-array fields.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

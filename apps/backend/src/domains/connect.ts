@@ -811,7 +811,13 @@ function userInfoFromApi(value: unknown): unknown {
 }
 
 function brokerConnectionsFromApi(value: unknown): unknown[] {
-  if (!isRecord(value) || !Array.isArray(value.connections)) {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse connections response", 500);
+  }
+  if (value.connections === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value.connections)) {
     throw new ConnectServiceError("internal_error", "Failed to parse connections response", 500);
   }
   return value.connections.map(brokerConnectionFromApi);
@@ -865,7 +871,13 @@ function brokerageFromApi(value: Record<string, unknown>): unknown | null {
 }
 
 function brokerAccountsFromApi(value: unknown): unknown[] {
-  if (!isRecord(value) || !Array.isArray(value.accounts)) {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  if (value.accounts === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value.accounts)) {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
   return value.accounts;

@@ -515,6 +515,35 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("defaults missing broker connection and account arrays to empty lists", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({});
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).resolves.toEqual([]);
+      await expect(service.listBrokerAccounts()).resolves.toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs broker connections into local platforms", async () => {
     const db = new Database(":memory:");
     db.exec(`
