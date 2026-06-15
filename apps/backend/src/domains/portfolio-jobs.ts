@@ -223,27 +223,6 @@ interface CalculatedValuation {
   calculatedAt: string;
 }
 
-export class PortfolioJobNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "PortfolioJobNotImplementedError";
-  }
-}
-
-const PORTFOLIO_JOB_DEFERRED_MESSAGE =
-  "Portfolio job execution is not yet available in the TS backend runtime.";
-
-export function createDeferredPortfolioJobService(): PortfolioJobService {
-  return {
-    async enqueuePortfolioJob() {
-      throw new PortfolioJobNotImplementedError(PORTFOLIO_JOB_DEFERRED_MESSAGE);
-    },
-  };
-}
-
 export function createLocalPortfolioJobService(
   db: Database,
   options: LocalPortfolioJobServiceOptions = {},

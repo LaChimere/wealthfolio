@@ -6,7 +6,6 @@ import {
   DEFAULT_HISTORY_DAYS,
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
-  createDeferredPortfolioJobService,
   createLocalPortfolioJobService,
   type PortfolioJobConfig,
 } from "./portfolio-jobs";
@@ -51,15 +50,6 @@ describe("TS portfolio job route config", () => {
     });
     expect(buildPortfolioRecalculateConfig({ marketSyncMode: { type: "none" } })).toMatchObject({
       marketSyncMode: { type: "backfill_history", asset_ids: null, days: DEFAULT_HISTORY_DAYS },
-    });
-  });
-
-  test("reports execution as an explicit deferred runtime", async () => {
-    const service = createDeferredPortfolioJobService();
-
-    await expect(service.enqueuePortfolioJob(buildPortfolioUpdateConfig())).rejects.toMatchObject({
-      status: 501,
-      code: "not_implemented",
     });
   });
 

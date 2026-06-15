@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 350
+turns_used: 351
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T00:09:25+08:00"
+updated_at: "2026-06-16T00:14:17+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2192,6 +2192,13 @@ updated_at: "2026-06-16T00:09:25+08:00"
   now describe Electron/Web traffic going through the Bun/TypeScript backend, TS
   backend packaging assets, and TypeScript keyring sidecar behavior. Verified
   with targeted `rg` checks, full `bun run check`, and `git diff --check`.
+- Turn 351: Removed the stale deferred portfolio job service/export/test now
+  that the standalone TS runtime executes bounded portfolio valuation and
+  activity replay jobs. Verified no `createDeferredPortfolioJobService` or
+  `PortfolioJobNotImplementedError` references remain, plus
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`.
 
 ## Deferred items
 

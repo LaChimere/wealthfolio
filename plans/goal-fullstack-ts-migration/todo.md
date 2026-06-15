@@ -3193,6 +3193,13 @@ contract:
   assistant architecture docs describing the Bun/TypeScript backend runtime,
   packaged TS backend assets, and TypeScript keyring sidecar behavior instead of
   stale Axum/Rust sidecar paths.
+- `pr5-portfolio-job-deferred-cleanup`: verification passed:
+  `rg "createDeferredPortfolioJobService|PortfolioJobNotImplementedError|Portfolio job execution is not yet available" apps/backend/src`,
+  `bun test apps/backend/src/domains/portfolio-jobs.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes removing the stale deferred portfolio
+  job service/export/test now that the standalone TS runtime executes bounded
+  portfolio valuation and activity replay jobs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

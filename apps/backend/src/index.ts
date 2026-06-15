@@ -270,8 +270,6 @@ export {
   DEFAULT_HISTORY_DAYS,
   buildPortfolioRecalculateConfig,
   buildPortfolioUpdateConfig,
-  createDeferredPortfolioJobService,
-  PortfolioJobNotImplementedError,
   type MarketSyncMode,
   type PortfolioJobConfig,
   type PortfolioJobService,
