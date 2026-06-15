@@ -1672,14 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`),
-        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, {
-          method: "PATCH",
-          headers: jsonHeaders,
-          body: JSON.stringify({ displayName: "Renamed" }),
-        }),
-        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, { method: "DELETE" }),
-        new Request(`${server.baseUrl}/api/v1/sync/device/device-1/revoke`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/sync/keys/initialize`, { method: "POST" }),
         jsonRequest("/api/v1/sync/keys/initialize/commit", {
           keyVersion: 1,
@@ -1752,6 +1744,23 @@ describe("TS backend runtime composition", () => {
       await expect(listDevicesWithoutSessionResponse.json()).resolves.toMatchObject({
         message: "No sync session configured",
       });
+
+      for (const request of [
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, {
+          method: "PATCH",
+          headers: jsonHeaders,
+          body: JSON.stringify({ displayName: "Renamed" }),
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, { method: "DELETE" }),
+        new Request(`${server.baseUrl}/api/v1/sync/device/device-1/revoke`, { method: "POST" }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No sync session configured",
+        });
+      }
 
       const engineStatusResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/device/engine-status`,

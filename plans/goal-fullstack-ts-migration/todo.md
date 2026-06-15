@@ -3621,6 +3621,15 @@ contract:
   `/api/v1/sync/devices` restoring the Connect session first, returning the same
   forbidden session error when no session is configured, and remaining
   feature-gated after a valid session until cloud device listing lands.
+- `pr5-device-sync-device-management-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/device/{id}` get/update/delete and revoke restoring the Connect
+  session before cloud work, returning the same forbidden session error when no
+  session is configured, and remaining feature-gated after a valid session until
+  cloud device management lands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

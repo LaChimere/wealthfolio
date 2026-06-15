@@ -255,7 +255,32 @@ export function createLocalDeviceSyncService({
       await connectService.restoreSyncSession();
       throw deviceSyncDisabled();
     },
+    async getDevice() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
+    async updateDevice() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
+    async deleteDevice() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
+    async revokeDevice() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
   };
+}
+
+async function restoreSessionOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+): Promise<void> {
+  if (!connectService) {
+    throw deviceSyncDisabled();
+  }
+  await connectService.restoreSyncSession();
 }
 
 async function getLocalDeviceId(secretService: SecretService): Promise<string | null> {

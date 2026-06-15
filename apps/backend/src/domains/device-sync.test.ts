@@ -83,4 +83,43 @@ describe("TS local device sync service", () => {
       status: 501,
     });
   });
+
+  test("requires Connect session before device get, update, delete, and revoke", async () => {
+    const service = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+
+    await expect(service.getDevice("device-1")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.updateDevice("device-1", { displayName: "Renamed" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(service.deleteDevice("device-1")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(service.revokeDevice("device-1")).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  test("keeps device get, update, delete, and revoke feature-gated after session restore", async () => {
+    const service = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(service.getDevice("device-1")).rejects.toMatchObject({ code: "not_implemented" });
+    await expect(
+      service.updateDevice("device-1", { displayName: "Renamed" }),
+    ).rejects.toMatchObject({ code: "not_implemented" });
+    await expect(service.deleteDevice("device-1")).rejects.toMatchObject({
+      code: "not_implemented",
+    });
+    await expect(service.revokeDevice("device-1")).rejects.toMatchObject({
+      code: "not_implemented",
+    });
+  });
 });
