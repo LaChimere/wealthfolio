@@ -1110,6 +1110,14 @@ describe("TS Connect local session service", () => {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (account_id, provider)
       );
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      ) VALUES (
+        'transaction-account', 'SNAPTRADE', NULL, '2026-01-09T00:00:00Z',
+        '2026-01-10T00:00:00Z', NULL, NULL, 'IDLE',
+        '2026-01-09T00:00:00Z', '2026-01-09T00:00:00Z'
+      );
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -1165,9 +1173,19 @@ describe("TS Connect local session service", () => {
         accountsWarned: 0,
         newAssetIds: [],
       });
-      expect(requests[1]).toContain("/api/v1/sync/brokerage/accounts/provider-account/activities?");
-      expect(requests[1]).toContain("offset=0");
-      expect(requests[1]).toContain("limit=1000");
+      const activityUrl = new URL(requests[1] ?? "");
+      expect(activityUrl.pathname).toBe(
+        "/api/v1/sync/brokerage/accounts/provider-account/activities",
+      );
+      expect([...activityUrl.searchParams.entries()].map(([key]) => key)).toEqual([
+        "offset",
+        "limit",
+        "start_date",
+        "end_date",
+      ]);
+      expect(activityUrl.searchParams.get("offset")).toBe("0");
+      expect(activityUrl.searchParams.get("limit")).toBe("1000");
+      expect(activityUrl.searchParams.get("start_date")).toBe("2026-01-09");
       const row = db
         .query<
           {
@@ -1285,8 +1303,15 @@ describe("TS Connect local session service", () => {
         request.includes("/api/v1/sync/brokerage/accounts/provider-account/activities?"),
       );
       expect(activityRequests).toHaveLength(2);
-      expect(activityRequests[0]).toContain("offset=0");
-      expect(activityRequests[1]).toContain("offset=2");
+      const firstActivityUrl = new URL(activityRequests[0] ?? "");
+      const secondActivityUrl = new URL(activityRequests[1] ?? "");
+      expect([...firstActivityUrl.searchParams.entries()].map(([key]) => key)).toEqual([
+        "offset",
+        "limit",
+        "end_date",
+      ]);
+      expect(firstActivityUrl.searchParams.get("offset")).toBe("0");
+      expect(secondActivityUrl.searchParams.get("offset")).toBe("2");
     } finally {
       db.close();
     }

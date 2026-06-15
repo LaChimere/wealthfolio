@@ -1191,11 +1191,11 @@ function brokerActivitiesPath(
   const params = new URLSearchParams({
     offset: String(offset),
     limit: String(limit),
-    end_date: endDate,
   });
   if (startDate) {
     params.set("start_date", startDate);
   }
+  params.set("end_date", endDate);
   return `/api/v1/sync/brokerage/accounts/${encodeURIComponent(providerAccountId)}/activities?${params}`;
 }
 
