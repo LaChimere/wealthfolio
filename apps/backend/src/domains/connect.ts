@@ -777,7 +777,7 @@ function userInfoFromApi(value: unknown): unknown {
   }
   const team = isRecord(value.team) ? value.team : null;
   return {
-    id: stringValue(value.id),
+    id: requiredStringValue(value.id, "user info"),
     full_name: optionalString(value.fullName ?? value.full_name),
     email: optionalString(value.email),
     avatar_url: optionalString(value.avatarUrl ?? value.avatar_url),
@@ -791,7 +791,7 @@ function userInfoFromApi(value: unknown): unknown {
     team_role: optionalString(value.teamRole ?? value.team_role),
     team: team
       ? {
-          id: stringValue(team.id),
+          id: requiredStringValue(team.id, "team info"),
           name: optionalString(team.name) ?? "",
           logo_url: optionalString(team.logoUrl ?? team.logo_url),
           plan: optionalString(team.plan),
@@ -808,6 +808,13 @@ function userInfoFromApi(value: unknown): unknown {
         }
       : null,
   };
+}
+
+function requiredStringValue(value: unknown, context: string): string {
+  if (typeof value !== "string") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
 }
 
 function brokerConnectionsFromApi(value: unknown): unknown[] {

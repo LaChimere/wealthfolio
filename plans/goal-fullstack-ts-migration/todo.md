@@ -3492,6 +3492,13 @@ contract:
   broker connection/account reads treating missing `connections` or `accounts`
   fields as empty arrays like Rust serde defaults, while still rejecting
   non-object responses and non-array fields.
+- `pr5-connect-user-info-required-ids`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "user info|authenticated plans"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes `/connect/user`
+  rejecting malformed cloud responses when required user or team IDs are missing
+  or non-string, matching Rust serde-required `ApiUser.id`/`ApiTeam.id` behavior
+  instead of silently returning empty IDs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
