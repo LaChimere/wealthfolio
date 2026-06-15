@@ -95,6 +95,7 @@ const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
 const DEFAULT_CONNECT_AUTH_URL = "https://auth.wealthfolio.app";
 const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
+const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
 
 export function createDisabledConnectService(): ConnectService {
   return {
@@ -198,6 +199,9 @@ export function createLocalConnectService({
         restorePromise = null;
       });
       return await restorePromise;
+    },
+    async getSubscriptionPlansPublic() {
+      return await fetchPublicSubscriptionPlans(env, fetchImpl);
     },
     getSyncedAccounts() {
       return accountService
@@ -564,6 +568,55 @@ async function restoreLocalSyncSession(
   await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, rotatedRefreshToken);
   await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
   return { accessToken: payload.accessToken, refreshToken: rotatedRefreshToken };
+}
+
+async function fetchPublicSubscriptionPlans(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
+  const url = `${baseUrl}/api/v1/subscription/plans`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "GET",
+      headers: { "content-type": "application/json" },
+    });
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", `Request failed: ${errorMessage(error)}`, 500);
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to read response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!response.ok) {
+    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
+  }
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (!isRecord(parsed) || !Array.isArray(parsed.plans)) {
+      throw new Error("missing plans array");
+    }
+    return parsed;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse plans response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+}
+
+function normalizeConnectApiUrl(value: string | undefined): string {
+  const trimmed = value?.trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_CONNECT_API_URL;
 }
 
 function normalizeConnectAuthUrl(value: string | undefined): string {

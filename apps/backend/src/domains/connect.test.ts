@@ -201,4 +201,36 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("fetches public subscription plans from the Connect API", async () => {
+    const db = new Database(":memory:");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return Response.json({ plans: [{ id: "free" }] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).resolves.toEqual({
+        plans: [{ id: "free" }],
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/subscription/plans",
+          init: { method: "GET", headers: { "content-type": "application/json" } },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

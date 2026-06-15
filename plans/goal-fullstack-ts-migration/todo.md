@@ -3266,6 +3266,14 @@ contract:
   classifying invalid OAuth error codes independently from generic descriptions,
   avoiding stale-refresh cleanup races, and updating disabled-cloud route tests
   for migrated Connect session routes.
+- `pr5-connect-public-plans-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes standalone TS runtime
+  `/connect/plans/public` fetching public subscription plans from
+  `CONNECT_API_URL` with the Rust-compatible default base URL while
+  authenticated plans and broker/device sync remain feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

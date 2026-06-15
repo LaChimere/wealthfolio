@@ -1194,8 +1194,14 @@ describe("TS backend runtime composition", () => {
 
   test("wires local Connect runtime behavior with disabled cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
+    const publicPlanRequests: string[] = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      marketDataFetch: (async (input) => {
+        publicPlanRequests.push(String(input));
+        return Response.json({ plans: [{ id: "free" }] });
+      }) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
     });
@@ -1208,7 +1214,6 @@ describe("TS backend runtime composition", () => {
     const server = startBackendServer(config, runtime.options);
 
     try {
-      const jsonHeaders = { "content-type": "application/json" };
       for (const request of [
         new Request(`${server.baseUrl}/api/v1/connect/connections`),
         new Request(`${server.baseUrl}/api/v1/connect/accounts`),
@@ -1216,12 +1221,16 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/plans`),
-        new Request(`${server.baseUrl}/api/v1/connect/plans/public`),
         new Request(`${server.baseUrl}/api/v1/connect/user`),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
       }
+
+      const publicPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans/public`);
+      expect(publicPlansResponse.status).toBe(200);
+      await expect(publicPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
+      expect(publicPlanRequests).toEqual(["https://api.example.test/api/v1/subscription/plans"]);
 
       const syncResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync`, {
         method: "POST",
@@ -1355,6 +1364,7 @@ describe("TS backend runtime composition", () => {
         symbolMappingMeta: {},
       });
 
+      const jsonHeaders = { "content-type": "application/json" };
       const saveProfileResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/broker-sync-profile`,
         {
