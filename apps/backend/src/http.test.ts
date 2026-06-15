@@ -6311,7 +6311,7 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
-  test("keeps goal valuation-backed routes explicitly deferred without a provider", async () => {
+  test("reports missing goal valuation provider as a route configuration error", async () => {
     const db = createGoalsDb();
     const goalService = createGoalService(createGoalRepository(db));
     const handler = createBackendRequestHandler(config, { goalService });
@@ -6337,9 +6337,9 @@ describe("TS backend HTTP skeleton", () => {
             headers: { authorization: "Bearer sidecar-token" },
           }),
         );
-        expect(response.status).toBe(501);
+        expect(response.status).toBe(500);
         await expect(response.json()).resolves.toMatchObject({
-          message: "Goal valuation provider is not available in the TS backend runtime yet",
+          message: "Goal valuation provider is required for valuation-backed goal routes",
         });
       }
 
@@ -6357,9 +6357,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(projectionNoProviderResponse.status).toBe(501);
+      expect(projectionNoProviderResponse.status).toBe(500);
       await expect(projectionNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const monteCarloNoProviderResponse = await handler(
@@ -6378,9 +6378,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(monteCarloNoProviderResponse.status).toBe(501);
+      expect(monteCarloNoProviderResponse.status).toBe(500);
       await expect(monteCarloNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const scenarioNoProviderResponse = await handler(
@@ -6397,9 +6397,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(scenarioNoProviderResponse.status).toBe(501);
+      expect(scenarioNoProviderResponse.status).toBe(500);
       await expect(scenarioNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const stressNoProviderResponse = await handler(
@@ -6416,9 +6416,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(stressNoProviderResponse.status).toBe(501);
+      expect(stressNoProviderResponse.status).toBe(500);
       await expect(stressNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const decisionNoProviderResponse = await handler(
@@ -6436,9 +6436,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(decisionNoProviderResponse.status).toBe(501);
+      expect(decisionNoProviderResponse.status).toBe(500);
       await expect(decisionNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const sorrNoProviderResponse = await handler(
@@ -6456,9 +6456,9 @@ describe("TS backend HTTP skeleton", () => {
           }),
         }),
       );
-      expect(sorrNoProviderResponse.status).toBe(501);
+      expect(sorrNoProviderResponse.status).toBe(500);
       await expect(sorrNoProviderResponse.json()).resolves.toMatchObject({
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       });
 
       const providerErrorResponse = await failingHandler(

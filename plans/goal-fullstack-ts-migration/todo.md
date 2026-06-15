@@ -3221,6 +3221,13 @@ contract:
   pinning Electron release jobs to matching-architecture runners, uploading only
   release files, and using one canonical release tag/version for workflow
   dispatch prebuild artifacts.
+- `pr5-goal-valuation-route-config-cleanup`: verification passed:
+  `bun test apps/backend/src/http.test.ts -t "goal valuation provider|retirement"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes replacing stale "not available in the TS
+  backend runtime yet" goal/retirement valuation route responses with an
+  explicit configuration error while the standalone runtime continues to provide
+  the valuation provider.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

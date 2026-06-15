@@ -2357,10 +2357,10 @@ async function handleGoalValuationRequest<T>(
   if (!provider) {
     return jsonResponse(
       {
-        code: 501,
-        message: "Goal valuation provider is not available in the TS backend runtime yet",
+        code: "configuration_error",
+        message: "Goal valuation provider is required for valuation-backed goal routes",
       },
-      501,
+      500,
     );
   }
   let valuationMap: GoalValuationMap;
