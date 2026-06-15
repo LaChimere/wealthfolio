@@ -231,7 +231,6 @@ export {
 } from "./domains/health";
 export {
   createHoldingsService,
-  HoldingsNotImplementedError,
   type CheckHoldingsImportResult,
   type DailyAccountValuation,
   type Holding,
@@ -248,11 +247,7 @@ export {
   type SnapshotInfo,
   type SymbolCheckResult,
 } from "./domains/holdings";
-export {
-  MarketDataNotImplementedError,
-  type MarketDataService,
-  type ResolveSymbolQuoteRequest,
-} from "./domains/market-data";
+export { type MarketDataService, type ResolveSymbolQuoteRequest } from "./domains/market-data";
 export {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
@@ -290,7 +285,6 @@ export {
   type PerformanceMetrics,
   type PortfolioMetricsService,
   type PortfolioMetricsServiceOptions,
-  PortfolioMetricsNotImplementedError,
   type ReturnData,
   type SimplePerformanceMetrics,
   type StaleAssetInfo,

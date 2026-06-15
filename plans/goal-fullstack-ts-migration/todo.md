@@ -3200,6 +3200,13 @@ contract:
   `git diff --check`. Coverage includes removing the stale deferred portfolio
   job service/export/test now that the standalone TS runtime executes bounded
   portfolio valuation and activity replay jobs.
+- `pr5-domain-not-implemented-error-cleanup`: verification passed:
+  `rg "HoldingsNotImplementedError|PortfolioMetricsNotImplementedError|MarketDataNotImplementedError" apps/backend/src`,
+  `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/domains/portfolio-metrics.test.ts apps/backend/src/domains/market-data.test.ts`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes removing stale exported
+  `NotImplementedError` classes for TS-backed holdings, portfolio metrics, and
+  market-data domains.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

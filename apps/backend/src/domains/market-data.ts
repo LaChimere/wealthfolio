@@ -171,16 +171,6 @@ export interface MarketDataServiceOptions {
   secretService?: SecretService;
 }
 
-export class MarketDataNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "MarketDataNotImplementedError";
-  }
-}
-
 interface QuoteRow {
   id: string;
   asset_id: string;

@@ -269,16 +269,6 @@ export interface AllocationHoldings {
   currency: string;
 }
 
-export class HoldingsNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "HoldingsNotImplementedError";
-  }
-}
-
 interface DailyAccountValuationRow {
   id: string;
   account_id: string;

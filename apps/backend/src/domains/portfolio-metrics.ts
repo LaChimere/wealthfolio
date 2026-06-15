@@ -23,16 +23,6 @@ export interface PortfolioMetricsService {
   getIncomeSummary(accountId?: string): Promise<unknown[]> | unknown[];
 }
 
-export class PortfolioMetricsNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "PortfolioMetricsNotImplementedError";
-  }
-}
-
 export interface NetWorthHistoryPoint {
   date: string;
   portfolioValue: number;
