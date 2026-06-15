@@ -247,6 +247,17 @@ export function createLocalConnectService({
         ),
       );
     },
+    async syncBrokerConnections() {
+      const connections = brokerConnectionsFromApi(
+        await fetchAuthenticatedConnectJson(
+          restoreSession,
+          env,
+          fetchImpl,
+          "/api/v1/sync/brokerage/connections",
+        ),
+      );
+      return syncBrokerConnectionsToPlatforms(db, connections);
+    },
     getSyncedAccounts() {
       return accountService
         .getAllAccounts()
@@ -813,6 +824,56 @@ function brokerAccountsFromApi(value: unknown): unknown[] {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
   return value.accounts;
+}
+
+function syncBrokerConnectionsToPlatforms(
+  db: Database,
+  connections: unknown[],
+): { synced: number; platformsCreated: number; platformsUpdated: number } {
+  let platformsCreated = 0;
+  let platformsUpdated = 0;
+
+  db.transaction(() => {
+    for (const connection of connections) {
+      if (!isRecord(connection) || !isRecord(connection.brokerage)) {
+        continue;
+      }
+      const brokerage = connection.brokerage;
+      const platformId = optionalString(brokerage.slug) ?? optionalString(brokerage.id) ?? "";
+      if (!platformId) {
+        continue;
+      }
+      const existing = db
+        .query<{ id: string }, [string]>("SELECT id FROM platforms WHERE id = ?")
+        .get(platformId);
+      const name = optionalString(brokerage.display_name) ?? optionalString(brokerage.name);
+      const url = `https://${platformId.toLowerCase().replaceAll("_", "")}.com`;
+      const externalId = optionalString(brokerage.id);
+      const logoUrl =
+        optionalString(brokerage.aws_s3_square_logo_url) ??
+        optionalString(brokerage.aws_s3_logo_url);
+      db.prepare(
+        `
+          INSERT INTO platforms (id, name, url, external_id, kind, website_url, logo_url)
+          VALUES (?, ?, ?, ?, 'BROKERAGE', NULL, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            url = excluded.url,
+            external_id = excluded.external_id,
+            kind = excluded.kind,
+            website_url = excluded.website_url,
+            logo_url = excluded.logo_url
+        `,
+      ).run(platformId, name, url, externalId, logoUrl);
+      if (existing) {
+        platformsUpdated += 1;
+      } else {
+        platformsCreated += 1;
+      }
+    }
+  })();
+
+  return { synced: connections.length, platformsCreated, platformsUpdated };
 }
 
 function stringValue(value: unknown): string {

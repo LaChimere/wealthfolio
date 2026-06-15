@@ -495,4 +495,103 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("syncs broker connections into local platforms", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      INSERT INTO platforms (id, name, url, external_id, kind, website_url, logo_url)
+      VALUES ('existing', 'Old Name', 'https://old.example.test', 'old-id', 'BROKERAGE', NULL, NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          connections: [
+            {
+              id: "row-1",
+              brokerage: {
+                id: "brokerage-1",
+                slug: "new_broker",
+                name: "New Broker",
+                display_name: "New Broker Display",
+                aws_s3_logo_url: "https://logo.example.test/logo.png",
+                aws_s3_square_logo_url: "https://logo.example.test/square.png",
+              },
+            },
+            {
+              id: "row-2",
+              brokerage: {
+                id: "brokerage-2",
+                slug: "existing",
+                name: "Existing Broker",
+                display_name: null,
+                aws_s3_logo_url: "https://logo.example.test/existing.png",
+                aws_s3_square_logo_url: null,
+              },
+            },
+            { id: "row-3", brokerage: null },
+          ],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerConnections()).resolves.toEqual({
+        synced: 3,
+        platformsCreated: 1,
+        platformsUpdated: 1,
+      });
+      expect(
+        db
+          .query<
+            {
+              id: string;
+              name: string | null;
+              url: string;
+              external_id: string | null;
+              logo_url: string | null;
+            },
+            []
+          >("SELECT id, name, url, external_id, logo_url FROM platforms ORDER BY id")
+          .all(),
+      ).toEqual([
+        {
+          id: "existing",
+          name: "Existing Broker",
+          url: "https://existing.com",
+          external_id: "brokerage-2",
+          logo_url: "https://logo.example.test/existing.png",
+        },
+        {
+          id: "new_broker",
+          name: "New Broker Display",
+          url: "https://newbroker.com",
+          external_id: "brokerage-1",
+          logo_url: "https://logo.example.test/square.png",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 362
+turns_used: 363
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T02:46:27+08:00"
+updated_at: "2026-06-16T02:54:43+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2268,6 +2268,12 @@ updated_at: "2026-06-16T02:46:27+08:00"
   map broker connection fallback brokerage fields. Verified with Connect
   domain/runtime tests, backend type-check, full `bun run check`, and
   `git diff --check`.
+- Turn 363: Ported the bounded Connect broker-connection sync path into the
+  standalone TS runtime. `/connect/sync/connections` now fetches cloud
+  connections with a restored access token and upserts brokerage platforms using
+  the Rust-compatible slug/id, display-name, URL, external-id, and logo mapping.
+  Verified with Connect domain/runtime tests, backend type-check, full
+  `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

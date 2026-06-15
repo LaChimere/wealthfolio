@@ -3291,6 +3291,14 @@ contract:
   `/connect/accounts` cloud reads through restored access tokens,
   Rust-compatible connection ID/brokerage fallback mapping, and account response
   pass-through.
+- `pr5-connect-sync-connections-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes `/connect/sync/connections` fetching
+  cloud connections with a restored access token and upserting brokerage
+  platforms with Rust-compatible slug/id, display-name, URL, external-id, and
+  logo mapping.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -1205,7 +1205,9 @@ describe("TS backend runtime composition", () => {
         }
         if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
           return Response.json({
-            connections: [{ id: "connection-1", brokerage_name: "Brokerage" }],
+            connections: [
+              { id: "connection-1", brokerage_name: "Brokerage", brokerage_slug: "brokerage" },
+            ],
           });
         }
         if (String(input).endsWith("/api/v1/sync/brokerage/accounts")) {
@@ -1231,7 +1233,6 @@ describe("TS backend runtime composition", () => {
 
     try {
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/sync/connections`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
       ]) {
@@ -1251,6 +1252,17 @@ describe("TS backend runtime composition", () => {
         body: JSON.stringify({ refreshToken: "refresh-token" }),
       });
       expect(sessionResponse.status).toBe(200);
+
+      const syncConnectionsResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/sync/connections`,
+        { method: "POST" },
+      );
+      expect(syncConnectionsResponse.status).toBe(200);
+      await expect(syncConnectionsResponse.json()).resolves.toEqual({
+        synced: 1,
+        platformsCreated: 1,
+        platformsUpdated: 0,
+      });
 
       const connectionsResponse = await fetch(`${server.baseUrl}/api/v1/connect/connections`);
       expect(connectionsResponse.status).toBe(200);
@@ -1278,6 +1290,8 @@ describe("TS backend runtime composition", () => {
         email: "user@example.test",
       });
       expect(publicPlanRequests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/brokerage/connections",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "https://api.example.test/api/v1/sync/brokerage/connections",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
@@ -1313,6 +1327,15 @@ describe("TS backend runtime composition", () => {
       const platformsResponse = await fetch(`${server.baseUrl}/api/v1/connect/platforms`);
       expect(platformsResponse.status).toBe(200);
       await expect(platformsResponse.json()).resolves.toEqual([
+        {
+          id: "brokerage",
+          name: "Brokerage",
+          url: "https://brokerage.com",
+          externalId: null,
+          kind: "BROKERAGE",
+          websiteUrl: null,
+          logoUrl: null,
+        },
         {
           id: "SNAPTRADE",
           name: "SnapTrade",
