@@ -3648,6 +3648,17 @@ contract:
   completing/canceling/claiming/messaging/confirming pairing after restoring
   Connect session, reporting Rust-compatible missing-device-ID errors before
   cloud calls, and remaining feature-gated after prerequisites are satisfied.
+- `pr5-device-sync-composite-pairing-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/pairing/complete-with-transfer` and
+  `/api/v1/sync/pairing/confirm-with-bootstrap` requiring a parseable
+  `sync_identity` with a device ID before restoring the Connect session,
+  preserving Rust's no-legacy-fallback composite engine precondition, rejecting
+  malformed non-i32 `version`/`keyVersion` identity values after dual GPT/Claude
+  xhigh review, and remaining feature-gated after prerequisites are satisfied.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 408
+turns_used: 409
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T07:25:43+08:00"
+updated_at: "2026-06-16T07:41:20+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2560,6 +2560,15 @@ updated_at: "2026-06-16T07:25:43+08:00"
   cancel, claim, messages, and confirm now restore Connect session and report
   Rust-compatible missing-device-ID errors before cloud calls, while remaining
   feature-gated after prerequisites are satisfied. Verified with focused
+  device-sync/runtime tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check`.
+- Turn 409: Extended standalone composite pairing transfer/bootstrap
+  preconditions. `/api/v1/sync/pairing/complete-with-transfer` and
+  `/api/v1/sync/pairing/confirm-with-bootstrap` now require a parseable
+  `sync_identity` with a device ID before restoring the Connect session,
+  matching the Rust engine path, and remain feature-gated after prerequisites
+  are satisfied. Dual GPT/Claude xhigh review found and fixed an i32 identity
+  parse gap for `version`/`keyVersion`. Verified with focused
   device-sync/runtime tests, backend type-check, backend test suite, full
   `bun run check`, and `git diff --check`.
 

@@ -1672,16 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
-          pairingId: "pairing-1",
-          encryptedKeyBundle: "bundle",
-          sasProof: {},
-          signature: "signature",
-        }),
-        jsonRequest("/api/v1/sync/pairing/confirm-with-bootstrap", {
-          pairingId: "pairing-1",
-          allowOverwrite: false,
-        }),
         jsonRequest("/api/v1/sync/pairing/flow/begin", {
           pairingId: "pairing-1",
           proof: "proof",
@@ -1777,6 +1767,25 @@ describe("TS backend runtime composition", () => {
         expect(response.status).toBe(403);
         await expect(response.json()).resolves.toMatchObject({
           message: "No sync session configured",
+        });
+      }
+
+      for (const request of [
+        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: {},
+          signature: "signature",
+        }),
+        jsonRequest("/api/v1/sync/pairing/confirm-with-bootstrap", {
+          pairingId: "pairing-1",
+          allowOverwrite: false,
+        }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No device ID configured",
         });
       }
 

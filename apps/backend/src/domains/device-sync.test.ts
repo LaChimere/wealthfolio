@@ -257,4 +257,126 @@ describe("TS local device sync service", () => {
       code: "not_implemented",
     });
   });
+
+  test("reports sync identity preconditions for composite pairing operations", async () => {
+    const secretService = createMemorySecretService();
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+    const completeRequest = {
+      pairingId: "pairing-1",
+      encryptedKeyBundle: "bundle",
+      sasProof: {},
+      signature: "signature",
+    };
+    const confirmRequest = {
+      pairingId: "pairing-1",
+      allowOverwrite: false,
+    };
+
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+    await expect(service.confirmPairingWithBootstrap?.(confirmRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_device_id", "legacy-device");
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: null, deviceId: "device-1" }),
+    );
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1", keyVersion: 1.5 }),
+    );
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+    await expect(service.confirmPairingWithBootstrap?.(confirmRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No device ID configured",
+      status: 500,
+    });
+  });
+
+  test("requires Connect session for composite pairing after sync identity is configured", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+
+    await expect(
+      service.completePairingWithTransfer?.({
+        pairingId: "pairing-1",
+        encryptedKeyBundle: "bundle",
+        sasProof: {},
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+  });
+
+  test("keeps composite pairing feature-gated after sync identity and session restore", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(
+      service.completePairingWithTransfer?.({
+        pairingId: "pairing-1",
+        encryptedKeyBundle: "bundle",
+        sasProof: {},
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+    await expect(
+      service.confirmPairingWithBootstrap?.({
+        pairingId: "pairing-1",
+        allowOverwrite: false,
+      }),
+    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+  });
 });

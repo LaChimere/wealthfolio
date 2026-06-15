@@ -323,7 +323,33 @@ export function createLocalDeviceSyncService({
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
       throw deviceSyncDisabled();
     },
+    async completePairingWithTransfer() {
+      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async confirmPairingWithBootstrap() {
+      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
   };
+}
+
+async function requireCompositePairingPrerequisitesOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+  secretService: SecretService | undefined,
+): Promise<string> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  const deviceId = await getLocalSyncIdentityDeviceId(secretService);
+  if (deviceId === undefined) {
+    throw new DeviceSyncServiceError("internal_error", "No sync identity configured", 500);
+  }
+  if (deviceId === null) {
+    throw new DeviceSyncServiceError("internal_error", "No device ID configured", 500);
+  }
+  await restoreSessionOrDisabled(connectService);
+  return deviceId;
 }
 
 async function requireSessionDeviceIdOrDisabled(
@@ -363,6 +389,60 @@ async function getLocalDeviceId(secretService: SecretService): Promise<string | 
     }
   }
   return await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+}
+
+async function getLocalSyncIdentityDeviceId(
+  secretService: SecretService,
+): Promise<string | null | undefined> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (!rawIdentity) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(rawIdentity) as unknown;
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    assertDefaultedIntegerField(parsed, "version");
+    assertOptionalStringField(parsed, "deviceNonce");
+    assertOptionalStringField(parsed, "deviceId");
+    assertOptionalStringField(parsed, "rootKey");
+    assertOptionalIntegerField(parsed, "keyVersion");
+    assertOptionalStringField(parsed, "deviceSecretKey");
+    assertOptionalStringField(parsed, "devicePublicKey");
+    return optionalString(parsed.deviceId);
+  } catch {
+    return undefined;
+  }
+}
+
+function assertOptionalStringField(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new Error("invalid sync identity");
+  }
+}
+
+function assertDefaultedIntegerField(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (value !== undefined && (!Number.isInteger(value) || typeof value !== "number")) {
+    throw new Error("invalid sync identity");
+  }
+}
+
+function assertOptionalIntegerField(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (
+    value !== undefined &&
+    value !== null &&
+    (!Number.isInteger(value) || typeof value !== "number")
+  ) {
+    throw new Error("invalid sync identity");
+  }
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
