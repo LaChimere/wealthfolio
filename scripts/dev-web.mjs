@@ -41,7 +41,7 @@ const fileLog = process.argv.includes("--file-log");
 let logStream = null;
 
 if (fileLog) {
-  const dbUrl = process.env.WF_DB_PATH || process.env.DATABASE_URL || "app.db";
+  const dbUrl = process.env.WF_DB_PATH || "app.db";
   const dbName = basename(dbUrl, ".db");
   mkdirSync("logs", { recursive: true });
   logStream = createWriteStream(`logs/${dbName}.log`);

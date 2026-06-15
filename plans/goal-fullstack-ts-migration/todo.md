@@ -3111,6 +3111,11 @@ contract:
   `git diff --check`. Coverage includes non-packaged Electron defaulting to the
   Bun TypeScript backend while packaged builds retain a temporary Rust sidecar
   fallback until TS backend bundling is implemented.
+- `pr5-dev-web-database-url-cleanup`: verification passed:
+  `node --check scripts/dev-web.mjs`, full `bun run check`, and
+  `git diff --check`. Coverage includes `scripts/dev-web.mjs --file-log`
+  deriving log names from `WF_DB_PATH` or `app.db`, without the Rust-era
+  `DATABASE_URL` fallback.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
