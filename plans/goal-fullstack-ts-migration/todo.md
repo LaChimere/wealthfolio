@@ -3520,6 +3520,13 @@ contract:
   brokerage fields rejecting invalid non-string scalar values like Rust serde
   would, instead of silently nulling malformed brokerage IDs, names, slugs, or
   logo URLs during TS mapping.
+- `pr5-connect-user-team-scalar-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "user team|user info|authenticated plans"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes `/connect/user`
+  rejecting malformed optional string, boolean, and numeric fields on user/team
+  payloads, matching Rust serde behavior instead of silently nulling invalid
+  cloud values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

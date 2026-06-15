@@ -448,6 +448,73 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects malformed Connect user info optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ id: "user-1", email: 123, weekStartsOnMonday: "true" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect user team optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "user-1",
+          team: { id: "team-1", subscriptionCancelAtPeriodEnd: "false" },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse team info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("shares one token restore across concurrent authenticated Connect reads", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

@@ -775,6 +775,7 @@ function userInfoFromApi(value: unknown): unknown {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "No user info returned", 500);
   }
+  validateUserInfoFromApi(value);
   const team = isRecord(value.team) ? value.team : null;
   return {
     id: requiredStringValue(value.id, "user info"),
@@ -808,6 +809,67 @@ function userInfoFromApi(value: unknown): unknown {
         }
       : null,
   };
+}
+
+function validateUserInfoFromApi(value: Record<string, unknown>): void {
+  for (const field of [
+    "fullName",
+    "full_name",
+    "email",
+    "avatarUrl",
+    "avatar_url",
+    "locale",
+    "timezone",
+    "dateFormat",
+    "date_format",
+    "teamId",
+    "team_id",
+    "teamRole",
+    "team_role",
+  ]) {
+    assertOptionalConnectStringField(value, field, "user info");
+  }
+  for (const field of [
+    "weekStartsOnMonday",
+    "week_starts_on_monday",
+    "timezoneAutoSync",
+    "timezone_auto_sync",
+  ]) {
+    assertOptionalConnectBooleanField(value, field, "user info");
+  }
+  assertOptionalConnectNumberField(value, "timeFormat", "user info");
+  assertOptionalConnectNumberField(value, "time_format", "user info");
+
+  const team = value.team;
+  if (team !== undefined && team !== null && !isRecord(team)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse user info", 500);
+  }
+  if (isRecord(team)) {
+    validateUserTeamFromApi(team);
+  }
+}
+
+function validateUserTeamFromApi(team: Record<string, unknown>): void {
+  for (const field of [
+    "name",
+    "logoUrl",
+    "logo_url",
+    "plan",
+    "subscriptionStatus",
+    "subscription_status",
+    "subscriptionCurrentPeriodEnd",
+    "subscription_current_period_end",
+    "canceledAt",
+    "canceled_at",
+    "countryCode",
+    "country_code",
+    "createdAt",
+    "created_at",
+  ]) {
+    assertOptionalConnectStringField(team, field, "team info");
+  }
+  assertOptionalConnectBooleanField(team, "subscriptionCancelAtPeriodEnd", "team info");
+  assertOptionalConnectBooleanField(team, "subscription_cancel_at_period_end", "team info");
 }
 
 function requiredStringValue(value: unknown, context: string): string {
@@ -1628,6 +1690,17 @@ function assertOptionalConnectBooleanField(
 ): void {
   const value = record[key];
   if (value !== undefined && value !== null && typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+}
+
+function assertOptionalConnectNumberField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "number") {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
 }
