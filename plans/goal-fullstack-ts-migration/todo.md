@@ -3258,6 +3258,14 @@ contract:
   Connect auth endpoint, refresh-token rotation, legacy access-token cleanup,
   invalid-session cleanup on unauthorized refresh responses, and runtime HTTP
   `/connect/session/restore` wiring.
+- `pr5-connect-token-restore-review-fixes`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "Connect refresh sessions|disabled cloud routes|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes serializing concurrent token restores,
+  classifying invalid OAuth error codes independently from generic descriptions,
+  avoiding stale-refresh cleanup races, and updating disabled-cloud route tests
+  for migrated Connect session routes.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

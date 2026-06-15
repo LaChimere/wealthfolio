@@ -134,4 +134,71 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("serializes concurrent restores so a stale refresh failure cannot clear a rotated token", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    let calls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh",
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.restoreSyncSession(), service.restoreSyncSession()]),
+      ).resolves.toEqual([
+        { accessToken: "access-token", refreshToken: "rotated-refresh" },
+        { accessToken: "access-token", refreshToken: "rotated-refresh" },
+      ]);
+      expect(calls).toBe(1);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats invalid OAuth error codes as invalid sessions even with generic descriptions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        Response.json(
+          { error: "invalid_grant", error_description: "bad request" },
+          { status: 400 },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
 });

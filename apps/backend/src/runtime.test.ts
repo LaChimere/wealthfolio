@@ -1210,14 +1210,6 @@ describe("TS backend runtime composition", () => {
     try {
       const jsonHeaders = { "content-type": "application/json" };
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/session`, {
-          method: "POST",
-          headers: jsonHeaders,
-          body: JSON.stringify({ refreshToken: "refresh-token" }),
-        }),
-        new Request(`${server.baseUrl}/api/v1/connect/session`, { method: "DELETE" }),
-        new Request(`${server.baseUrl}/api/v1/connect/session/status`),
-        new Request(`${server.baseUrl}/api/v1/connect/session/restore`),
         new Request(`${server.baseUrl}/api/v1/connect/connections`),
         new Request(`${server.baseUrl}/api/v1/connect/accounts`),
         new Request(`${server.baseUrl}/api/v1/connect/sync/connections`, { method: "POST" }),

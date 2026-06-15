@@ -167,6 +167,7 @@ export function createLocalConnectService({
   fetch: fetchImpl = fetch,
 }: LocalConnectServiceDependencies): ConnectService {
   const disabledService = createDisabledConnectService();
+  let restorePromise: Promise<{ accessToken: string; refreshToken: string }> | null = null;
   return {
     ...disabledService,
     async storeSyncSession(refreshToken) {
@@ -193,7 +194,10 @@ export function createLocalConnectService({
       if (!secretService) {
         throw cloudSyncDisabled();
       }
-      return await restoreLocalSyncSession(secretService, env, fetchImpl);
+      restorePromise ??= restoreLocalSyncSession(secretService, env, fetchImpl).finally(() => {
+        restorePromise = null;
+      });
+      return await restorePromise;
     },
     getSyncedAccounts() {
       return accountService
@@ -540,17 +544,19 @@ async function restoreLocalSyncSession(
   }
 
   if (!response.ok) {
-    const message = refreshErrorMessage(response.status, bodyText);
-    if (isSessionInvalid(response.status, message)) {
+    const refreshError = parseRefreshError(response.status, bodyText);
+    if (isSessionInvalid(response.status, refreshError.message, refreshError.code)) {
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
-      await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
+      if ((await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) === refreshToken) {
+        await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
+      }
       throw new ConnectServiceError(
         "forbidden",
-        `Session expired. Please sign in again. (${message})`,
+        `Session expired. Please sign in again. (${refreshError.message})`,
         403,
       );
     }
-    throw new ConnectServiceError("internal_error", message, 500);
+    throw new ConnectServiceError("internal_error", refreshError.message, 500);
   }
 
   const payload = parseRefreshTokenResponse(bodyText);
@@ -594,7 +600,7 @@ function parseRefreshTokenResponse(bodyText: string): {
   return { accessToken: parsed.access_token, refreshToken };
 }
 
-function refreshErrorMessage(status: number, bodyText: string): string {
+function parseRefreshError(status: number, bodyText: string): { code: string; message: string } {
   const trimmed = bodyText.trim();
   if (trimmed) {
     try {
@@ -603,21 +609,26 @@ function refreshErrorMessage(status: number, bodyText: string): string {
         const description =
           typeof parsed.error_description === "string" ? parsed.error_description.trim() : "";
         const error = typeof parsed.error === "string" ? parsed.error.trim() : "";
-        return description || error || trimmed;
+        const errorCode = typeof parsed.error_code === "string" ? parsed.error_code.trim() : error;
+        const message = typeof parsed.msg === "string" ? parsed.msg.trim() : "";
+        return { code: errorCode, message: description || message || error || trimmed };
       }
     } catch {
-      return trimmed;
+      return { code: "", message: trimmed };
     }
   }
-  return `HTTP ${status}`;
+  return { code: "", message: `HTTP ${status}` };
 }
 
-function isSessionInvalid(status: number, message: string): boolean {
+function isSessionInvalid(status: number, message: string, code = ""): boolean {
   if (status === 401 || status === 403) {
     return true;
   }
-  return /(invalid[_\s-]?grant|invalid refresh|refresh token.*not found|jwt.*expired|expired)/i.test(
-    message,
+  return (
+    /(invalid[_\s-]?grant|refresh_token_not_found)/i.test(code) ||
+    /(invalid[_\s-]?grant|invalid refresh|refresh token.*not found|jwt.*expired|expired)/i.test(
+      message,
+    )
   );
 }
 
