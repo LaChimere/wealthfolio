@@ -96,8 +96,17 @@ describe("TS backend runtime composition", () => {
 
   test("stores Connect refresh sessions through the runtime secret service", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-session-"));
+    const refreshRequests: string[] = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      marketDataFetch: (async (input) => {
+        refreshRequests.push(String(input));
+        return Response.json({ access_token: "access-token", refresh_token: "rotated-refresh" });
+      }) as typeof fetch,
       secretKey: new Uint8Array(32),
     });
     const server = startBackendServer(config, runtime.options);
@@ -119,6 +128,16 @@ describe("TS backend runtime composition", () => {
       );
       expect(configuredStatusResponse.status).toBe(200);
       await expect(configuredStatusResponse.json()).resolves.toEqual({ isConfigured: true });
+
+      const restoreResponse = await fetch(`${server.baseUrl}/api/v1/connect/session/restore`);
+      expect(restoreResponse.status).toBe(200);
+      await expect(restoreResponse.json()).resolves.toEqual({
+        accessToken: "access-token",
+        refreshToken: "rotated-refresh",
+      });
+      expect(refreshRequests).toEqual([
+        "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+      ]);
 
       const clearResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
         method: "DELETE",

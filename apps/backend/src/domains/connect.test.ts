@@ -51,4 +51,87 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("restores sessions by refreshing access tokens and rotating refresh tokens", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    secretService.entries.set("sync_access_token", "legacy-access");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test/",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh",
+          expires_in: 3600,
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toEqual({
+        accessToken: "access-token",
+        refreshToken: "rotated-refresh",
+      });
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh");
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.url).toBe(
+        "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+      );
+      expect(requests[0]?.init?.headers).toMatchObject({
+        apikey: "publishable-key",
+        "content-type": "application/json",
+      });
+      expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+        refresh_token: "old-refresh",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("clears invalid refresh sessions during restore", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    secretService.entries.set("sync_access_token", "legacy-access");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        Response.json(
+          { error: "invalid_grant", error_description: "Refresh Token Not Found" },
+          { status: 401 },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
 });

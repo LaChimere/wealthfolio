@@ -19,6 +19,8 @@ export interface LocalConnectServiceDependencies {
   activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules">;
   accountService: Pick<AccountService, "getAllAccounts">;
   secretService?: SecretService;
+  env?: NodeJS.ProcessEnv;
+  fetch?: typeof fetch;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -65,12 +67,21 @@ export interface ConnectService {
   getUserInfo(): Promise<unknown> | unknown;
 }
 
-export class ConnectNotImplementedError extends Error {
-  readonly status = 501;
-  readonly code = "not_implemented";
+export class ConnectServiceError extends Error {
+  readonly status: number;
+  readonly code: string;
 
-  constructor(message: string) {
+  constructor(code: string, message: string, status: number) {
     super(message);
+    this.name = "ConnectServiceError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export class ConnectNotImplementedError extends ConnectServiceError {
+  constructor(message: string) {
+    super("not_implemented", message, 501);
     this.name = "ConnectNotImplementedError";
   }
 }
@@ -82,6 +93,8 @@ const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not yet available in the TS backend runtime";
 const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
+const DEFAULT_CONNECT_AUTH_URL = "https://auth.wealthfolio.app";
+const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
 
 export function createDisabledConnectService(): ConnectService {
   return {
@@ -150,6 +163,8 @@ export function createLocalConnectService({
   activityService,
   accountService,
   secretService,
+  env = process.env,
+  fetch: fetchImpl = fetch,
 }: LocalConnectServiceDependencies): ConnectService {
   const disabledService = createDisabledConnectService();
   return {
@@ -173,6 +188,12 @@ export function createLocalConnectService({
         throw cloudSyncDisabled();
       }
       return { isConfigured: (await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) !== null };
+    },
+    async restoreSyncSession() {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      return await restoreLocalSyncSession(secretService, env, fetchImpl);
     },
     getSyncedAccounts() {
       return accountService
@@ -474,6 +495,134 @@ function rustDateTime(value: string): string {
 
 function rustUtcString(date: Date): string {
   return date.toISOString().replace(".000Z", "Z");
+}
+
+async function restoreLocalSyncSession(
+  secretService: SecretService,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const refreshToken = await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY);
+  if (!refreshToken) {
+    throw new ConnectServiceError("forbidden", "No sync session configured", 403);
+  }
+
+  const authUrl = normalizeConnectAuthUrl(env.CONNECT_AUTH_URL);
+  const publishableKey = normalizeConnectPublishableKey(env.CONNECT_AUTH_PUBLISHABLE_KEY);
+  const tokenUrl = `${authUrl}/auth/v1/token?grant_type=refresh_token`;
+  let response: Response;
+  try {
+    response = await fetchImpl(tokenUrl, {
+      method: "POST",
+      headers: {
+        apikey: publishableKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to refresh token: ${errorMessage(error)}`,
+      500,
+    );
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to read token response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+
+  if (!response.ok) {
+    const message = refreshErrorMessage(response.status, bodyText);
+    if (isSessionInvalid(response.status, message)) {
+      await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+      await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
+      throw new ConnectServiceError(
+        "forbidden",
+        `Session expired. Please sign in again. (${message})`,
+        403,
+      );
+    }
+    throw new ConnectServiceError("internal_error", message, 500);
+  }
+
+  const payload = parseRefreshTokenResponse(bodyText);
+  const rotatedRefreshToken = payload.refreshToken || refreshToken;
+  await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, rotatedRefreshToken);
+  await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+  return { accessToken: payload.accessToken, refreshToken: rotatedRefreshToken };
+}
+
+function normalizeConnectAuthUrl(value: string | undefined): string {
+  const trimmed = value?.trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_CONNECT_AUTH_URL;
+}
+
+function normalizeConnectPublishableKey(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY;
+}
+
+function parseRefreshTokenResponse(bodyText: string): {
+  accessToken: string;
+  refreshToken: string | null;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse token response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed) || typeof parsed.access_token !== "string" || !parsed.access_token.trim()) {
+    throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+  }
+  const refreshToken =
+    typeof parsed.refresh_token === "string" && parsed.refresh_token.trim()
+      ? parsed.refresh_token.trim()
+      : null;
+  return { accessToken: parsed.access_token, refreshToken };
+}
+
+function refreshErrorMessage(status: number, bodyText: string): string {
+  const trimmed = bodyText.trim();
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (isRecord(parsed)) {
+        const description =
+          typeof parsed.error_description === "string" ? parsed.error_description.trim() : "";
+        const error = typeof parsed.error === "string" ? parsed.error.trim() : "";
+        return description || error || trimmed;
+      }
+    } catch {
+      return trimmed;
+    }
+  }
+  return `HTTP ${status}`;
+}
+
+function isSessionInvalid(status: number, message: string): boolean {
+  if (status === 401 || status === 403) {
+    return true;
+  }
+  return /(invalid[_\s-]?grant|invalid refresh|refresh token.*not found|jwt.*expired|expired)/i.test(
+    message,
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function cloudSyncDisabled(): ConnectNotImplementedError {

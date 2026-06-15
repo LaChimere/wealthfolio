@@ -3250,6 +3250,14 @@ contract:
   store/status/clear backed by `SecretService`, with legacy access-token
   cleanup, while cloud access-token restore and broker/device sync remain
   feature-gated.
+- `pr5-connect-token-restore-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes refresh-token restore through the
+  Connect auth endpoint, refresh-token rotation, legacy access-token cleanup,
+  invalid-session cleanup on unauthorized refresh responses, and runtime HTTP
+  `/connect/session/restore` wiring.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

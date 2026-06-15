@@ -507,6 +507,8 @@ function createServicesFromDatabase(
       activityService,
       accountService,
       secretService,
+      env: runtimeOptions.env,
+      fetch: runtimeOptions.marketDataFetch,
     }),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
