@@ -21,7 +21,7 @@ show_help() {
     echo "  -p, --port PORT            Port number to check for (default: 8088)"
     echo "  -h, --help                 Show this help message"
     echo ""
-    echo "The script checks for 'ready in' and 'listening|:$PORT|Axum' in the log file."
+    echo "The script checks for 'ready in' (Vite) and 'listening|:$PORT' (Bun backend) in the log file."
 }
 
 # Parse options
@@ -82,7 +82,7 @@ fi
 
 # Wait loop
 for ((i=1; i<=MAX_ATTEMPTS; i++)); do
-    if grep -q "ready in" "$LOG_FILE" 2>/dev/null && grep -qE "listening|:$PORT|Axum" "$LOG_FILE" 2>/dev/null; then
+    if grep -q "ready in" "$LOG_FILE" 2>/dev/null && grep -qE "listening|:$PORT" "$LOG_FILE" 2>/dev/null; then
         echo "Both servers ready after $((i*INTERVAL))s"
         break
     fi

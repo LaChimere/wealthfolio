@@ -9,7 +9,6 @@ frontend and backend must be running against a fresh database.
 ## Prerequisites
 
 - `Bun` installed
-- Rust toolchain installed (for the backend server)
 - Chrome installed (Playwright uses the system Chrome)
 
 ---
@@ -57,8 +56,8 @@ this every time** before starting the server — it ensures test isolation.
 bun run dev:web
 ```
 
-Wait until you see Vite's "ready in Xms" and the Rust server binding messages,
-then move on to Step 3 in a separate terminal.
+Wait until you see Vite's "ready in Xms" and the Bun backend's "Wealthfolio TS
+backend listening on …" message, then move on to Step 3 in a separate terminal.
 
 **Option B — redirect output to a log file and use the wait script:**
 
@@ -68,9 +67,9 @@ bun run dev:web > /tmp/wealthfolio-dev2.log 2>&1 &
 ```
 
 `wait-for-both-servers-to-be-ready.sh` polls the log file until it detects both
-"ready in" (Vite) and the Axum server binding on port 8088, then prints the last
-few lines and exits. The output redirect is required — the script reads from a
-file, not from a live terminal.
+"ready in" (Vite) and the Bun backend "listening" message on port 8088, then
+prints the last few lines and exits. The output redirect is required — the
+script reads from a file, not from a live terminal.
 
 > **If the web app is already running:** Stop it first (Ctrl+C), then re-run
 > `prep-e2e.mjs` and restart. The running instance is using a stale database —

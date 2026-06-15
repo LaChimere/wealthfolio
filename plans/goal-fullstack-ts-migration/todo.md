@@ -3121,6 +3121,12 @@ contract:
   full `bun run check`, and `git diff --check`. Coverage includes README web
   mode and Docker sections documenting the Bun TypeScript backend instead of the
   Rust Axum server path.
+- `pr5-e2e-bun-backend-cleanup`: verification passed:
+  `node --check scripts/run-e2e.mjs`,
+  `bash -n scripts/wait-for-both-servers-to-be-ready.sh`, full `bun run check`,
+  and `git diff --check`. Coverage includes E2E no longer passing `RUST_LOG` to
+  the Bun backend, wait-script readiness checks no longer mentioning Axum, and
+  E2E setup docs no longer requiring Rust for the backend server.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
