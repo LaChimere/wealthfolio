@@ -14,9 +14,13 @@ export interface StartElectronBackendRuntimeOptions extends StartSidecarOptions 
 
 export function resolveElectronBackendRuntimeKind(
   env: NodeJS.ProcessEnv = process.env,
+  defaultRuntime: ElectronBackendRuntimeKind = "ts",
 ): ElectronBackendRuntimeKind {
   const raw = env.WF_BACKEND_RUNTIME?.trim().toLowerCase();
-  if (!raw || raw === "rust" || raw === "rust-sidecar") {
+  if (!raw) {
+    return defaultRuntime;
+  }
+  if (raw === "rust" || raw === "rust-sidecar") {
     return "rust";
   }
   if (raw === "ts" || raw === "typescript" || raw === "bun") {
@@ -28,6 +32,7 @@ export function resolveElectronBackendRuntimeKind(
 export async function startElectronBackendRuntime(
   options: StartElectronBackendRuntimeOptions,
 ): Promise<SidecarHandle> {
-  const runtime = options.runtime ?? resolveElectronBackendRuntimeKind(options.env);
+  const defaultRuntime = options.packaged ? "rust" : "ts";
+  const runtime = options.runtime ?? resolveElectronBackendRuntimeKind(options.env, defaultRuntime);
   return runtime === "ts" ? await startTsBackendSidecar(options) : await startRustSidecar(options);
 }

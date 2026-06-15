@@ -3105,6 +3105,12 @@ contract:
   TypeScript backend instead of
   `cargo run --manifest-path apps/server/Cargo.toml` and `.env.web.example`
   documenting the Bun backend.
+- `pr5-electron-default-ts-runtime`: verification passed:
+  `bun test apps/electron/src/main/backend-runtime.test.ts`,
+  `bun run --cwd apps/electron type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes non-packaged Electron defaulting to the
+  Bun TypeScript backend while packaged builds retain a temporary Rust sidecar
+  fallback until TS backend bundling is implemented.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -13,8 +13,9 @@ const legacyPaths = {
 const repositoryRoot = path.resolve(import.meta.dir, "../../../..");
 
 describe("Electron backend runtime selector", () => {
-  test("defaults to the Rust sidecar unless TypeScript backend is explicitly selected", () => {
-    expect(resolveElectronBackendRuntimeKind({})).toBe("rust");
+  test("defaults to the TypeScript backend unless Rust sidecar is explicitly selected", () => {
+    expect(resolveElectronBackendRuntimeKind({})).toBe("ts");
+    expect(resolveElectronBackendRuntimeKind({}, "rust")).toBe("rust");
     expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "rust-sidecar" })).toBe("rust");
     expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "ts" })).toBe("ts");
     expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "bun" })).toBe("ts");
