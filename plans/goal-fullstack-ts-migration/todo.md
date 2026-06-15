@@ -3379,6 +3379,15 @@ contract:
   `git diff --check`. Coverage includes local `/connect/device/cancel-snapshot`
   returning Rust-compatible `cancel_requested`/message while snapshot
   generation/upload remains feature-gated.
+- `pr5-device-sync-snapshot-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "snapshot preconditions|device sync local"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local
+  `/connect/device/bootstrap-snapshot` and `/connect/device/generate-snapshot`
+  returning Rust-compatible no-identity and no-device-id errors before cloud
+  upload paths, while trusted-device snapshot export/upload remains
+  feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -1338,4 +1338,28 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("reports local snapshot preconditions before cloud upload paths", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(() => service.bootstrapDeviceSnapshot()).toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+      expect(() => service.generateDeviceSnapshotNow()).toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+    } finally {
+      db.close();
+    }
+  });
 });

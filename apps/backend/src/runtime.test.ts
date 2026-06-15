@@ -1555,13 +1555,7 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/bootstrap-snapshot`, {
-          method: "POST",
-        }),
         new Request(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/generate-snapshot`, {
-          method: "POST",
-        }),
         jsonRequest("/api/v1/sync/device/register", {
           displayName: "MacBook",
           platform: "macos",
@@ -1682,6 +1676,17 @@ describe("TS backend runtime composition", () => {
         status: "stopped",
         message: "Device sync background engine stopped",
       });
+
+      for (const pathName of [
+        "/api/v1/connect/device/bootstrap-snapshot",
+        "/api/v1/connect/device/generate-snapshot",
+      ]) {
+        const response = await fetch(`${server.baseUrl}${pathName}`, { method: "POST" });
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No sync identity configured. Please enable sync first.",
+        });
+      }
 
       const cancelSnapshotResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/device/cancel-snapshot`,

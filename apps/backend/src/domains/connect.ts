@@ -1645,6 +1645,12 @@ export function createLocalConnectDeviceSyncService({
     getDeviceSyncPairingSourceStatus() {
       return getLocalDeviceSyncPairingSourceStatus(db);
     },
+    bootstrapDeviceSnapshot() {
+      return getLocalSnapshotIdentityOrThrow(db);
+    },
+    generateDeviceSnapshotNow() {
+      return getLocalSnapshotIdentityOrThrow(db);
+    },
     startDeviceSyncBackgroundEngine() {
       return {
         status: "skipped",
@@ -1778,6 +1784,30 @@ function getLocalDeviceSyncPairingSourceStatus(db: Database): Record<string, unk
       "Current device is not ready to connect another device yet.",
       500,
     );
+  }
+  throw deviceSyncDisabled();
+}
+
+function getLocalSnapshotIdentityOrThrow(db: Database): never {
+  const config = db
+    .query<{ device_id: string | null }, []>(
+      `
+        SELECT device_id
+        FROM sync_device_config
+        ORDER BY device_id
+        LIMIT 1
+      `,
+    )
+    .get();
+  if (!config) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "No sync identity configured. Please enable sync first.",
+      500,
+    );
+  }
+  if (!config.device_id) {
+    throw new ConnectServiceError("internal_error", "No device ID configured", 500);
   }
   throw deviceSyncDisabled();
 }
