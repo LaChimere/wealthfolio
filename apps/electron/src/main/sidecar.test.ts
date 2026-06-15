@@ -6,7 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, spyOn, test } from "bun:test";
 
 import {
-  createPackagedSidecarCommand,
+  createPackagedRustSidecarCommand,
+  createPackagedTsBackendCommand,
   createRustSidecarCommand,
   createSidecarEnvironment,
   startRustSidecar,
@@ -113,9 +114,41 @@ describe("Electron sidecar configuration", () => {
     expect(command.args).toContain(path.join("/repo", "apps/server/Cargo.toml"));
   });
 
-  test("resolves the packaged sidecar from Electron resources", () => {
+  test("resolves the packaged TS backend from Electron resources", () => {
     const tempRoot = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-electron-sidecar-resource-test-"),
+    );
+    const sidecarDir = path.join(tempRoot, "sidecars");
+    const sidecarPath = path.join(
+      sidecarDir,
+      process.platform === "win32" ? "wealthfolio-backend.exe" : "wealthfolio-backend",
+    );
+    mkdirSync(sidecarDir, { recursive: true });
+    writeFileSync(sidecarPath, "");
+
+    try {
+      const command = createPackagedTsBackendCommand(tempRoot);
+
+      expect(command).toEqual({
+        command: sidecarPath,
+        args: [],
+        env: {
+          WF_AI_PROVIDER_CATALOG_PATH: path.join(
+            tempRoot,
+            "sidecars/backend-assets/ai_providers.json",
+          ),
+          WF_EXCHANGE_CATALOG_PATH: path.join(tempRoot, "sidecars/backend-assets/exchanges.json"),
+          WF_MIGRATIONS_DIR: path.join(tempRoot, "sidecars/backend-assets/migrations"),
+        },
+      });
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("keeps explicit packaged Rust sidecar fallback separate", () => {
+    const tempRoot = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-electron-rust-sidecar-resource-test-"),
     );
     const sidecarDir = path.join(tempRoot, "sidecars");
     const sidecarPath = path.join(
@@ -126,9 +159,10 @@ describe("Electron sidecar configuration", () => {
     writeFileSync(sidecarPath, "");
 
     try {
-      const command = createPackagedSidecarCommand(tempRoot);
-
-      expect(command).toEqual({ command: sidecarPath, args: [] });
+      expect(createPackagedRustSidecarCommand(tempRoot)).toEqual({
+        command: sidecarPath,
+        args: [],
+      });
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });
     }
@@ -138,8 +172,8 @@ describe("Electron sidecar configuration", () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-missing-test-"));
 
     try {
-      expect(() => createPackagedSidecarCommand(tempRoot)).toThrow(
-        /Electron sidecar binary is not bundled/,
+      expect(() => createPackagedTsBackendCommand(tempRoot)).toThrow(
+        /Electron TypeScript backend is not bundled/,
       );
     } finally {
       rmSync(tempRoot, { force: true, recursive: true });

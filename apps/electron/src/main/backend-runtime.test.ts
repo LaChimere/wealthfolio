@@ -1,9 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
 import { resolveElectronBackendRuntimeKind, startElectronBackendRuntime } from "./backend-runtime";
-import { createTsBackendCommand, startTsBackendSidecar } from "./sidecar";
+import { createTsBackendCommand } from "./sidecar";
 
 const legacyPaths = {
   dataRoot: "/tmp/wealthfolio",
@@ -33,15 +35,22 @@ describe("Electron backend runtime selector", () => {
     expect(createTsBackendCommand("C:\\repo", "win32").command).toBe("bun.exe");
   });
 
-  test("guards packaged builds from selecting the unbundled TS backend runtime", async () => {
-    await expect(
-      startTsBackendSidecar({
-        legacyPaths,
-        repositoryRoot: "/repo",
-        packaged: true,
-        resourcesPath: "/resources",
-      }),
-    ).rejects.toThrow("The TypeScript backend runtime is not packaged yet");
+  test("packaged builds default to the bundled TS backend runtime", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-packaged-ts-test-"));
+
+    try {
+      await expect(
+        startElectronBackendRuntime({
+          legacyPaths,
+          repositoryRoot: "/repo",
+          packaged: true,
+          resourcesPath: tempRoot,
+          timeoutMs: 10,
+        }),
+      ).rejects.toThrow("Electron TypeScript backend is not bundled");
+    } finally {
+      rmSync(tempRoot, { force: true, recursive: true });
+    }
   });
 
   test("can start the explicitly selected TS backend through the shared sidecar lifecycle", async () => {

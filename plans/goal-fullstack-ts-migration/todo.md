@@ -137,8 +137,9 @@
     DRIP/dividend-in-kind/staking reward activity compiler expansion now run in
     the standalone TS runtime; TS file-backed secret persistence and native
     keyring-backed `WF_SECRET_BACKEND=keyring` are wired into standalone runtime
-    while packaged keyring cutover and cross-platform keyring CI remain deferred
-    to a runtime/keyring parity slice; AI provider
+    and packaged Electron now launches the Bun-compiled TS backend with the
+    keyring-backed desktop environment, while cross-platform keyring CI remains
+    deferred to a runtime/keyring parity slice; AI provider
     catalog/settings/model-listing runtime behavior, bounded native/fallback
     text/reasoning AI chat provider streaming, generated thread titles,
     OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution,
@@ -3109,8 +3110,8 @@ contract:
   `bun test apps/electron/src/main/backend-runtime.test.ts`,
   `bun run --cwd apps/electron type-check`, full `bun run check`, and
   `git diff --check`. Coverage includes non-packaged Electron defaulting to the
-  Bun TypeScript backend while packaged builds retain a temporary Rust sidecar
-  fallback until TS backend bundling is implemented.
+  Bun TypeScript backend; packaged TS backend bundling/cutover is covered by the
+  later `pr5-electron-packaged-ts-sidecar` evidence.
 - `pr5-dev-web-database-url-cleanup`: verification passed:
   `node --check scripts/dev-web.mjs`, full `bun run check`, and
   `git diff --check`. Coverage includes `scripts/dev-web.mjs --file-log`
@@ -3160,6 +3161,15 @@ contract:
   `git diff --check`. Coverage includes VS Code recommendations no longer
   prompting developers to install the Tauri extension after Tauri runtime
   removal.
+- `pr5-electron-packaged-ts-sidecar`: verification passed:
+  `bun run build:electron:sidecar`, `bun run test:backend`,
+  `bun run test:electron`, full `bun run check`, and `git diff --check`.
+  Coverage includes Bun-compiling `apps/backend/src/main.ts` into the packaged
+  Electron sidecar executable, staging SQLite migrations plus exchange and AI
+  provider catalogs beside the binary, smoke-testing the compiled backend via
+  `/api/v1/readyz`, copying TS backend resources in `afterPack`, defaulting
+  packaged Electron runtime to TS, and removing Rust setup/cache from the
+  Electron release job's sidecar build.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -3168,21 +3178,21 @@ contract:
   registration/no-op/portfolio-recalculation parity and explicit runtime 501
   gates; background portfolio worker orchestration moves with
   portfolio/calculation slices after the current bounded portfolio
-  valuation/activity-replay runtime; packaged keyring cutover and cross-platform
-  keyring CI move with a dedicated runtime parity slice; AI chat richer
-  provider/tool orchestration and any future Ollama PDF support move with AI
-  runtime parity slices if Ollama documents non-image file inputs; asset
-  quote-provider interactions and portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; remaining provider breadth and
-  background orchestration move with market-data/portfolio parity slices;
-  remaining provider-backed symbol fetch/resolution and sync breadth moves with
-  market-data/provider parity slices; full portfolio snapshot rebuilding side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths,
-  remaining activity/provider-backed asset resolution beyond import flows, sync
-  engine push/pull, and portfolio recalculation side effects move with
+  valuation/activity-replay runtime; cross-platform keyring CI moves with a
+  dedicated runtime parity slice; AI chat richer provider/tool orchestration and
+  any future Ollama PDF support move with AI runtime parity slices if Ollama
+  documents non-image file inputs; asset quote-provider interactions and
+  portfolio recalculation side effects move with asset/market-data/portfolio
+  parity slices; remaining provider breadth and background orchestration move
+  with market-data/portfolio parity slices; remaining provider-backed symbol
+  fetch/resolution and sync breadth moves with market-data/provider parity
+  slices; full portfolio snapshot rebuilding side effects move with
+  holdings/portfolio parity slices; add-on security scanning, full sandbox
+  isolation, and query-cache hardening move with add-on runtime parity slices;
+  provider-backed asset resolution, remaining quote sync-outbox emission outside
+  migrated alternative-asset and market-data quote paths, remaining
+  activity/provider-backed asset resolution beyond import flows, sync engine
+  push/pull, and portfolio recalculation side effects move with
   activities/import/device-sync runtime parity slices; device-sync integration
   for sync crypto moves with device-sync parity slices; broader health checks
   and real market sync fix execution move with health/calculation parity slices;

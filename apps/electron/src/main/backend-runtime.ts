@@ -32,7 +32,6 @@ export function resolveElectronBackendRuntimeKind(
 export async function startElectronBackendRuntime(
   options: StartElectronBackendRuntimeOptions,
 ): Promise<SidecarHandle> {
-  const defaultRuntime = options.packaged ? "rust" : "ts";
-  const runtime = options.runtime ?? resolveElectronBackendRuntimeKind(options.env, defaultRuntime);
+  const runtime = options.runtime ?? resolveElectronBackendRuntimeKind(options.env);
   return runtime === "ts" ? await startTsBackendSidecar(options) : await startRustSidecar(options);
 }

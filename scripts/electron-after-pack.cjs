@@ -1,4 +1,4 @@
-const { chmodSync, copyFileSync, mkdirSync } = require("node:fs");
+const { chmodSync, copyFileSync, cpSync, mkdirSync, rmSync } = require("node:fs");
 const path = require("node:path");
 
 const ARCH_NAMES = new Map([
@@ -12,7 +12,7 @@ const ARCH_NAMES = new Map([
 module.exports = async function copyElectronSidecar(context) {
   const platform = context.electronPlatformName;
   const arch = resolveArchName(context.arch);
-  const binaryName = platform === "win32" ? "wealthfolio-server.exe" : "wealthfolio-server";
+  const binaryName = platform === "win32" ? "wealthfolio-backend.exe" : "wealthfolio-backend";
   const sourcePath = path.join(
     context.packager.projectDir,
     "resources",
@@ -20,11 +20,15 @@ module.exports = async function copyElectronSidecar(context) {
     `${platform}-${arch}`,
     binaryName,
   );
+  const sourceAssetsPath = path.join(path.dirname(sourcePath), "backend-assets");
   const destinationDir = path.join(resolveResourcesDir(context), "sidecars");
   const destinationPath = path.join(destinationDir, binaryName);
+  const destinationAssetsPath = path.join(destinationDir, "backend-assets");
 
   mkdirSync(destinationDir, { recursive: true });
   copyFileSync(sourcePath, destinationPath);
+  rmSync(destinationAssetsPath, { force: true, recursive: true });
+  cpSync(sourceAssetsPath, destinationAssetsPath, { recursive: true });
   if (platform !== "win32") {
     chmodSync(destinationPath, 0o755);
   }

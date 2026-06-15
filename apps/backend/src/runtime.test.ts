@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -41,6 +41,42 @@ describe("TS backend runtime composition", () => {
     expect(resolveBackendMigrationsDir({ WF_MIGRATIONS_DIR: "/tmp/migrations" })).toBe(
       "/tmp/migrations",
     );
+  });
+
+  test("starts from packaged runtime resource paths without repository-relative catalogs", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-packaged-"));
+    const resourceDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-resources-"));
+    const migrationsDir = path.join(resourceDir, "migrations");
+    const exchangeCatalogPath = path.join(resourceDir, "exchanges.json");
+    const aiProviderCatalogPath = path.join(resourceDir, "ai_providers.json");
+    cpSync(path.join(repositoryRoot, "crates/storage-sqlite/migrations"), migrationsDir, {
+      recursive: true,
+    });
+    copyFileSync(
+      path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
+      exchangeCatalogPath,
+    );
+    copyFileSync(
+      path.join(repositoryRoot, "crates/ai/src/ai_providers.json"),
+      aiProviderCatalogPath,
+    );
+
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        WF_MIGRATIONS_DIR: migrationsDir,
+        WF_EXCHANGE_CATALOG_PATH: exchangeCatalogPath,
+        WF_AI_PROVIDER_CATALOG_PATH: aiProviderCatalogPath,
+      },
+      repositoryRoot: path.join(resourceDir, "missing-repository"),
+      secretKey: new Uint8Array(32),
+    });
+
+    try {
+      expect(runtime.dbPath).toBe(path.join(appDataDir, "app.db"));
+    } finally {
+      await runtime.close();
+    }
   });
 
   test("starts a TS server with SQLite-backed low-risk services", async () => {

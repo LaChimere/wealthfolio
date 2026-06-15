@@ -82,6 +82,7 @@ export interface SqliteBackedBackendServicesOptions {
   migrationsDir?: string;
   repositoryRoot?: string;
   secretKey?: Uint8Array;
+  exchangeCatalogJson?: string;
   aiProviderCatalogJson?: string;
   marketDataFetch?: typeof fetch;
   domainEventDebounceMs?: number;
@@ -114,6 +115,7 @@ export function createSqliteBackedBackendServices(
       eventBus: options.eventBus,
       repositoryRoot,
       secretKey: options.secretKey,
+      exchangeCatalogJson: options.exchangeCatalogJson,
       aiProviderCatalogJson: options.aiProviderCatalogJson,
       marketDataFetch: options.marketDataFetch,
       ...(options.domainEventDebounceMs === undefined
@@ -173,6 +175,7 @@ function createServicesFromDatabase(
     eventBus?: BackendEventBus;
     repositoryRoot: string;
     secretKey?: Uint8Array;
+    exchangeCatalogJson?: string;
     aiProviderCatalogJson?: string;
     marketDataFetch?: typeof fetch;
     domainEventDebounceMs?: number;
@@ -273,7 +276,9 @@ function createServicesFromDatabase(
       });
     },
   );
-  const exchangeCatalogJson = readExchangeCatalogJson(runtimeOptions.repositoryRoot);
+  const exchangeCatalogJson =
+    runtimeOptions.exchangeCatalogJson ??
+    readExchangeCatalogJson(runtimeOptions.env, runtimeOptions.repositoryRoot);
   const exchangeMetadata = parseExchangeMetadataLookup(exchangeCatalogJson);
   const marketDataService = createMarketDataService(db, {
     exchangeCatalogJson,
@@ -295,7 +300,7 @@ function createServicesFromDatabase(
         secretService,
         catalogJson:
           runtimeOptions.aiProviderCatalogJson ??
-          readAiProviderCatalogJson(runtimeOptions.repositoryRoot),
+          readAiProviderCatalogJson(runtimeOptions.env, runtimeOptions.repositoryRoot),
       })
     : undefined;
   const taxonomyService = createTaxonomyService(
@@ -812,9 +817,10 @@ function readPackageVersion(repositoryRoot: string): string {
   }
 }
 
-function readExchangeCatalogJson(repositoryRoot: string): string {
+function readExchangeCatalogJson(env: NodeJS.ProcessEnv, repositoryRoot: string): string {
+  const packagedPath = env.WF_EXCHANGE_CATALOG_PATH?.trim();
   return readFileSync(
-    path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
+    packagedPath || path.join(repositoryRoot, "crates/market-data/src/resolver/exchanges.json"),
     "utf8",
   );
 }
@@ -823,6 +829,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readAiProviderCatalogJson(repositoryRoot: string): string {
-  return readFileSync(path.join(repositoryRoot, "crates/ai/src/ai_providers.json"), "utf8");
+function readAiProviderCatalogJson(env: NodeJS.ProcessEnv, repositoryRoot: string): string {
+  const packagedPath = env.WF_AI_PROVIDER_CATALOG_PATH?.trim();
+  return readFileSync(
+    packagedPath || path.join(repositoryRoot, "crates/ai/src/ai_providers.json"),
+    "utf8",
+  );
 }

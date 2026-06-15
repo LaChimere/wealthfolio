@@ -27,6 +27,7 @@ export interface SidecarCommand {
   command: string;
   args: string[];
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface StartSidecarOptions {
@@ -111,7 +112,7 @@ export function createTsBackendCommand(
   };
 }
 
-export function createPackagedSidecarCommand(
+export function createPackagedRustSidecarCommand(
   resourcesPath: string,
   platform: NodeJS.Platform = process.platform,
 ): SidecarCommand {
@@ -121,6 +122,27 @@ export function createPackagedSidecarCommand(
     throw new Error(`Electron sidecar binary is not bundled at ${command}.`);
   }
   return { command, args: [] };
+}
+
+export function createPackagedTsBackendCommand(
+  resourcesPath: string,
+  platform: NodeJS.Platform = process.platform,
+): SidecarCommand {
+  const binaryName = platform === "win32" ? "wealthfolio-backend.exe" : "wealthfolio-backend";
+  const command = path.join(resourcesPath, "sidecars", binaryName);
+  const assetsPath = path.join(resourcesPath, "sidecars", "backend-assets");
+  if (!existsSync(command)) {
+    throw new Error(`Electron TypeScript backend is not bundled at ${command}.`);
+  }
+  return {
+    command,
+    args: [],
+    env: {
+      WF_AI_PROVIDER_CATALOG_PATH: path.join(assetsPath, "ai_providers.json"),
+      WF_EXCHANGE_CATALOG_PATH: path.join(assetsPath, "exchanges.json"),
+      WF_MIGRATIONS_DIR: path.join(assetsPath, "migrations"),
+    },
+  };
 }
 
 export async function startRustSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
@@ -141,14 +163,14 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
   const sidecarCommand =
     options.command ??
     (options.packaged
-      ? createPackagedSidecarCommand(options.resourcesPath)
+      ? createPackagedRustSidecarCommand(options.resourcesPath)
       : createRustSidecarCommand(options.repositoryRoot));
 
   const child = spawn(sidecarCommand.command, sidecarCommand.args, {
     cwd:
       sidecarCommand.cwd ??
       (options.packaged ? path.dirname(sidecarCommand.command) : options.repositoryRoot),
-    env,
+    env: sidecarCommand.env ? { ...env, ...sidecarCommand.env } : env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -213,12 +235,13 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
 }
 
 export async function startTsBackendSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
-  if (options.packaged && !options.command) {
-    throw new Error("The TypeScript backend runtime is not packaged yet; use the Rust sidecar.");
-  }
   return await startRustSidecar({
     ...options,
-    command: options.command ?? createTsBackendCommand(options.repositoryRoot),
+    command:
+      options.command ??
+      (options.packaged
+        ? createPackagedTsBackendCommand(options.resourcesPath)
+        : createTsBackendCommand(options.repositoryRoot)),
   });
 }
 
