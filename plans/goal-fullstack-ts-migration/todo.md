@@ -3613,6 +3613,14 @@ contract:
   `400 No device ID configured` after session restore when no local device ID is
   present, preserving legacy `sync_device_id` fallback when `sync_identity`
   cannot be parsed, and keeping actual cloud device reads feature-gated.
+- `pr5-device-sync-list-devices-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/devices` restoring the Connect session first, returning the same
+  forbidden session error when no session is configured, and remaining
+  feature-gated after a valid session until cloud device listing lands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

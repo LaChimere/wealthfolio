@@ -1672,7 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        new Request(`${server.baseUrl}/api/v1/sync/devices?scope=team`),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1`),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, {
           method: "PATCH",
@@ -1743,6 +1742,14 @@ describe("TS backend runtime composition", () => {
       );
       expect(currentDeviceWithoutSessionResponse.status).toBe(403);
       await expect(currentDeviceWithoutSessionResponse.json()).resolves.toMatchObject({
+        message: "No sync session configured",
+      });
+
+      const listDevicesWithoutSessionResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/devices?scope=team`,
+      );
+      expect(listDevicesWithoutSessionResponse.status).toBe(403);
+      await expect(listDevicesWithoutSessionResponse.json()).resolves.toMatchObject({
         message: "No sync session configured",
       });
 

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 404
+turns_used: 405
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T07:07:19+08:00"
+updated_at: "2026-06-16T07:12:03+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2536,6 +2536,12 @@ updated_at: "2026-06-16T07:07:19+08:00"
   when `sync_identity` cannot be parsed, while actual cloud device reads remain
   feature-gated. Verified with focused device-sync/runtime tests, backend
   type-check, backend test suite, full `bun run check`, and `git diff --check`.
+- Turn 405: Extended standalone `/api/v1/sync/devices` device-management
+  preconditions. Listing devices now restores the Connect session first,
+  returning the same forbidden session error when no session is configured, and
+  remains feature-gated after a valid session until cloud device listing lands.
+  Verified with focused device-sync/runtime tests, backend type-check, backend
+  test suite, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

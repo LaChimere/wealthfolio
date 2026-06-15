@@ -52,4 +52,35 @@ describe("TS local device sync service", () => {
       status: 501,
     });
   });
+
+  test("requires Connect session before listing devices", async () => {
+    const service = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+
+    await expect(service.listDevices()).rejects.toMatchObject({
+      code: "forbidden",
+      status: 403,
+    });
+  });
+
+  test("keeps device listing feature-gated after restoring Connect session", async () => {
+    const service = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(service.listDevices()).rejects.toMatchObject({
+      code: "not_implemented",
+      status: 501,
+    });
+  });
 });

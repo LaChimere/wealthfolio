@@ -1,3 +1,6 @@
+import type { ConnectService } from "./connect";
+import type { SecretService } from "./secrets";
+
 export interface RegisterDeviceRequest {
   displayName: string;
   platform: string;
@@ -245,6 +248,13 @@ export function createLocalDeviceSyncService({
       }
       throw deviceSyncDisabled();
     },
+    async listDevices() {
+      if (!connectService) {
+        throw deviceSyncDisabled();
+      }
+      await connectService.restoreSyncSession();
+      throw deviceSyncDisabled();
+    },
   };
 }
 
@@ -270,5 +280,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function deviceSyncDisabled(): DeviceSyncNotImplementedError {
   return new DeviceSyncNotImplementedError(DEVICE_SYNC_DISABLED_MESSAGE);
 }
-import type { ConnectService } from "./connect";
-import type { SecretService } from "./secrets";
