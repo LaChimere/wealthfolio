@@ -1290,7 +1290,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("returns local background engine start and stop no-op responses", () => {
+  test("returns local background and snapshot cancellation no-op responses", () => {
     const db = new Database(":memory:");
     const service = createLocalConnectDeviceSyncService({ db });
 
@@ -1302,6 +1302,10 @@ describe("TS Connect device sync local service", () => {
       expect(service.stopDeviceSyncBackgroundEngine()).toEqual({
         status: "stopped",
         message: "Device sync background engine stopped",
+      });
+      expect(service.cancelDeviceSnapshotUpload()).toEqual({
+        status: "cancel_requested",
+        message: "Snapshot upload cancellation requested",
       });
     } finally {
       db.close();

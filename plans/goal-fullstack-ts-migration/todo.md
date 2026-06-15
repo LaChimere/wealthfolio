@@ -3372,6 +3372,13 @@ contract:
   `/connect/device/pairing-source-status` returning Rust-compatible no-identity
   and not-ready errors before cloud cursor checks, while trusted-device cursor
   comparison remains feature-gated.
+- `pr5-device-sync-cancel-snapshot-noop`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "snapshot cancellation|background|device sync local"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local `/connect/device/cancel-snapshot`
+  returning Rust-compatible `cancel_requested`/message while snapshot
+  generation/upload remains feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -1657,6 +1657,12 @@ export function createLocalConnectDeviceSyncService({
         message: "Device sync background engine stopped",
       };
     },
+    cancelDeviceSnapshotUpload() {
+      return {
+        status: "cancel_requested",
+        message: "Snapshot upload cancellation requested",
+      };
+    },
   };
 }
 

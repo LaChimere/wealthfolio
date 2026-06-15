@@ -1562,7 +1562,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/generate-snapshot`, {
           method: "POST",
         }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/cancel-snapshot`, { method: "POST" }),
         jsonRequest("/api/v1/sync/device/register", {
           displayName: "MacBook",
           platform: "macos",
@@ -1682,6 +1681,16 @@ describe("TS backend runtime composition", () => {
       await expect(stopBackgroundResponse.json()).resolves.toEqual({
         status: "stopped",
         message: "Device sync background engine stopped",
+      });
+
+      const cancelSnapshotResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/cancel-snapshot`,
+        { method: "POST" },
+      );
+      expect(cancelSnapshotResponse.status).toBe(200);
+      await expect(cancelSnapshotResponse.json()).resolves.toEqual({
+        status: "cancel_requested",
+        message: "Snapshot upload cancellation requested",
       });
     } finally {
       server.stop();
