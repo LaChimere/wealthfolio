@@ -3478,6 +3478,13 @@ contract:
   architecture doc describing the TS backend as preserving behavior proven
   against the legacy Rust reference implementation rather than implying the
   current runtime still uses legacy Rust business logic.
+- `pr5-connect-api-error-body-parsing`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "activity page fetch fails|broker activity|transaction-mode"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes bearer Connect
+  requests and public plans fetch parsing JSON error bodies to include
+  cloud-provided `message`/`error` text in `API error <status>: ...` messages,
+  so broker activity sync failures persist more actionable `last_error` values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

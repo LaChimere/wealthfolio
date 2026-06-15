@@ -691,7 +691,11 @@ async function fetchPublicSubscriptionPlans(
     );
   }
   if (!response.ok) {
-    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
+    throw new ConnectServiceError(
+      "internal_error",
+      connectApiErrorMessage(response.status, bodyText),
+      500,
+    );
   }
   try {
     const parsed = JSON.parse(bodyText) as unknown;
@@ -750,7 +754,11 @@ async function fetchConnectJsonWithAccessToken(
     );
   }
   if (!response.ok) {
-    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
+    throw new ConnectServiceError(
+      "internal_error",
+      connectApiErrorMessage(response.status, bodyText),
+      500,
+    );
   }
   try {
     return JSON.parse(bodyText) as unknown;
@@ -1583,6 +1591,23 @@ function parseRefreshError(status: number, bodyText: string): { code: string; me
     }
   }
   return { code: "", message: `HTTP ${status}` };
+}
+
+function connectApiErrorMessage(status: number, bodyText: string): string {
+  const trimmed = bodyText.trim();
+  if (!trimmed) {
+    return `API error ${status}`;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (isRecord(parsed)) {
+      const message = optionalString(parsed.message) ?? optionalString(parsed.error);
+      return `API error ${status}: ${message ?? `HTTP ${status}`}`;
+    }
+  } catch {
+    return `API error ${status}`;
+  }
+  return `API error ${status}`;
 }
 
 function isSessionInvalid(status: number, message: string, code = ""): boolean {

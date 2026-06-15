@@ -1395,7 +1395,7 @@ describe("TS Connect local session service", () => {
           .get(),
       ).toEqual({
         sync_status: "FAILED",
-        last_error: "API error 503",
+        last_error: "API error 503: upstream unavailable",
       });
     } finally {
       db.close();
