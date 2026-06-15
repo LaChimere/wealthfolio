@@ -3350,6 +3350,14 @@ contract:
   connections sync, accounts sync, and HOLDINGS-mode activities no-op path,
   returning accepted while TRANSACTIONS-mode broker activity mapping remains
   feature-gated.
+- `pr5-connect-activities-empty-page-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "activity sync|empty broker activity|transaction-mode"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes marking TRANSACTIONS accounts as
+  attempted, fetching broker activity pages, finalizing success when no
+  activities are returned, and preserving explicit 501 behavior for non-empty
+  pages until broker activity mapping lands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

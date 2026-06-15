@@ -274,7 +274,13 @@ export function createLocalConnectService({
       return await syncBrokerAccountsToLocal(db, accountService, accounts);
     },
     async syncBrokerActivities() {
-      return syncBrokerActivitiesForHoldingsOnly(accountService);
+      return syncBrokerActivitiesForHoldingsOnly(
+        accountService,
+        db,
+        restoreSession,
+        env,
+        fetchImpl,
+      );
     },
     getSyncedAccounts() {
       return accountService
@@ -989,21 +995,43 @@ async function syncBrokerAccountsToLocal(
 
 function syncBrokerActivitiesForHoldingsOnly(
   accountService: Pick<AccountService, "getAllAccounts">,
-): {
-  accountsSynced: number;
-  activitiesUpserted: number;
-  assetsInserted: number;
-  accountsFailed: number;
-  accountsWarned: number;
-  newAssetIds: string[];
-} {
-  const hasTransactionsAccount = accountService
+  db?: Database,
+  restoreSession?: () => Promise<{ accessToken: string; refreshToken: string }>,
+  env?: NodeJS.ProcessEnv,
+  fetchImpl?: typeof fetch,
+):
+  | Promise<{
+      accountsSynced: number;
+      activitiesUpserted: number;
+      assetsInserted: number;
+      accountsFailed: number;
+      accountsWarned: number;
+      newAssetIds: string[];
+    }>
+  | {
+      accountsSynced: number;
+      activitiesUpserted: number;
+      assetsInserted: number;
+      accountsFailed: number;
+      accountsWarned: number;
+      newAssetIds: string[];
+    } {
+  const transactionAccounts = accountService
     .getAllAccounts()
-    .some(
+    .filter(
       (account) => account.providerAccountId !== null && account.trackingMode === "TRANSACTIONS",
     );
-  if (hasTransactionsAccount) {
+  if (transactionAccounts.length > 0 && (!db || !restoreSession || !env || !fetchImpl)) {
     throw connectSyncDisabled();
+  }
+  if (transactionAccounts.length > 0) {
+    return syncEmptyTransactionActivityPages(
+      db!,
+      restoreSession!,
+      env!,
+      fetchImpl!,
+      transactionAccounts,
+    );
   }
   return {
     accountsSynced: 0,
@@ -1013,6 +1041,151 @@ function syncBrokerActivitiesForHoldingsOnly(
     accountsWarned: 0,
     newAssetIds: [],
   };
+}
+
+async function syncEmptyTransactionActivityPages(
+  db: Database,
+  restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accounts: ReturnType<AccountService["getAllAccounts"]>,
+): Promise<{
+  accountsSynced: number;
+  activitiesUpserted: number;
+  assetsInserted: number;
+  accountsFailed: number;
+  accountsWarned: number;
+  newAssetIds: string[];
+}> {
+  const summary = {
+    accountsSynced: 0,
+    activitiesUpserted: 0,
+    assetsInserted: 0,
+    accountsFailed: 0,
+    accountsWarned: 0,
+    newAssetIds: [] as string[],
+  };
+  const endDate = dateOnly(new Date());
+  for (const account of accounts) {
+    if (!account.providerAccountId) {
+      continue;
+    }
+    upsertBrokerSyncAttempt(db, account.id);
+    const startDate = brokerActivitySyncStartDate(db, account.id, endDate);
+    const path = brokerActivitiesPath(account.providerAccountId, startDate, endDate, 0, 1000);
+    const page = await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, path);
+    const data = isRecord(page) && Array.isArray(page.data) ? page.data : [];
+    if (data.length > 0) {
+      const message = "Broker activity mapping is not yet available in the TS backend runtime";
+      upsertBrokerSyncFailure(db, account.id, message);
+      throw new ConnectNotImplementedError(message);
+    }
+    upsertBrokerSyncSuccess(db, account.id);
+    summary.accountsSynced += 1;
+  }
+  return summary;
+}
+
+function brokerActivitiesPath(
+  providerAccountId: string,
+  startDate: string | null,
+  endDate: string,
+  offset: number,
+  limit: number,
+): string {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    end_date: endDate,
+  });
+  if (startDate) {
+    params.set("start_date", startDate);
+  }
+  return `/api/v1/sync/brokerage/accounts/${encodeURIComponent(providerAccountId)}/activities?${params}`;
+}
+
+function brokerActivitySyncStartDate(
+  db: Database,
+  accountId: string,
+  endDate: string,
+): string | null {
+  const row = db
+    .query<{ last_successful_at: string | null }, [string, string]>(
+      `
+        SELECT last_successful_at
+        FROM brokers_sync_state
+        WHERE account_id = ? AND provider = ?
+      `,
+    )
+    .get(accountId, "SNAPTRADE");
+  if (!row?.last_successful_at) {
+    return null;
+  }
+  const parsed = new Date(row.last_successful_at);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() - 1);
+  const startDate = dateOnly(parsed);
+  return startDate > endDate ? endDate : startDate;
+}
+
+function upsertBrokerSyncAttempt(db: Database, accountId: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      )
+      VALUES (?, 'SNAPTRADE', NULL, ?, NULL, NULL, NULL, 'RUNNING', ?, ?)
+      ON CONFLICT(account_id, provider) DO UPDATE SET
+        last_attempted_at = excluded.last_attempted_at,
+        sync_status = excluded.sync_status,
+        updated_at = excluded.updated_at
+    `,
+  ).run(accountId, now, now, now);
+}
+
+function upsertBrokerSyncSuccess(db: Database, accountId: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      )
+      VALUES (?, 'SNAPTRADE', NULL, ?, ?, NULL, NULL, 'IDLE', ?, ?)
+      ON CONFLICT(account_id, provider) DO UPDATE SET
+        last_successful_at = excluded.last_successful_at,
+        last_error = NULL,
+        last_run_id = NULL,
+        sync_status = excluded.sync_status,
+        updated_at = excluded.updated_at
+    `,
+  ).run(accountId, now, now, now, now);
+}
+
+function upsertBrokerSyncFailure(db: Database, accountId: string, error: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      )
+      VALUES (?, 'SNAPTRADE', NULL, ?, NULL, ?, NULL, 'FAILED', ?, ?)
+      ON CONFLICT(account_id, provider) DO UPDATE SET
+        sync_status = excluded.sync_status,
+        last_error = excluded.last_error,
+        last_run_id = NULL,
+        updated_at = excluded.updated_at
+    `,
+  ).run(accountId, now, error, now, now);
+}
+
+function dateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 async function syncBrokerDataBounded(
