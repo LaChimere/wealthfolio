@@ -3283,6 +3283,14 @@ contract:
   requests, Rust-compatible user/team response field mapping, shared in-flight
   token restores for concurrent authenticated reads, and guards preventing
   pending restores from resurrecting cleared or replaced sessions.
+- `pr5-connect-broker-read-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes authenticated `/connect/connections` and
+  `/connect/accounts` cloud reads through restored access tokens,
+  Rust-compatible connection ID/brokerage fallback mapping, and account response
+  pass-through.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

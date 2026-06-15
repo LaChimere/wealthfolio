@@ -400,4 +400,99 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("lists broker connections and accounts from authenticated Connect API reads", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({
+            connections: [
+              {
+                id: "connection-row-id",
+                authorization_id: "authorization-1",
+                status: "connected",
+                disabled: false,
+                updated_at: "2026-01-02T00:00:00Z",
+                name: "Main connection",
+                brokerage: {
+                  id: "brokerage-1",
+                  slug: "snaptrade",
+                  name: "SnapTrade",
+                  display_name: "SnapTrade Display",
+                  aws_s3_logo_url: "https://logo.example.test/logo.png",
+                  aws_s3_square_logo_url: "https://logo.example.test/square.png",
+                },
+              },
+              {
+                id: "connection-row-2",
+                brokerage_name: "Fallback Broker",
+                brokerage_slug: "fallback",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          accounts: [{ id: "broker-account-1", name: "Broker Account", currency: "USD" }],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).resolves.toEqual([
+        {
+          id: "authorization-1",
+          brokerage: {
+            id: "brokerage-1",
+            slug: "snaptrade",
+            name: "SnapTrade",
+            display_name: "SnapTrade Display",
+            aws_s3_logo_url: "https://logo.example.test/logo.png",
+            aws_s3_square_logo_url: "https://logo.example.test/square.png",
+          },
+          type: null,
+          status: "connected",
+          disabled: false,
+          disabled_date: null,
+          updated_at: "2026-01-02T00:00:00Z",
+          name: "Main connection",
+        },
+        {
+          id: "connection-row-2",
+          brokerage: {
+            id: null,
+            slug: "fallback",
+            name: "Fallback Broker",
+            display_name: "Fallback Broker",
+            aws_s3_logo_url: null,
+            aws_s3_square_logo_url: null,
+          },
+          type: null,
+          status: null,
+          disabled: false,
+          disabled_date: null,
+          updated_at: null,
+          name: null,
+        },
+      ]);
+      await expect(service.listBrokerAccounts()).resolves.toEqual([
+        { id: "broker-account-1", name: "Broker Account", currency: "USD" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

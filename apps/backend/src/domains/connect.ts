@@ -227,6 +227,26 @@ export function createLocalConnectService({
         await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, "/api/v1/user/me"),
       );
     },
+    async listBrokerConnections() {
+      return brokerConnectionsFromApi(
+        await fetchAuthenticatedConnectJson(
+          restoreSession,
+          env,
+          fetchImpl,
+          "/api/v1/sync/brokerage/connections",
+        ),
+      );
+    },
+    async listBrokerAccounts() {
+      return brokerAccountsFromApi(
+        await fetchAuthenticatedConnectJson(
+          restoreSession,
+          env,
+          fetchImpl,
+          "/api/v1/sync/brokerage/accounts",
+        ),
+      );
+    },
     getSyncedAccounts() {
       return accountService
         .getAllAccounts()
@@ -732,6 +752,67 @@ function userInfoFromApi(value: unknown): unknown {
         }
       : null,
   };
+}
+
+function brokerConnectionsFromApi(value: unknown): unknown[] {
+  if (!isRecord(value) || !Array.isArray(value.connections)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse connections response", 500);
+  }
+  return value.connections.map(brokerConnectionFromApi);
+}
+
+function brokerConnectionFromApi(value: unknown): unknown {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse connection response", 500);
+  }
+  const brokerage = brokerageFromApi(value);
+  return {
+    id: optionalString(value.authorization_id ?? value.authorizationId) ?? stringValue(value.id),
+    brokerage,
+    type: null,
+    status: optionalString(value.status),
+    disabled: optionalBoolean(value.disabled) ?? false,
+    disabled_date: null,
+    updated_at: optionalString(value.updated_at ?? value.updatedAt),
+    name: optionalString(value.name),
+  };
+}
+
+function brokerageFromApi(value: Record<string, unknown>): unknown | null {
+  const nested = isRecord(value.brokerage) ? value.brokerage : null;
+  if (nested) {
+    const name = optionalString(nested.name);
+    return {
+      id: optionalString(nested.id),
+      slug: optionalString(nested.slug),
+      name,
+      display_name: optionalString(nested.display_name ?? nested.displayName) ?? name,
+      aws_s3_logo_url: optionalString(nested.aws_s3_logo_url ?? nested.awsS3LogoUrl),
+      aws_s3_square_logo_url: optionalString(
+        nested.aws_s3_square_logo_url ?? nested.awsS3SquareLogoUrl,
+      ),
+    };
+  }
+  const brokerageName = optionalString(value.brokerage_name ?? value.brokerageName);
+  const brokerageSlug = optionalString(value.brokerage_slug ?? value.brokerageSlug);
+  if (brokerageName !== null || brokerageSlug !== null) {
+    return {
+      id: null,
+      slug: brokerageSlug,
+      name: brokerageName,
+      display_name: brokerageName,
+      aws_s3_logo_url: null,
+      aws_s3_square_logo_url: null,
+    };
+  }
+  return null;
+}
+
+function brokerAccountsFromApi(value: unknown): unknown[] {
+  if (!isRecord(value) || !Array.isArray(value.accounts)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  return value.accounts;
 }
 
 function stringValue(value: unknown): string {

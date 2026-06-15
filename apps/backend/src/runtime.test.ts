@@ -1203,6 +1203,16 @@ describe("TS backend runtime composition", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
+        if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({
+            connections: [{ id: "connection-1", brokerage_name: "Brokerage" }],
+          });
+        }
+        if (String(input).endsWith("/api/v1/sync/brokerage/accounts")) {
+          return Response.json({
+            accounts: [{ id: "broker-account-1", name: "Broker Account" }],
+          });
+        }
         if (String(input).endsWith("/api/v1/user/me")) {
           return Response.json({ id: "user-1", email: "user@example.test" });
         }
@@ -1221,8 +1231,6 @@ describe("TS backend runtime composition", () => {
 
     try {
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/connections`),
-        new Request(`${server.baseUrl}/api/v1/connect/accounts`),
         new Request(`${server.baseUrl}/api/v1/connect/sync/connections`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
@@ -1244,6 +1252,21 @@ describe("TS backend runtime composition", () => {
       });
       expect(sessionResponse.status).toBe(200);
 
+      const connectionsResponse = await fetch(`${server.baseUrl}/api/v1/connect/connections`);
+      expect(connectionsResponse.status).toBe(200);
+      await expect(connectionsResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: "connection-1",
+          brokerage: expect.objectContaining({ name: "Brokerage" }),
+        }),
+      ]);
+
+      const brokerAccountsResponse = await fetch(`${server.baseUrl}/api/v1/connect/accounts`);
+      expect(brokerAccountsResponse.status).toBe(200);
+      await expect(brokerAccountsResponse.json()).resolves.toEqual([
+        { id: "broker-account-1", name: "Broker Account" },
+      ]);
+
       const authenticatedPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans`);
       expect(authenticatedPlansResponse.status).toBe(200);
       await expect(authenticatedPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
@@ -1255,6 +1278,10 @@ describe("TS backend runtime composition", () => {
         email: "user@example.test",
       });
       expect(publicPlanRequests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/brokerage/connections",
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/brokerage/accounts",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "https://api.example.test/api/v1/subscription/plans",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
