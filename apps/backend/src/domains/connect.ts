@@ -1132,7 +1132,16 @@ async function syncEmptyTransactionActivityPages(
 }
 
 function brokerActivityPageData(page: unknown): unknown[] {
-  return isRecord(page) && Array.isArray(page.data) ? page.data : [];
+  if (!isRecord(page)) {
+    return [];
+  }
+  for (const key of ["data", "activities", "universalActivities", "universal_activities"]) {
+    const value = page[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return [];
 }
 
 function brokerActivityPageHasMore(

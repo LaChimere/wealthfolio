@@ -3446,6 +3446,14 @@ contract:
   usage to `apps/backend` and the root README, fixing old
   `src-server`/`src-core` paths, and scoping environment variables to explicit
   legacy reference runs.
+- `pr5-connect-activity-page-aliases`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "activity page|broker activity|transaction-mode|aliases"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/connect/sync/activities` recognizing broker activity arrays from `data`,
+  `activities`, `universalActivities`, and `universal_activities` like Rust's
+  serde aliases, preventing aliased non-empty pages from being mistaken as empty
+  and preserving the mapper feature gate for aliased mappable activity rows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
