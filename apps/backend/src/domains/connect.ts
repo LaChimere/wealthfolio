@@ -273,6 +273,9 @@ export function createLocalConnectService({
       );
       return await syncBrokerAccountsToLocal(db, accountService, accounts);
     },
+    async syncBrokerActivities() {
+      return syncBrokerActivitiesForHoldingsOnly(accountService);
+    },
     getSyncedAccounts() {
       return accountService
         .getAllAccounts()
@@ -981,6 +984,34 @@ async function syncBrokerAccountsToLocal(
     skipped,
     createdAccounts,
     newAccountsInfo,
+  };
+}
+
+function syncBrokerActivitiesForHoldingsOnly(
+  accountService: Pick<AccountService, "getAllAccounts">,
+): {
+  accountsSynced: number;
+  activitiesUpserted: number;
+  assetsInserted: number;
+  accountsFailed: number;
+  accountsWarned: number;
+  newAssetIds: string[];
+} {
+  const hasTransactionsAccount = accountService
+    .getAllAccounts()
+    .some(
+      (account) => account.providerAccountId !== null && account.trackingMode === "TRANSACTIONS",
+    );
+  if (hasTransactionsAccount) {
+    throw connectSyncDisabled();
+  }
+  return {
+    accountsSynced: 0,
+    activitiesUpserted: 0,
+    assetsInserted: 0,
+    accountsFailed: 0,
+    accountsWarned: 0,
+    newAssetIds: [],
   };
 }
 

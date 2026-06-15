@@ -1241,13 +1241,6 @@ describe("TS backend runtime composition", () => {
     const server = startBackendServer(config, runtime.options);
 
     try {
-      for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
-      ]) {
-        const response = await fetch(request);
-        expect(response.status).toBe(501);
-      }
-
       const publicPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans/public`);
       expect(publicPlansResponse.status).toBe(200);
       await expect(publicPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
@@ -1342,6 +1335,22 @@ describe("TS backend runtime composition", () => {
         method: "POST",
       });
       expect(syncResponse.status).toBe(501);
+
+      const syncActivitiesResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/sync/activities`,
+        {
+          method: "POST",
+        },
+      );
+      expect(syncActivitiesResponse.status).toBe(200);
+      await expect(syncActivitiesResponse.json()).resolves.toEqual({
+        accountsSynced: 0,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
 
       const syncedAccountsResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/synced-accounts`,

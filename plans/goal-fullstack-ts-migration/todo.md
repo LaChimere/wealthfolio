@@ -3326,6 +3326,14 @@ contract:
   table set from SQLite, applying manual/user-data filters, sorting
   non-empty-table counts by rows then table, and keeping device-sync mutation
   routes feature-gated.
+- `pr5-connect-sync-activities-holdings-noop`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes `/connect/sync/activities` returning a
+  Rust-compatible empty summary when all synced broker accounts are
+  HOLDINGS-mode and keeping TRANSACTIONS-mode broker activity mapping
+  feature-gated until the full mapper lands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

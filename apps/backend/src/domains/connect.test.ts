@@ -756,6 +756,102 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("treats activities-only sync as a no-op when all synced accounts are holdings-mode", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "holdings-account",
+            name: "Holdings",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "HOLDINGS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toEqual({
+        accountsSynced: 0,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps transaction-mode activity sync feature-gated until broker activity mapping lands", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe("TS Connect device sync local service", () => {

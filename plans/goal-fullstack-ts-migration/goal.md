@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 366
+turns_used: 367
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T03:30:15+08:00"
+updated_at: "2026-06-16T03:37:11+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2294,6 +2294,12 @@ updated_at: "2026-06-16T03:30:15+08:00"
   the same overwrite-risk table set from SQLite, applies Rust-compatible filters
   and row sorting, and returns bootstrap/local-data summaries while device-sync
   mutation routes remain feature-gated. Verified with Connect domain/runtime
+  tests, backend type-check, full `bun run check`, and `git diff --check`.
+- Turn 367: Ported the safe no-op branch of Connect activities-only sync into
+  the standalone TS runtime. `/connect/sync/activities` now returns a
+  Rust-compatible empty sync summary when all synced broker accounts are
+  HOLDINGS-mode and keeps TRANSACTIONS-mode activity mapping feature-gated until
+  the full broker activity mapper lands. Verified with Connect domain/runtime
   tests, backend type-check, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
