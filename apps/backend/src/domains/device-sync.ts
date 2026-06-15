@@ -271,7 +271,42 @@ export function createLocalDeviceSyncService({
       await restoreSessionOrDisabled(connectService);
       throw deviceSyncDisabled();
     },
+    async initializeTeamKeys() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async commitInitializeTeamKeys() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async rotateTeamKeys() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async commitRotateTeamKeys() {
+      await requireSessionDeviceIdOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async resetTeamSync() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
   };
+}
+
+async function requireSessionDeviceIdOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+  secretService: SecretService | undefined,
+): Promise<string> {
+  await restoreSessionOrDisabled(connectService);
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  const deviceId = await getLocalDeviceId(secretService);
+  if (!deviceId) {
+    throw new DeviceSyncServiceError("bad_request", "No device ID configured", 400);
+  }
+  return deviceId;
 }
 
 async function restoreSessionOrDisabled(

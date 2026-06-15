@@ -3630,6 +3630,15 @@ contract:
   session before cloud work, returning the same forbidden session error when no
   session is configured, and remaining feature-gated after a valid session until
   cloud device management lands.
+- `pr5-device-sync-team-key-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes team key
+  initialize/commit/rotate/commit restoring Connect session and reporting
+  Rust-compatible `400 No device ID configured` when no local device ID exists,
+  reset-team-sync restoring session first, and all paths remaining feature-gated
+  after prerequisites are satisfied.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

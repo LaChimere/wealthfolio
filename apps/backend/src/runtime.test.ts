@@ -1672,19 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        new Request(`${server.baseUrl}/api/v1/sync/keys/initialize`, { method: "POST" }),
-        jsonRequest("/api/v1/sync/keys/initialize/commit", {
-          keyVersion: 1,
-          deviceKeyEnvelope: "envelope",
-          signature: "signature",
-        }),
-        new Request(`${server.baseUrl}/api/v1/sync/keys/rotate`, { method: "POST" }),
-        jsonRequest("/api/v1/sync/keys/rotate/commit", {
-          newKeyVersion: 2,
-          envelopes: [{ deviceId: "device-1", deviceKeyEnvelope: "envelope" }],
-          signature: "signature",
-        }),
-        jsonRequest("/api/v1/sync/team/reset", { reason: "test" }),
         jsonRequest("/api/v1/sync/pairing", {
           codeHash: "hash",
           ephemeralPublicKey: "public-key",
@@ -1754,6 +1741,28 @@ describe("TS backend runtime composition", () => {
         }),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1/revoke`, { method: "POST" }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No sync session configured",
+        });
+      }
+
+      for (const request of [
+        new Request(`${server.baseUrl}/api/v1/sync/keys/initialize`, { method: "POST" }),
+        jsonRequest("/api/v1/sync/keys/initialize/commit", {
+          keyVersion: 1,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+        }),
+        new Request(`${server.baseUrl}/api/v1/sync/keys/rotate`, { method: "POST" }),
+        jsonRequest("/api/v1/sync/keys/rotate/commit", {
+          newKeyVersion: 2,
+          envelopes: [{ deviceId: "device-1", deviceKeyEnvelope: "envelope" }],
+          signature: "signature",
+        }),
+        jsonRequest("/api/v1/sync/team/reset", { reason: "test" }),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(403);

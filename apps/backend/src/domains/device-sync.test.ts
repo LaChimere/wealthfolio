@@ -122,4 +122,79 @@ describe("TS local device sync service", () => {
       code: "not_implemented",
     });
   });
+
+  test("reports missing device id for team key operations after session restore", async () => {
+    const secretService = createMemorySecretService();
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(service.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "bad_request",
+      message: "No device ID configured",
+      status: 400,
+    });
+    await expect(
+      service.commitInitializeTeamKeys?.({
+        keyVersion: 1,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+    await expect(service.rotateTeamKeys?.()).rejects.toMatchObject({ code: "bad_request" });
+    await expect(
+      service.commitRotateTeamKeys?.({
+        newKeyVersion: 2,
+        envelopes: [{ deviceId: "device-2", deviceKeyEnvelope: "envelope" }],
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  test("keeps team key operations feature-gated when device id is configured", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+
+    await expect(service.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "not_implemented",
+      status: 501,
+    });
+    await expect(service.rotateTeamKeys?.()).rejects.toMatchObject({ code: "not_implemented" });
+  });
+
+  test("requires Connect session before reset team sync and keeps it feature-gated after restore", async () => {
+    const noSessionService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+    await expect(noSessionService.resetTeamSync?.({ reason: "test" })).rejects.toMatchObject({
+      code: "forbidden",
+      status: 403,
+    });
+
+    const restoredService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+    await expect(restoredService.resetTeamSync?.({ reason: "test" })).rejects.toMatchObject({
+      code: "not_implemented",
+      status: 501,
+    });
+  });
 });
