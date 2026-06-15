@@ -3280,7 +3280,9 @@ contract:
   `bun run --cwd apps/backend type-check`, full `bun run check`, and
   `git diff --check`. Coverage includes authenticated `/connect/plans` and
   `/connect/user` calls through restored access tokens, bearer-auth Connect API
-  requests, and Rust-compatible user/team response field mapping.
+  requests, Rust-compatible user/team response field mapping, shared in-flight
+  token restores for concurrent authenticated reads, and guards preventing
+  pending restores from resurrecting cleared or replaced sessions.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

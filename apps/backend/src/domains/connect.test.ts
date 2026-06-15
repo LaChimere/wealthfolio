@@ -172,6 +172,46 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("does not resurrect cleared sessions when an in-flight restore completes", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    let releaseRefresh: (() => void) | undefined;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () => {
+        await new Promise<void>((resolve) => {
+          releaseRefresh = resolve;
+        });
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh",
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      const restorePromise = service.restoreSyncSession();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await service.clearSyncSession();
+      releaseRefresh?.();
+
+      await expect(restorePromise).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   test("treats invalid OAuth error codes as invalid sessions even with generic descriptions", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
@@ -320,6 +360,42 @@ describe("TS Connect local session service", () => {
         "POST https://auth.example.test/auth/v1/token?grant_type=refresh_token",
         "GET https://api.example.test/api/v1/user/me",
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("shares one token restore across concurrent authenticated Connect reads", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let authCalls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          authCalls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/subscription/plans")) {
+          return Response.json({ plans: [{ id: "pro" }] });
+        }
+        return Response.json({ id: "user-1" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.getSubscriptionPlans(), service.getUserInfo()]),
+      ).resolves.toEqual([{ plans: [{ id: "pro" }] }, expect.objectContaining({ id: "user-1" })]);
+      expect(authCalls).toBe(1);
     } finally {
       db.close();
     }

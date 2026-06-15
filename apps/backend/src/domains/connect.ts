@@ -169,12 +169,28 @@ export function createLocalConnectService({
 }: LocalConnectServiceDependencies): ConnectService {
   const disabledService = createDisabledConnectService();
   let restorePromise: Promise<{ accessToken: string; refreshToken: string }> | null = null;
+  let sessionGeneration = 0;
+  const restoreSession = async () => {
+    if (!secretService) {
+      throw cloudSyncDisabled();
+    }
+    restorePromise ??= restoreLocalSyncSession(
+      secretService,
+      env,
+      fetchImpl,
+      () => sessionGeneration,
+    ).finally(() => {
+      restorePromise = null;
+    });
+    return await restorePromise;
+  };
   return {
     ...disabledService,
     async storeSyncSession(refreshToken) {
       if (!secretService) {
         throw cloudSyncDisabled();
       }
+      sessionGeneration += 1;
       await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, refreshToken);
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
     },
@@ -182,6 +198,7 @@ export function createLocalConnectService({
       if (!secretService) {
         throw cloudSyncDisabled();
       }
+      sessionGeneration += 1;
       await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
     },
@@ -192,34 +209,22 @@ export function createLocalConnectService({
       return { isConfigured: (await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) !== null };
     },
     async restoreSyncSession() {
-      if (!secretService) {
-        throw cloudSyncDisabled();
-      }
-      restorePromise ??= restoreLocalSyncSession(secretService, env, fetchImpl).finally(() => {
-        restorePromise = null;
-      });
-      return await restorePromise;
+      return await restoreSession();
     },
     async getSubscriptionPlansPublic() {
       return await fetchPublicSubscriptionPlans(env, fetchImpl);
     },
     async getSubscriptionPlans() {
-      if (!secretService) {
-        throw cloudSyncDisabled();
-      }
       return await fetchAuthenticatedConnectJson(
-        secretService,
+        restoreSession,
         env,
         fetchImpl,
         "/api/v1/subscription/plans",
       );
     },
     async getUserInfo() {
-      if (!secretService) {
-        throw cloudSyncDisabled();
-      }
       return userInfoFromApi(
-        await fetchAuthenticatedConnectJson(secretService, env, fetchImpl, "/api/v1/user/me"),
+        await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, "/api/v1/user/me"),
       );
     },
     getSyncedAccounts() {
@@ -528,7 +533,9 @@ async function restoreLocalSyncSession(
   secretService: SecretService,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
+  sessionGeneration: () => number,
 ): Promise<{ accessToken: string; refreshToken: string }> {
+  const startedAtGeneration = sessionGeneration();
   const refreshToken = await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY);
   if (!refreshToken) {
     throw new ConnectServiceError("forbidden", "No sync session configured", 403);
@@ -570,7 +577,10 @@ async function restoreLocalSyncSession(
     const refreshError = parseRefreshError(response.status, bodyText);
     if (isSessionInvalid(response.status, refreshError.message, refreshError.code)) {
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
-      if ((await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) === refreshToken) {
+      if (
+        sessionGeneration() === startedAtGeneration &&
+        (await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) === refreshToken
+      ) {
         await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
       }
       throw new ConnectServiceError(
@@ -584,6 +594,12 @@ async function restoreLocalSyncSession(
 
   const payload = parseRefreshTokenResponse(bodyText);
   const rotatedRefreshToken = payload.refreshToken || refreshToken;
+  if (
+    sessionGeneration() !== startedAtGeneration ||
+    (await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) !== refreshToken
+  ) {
+    throw new ConnectServiceError("forbidden", "Sync session changed during token refresh", 403);
+  }
   await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, rotatedRefreshToken);
   await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
   return { accessToken: payload.accessToken, refreshToken: rotatedRefreshToken };
@@ -634,12 +650,12 @@ async function fetchPublicSubscriptionPlans(
 }
 
 async function fetchAuthenticatedConnectJson(
-  secretService: SecretService,
+  restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   path: string,
 ): Promise<unknown> {
-  const { accessToken } = await restoreLocalSyncSession(secretService, env, fetchImpl);
+  const { accessToken } = await restoreSession();
   const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
   const url = `${baseUrl}${path}`;
   let response: Response;

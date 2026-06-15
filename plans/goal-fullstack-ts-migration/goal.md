@@ -2258,8 +2258,10 @@ updated_at: "2026-06-16T02:14:53+08:00"
 - Turn 361: Ported authenticated Connect user/plans reads into the standalone TS
   runtime. `getSubscriptionPlans` and `getUserInfo` now restore an access token,
   call the Connect API with bearer auth, and map user/team fields to
-  Rust-compatible response shapes. Verified with Connect domain/runtime tests,
-  backend type-check, full `bun run check`, and `git diff --check`.
+  Rust-compatible response shapes. Authenticated reads share the same in-flight
+  restore as `/connect/session/restore`, and pending restores cannot resurrect a
+  cleared/replaced session. Verified with Connect domain/runtime tests, backend
+  type-check, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 
