@@ -502,7 +502,12 @@ function createServicesFromDatabase(
       prepareDatabaseRestore,
     }),
     connectDeviceSyncService: createDisabledConnectDeviceSyncService(),
-    connectService: createLocalConnectService({ db, activityService, accountService }),
+    connectService: createLocalConnectService({
+      db,
+      activityService,
+      accountService,
+      secretService,
+    }),
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
         queueSyncEvent: (event) =>

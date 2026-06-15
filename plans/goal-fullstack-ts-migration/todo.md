@@ -3242,6 +3242,14 @@ contract:
   DevContainer features, backend technology summary, folder structure, and API
   key/keyring storage text reflecting the Bun/TypeScript backend plus legacy
   Rust compatibility tooling.
+- `pr5-connect-session-secret-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes standalone TS runtime Connect session
+  store/status/clear backed by `SecretService`, with legacy access-token
+  cleanup, while cloud access-token restore and broker/device sync remain
+  feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

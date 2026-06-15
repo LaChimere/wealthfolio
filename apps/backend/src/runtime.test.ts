@@ -94,6 +94,46 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("stores Connect refresh sessions through the runtime secret service", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-session-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      secretKey: new Uint8Array(32),
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const initialStatusResponse = await fetch(`${server.baseUrl}/api/v1/connect/session/status`);
+      expect(initialStatusResponse.status).toBe(200);
+      await expect(initialStatusResponse.json()).resolves.toEqual({ isConfigured: false });
+
+      const storeResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(storeResponse.status).toBe(200);
+
+      const configuredStatusResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/session/status`,
+      );
+      expect(configuredStatusResponse.status).toBe(200);
+      await expect(configuredStatusResponse.json()).resolves.toEqual({ isConfigured: true });
+
+      const clearResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "DELETE",
+      });
+      expect(clearResponse.status).toBe(200);
+
+      const clearedStatusResponse = await fetch(`${server.baseUrl}/api/v1/connect/session/status`);
+      expect(clearedStatusResponse.status).toBe(200);
+      await expect(clearedStatusResponse.json()).resolves.toEqual({ isConfigured: false });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("starts a TS server with SQLite-backed low-risk services", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-"));
     const runtime = createSqliteBackedBackendServices({

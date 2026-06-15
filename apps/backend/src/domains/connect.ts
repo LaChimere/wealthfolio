@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
+import type { SecretService } from "./secrets";
 
 export interface ConnectImportRunsRequest {
   runType?: string;
@@ -15,8 +16,9 @@ export interface ConnectDeviceSyncReconcileReadyRequest {
 
 export interface LocalConnectServiceDependencies {
   db: Database;
-  activityService: ActivityService;
+  activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules">;
   accountService: Pick<AccountService, "getAllAccounts">;
+  secretService?: SecretService;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -78,6 +80,8 @@ const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this 
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
 const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not yet available in the TS backend runtime";
+const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
+const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
 
 export function createDisabledConnectService(): ConnectService {
   return {
@@ -145,10 +149,31 @@ export function createLocalConnectService({
   db,
   activityService,
   accountService,
+  secretService,
 }: LocalConnectServiceDependencies): ConnectService {
   const disabledService = createDisabledConnectService();
   return {
     ...disabledService,
+    async storeSyncSession(refreshToken) {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, refreshToken);
+      await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+    },
+    async clearSyncSession() {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
+      await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+    },
+    async getSyncSessionStatus() {
+      if (!secretService) {
+        throw cloudSyncDisabled();
+      }
+      return { isConfigured: (await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY)) !== null };
+    },
     getSyncedAccounts() {
       return accountService
         .getAllAccounts()
