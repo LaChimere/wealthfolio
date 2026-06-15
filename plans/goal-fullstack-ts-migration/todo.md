@@ -3150,6 +3150,11 @@ contract:
   `git diff --check`. Coverage includes README and `.env.example` no longer
   instructing desktop users to configure `DATABASE_URL`; web database
   configuration points to `WF_DB_PATH` in `.env.web`.
+- `pr5-readme-backend-summary-refresh`: verification passed: full
+  `bun run check` and `git diff --check`. Coverage includes README technology
+  and folder-structure sections naming `apps/backend` as the Bun TypeScript
+  backend runtime and `apps/server` as the temporary Rust sidecar/prebuild
+  fallback.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
