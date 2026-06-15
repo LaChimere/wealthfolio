@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 343
+turns_used: 344
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-15T23:15:01+08:00"
+updated_at: "2026-06-15T23:19:51+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2151,6 +2151,10 @@ updated_at: "2026-06-15T23:15:01+08:00"
   `test:all`; PR checks run backend and Electron tests after frontend tests; and
   `scripts/ci-check.sh --full` runs both suites. `bun run test:backend`,
   `bun run test:electron`, full `bun run check`, and `git diff --check` passed.
+- Turn 344: Removed Rust-era desktop `DATABASE_URL` setup instructions from
+  README and `.env.example`. Desktop now documents automatic Electron database
+  path management and points web mode database configuration to `WF_DB_PATH` in
+  `.env.web`. Full `bun run check` and `git diff --check` passed.
 
 ## Deferred items
 

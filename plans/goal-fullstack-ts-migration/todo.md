@@ -3146,6 +3146,10 @@ contract:
   Coverage includes root scripts, PR CI, and local full-check wiring for TS
   backend and Electron tests so migration regressions are no longer hidden
   behind frontend-only `bun run test`.
+- `pr5-env-database-url-cleanup`: verification passed: full `bun run check` and
+  `git diff --check`. Coverage includes README and `.env.example` no longer
+  instructing desktop users to configure `DATABASE_URL`; web database
+  configuration points to `WF_DB_PATH` in `.env.web`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -156,13 +156,10 @@ Ensure you have the following installed on your machine:
    cp .env.example .env
    ```
 
-   Update the `.env` file with your database path and other configuration as
-   needed:
-
-   ```bash
-   # Database location
-   DATABASE_URL=../db/wealthfolio.db
-   ```
+   The `.env` file carries Wealthfolio Connect build-time variables
+   (`CONNECT_AUTH_URL`, `CONNECT_AUTH_PUBLISHABLE_KEY`, etc.). The Electron
+   desktop app manages its database path automatically; web mode uses
+   `WF_DB_PATH` from `.env.web`.
 
 4. **Run in Development Mode**:
 
