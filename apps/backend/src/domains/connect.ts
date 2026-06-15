@@ -896,6 +896,7 @@ function brokerConnectionFromApi(value: unknown): unknown {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "Failed to parse connection response", 500);
   }
+  validateBrokerConnectionFromApi(value);
   const brokerage = brokerageFromApi(value);
   const id = requiredStringValue(value.id, "connection response");
   return {
@@ -908,6 +909,20 @@ function brokerConnectionFromApi(value: unknown): unknown {
     updated_at: optionalString(value.updated_at ?? value.updatedAt),
     name: optionalString(value.name),
   };
+}
+
+function validateBrokerConnectionFromApi(value: Record<string, unknown>): void {
+  for (const field of [
+    "authorization_id",
+    "authorizationId",
+    "status",
+    "updated_at",
+    "updatedAt",
+    "name",
+  ]) {
+    assertOptionalConnectStringField(value, field, "connection response");
+  }
+  assertOptionalConnectBooleanField(value, "disabled", "connection response");
 }
 
 function brokerageFromApi(value: Record<string, unknown>): unknown | null {

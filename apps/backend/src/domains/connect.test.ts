@@ -707,6 +707,40 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects broker connection fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          connections: [{ id: "connection-1", authorization_id: 123, disabled: "false" }],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects broker connection brokerage fields with invalid scalar types", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

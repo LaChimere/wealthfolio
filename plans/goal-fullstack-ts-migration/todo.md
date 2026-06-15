@@ -3534,6 +3534,13 @@ contract:
   reads rejecting malformed balance totals, owner fields, and sync-status detail
   fields when their scalar types do not match Rust models, instead of silently
   preserving invalid cloud payloads.
+- `pr5-connect-broker-connection-scalar-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connection|malformed broker"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes optional broker
+  connection fields such as `authorization_id`, `status`, `updated_at`, `name`,
+  and `disabled` rejecting invalid scalar types like Rust serde instead of
+  silently dropping or defaulting malformed cloud values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
