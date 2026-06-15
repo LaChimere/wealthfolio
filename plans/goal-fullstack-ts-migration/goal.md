@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 390
+turns_used: 391
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-16T05:58:39+08:00"
+updated_at: "2026-06-16T06:03:22+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2445,6 +2445,12 @@ updated_at: "2026-06-16T05:58:39+08:00"
   is present, broker account entries must be objects, and the old unused string
   fallback helper was removed. Verified with focused Connect broker read tests,
   backend type-check, backend test suite, full `bun run check`, and
+  `git diff --check`.
+- Turn 391: Extended Connect broker account scalar validation. Broker account
+  reads now reject non-string values for Rust `Option<String>` account fields
+  and non-boolean values for boolean account flags instead of silently dropping
+  invalid values during TS mapping. Verified with focused Connect broker account
+  tests, backend type-check, backend test suite, full `bun run check`, and
   `git diff --check`.
 
 ## Deferred items

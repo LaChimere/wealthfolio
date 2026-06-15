@@ -3506,6 +3506,13 @@ contract:
   entries requiring the Rust-required `id` field even when `authorization_id` is
   present, broker account entries rejecting non-object values, and removal of
   the old unused string fallback helper.
+- `pr5-connect-broker-account-scalar-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account|malformed broker|empty lists"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes broker account
+  reads rejecting non-string values for Rust `Option<String>` account fields and
+  non-boolean values for boolean account flags instead of silently dropping
+  invalid values during TS mapping.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

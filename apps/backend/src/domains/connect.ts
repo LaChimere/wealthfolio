@@ -891,7 +891,43 @@ function brokerAccountsFromApi(value: unknown): unknown[] {
   if (!value.accounts.every(isRecord)) {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
+  for (const account of value.accounts) {
+    validateBrokerAccountFromApi(account);
+  }
   return value.accounts;
+}
+
+function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
+  for (const field of [
+    "id",
+    "name",
+    "account_number",
+    "accountNumber",
+    "number",
+    "type",
+    "currency",
+    "brokerage_authorization",
+    "brokerageAuthorization",
+    "institution_name",
+    "institutionName",
+    "created_date",
+    "createdDate",
+    "status",
+    "raw_type",
+    "rawType",
+  ]) {
+    assertOptionalConnectStringField(account, field, "accounts response");
+  }
+  for (const field of [
+    "is_paper",
+    "isPaper",
+    "sync_enabled",
+    "syncEnabled",
+    "shared_with_household",
+    "sharedWithHousehold",
+  ]) {
+    assertOptionalConnectBooleanField(account, field, "accounts response");
+  }
 }
 
 function syncBrokerConnectionsToPlatforms(
@@ -1551,6 +1587,28 @@ function optionalBoolean(value: unknown): boolean | null {
 
 function optionalNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function assertOptionalConnectStringField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+}
+
+function assertOptionalConnectBooleanField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
 }
 
 function normalizeConnectApiUrl(value: string | undefined): string {
