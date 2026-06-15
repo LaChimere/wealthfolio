@@ -25,6 +25,7 @@ export interface LocalConnectServiceDependencies {
 
 export interface LocalConnectDeviceSyncServiceDependencies {
   db: Database;
+  secretService?: SecretService;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -97,6 +98,8 @@ const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not yet available in the TS backend runtime";
 const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
+const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
+const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
 const DEFAULT_CONNECT_AUTH_URL = "https://auth.wealthfolio.app";
 const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
 const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
@@ -1632,6 +1635,7 @@ interface SyncDeviceConfigRow {
 
 export function createLocalConnectDeviceSyncService({
   db,
+  secretService,
 }: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
   const disabledService = createDisabledConnectDeviceSyncService();
   return {
@@ -1642,13 +1646,19 @@ export function createLocalConnectDeviceSyncService({
     getDeviceSyncBootstrapOverwriteCheck() {
       return getLocalDeviceSyncBootstrapOverwriteCheck(db);
     },
-    getDeviceSyncPairingSourceStatus() {
+    async clearDeviceSyncData() {
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      await clearLocalDeviceSyncData(db, secretService);
+    },
+    async getDeviceSyncPairingSourceStatus() {
       return getLocalDeviceSyncPairingSourceStatus(db);
     },
-    bootstrapDeviceSnapshot() {
+    async bootstrapDeviceSnapshot() {
       return getLocalSnapshotIdentityOrThrow(db);
     },
-    generateDeviceSnapshotNow() {
+    async generateDeviceSnapshotNow() {
       return getLocalSnapshotIdentityOrThrow(db);
     },
     startDeviceSyncBackgroundEngine() {
@@ -1663,7 +1673,7 @@ export function createLocalConnectDeviceSyncService({
         message: "Device sync background engine stopped",
       };
     },
-    triggerDeviceSyncCycle() {
+    async triggerDeviceSyncCycle() {
       return triggerLocalDeviceSyncCycle(db);
     },
     cancelDeviceSnapshotUpload() {
@@ -1673,6 +1683,118 @@ export function createLocalConnectDeviceSyncService({
       };
     },
   };
+}
+
+async function clearLocalDeviceSyncData(db: Database, secretService: SecretService): Promise<void> {
+  await clearLocalSyncIdentity(secretService);
+  resetLocalSyncSession(db);
+  await secretService.deleteSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+}
+
+async function clearLocalSyncIdentity(secretService: SecretService): Promise<void> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  let deviceNonce: string | null = null;
+  if (rawIdentity !== null) {
+    let identity: unknown;
+    try {
+      identity = JSON.parse(rawIdentity);
+    } catch (error) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `Failed to parse identity: ${errorMessage(error)}`,
+        500,
+      );
+    }
+    deviceNonce = parseSyncIdentityDeviceNonce(identity);
+  }
+  await secretService.setSecret(
+    DEVICE_SYNC_IDENTITY_KEY,
+    JSON.stringify({
+      version: 2,
+      deviceNonce,
+      deviceId: null,
+      rootKey: null,
+      keyVersion: null,
+      deviceSecretKey: null,
+      devicePublicKey: null,
+    }),
+  );
+}
+
+function parseSyncIdentityDeviceNonce(identity: unknown): string | null {
+  if (!isRecord(identity)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+  }
+  assertOptionalNumberField(identity, "version");
+  assertOptionalStringField(identity, "deviceNonce");
+  assertOptionalStringField(identity, "deviceId");
+  assertOptionalStringField(identity, "rootKey");
+  assertOptionalNumberField(identity, "keyVersion");
+  assertOptionalStringField(identity, "deviceSecretKey");
+  assertOptionalStringField(identity, "devicePublicKey");
+  return optionalString(identity.deviceNonce);
+}
+
+function assertOptionalStringField(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+  }
+}
+
+function assertOptionalNumberField(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== "number") {
+    throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+  }
+}
+
+function resetLocalSyncSession(db: Database): void {
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    for (const tableName of [
+      "sync_outbox",
+      "sync_entity_metadata",
+      "sync_applied_events",
+      "sync_table_state",
+      "sync_device_config",
+    ]) {
+      if (sqliteTableExists(db, tableName)) {
+        db.prepare(`DELETE FROM "${tableName}"`).run();
+      }
+    }
+    if (sqliteTableExists(db, "sync_cursor")) {
+      db.prepare(
+        `
+          INSERT INTO sync_cursor (id, cursor, updated_at)
+          VALUES (1, 0, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            cursor = excluded.cursor,
+            updated_at = excluded.updated_at
+        `,
+      ).run(now);
+    }
+    if (sqliteTableExists(db, "sync_engine_state")) {
+      db.prepare(
+        `
+          INSERT INTO sync_engine_state (
+            id, lock_version, last_push_at, last_pull_at, last_error,
+            consecutive_failures, next_retry_at, last_cycle_status, last_cycle_duration_ms
+          )
+          VALUES (1, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL)
+          ON CONFLICT(id) DO UPDATE SET
+            lock_version = excluded.lock_version,
+            last_push_at = excluded.last_push_at,
+            last_pull_at = excluded.last_pull_at,
+            last_error = excluded.last_error,
+            consecutive_failures = excluded.consecutive_failures,
+            next_retry_at = excluded.next_retry_at,
+            last_cycle_status = excluded.last_cycle_status,
+            last_cycle_duration_ms = excluded.last_cycle_duration_ms
+        `,
+      ).run();
+    }
+  })();
 }
 
 function getLocalDeviceSyncEngineStatus(db: Database): Record<string, unknown> {

@@ -498,7 +498,7 @@ function createServicesFromDatabase(
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
       prepareDatabaseRestore,
     }),
-    connectDeviceSyncService: createLocalConnectDeviceSyncService({ db }),
+    connectDeviceSyncService: createLocalConnectDeviceSyncService({ db, secretService }),
     connectService: createLocalConnectService({
       db,
       activityService,

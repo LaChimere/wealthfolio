@@ -1312,7 +1312,168 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("records config error for local trigger cycle without sync identity", () => {
+  test("clears local device sync session data while preserving app data and device nonce", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 3,
+        deviceSecretKey: "secret-key",
+        devicePublicKey: "public-key",
+      }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    db.exec(`
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_entity_metadata (
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        last_event_id TEXT NOT NULL,
+        last_client_timestamp TEXT NOT NULL,
+        last_op TEXT NOT NULL DEFAULT 'update',
+        last_seq BIGINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (entity, entity_id)
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_table_state (table_name TEXT PRIMARY KEY NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE sync_applied_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        seq BIGINT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      INSERT INTO accounts (id) VALUES ('account-keep');
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload, payload_key_version,
+        sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-1', 'account', 'account-1', 'update', '2026-01-01T00:00:00Z', '{}', 3,
+        0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+      INSERT INTO sync_entity_metadata (
+        entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+      ) VALUES ('account', 'account-1', 'event-1', '2026-01-01T00:00:00Z', 'update', 9);
+      INSERT INTO sync_applied_events (
+        event_id, seq, entity, entity_id, applied_at
+      ) VALUES ('event-applied', 10, 'account', 'account-1', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 3, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_push_at, last_pull_at, last_error, consecutive_failures,
+        next_retry_at, last_cycle_status, last_cycle_duration_ms
+      ) VALUES (
+        1, 7, '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z', 'stale', 2,
+        '2026-01-04T00:00:00Z', 'failed', 50
+      );
+      INSERT INTO sync_table_state (table_name, enabled) VALUES ('accounts', 1);
+    `);
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await service.clearDeviceSyncData();
+
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toEqual({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(secretService.entries.has("sync_device_id")).toBe(false);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM accounts").get(),
+      ).toEqual({
+        count: 1,
+      });
+      for (const tableName of [
+        "sync_outbox",
+        "sync_entity_metadata",
+        "sync_applied_events",
+        "sync_table_state",
+        "sync_device_config",
+      ]) {
+        expect(
+          db.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM "${tableName}"`).get(),
+        ).toEqual({ count: 0 });
+      }
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toEqual({ cursor: 0 });
+      expect(
+        db
+          .query<
+            { lock_version: number; last_error: string | null; last_cycle_status: string | null },
+            []
+          >("SELECT lock_version, last_error, last_cycle_status FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({ lock_version: 0, last_error: null, last_cycle_status: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed sync identity during local device sync clear", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.clearDeviceSyncData()).rejects.toThrow("Failed to parse identity");
+      expect(secretService.entries.get("sync_identity")).toBe(JSON.stringify({ deviceNonce: 42 }));
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records config error for local trigger cycle without sync identity", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
@@ -1339,7 +1500,7 @@ describe("TS Connect device sync local service", () => {
     const service = createLocalConnectDeviceSyncService({ db });
 
     try {
-      expect(service.triggerDeviceSyncCycle()).toEqual({
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
         status: "config_error",
         lockVersion: 3,
         pushedCount: 0,
@@ -1366,7 +1527,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("reports local pairing source status preconditions before cloud cursor checks", () => {
+  test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_device_config (
@@ -1379,13 +1540,13 @@ describe("TS Connect device sync local service", () => {
     const service = createLocalConnectDeviceSyncService({ db });
 
     try {
-      expect(() => service.getDeviceSyncPairingSourceStatus()).toThrow(
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
       db.prepare(
         "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('device-1', 1, 'untrusted', NULL)",
       ).run();
-      expect(() => service.getDeviceSyncPairingSourceStatus()).toThrow(
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
         "Current device is not ready to connect another device yet.",
       );
     } finally {
@@ -1393,7 +1554,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("reports local snapshot preconditions before cloud upload paths", () => {
+  test("reports local snapshot preconditions before cloud upload paths", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_device_config (
@@ -1406,10 +1567,10 @@ describe("TS Connect device sync local service", () => {
     const service = createLocalConnectDeviceSyncService({ db });
 
     try {
-      expect(() => service.bootstrapDeviceSnapshot()).toThrow(
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
-      expect(() => service.generateDeviceSnapshotNow()).toThrow(
+      await expect(service.generateDeviceSnapshotNow()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
     } finally {

@@ -1548,11 +1548,66 @@ describe("TS backend runtime composition", () => {
           headers: jsonHeaders,
           body: JSON.stringify(body),
         });
+      expect(runtime.options.secretService).toBeDefined();
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 55 WHERE id = 1;
+          UPDATE sync_engine_state SET
+            lock_version = 8,
+            last_error = 'stale',
+            consecutive_failures = 2,
+            last_cycle_status = 'failed',
+            last_cycle_duration_ms = 99
+          WHERE id = 1;
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          ) VALUES (
+            'device-runtime', 5, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'
+          );
+          INSERT INTO sync_table_state (table_name, enabled) VALUES ('accounts', 1);
+        `);
+      } finally {
+        seedDb.close();
+      }
+
+      const clearSyncDataResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/sync-data`,
+        { method: "DELETE" },
+      );
+      expect(clearSyncDataResponse.status).toBe(200);
+      await expect(clearSyncDataResponse.json()).resolves.toBeNull();
+      expect(
+        await Promise.resolve(runtime.options.secretService?.getSecret("sync_device_id")),
+      ).toBeNull();
+      expect(await Promise.resolve(runtime.options.secretService?.getSecret("sync_identity"))).toBe(
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: null,
+          rootKey: null,
+          keyVersion: null,
+          deviceSecretKey: null,
+          devicePublicKey: null,
+        }),
+      );
 
       for (const request of [
         new Request(`${server.baseUrl}/api/v1/connect/device/sync-state`),
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
         jsonRequest("/api/v1/sync/device/register", {

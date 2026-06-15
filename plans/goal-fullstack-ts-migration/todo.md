@@ -276,14 +276,15 @@
     deferred; remaining calculation-heavy health checks are deferred to
     health/calculation parity slices; disabled Connect feature-flag responses,
     local Connect synced-account/platform/sync-state/import-run reads, local
-    broker sync profile persistence, and disabled device-sync route responses
-    now have TS runtime parity, while real Connect token lifecycle, cloud HTTP
-    clients, broker sync orchestration, subscription entitlement checks, event
-    production, E2EE enrollment, sync engine, snapshot/upload runtime,
-    background workers, device-sync cloud clients, token lifecycle, team-key
-    operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and secret side effects are deferred to
-    Connect/device-sync parity slices.
+    broker sync profile persistence, disabled device-sync route responses, and
+    local device-sync status/precondition/no-op/clear-data behavior now have TS
+    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
+    broker sync orchestration, subscription entitlement checks, event
+    production, E2EE enrollment, sync engine, trusted-device snapshot/upload
+    runtime, background workers, device-sync cloud clients, token lifecycle,
+    team-key operations, key material handling, pairing flows, freshness gate
+    persistence, bootstrap transfer, and remaining secret side effects are
+    deferred to Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -3396,6 +3397,15 @@ contract:
   recording a Rust-compatible `config_error` engine outcome and returning the
   cycle summary with cursor/lock version and zero pushed/pulled counts before
   cloud push/pull paths.
+- `pr5-device-sync-clear-data-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts apps/backend/src/runtime.test.ts -t "device sync"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local `DELETE /connect/device/sync-data`
+  preserving the sync identity device nonce, clearing device identity/key
+  material, deleting the legacy device-id secret, resetting sync cursor/engine
+  state, clearing sync control-plane tables, preserving app data, returning JSON
+  `null`, and ensuring migrated local device-sync route errors are catchable
+  HTTP domain rejections.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -3424,7 +3434,8 @@ contract:
   and real market sync fix execution move with health/calculation parity slices;
   real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
   subscription entitlement checks, event production, E2EE enrollment, sync
-  engine, snapshot/upload runtime, feature-flag errors, background workers,
-  device-sync cloud clients, token lifecycle, team-key operations, key material
-  handling, pairing flows, freshness gate persistence, bootstrap transfer, and
-  secret side effects move with Connect/device-sync parity slices.
+  engine, trusted-device snapshot/upload runtime, feature-flag errors,
+  background workers, device-sync cloud clients, token lifecycle, team-key
+  operations, key material handling, pairing flows, freshness gate persistence,
+  bootstrap transfer, and remaining secret side effects move with
+  Connect/device-sync parity slices.
