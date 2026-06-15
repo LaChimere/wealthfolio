@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
@@ -678,7 +679,7 @@ async function fetchPublicSubscriptionPlans(
   try {
     response = await fetchImpl(url, {
       method: "GET",
-      headers: { "content-type": "application/json" },
+      headers: connectRequestHeaders(),
     });
   } catch (error) {
     throw new ConnectServiceError("internal_error", `Request failed: ${errorMessage(error)}`, 500);
@@ -740,7 +741,7 @@ async function fetchConnectJsonWithAccessToken(
       method: "GET",
       headers: {
         authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
+        ...connectRequestHeaders(),
       },
     });
   } catch (error) {
@@ -1961,6 +1962,13 @@ function connectApiErrorMessage(status: number, bodyText: string): string {
     return `API error ${status}`;
   }
   return `API error ${status}`;
+}
+
+function connectRequestHeaders(): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    "x-wf-client-request-id": `app:${randomUUID()}`,
+  };
 }
 
 function isSessionInvalid(status: number, message: string, code = ""): boolean {

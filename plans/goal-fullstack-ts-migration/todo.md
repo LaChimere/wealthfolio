@@ -3589,6 +3589,13 @@ contract:
   bootstrap-overwrite checks requiring bootstrap when sync identity is missing
   or malformed, and using `sync_device_config` only for the current identity
   device ID instead of any stale config row.
+- `pr5-connect-client-request-id-headers`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "public subscription|authenticated plans|broker connection|activity page"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes public and
+  bearer-authenticated Connect requests adding
+  `x-wf-client-request-id: app:<uuid>` with JSON content headers, matching Rust
+  Connect client request metadata behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

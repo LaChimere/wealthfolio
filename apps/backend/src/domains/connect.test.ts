@@ -302,7 +302,15 @@ describe("TS Connect local session service", () => {
       expect(requests).toEqual([
         {
           url: "https://api.example.test/api/v1/subscription/plans",
-          init: { method: "GET", headers: { "content-type": "application/json" } },
+          init: {
+            method: "GET",
+            headers: expect.objectContaining({
+              "content-type": "application/json",
+              "x-wf-client-request-id": expect.stringMatching(
+                /^app:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+              ),
+            }),
+          },
         },
       ]);
     } finally {
@@ -429,6 +437,7 @@ describe("TS Connect local session service", () => {
         expect(init?.headers).toMatchObject({
           authorization: "Bearer access-token",
           "content-type": "application/json",
+          "x-wf-client-request-id": expect.stringMatching(/^app:/),
         });
         if (String(input).endsWith("/api/v1/subscription/plans")) {
           return Response.json({ plans: [connectSubscriptionPlan("pro")] });
