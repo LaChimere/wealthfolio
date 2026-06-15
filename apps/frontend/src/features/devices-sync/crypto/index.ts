@@ -1,5 +1,5 @@
 // Cryptographic utilities for E2EE device sync
-// Delegates to Rust backend for all crypto operations
+// Delegates to the backend for all crypto operations
 // ====================================================
 
 import {

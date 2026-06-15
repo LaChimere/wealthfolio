@@ -96,7 +96,7 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
     // Source maps can't be loaded from blob: URLs and cause console errors
     addonCode = addonCode.replace(/\/\/# sourceMappingURL=.*/g, "");
 
-    // Extract permission data directly from manifest (already processed by Rust backend)
+    // Extract permission data directly from manifest (already processed by the backend)
     const permissions = extractedAddon.metadata.permissions ?? null;
     const permissionsForLogging = permissions ?? [];
     const detectedFunctions = permissionsForLogging.flatMap((p) =>

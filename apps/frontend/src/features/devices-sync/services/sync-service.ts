@@ -2,9 +2,9 @@
 // Core service for device sync, E2EE, and pairing operations
 // Uses state machine model: FRESH → REGISTERED → READY (+ STALE, RECOVERY)
 //
-// NOTE: State detection and enable sync are now handled by the Rust backend
-// (DeviceEnrollService). This service wraps those commands and handles
-// pairing operations which require real-time UI interaction.
+// NOTE: State detection and enable sync are handled by the backend. This service
+// wraps those commands and handles pairing operations which require real-time UI
+// interaction.
 // ===========================================================================
 
 import {
@@ -86,9 +86,9 @@ export type BootstrapCheckResult =
  * Manages device registration, E2EE key initialization, and pairing operations.
  * Uses state machine model for clear state transitions.
  *
- * NOTE: Core state detection and enable sync are now handled by Rust backend
- * (DeviceEnrollService). This service wraps those commands and handles
- * pairing operations which require real-time UI interaction.
+ * NOTE: Core state detection and enable sync are handled by the backend. This
+ * service wraps those commands and handles pairing operations which require
+ * real-time UI interaction.
  */
 class SyncService {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -97,7 +97,7 @@ class SyncService {
 
   /**
    * Detect the current sync state.
-   * Delegates to Rust backend which handles keyring access and server verification.
+   * Delegates to the backend, which handles keyring access and server verification.
    *
    * State Machine:
    * - FRESH: No deviceNonce in keychain (never enrolled on this physical device)
@@ -161,7 +161,7 @@ class SyncService {
 
   /**
    * Enable device sync by enrolling this device.
-   * Delegates to Rust backend which handles:
+   * Delegates to the backend, which handles:
    * - Device nonce generation
    * - Server enrollment
    * - E2EE key initialization (for BOOTSTRAP mode)

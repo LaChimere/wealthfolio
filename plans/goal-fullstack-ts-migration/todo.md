@@ -3431,6 +3431,13 @@ contract:
   over non-empty unmappable pages, recording per-account fetch failures on any
   page, and preserving the mapper feature gate for the first mappable activity
   page.
+- `pr5-frontend-rust-backend-wording-cleanup`: verification passed:
+  `rg "Rust backend|rust backend|processed by Rust backend|Delegates to Rust backend" apps/frontend/src`,
+  `bun run --cwd apps/frontend type-check -- --pretty false`, full
+  `bun run check`, and `git diff --check`. Coverage includes device-sync service
+  comments, sync crypto comments, add-on manifest permission comments, and AI
+  activity payload compatibility comments now using neutral backend wording
+  while preserving intentional Tauri-compatible event/API names.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
