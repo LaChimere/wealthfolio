@@ -696,11 +696,7 @@ async function fetchPublicSubscriptionPlans(
     );
   }
   if (!response.ok) {
-    throw new ConnectServiceError(
-      "internal_error",
-      connectApiErrorMessage(response.status, bodyText),
-      500,
-    );
+    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
   }
   try {
     const parsed = JSON.parse(bodyText) as unknown;

@@ -3481,10 +3481,10 @@ contract:
 - `pr5-connect-api-error-body-parsing`: verification passed:
   `bun test apps/backend/src/domains/connect.test.ts -t "activity page fetch fails|broker activity|transaction-mode"`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
-  `bun run check`, and `git diff --check`. Coverage includes bearer Connect
-  requests and public plans fetch parsing JSON error bodies to include
-  cloud-provided `message`/`error` text in `API error <status>: ...` messages,
-  so broker activity sync failures persist more actionable `last_error` values.
+  `bun run check`, and `git diff --check`. Coverage includes authenticated
+  bearer Connect requests parsing JSON error bodies to include cloud-provided
+  `message`/`error` text in `API error <status>: ...` messages, so broker
+  activity sync failures persist more actionable `last_error` values.
 - `pr5-connect-broker-list-default-arrays`: verification passed:
   `bun test apps/backend/src/domains/connect.test.ts -t "broker connection|broker account|empty lists"`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
@@ -3596,6 +3596,13 @@ contract:
   bearer-authenticated Connect requests adding
   `x-wf-client-request-id: app:<uuid>` with JSON content headers, matching Rust
   Connect client request metadata behavior.
+- `pr5-connect-public-plan-error-status`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "public subscription|API error|authenticated plans|activity page fetch"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes public
+  `/connect/plans/public` failures returning status-only `API error <status>`
+  messages instead of parsing cloud JSON error bodies, while authenticated
+  bearer Connect requests still preserve cloud error text.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

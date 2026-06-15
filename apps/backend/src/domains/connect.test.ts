@@ -345,6 +345,31 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("does not parse public subscription plan error bodies", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        Response.json({ message: "public plan failure should stay hidden" }, { status: 503 }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "API error 503",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects malformed authenticated subscription plan scalar fields", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
