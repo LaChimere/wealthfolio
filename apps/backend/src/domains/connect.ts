@@ -17,7 +17,7 @@ export interface ConnectDeviceSyncReconcileReadyRequest {
 export interface LocalConnectServiceDependencies {
   db: Database;
   activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules">;
-  accountService: Pick<AccountService, "getAllAccounts">;
+  accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">;
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
@@ -257,6 +257,17 @@ export function createLocalConnectService({
         ),
       );
       return syncBrokerConnectionsToPlatforms(db, connections);
+    },
+    async syncBrokerAccounts() {
+      const accounts = brokerAccountsFromApi(
+        await fetchAuthenticatedConnectJson(
+          restoreSession,
+          env,
+          fetchImpl,
+          "/api/v1/sync/brokerage/accounts",
+        ),
+      );
+      return await syncBrokerAccountsToLocal(db, accountService, accounts);
     },
     getSyncedAccounts() {
       return accountService
@@ -874,6 +885,314 @@ function syncBrokerConnectionsToPlatforms(
   })();
 
   return { synced: connections.length, platformsCreated, platformsUpdated };
+}
+
+async function syncBrokerAccountsToLocal(
+  db: Database,
+  accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">,
+  brokerAccounts: unknown[],
+): Promise<{
+  synced: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  createdAccounts: Array<[string, string]>;
+  newAccountsInfo: Array<{
+    localAccountId: string;
+    providerAccountId: string;
+    defaultName: string;
+    currency: string;
+    institutionName: string | null;
+  }>;
+}> {
+  let created = 0;
+  let skipped = 0;
+  const createdAccounts: Array<[string, string]> = [];
+  const newAccountsInfo: Array<{
+    localAccountId: string;
+    providerAccountId: string;
+    defaultName: string;
+    currency: string;
+    institutionName: string | null;
+  }> = [];
+  const existingProviderAccountIds = new Set(
+    accountService
+      .getAllAccounts()
+      .map((account) => account.providerAccountId)
+      .filter((id): id is string => id !== null && id.trim() !== ""),
+  );
+
+  for (const brokerAccount of brokerAccounts) {
+    if (!isRecord(brokerAccount)) {
+      skipped += 1;
+      continue;
+    }
+    const providerAccountId = optionalString(brokerAccount.id);
+    if (!providerAccountId) {
+      skipped += 1;
+      continue;
+    }
+    if (existingProviderAccountIds.has(providerAccountId)) {
+      skipped += 1;
+      continue;
+    }
+
+    const defaultName = brokerAccountDisplayName(brokerAccount);
+    const currency = brokerAccountCurrency(brokerAccount, accountService.getBaseCurrency());
+    const account = await accountService.createAccount({
+      name: defaultName,
+      accountType: brokerAccountType(brokerAccount),
+      group: null,
+      currency,
+      isDefault: false,
+      isActive: optionalString(brokerAccount.status) !== "closed",
+      isArchived: false,
+      trackingMode: "HOLDINGS",
+      platformId: findPlatformForBrokerAccount(db, brokerAccount),
+      accountNumber: optionalString(
+        brokerAccount.account_number ?? brokerAccount.accountNumber ?? brokerAccount.number,
+      ),
+      meta: JSON.stringify(brokerAccountMeta(brokerAccount)),
+      provider: "SNAPTRADE",
+      providerAccountId,
+    });
+    existingProviderAccountIds.add(providerAccountId);
+    createdAccounts.push([account.id, account.currency]);
+    newAccountsInfo.push({
+      localAccountId: account.id,
+      providerAccountId,
+      defaultName,
+      currency: account.currency,
+      institutionName: optionalString(
+        brokerAccount.institution_name ?? brokerAccount.institutionName,
+      ),
+    });
+    created += 1;
+  }
+
+  return {
+    synced: brokerAccounts.length,
+    created,
+    updated: 0,
+    skipped,
+    createdAccounts,
+    newAccountsInfo,
+  };
+}
+
+function brokerAccountDisplayName(account: Record<string, unknown>): string {
+  const name = optionalString(account.name);
+  if (name) {
+    return name;
+  }
+  const institution =
+    optionalString(account.institution_name ?? account.institutionName) ?? "Unknown";
+  const accountNumber =
+    optionalString(account.account_number ?? account.accountNumber ?? account.number) ?? "Account";
+  return `${institution} - ${accountNumber}`;
+}
+
+function brokerAccountCurrency(
+  account: Record<string, unknown>,
+  baseCurrency: string | undefined,
+): string {
+  const currency = optionalString(account.currency);
+  if (currency) {
+    return currency;
+  }
+  const balance = isRecord(account.balance) ? account.balance : null;
+  const total = balance && isRecord(balance.total) ? balance.total : null;
+  const balanceCurrency = total ? optionalString(total.currency) : null;
+  return balanceCurrency || baseCurrency?.trim() || "USD";
+}
+
+function brokerAccountType(account: Record<string, unknown>): string {
+  const accountType = optionalString(account.type ?? account.account_type ?? account.accountType);
+  if (accountType) {
+    return accountType;
+  }
+  const rawType = (optionalString(account.raw_type ?? account.rawType) ?? "").toUpperCase();
+  switch (rawType) {
+    case "RRSP":
+    case "RSP":
+      return "RRSP";
+    case "TFSA":
+      return "TFSA";
+    case "FHSA":
+      return "FHSA";
+    case "RESP":
+      return "RESP";
+    case "LIRA":
+    case "LRSP":
+      return "LIRA";
+    case "RRIF":
+      return "RRIF";
+    case "LIF":
+      return "LIF";
+    case "DPSP":
+      return "DPSP";
+    case "IRA":
+    case "TRADITIONAL_IRA":
+    case "TRADITIONAL IRA":
+      return "IRA";
+    case "ROTH_IRA":
+    case "ROTH IRA":
+    case "ROTH":
+      return "ROTH_IRA";
+    case "401K":
+    case "401(K)":
+      return "401K";
+    case "403B":
+    case "403(B)":
+      return "403B";
+    case "SEP_IRA":
+    case "SEP IRA":
+    case "SEP":
+      return "SEP_IRA";
+    case "SIMPLE_IRA":
+    case "SIMPLE IRA":
+      return "SIMPLE_IRA";
+    case "529":
+      return "529";
+    case "HSA":
+      return "HSA";
+    case "MARGIN":
+    case "MARGIN_ACCOUNT":
+      return "MARGIN";
+    case "CASH":
+    case "CASH_ACCOUNT":
+      return "CASH";
+    case "INVESTMENT":
+    case "BROKERAGE":
+    case "INDIVIDUAL":
+      return "INVESTMENT";
+    case "JOINT":
+    case "JOINT_ACCOUNT":
+      return "JOINT";
+    case "CORPORATE":
+    case "BUSINESS":
+      return "CORPORATE";
+    case "TRUST":
+      return "TRUST";
+    default:
+      if (rawType.includes("RRSP")) return "RRSP";
+      if (rawType.includes("TFSA")) return "TFSA";
+      if (rawType.includes("MARGIN")) return "MARGIN";
+      if (rawType.includes("CASH")) return "CASH";
+      if (rawType.includes("IRA")) return "IRA";
+      if (rawType.includes("401")) return "401K";
+      return "SECURITIES";
+  }
+}
+
+function findPlatformForBrokerAccount(
+  db: Database,
+  account: Record<string, unknown>,
+): string | null {
+  const platforms = db
+    .query<
+      { id: string; name: string | null; external_id: string | null },
+      []
+    >("SELECT id, name, external_id FROM platforms")
+    .all();
+  const externalIds = brokerAccountExternalIdCandidates(account);
+  for (const candidate of externalIds) {
+    const match = platforms.find((platform) => platform.external_id === candidate);
+    if (match) return match.id;
+  }
+  const names = brokerAccountNameCandidates(account);
+  for (const candidate of names) {
+    const candidateNorm = normalizePlatformMatch(candidate);
+    for (const platform of platforms) {
+      if (
+        normalizePlatformMatch(platform.id) === candidateNorm ||
+        isConfidentPlatformPartialMatch(candidateNorm, normalizePlatformMatch(platform.id)) ||
+        (platform.name !== null &&
+          (normalizePlatformMatch(platform.name) === candidateNorm ||
+            isConfidentPlatformPartialMatch(candidateNorm, normalizePlatformMatch(platform.name))))
+      ) {
+        return platform.id;
+      }
+    }
+  }
+  return null;
+}
+
+function brokerAccountNameCandidates(account: Record<string, unknown>): string[] {
+  const meta = isRecord(account.meta) ? account.meta : {};
+  const values = [
+    account.institution_name,
+    account.institutionName,
+    readPath(meta, ["institution_name"]),
+    readPath(meta, ["institutionName"]),
+    readPath(meta, ["brokerage_name"]),
+    readPath(meta, ["brokerageName"]),
+    readPath(meta, ["institution", "name"]),
+    readPath(meta, ["brokerage", "name"]),
+    readPath(meta, ["brokerage", "display_name"]),
+    readPath(meta, ["brokerage", "displayName"]),
+  ].flatMap((value) => {
+    const parsed = optionalString(value);
+    return parsed ? [parsed] : [];
+  });
+  return [...new Set(values)].sort();
+}
+
+function brokerAccountExternalIdCandidates(account: Record<string, unknown>): string[] {
+  const meta = isRecord(account.meta) ? account.meta : {};
+  const values = [
+    readPath(meta, ["brokerage_id"]),
+    readPath(meta, ["brokerageId"]),
+    readPath(meta, ["brokerage", "id"]),
+    readPath(meta, ["brokerage", "uuid"]),
+    account.brokerage_authorization,
+    account.brokerageAuthorization,
+  ].flatMap((value) => {
+    const parsed = optionalString(value);
+    return parsed ? [parsed] : [];
+  });
+  return [...new Set(values)].sort();
+}
+
+function brokerAccountMeta(account: Record<string, unknown>): Record<string, unknown> {
+  return {
+    institution_name: optionalString(account.institution_name ?? account.institutionName),
+    brokerage_authorization: optionalString(
+      account.brokerage_authorization ?? account.brokerageAuthorization,
+    ),
+    created_date: optionalString(account.created_date ?? account.createdDate),
+    status: optionalString(account.status),
+    raw_type: optionalString(account.raw_type ?? account.rawType),
+    is_paper: optionalBoolean(account.is_paper ?? account.isPaper) ?? false,
+    sync_enabled: optionalBoolean(account.sync_enabled ?? account.syncEnabled) ?? true,
+    shared_with_household:
+      optionalBoolean(account.shared_with_household ?? account.sharedWithHousehold) ?? false,
+    sync_status: account.sync_status ?? account.syncStatus ?? null,
+    owner: account.owner ?? null,
+  };
+}
+
+function normalizePlatformMatch(value: string): string {
+  return value.toUpperCase().replace(/[ -]/g, "_");
+}
+
+function isConfidentPlatformPartialMatch(left: string, right: string): boolean {
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  if (shorter.length < 6 || !longer.includes(shorter)) {
+    return false;
+  }
+  return shorter.split("_").some((token) => token.length >= 3 && longer.includes(token));
+}
+
+function readPath(record: Record<string, unknown>, path: string[]): unknown {
+  let value: unknown = record;
+  for (const key of path) {
+    if (!isRecord(value)) {
+      return undefined;
+    }
+    value = value[key];
+  }
+  return value;
 }
 
 function stringValue(value: unknown): string {

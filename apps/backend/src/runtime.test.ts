@@ -1212,7 +1212,16 @@ describe("TS backend runtime composition", () => {
         }
         if (String(input).endsWith("/api/v1/sync/brokerage/accounts")) {
           return Response.json({
-            accounts: [{ id: "broker-account-1", name: "Broker Account" }],
+            accounts: [
+              {
+                id: "broker-account-1",
+                name: "Broker Account",
+                type: "TFSA",
+                currency: "CAD",
+                brokerage_authorization: "brokerage",
+                institution_name: "Brokerage",
+              },
+            ],
           });
         }
         if (String(input).endsWith("/api/v1/user/me")) {
@@ -1233,7 +1242,6 @@ describe("TS backend runtime composition", () => {
 
     try {
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/sync/accounts`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/sync/activities`, { method: "POST" }),
       ]) {
         const response = await fetch(request);
@@ -1276,8 +1284,34 @@ describe("TS backend runtime composition", () => {
       const brokerAccountsResponse = await fetch(`${server.baseUrl}/api/v1/connect/accounts`);
       expect(brokerAccountsResponse.status).toBe(200);
       await expect(brokerAccountsResponse.json()).resolves.toEqual([
-        { id: "broker-account-1", name: "Broker Account" },
+        {
+          id: "broker-account-1",
+          name: "Broker Account",
+          type: "TFSA",
+          currency: "CAD",
+          brokerage_authorization: "brokerage",
+          institution_name: "Brokerage",
+        },
       ]);
+
+      const syncAccountsResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync/accounts`, {
+        method: "POST",
+      });
+      expect(syncAccountsResponse.status).toBe(200);
+      await expect(syncAccountsResponse.json()).resolves.toMatchObject({
+        synced: 1,
+        created: 1,
+        updated: 0,
+        skipped: 0,
+        createdAccounts: [expect.arrayContaining([expect.any(String), "CAD"])],
+        newAccountsInfo: [
+          expect.objectContaining({
+            providerAccountId: "broker-account-1",
+            defaultName: "Broker Account",
+            currency: "CAD",
+          }),
+        ],
+      });
 
       const authenticatedPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans`);
       expect(authenticatedPlansResponse.status).toBe(200);
@@ -1297,6 +1331,8 @@ describe("TS backend runtime composition", () => {
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "https://api.example.test/api/v1/sync/brokerage/accounts",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/brokerage/accounts",
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "https://api.example.test/api/v1/subscription/plans",
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "https://api.example.test/api/v1/user/me",
@@ -1311,18 +1347,27 @@ describe("TS backend runtime composition", () => {
         `${server.baseUrl}/api/v1/connect/synced-accounts`,
       );
       expect(syncedAccountsResponse.status).toBe(200);
-      await expect(syncedAccountsResponse.json()).resolves.toEqual([
-        expect.objectContaining({
-          id: "connect-account",
-          name: "Snap Account",
-          platformId: "SNAPTRADE",
-          provider: "SNAPTRADE",
-          providerAccountId: "provider-account-1",
-          trackingMode: "HOLDINGS",
-          isActive: true,
-          isArchived: false,
-        }),
-      ]);
+      await expect(syncedAccountsResponse.json()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "connect-account",
+            name: "Snap Account",
+            platformId: "SNAPTRADE",
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account-1",
+            trackingMode: "HOLDINGS",
+            isActive: true,
+            isArchived: false,
+          }),
+          expect.objectContaining({
+            name: "Broker Account",
+            platformId: "brokerage",
+            provider: "SNAPTRADE",
+            providerAccountId: "broker-account-1",
+            trackingMode: "HOLDINGS",
+          }),
+        ]),
+      );
 
       const platformsResponse = await fetch(`${server.baseUrl}/api/v1/connect/platforms`);
       expect(platformsResponse.status).toBe(200);

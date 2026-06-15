@@ -3299,6 +3299,15 @@ contract:
   cloud connections with a restored access token and upserting brokerage
   platforms with Rust-compatible slug/id, display-name, URL, external-id, and
   logo mapping.
+- `pr5-connect-sync-accounts-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes `/connect/sync/accounts` fetching broker
+  accounts with a restored access token, skipping missing/existing provider IDs,
+  creating SNAPTRADE HOLDINGS accounts through the account service, matching
+  platforms by external ID/name, preserving broker metadata JSON, and returning
+  Rust-compatible created/skipped/new-account payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

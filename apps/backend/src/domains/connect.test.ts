@@ -594,4 +594,167 @@ describe("TS Connect local session service", () => {
       db.close();
     }
   });
+
+  test("syncs new broker accounts into local accounts and skips existing provider accounts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      INSERT INTO platforms (id, name, url, external_id, kind, website_url, logo_url)
+      VALUES ('snaptrade', 'SnapTrade', 'https://snaptrade.com', 'brokerage-1', 'BROKERAGE', NULL, NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const localAccounts: Array<{ id: string; providerAccountId: string | null }> = [
+      { id: "existing-local", providerAccountId: "existing-provider-account" },
+    ];
+    const createdAccounts: unknown[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          accounts: [
+            {
+              id: "new-provider-account",
+              name: "Broker Account",
+              number: "****1234",
+              type: "TFSA",
+              currency: null,
+              balance: { total: { currency: "CAD" } },
+              status: "open",
+              brokerage_authorization: "brokerage-1",
+              institution_name: "SnapTrade",
+              raw_type: "tfsa",
+              owner: { user_id: "user-1", is_own_account: true },
+            },
+            { id: "existing-provider-account", name: "Existing Account" },
+            { name: "Missing ID Account" },
+            {
+              id: "meta-provider-account",
+              name: "Meta Brokerage Account",
+              currency: "USD",
+              meta: { brokerage: { id: "brokerage-1", name: "SnapTrade" } },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () =>
+          localAccounts.map((account) => ({
+            ...account,
+            name: "",
+            accountType: "",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "HOLDINGS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: null,
+          })),
+        createAccount: async (account) => {
+          const created = {
+            id: `created-local-${createdAccounts.length + 1}`,
+            name: account.name,
+            accountType: account.accountType,
+            group: account.group ?? null,
+            currency: account.currency,
+            isDefault: account.isDefault,
+            isActive: account.isActive,
+            isArchived: account.isArchived ?? false,
+            trackingMode: account.trackingMode ?? "NOT_SET",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            platformId: account.platformId ?? null,
+            accountNumber: account.accountNumber ?? null,
+            meta: account.meta ?? null,
+            provider: account.provider ?? null,
+            providerAccountId: account.providerAccountId ?? null,
+          };
+          createdAccounts.push(created);
+          localAccounts.push({ id: created.id, providerAccountId: created.providerAccountId });
+          return created;
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerAccounts()).resolves.toEqual({
+        synced: 4,
+        created: 2,
+        updated: 0,
+        skipped: 2,
+        createdAccounts: [
+          ["created-local-1", "CAD"],
+          ["created-local-2", "USD"],
+        ],
+        newAccountsInfo: [
+          {
+            localAccountId: "created-local-1",
+            providerAccountId: "new-provider-account",
+            defaultName: "Broker Account",
+            currency: "CAD",
+            institutionName: "SnapTrade",
+          },
+          {
+            localAccountId: "created-local-2",
+            providerAccountId: "meta-provider-account",
+            defaultName: "Meta Brokerage Account",
+            currency: "USD",
+            institutionName: null,
+          },
+        ],
+      });
+      expect(createdAccounts).toEqual([
+        expect.objectContaining({
+          id: "created-local-1",
+          name: "Broker Account",
+          accountType: "TFSA",
+          currency: "CAD",
+          isActive: true,
+          platformId: "snaptrade",
+          accountNumber: "****1234",
+          provider: "SNAPTRADE",
+          providerAccountId: "new-provider-account",
+          trackingMode: "HOLDINGS",
+        }),
+        expect.objectContaining({
+          id: "created-local-2",
+          name: "Meta Brokerage Account",
+          platformId: "snaptrade",
+          providerAccountId: "meta-provider-account",
+        }),
+      ]);
+      expect(JSON.parse(String((createdAccounts[0] as { meta: string }).meta))).toMatchObject({
+        institution_name: "SnapTrade",
+        brokerage_authorization: "brokerage-1",
+        raw_type: "tfsa",
+        sync_enabled: true,
+        owner: { user_id: "user-1", is_own_account: true },
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
