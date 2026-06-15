@@ -20,6 +20,23 @@ function createMemorySecretService(): SecretService & { entries: Map<string, str
   };
 }
 
+function connectSubscriptionPlan(id: string): Record<string, unknown> {
+  return {
+    id,
+    name: `${id} plan`,
+    tagline: null,
+    description: `${id} description`,
+    pricing: { monthly: 10, yearly: 100, yearlyPerMonth: 8.33 },
+    limits: { householdSize: 4, institutionConnections: "unlimited", devices: 5 },
+    features: ["sync"],
+    featuresExtended: null,
+    isAvailable: true,
+    isComingSoon: false,
+    badge: null,
+    yearlyDiscountPercent: null,
+  };
+}
+
 describe("TS Connect local session service", () => {
   test("stores, reports, and clears cloud refresh session secrets", async () => {
     const db = new Database(":memory:");
@@ -269,7 +286,7 @@ describe("TS Connect local session service", () => {
       env: { CONNECT_API_URL: "https://api.example.test/" },
       fetch: async (input, init) => {
         requests.push({ url: String(input), init });
-        return Response.json({ plans: [{ id: "free" }] });
+        return Response.json({ plans: [connectSubscriptionPlan("free")] });
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
@@ -280,7 +297,7 @@ describe("TS Connect local session service", () => {
 
     try {
       await expect(service.getSubscriptionPlansPublic()).resolves.toEqual({
-        plans: [{ id: "free" }],
+        plans: [connectSubscriptionPlan("free")],
       });
       expect(requests).toEqual([
         {
@@ -288,6 +305,72 @@ describe("TS Connect local session service", () => {
           init: { method: "GET", headers: { "content-type": "application/json" } },
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed public subscription plan payloads", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        Response.json({
+          plans: [{ id: "free", name: "Free", description: "Missing pricing and limits" }],
+        }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed authenticated subscription plan scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          plans: [
+            {
+              ...connectSubscriptionPlan("pro"),
+              pricing: { monthly: "10", yearly: 100 },
+            },
+          ],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
     } finally {
       db.close();
     }
@@ -315,7 +398,7 @@ describe("TS Connect local session service", () => {
           "content-type": "application/json",
         });
         if (String(input).endsWith("/api/v1/subscription/plans")) {
-          return Response.json({ plans: [{ id: "pro" }] });
+          return Response.json({ plans: [connectSubscriptionPlan("pro")] });
         }
         return Response.json({
           id: "user-1",
@@ -352,7 +435,9 @@ describe("TS Connect local session service", () => {
     });
 
     try {
-      await expect(service.getSubscriptionPlans()).resolves.toEqual({ plans: [{ id: "pro" }] });
+      await expect(service.getSubscriptionPlans()).resolves.toEqual({
+        plans: [connectSubscriptionPlan("pro")],
+      });
       await expect(service.getUserInfo()).resolves.toMatchObject({
         id: "user-1",
         full_name: "Ada Lovelace",
@@ -530,7 +615,7 @@ describe("TS Connect local session service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (String(input).endsWith("/api/v1/subscription/plans")) {
-          return Response.json({ plans: [{ id: "pro" }] });
+          return Response.json({ plans: [connectSubscriptionPlan("pro")] });
         }
         return Response.json({ id: "user-1" });
       },
@@ -544,7 +629,10 @@ describe("TS Connect local session service", () => {
     try {
       await expect(
         Promise.all([service.getSubscriptionPlans(), service.getUserInfo()]),
-      ).resolves.toEqual([{ plans: [{ id: "pro" }] }, expect.objectContaining({ id: "user-1" })]);
+      ).resolves.toEqual([
+        { plans: [connectSubscriptionPlan("pro")] },
+        expect.objectContaining({ id: "user-1" }),
+      ]);
       expect(authCalls).toBe(1);
     } finally {
       db.close();

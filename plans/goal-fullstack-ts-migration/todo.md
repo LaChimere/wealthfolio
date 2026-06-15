@@ -3541,6 +3541,15 @@ contract:
   connection fields such as `authorization_id`, `status`, `updated_at`, `name`,
   and `disabled` rejecting invalid scalar types like Rust serde instead of
   silently dropping or defaulting malformed cloud values.
+- `pr5-connect-plan-response-parsing`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "subscription plan|authenticated plans|public subscription|concurrent authenticated"`,
+  `bun test apps/backend/src/runtime.test.ts -t "wires local Connect runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes public and
+  authenticated plan reads validating required plan/pricing/limit fields,
+  normalizing serde-default fields (`features`, availability flags, badge,
+  discount metadata), and rejecting malformed plan payloads instead of returning
+  raw partial responses.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

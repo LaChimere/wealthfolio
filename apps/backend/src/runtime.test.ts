@@ -28,6 +28,23 @@ const config: BackendRuntimeConfig = {
   secretKey: new Uint8Array(32),
 };
 
+function connectSubscriptionPlan(id: string): Record<string, unknown> {
+  return {
+    id,
+    name: `${id} plan`,
+    tagline: null,
+    description: `${id} description`,
+    pricing: { monthly: 10, yearly: 100, yearlyPerMonth: 8.33 },
+    limits: { householdSize: 4, institutionConnections: "unlimited", devices: 5 },
+    features: ["sync"],
+    featuresExtended: null,
+    isAvailable: true,
+    isComingSoon: false,
+    badge: null,
+    yearlyDiscountPercent: null,
+  };
+}
+
 describe("TS backend runtime composition", () => {
   test("resolves runtime data and migration roots from explicit options and env", () => {
     expect(resolveBackendAppDataDir({}, "/tmp/app-data")).toBe("/tmp/app-data");
@@ -1256,7 +1273,7 @@ describe("TS backend runtime composition", () => {
         if (String(input).endsWith("/api/v1/user/me")) {
           return Response.json({ id: "user-1", email: "user@example.test" });
         }
-        return Response.json({ plans: [{ id: "free" }] });
+        return Response.json({ plans: [connectSubscriptionPlan("free")] });
       }) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
@@ -1272,7 +1289,9 @@ describe("TS backend runtime composition", () => {
     try {
       const publicPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans/public`);
       expect(publicPlansResponse.status).toBe(200);
-      await expect(publicPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
+      await expect(publicPlansResponse.json()).resolves.toEqual({
+        plans: [connectSubscriptionPlan("free")],
+      });
       expect(publicPlanRequests).toEqual(["https://api.example.test/api/v1/subscription/plans"]);
       publicPlanRequests.length = 0;
 
@@ -1337,7 +1356,9 @@ describe("TS backend runtime composition", () => {
 
       const authenticatedPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans`);
       expect(authenticatedPlansResponse.status).toBe(200);
-      await expect(authenticatedPlansResponse.json()).resolves.toEqual({ plans: [{ id: "free" }] });
+      await expect(authenticatedPlansResponse.json()).resolves.toEqual({
+        plans: [connectSubscriptionPlan("free")],
+      });
 
       const userInfoResponse = await fetch(`${server.baseUrl}/api/v1/connect/user`);
       expect(userInfoResponse.status).toBe(200);

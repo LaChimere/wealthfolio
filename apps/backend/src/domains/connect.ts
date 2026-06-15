@@ -223,11 +223,13 @@ export function createLocalConnectService({
       return await fetchPublicSubscriptionPlans(env, fetchImpl);
     },
     async getSubscriptionPlans() {
-      return await fetchAuthenticatedConnectJson(
-        restoreSession,
-        env,
-        fetchImpl,
-        "/api/v1/subscription/plans",
+      return plansResponseFromApi(
+        await fetchAuthenticatedConnectJson(
+          restoreSession,
+          env,
+          fetchImpl,
+          "/api/v1/subscription/plans",
+        ),
       );
     },
     async getUserInfo() {
@@ -699,11 +701,11 @@ async function fetchPublicSubscriptionPlans(
   }
   try {
     const parsed = JSON.parse(bodyText) as unknown;
-    if (!isRecord(parsed) || !Array.isArray(parsed.plans)) {
-      throw new Error("missing plans array");
-    }
-    return parsed;
+    return plansResponseFromApi(parsed);
   } catch (error) {
+    if (error instanceof ConnectServiceError) {
+      throw error;
+    }
     throw new ConnectServiceError(
       "internal_error",
       `Failed to parse plans response: ${errorMessage(error)}`,
@@ -769,6 +771,71 @@ async function fetchConnectJsonWithAccessToken(
       500,
     );
   }
+}
+
+function plansResponseFromApi(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.plans)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  return { plans: value.plans.map(subscriptionPlanFromApi) };
+}
+
+function subscriptionPlanFromApi(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  const pricing = value.pricing;
+  const limits = value.limits;
+  if (!isRecord(pricing) || !isRecord(limits)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  const features = value.features;
+  const featuresExtended = value.featuresExtended;
+  if (features !== undefined && (!Array.isArray(features) || !features.every(isStringValue))) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  if (
+    featuresExtended !== undefined &&
+    featuresExtended !== null &&
+    (!Array.isArray(featuresExtended) || !featuresExtended.every(isStringValue))
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  return {
+    id: requiredStringValue(value.id, "plans response"),
+    name: requiredStringValue(value.name, "plans response"),
+    tagline: optionalString(value.tagline),
+    description: requiredStringValue(value.description, "plans response"),
+    pricing: {
+      monthly: requiredFiniteNumber(pricing.monthly, "plans response"),
+      yearly: requiredFiniteNumber(pricing.yearly, "plans response"),
+      yearlyPerMonth:
+        valueOrNull(pricing.yearlyPerMonth) === null
+          ? null
+          : requiredFiniteNumber(pricing.yearlyPerMonth, "plans response"),
+    },
+    limits: {
+      householdSize: requiredInteger(limits.householdSize, "plans response"),
+      institutionConnections: planLimitValueFromApi(limits.institutionConnections),
+      devices: requiredInteger(limits.devices, "plans response"),
+    },
+    features: features ?? [],
+    featuresExtended: featuresExtended ?? null,
+    isAvailable: optionalBoolean(value.isAvailable) ?? false,
+    isComingSoon: optionalBoolean(value.isComingSoon) ?? false,
+    badge: optionalString(value.badge),
+    yearlyDiscountPercent:
+      valueOrNull(value.yearlyDiscountPercent) === null
+        ? null
+        : requiredInteger(value.yearlyDiscountPercent, "plans response"),
+  };
+}
+
+function planLimitValueFromApi(value: unknown): number | string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return requiredInteger(value, "plans response");
 }
 
 function userInfoFromApi(value: unknown): unknown {
@@ -877,6 +944,28 @@ function requiredStringValue(value: unknown, context: string): string {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
+}
+
+function requiredFiniteNumber(value: unknown, context: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredInteger(value: unknown, context: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function isStringValue(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function valueOrNull(value: unknown): unknown | null {
+  return value === undefined ? null : value;
 }
 
 function brokerConnectionsFromApi(value: unknown): unknown[] {
