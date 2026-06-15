@@ -53,6 +53,81 @@ describe("TS local device sync service", () => {
     });
   });
 
+  test("reports sync identity preconditions for beginning pairing flow confirmation", async () => {
+    const secretService = createMemorySecretService();
+    const service = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+    const request = { pairingId: "pairing-1", proof: "proof" };
+
+    await expect(service.beginPairingConfirm?.(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+    await expect(service.beginPairingConfirm?.(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No device ID configured",
+      status: 500,
+    });
+  });
+
+  test("keeps beginning pairing flow confirmation feature-gated after prerequisites", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const noSessionService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+    await expect(
+      noSessionService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
+    ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+    const restoredService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+    await expect(
+      restoredService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
+    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+  });
+
+  test("reports missing pairing flows and cancels missing flows locally", async () => {
+    const service = createLocalDeviceSyncService({});
+
+    await expect(service.getPairingFlowState?.({ flowId: "flow-1" })).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Flow not found",
+      status: 500,
+    });
+    await expect(service.approvePairingOverwrite?.({ flowId: "flow-1" })).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Flow not found",
+      status: 500,
+    });
+    expect(service.cancelPairingFlow?.({ flowId: "flow-1" })).toEqual({
+      flowId: "flow-1",
+      phase: { phase: "success" },
+    });
+  });
+
   test("requires Connect session before listing devices", async () => {
     const service = createLocalDeviceSyncService({
       connectService: {

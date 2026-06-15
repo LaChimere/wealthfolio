@@ -331,6 +331,22 @@ export function createLocalDeviceSyncService({
       await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
       throw deviceSyncDisabled();
     },
+    async beginPairingConfirm() {
+      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
+      throw deviceSyncDisabled();
+    },
+    async getPairingFlowState() {
+      throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+    },
+    async approvePairingOverwrite() {
+      throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+    },
+    cancelPairingFlow(request) {
+      return {
+        flowId: request.flowId,
+        phase: { phase: "success" },
+      };
+    },
   };
 }
 

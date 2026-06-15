@@ -1672,13 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        jsonRequest("/api/v1/sync/pairing/flow/begin", {
-          pairingId: "pairing-1",
-          proof: "proof",
-        }),
-        jsonRequest("/api/v1/sync/pairing/flow/state", { flowId: "flow-1" }),
-        jsonRequest("/api/v1/sync/pairing/flow/approve-overwrite", { flowId: "flow-1" }),
-        jsonRequest("/api/v1/sync/pairing/flow/cancel", { flowId: "flow-1" }),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
@@ -1781,6 +1774,10 @@ describe("TS backend runtime composition", () => {
           pairingId: "pairing-1",
           allowOverwrite: false,
         }),
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-1",
+          proof: "proof",
+        }),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(500);
@@ -1788,6 +1785,26 @@ describe("TS backend runtime composition", () => {
           message: "No device ID configured",
         });
       }
+
+      for (const request of [
+        jsonRequest("/api/v1/sync/pairing/flow/state", { flowId: "flow-1" }),
+        jsonRequest("/api/v1/sync/pairing/flow/approve-overwrite", { flowId: "flow-1" }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "Flow not found",
+        });
+      }
+
+      const cancelPairingFlowResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/cancel", { flowId: "flow-1" }),
+      );
+      expect(cancelPairingFlowResponse.status).toBe(200);
+      await expect(cancelPairingFlowResponse.json()).resolves.toEqual({
+        flowId: "flow-1",
+        phase: { phase: "success" },
+      });
 
       const engineStatusResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/device/engine-status`,
