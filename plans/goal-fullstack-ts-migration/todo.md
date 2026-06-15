@@ -3155,6 +3155,11 @@ contract:
   and folder-structure sections naming `apps/backend` as the Bun TypeScript
   backend runtime and `apps/server` as the temporary Rust sidecar/prebuild
   fallback.
+- `pr5-vscode-tauri-extension-cleanup`: verification passed:
+  `python3 -m json.tool .vscode/extensions.json`, full `bun run check`, and
+  `git diff --check`. Coverage includes VS Code recommendations no longer
+  prompting developers to install the Tauri extension after Tauri runtime
+  removal.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
