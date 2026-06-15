@@ -1098,14 +1098,20 @@ async function syncEmptyTransactionActivityPages(
     }
     const data = isRecord(page) && Array.isArray(page.data) ? page.data : [];
     if (data.length > 0) {
-      const message = "Broker activity mapping is not yet available in the TS backend runtime";
-      upsertBrokerSyncFailure(db, account.id, message);
-      throw new ConnectNotImplementedError(message);
+      if (data.some(hasBrokerActivityMappableId)) {
+        const message = "Broker activity mapping is not yet available in the TS backend runtime";
+        upsertBrokerSyncFailure(db, account.id, message);
+        throw new ConnectNotImplementedError(message);
+      }
     }
     upsertBrokerSyncSuccess(db, account.id);
     summary.accountsSynced += 1;
   }
   return summary;
+}
+
+function hasBrokerActivityMappableId(activity: unknown): boolean {
+  return isRecord(activity) && typeof activity.id === "string" && activity.id.trim().length > 0;
 }
 
 function brokerActivitiesPath(

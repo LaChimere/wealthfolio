@@ -3414,6 +3414,14 @@ contract:
   `sync_device_config.min_snapshot_created_at` after refresh/access token
   cleanup without deleting device config rows, matching Rust logout/reset
   freshness-gate cleanup.
+- `pr5-connect-activity-skip-missing-ids`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "activity pages|broker activity|transaction-mode"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes transaction-mode
+  `/connect/sync/activities` accepting non-empty broker activity pages when
+  every activity lacks a non-blank `id`, finalizing sync success with zero
+  upserts like Rust's `map_broker_activity` skip path, and preserving the
+  explicit mapper feature gate for pages containing mappable activity IDs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
