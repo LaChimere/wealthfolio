@@ -1663,6 +1663,9 @@ export function createLocalConnectDeviceSyncService({
         message: "Device sync background engine stopped",
       };
     },
+    triggerDeviceSyncCycle() {
+      return triggerLocalDeviceSyncCycle(db);
+    },
     cancelDeviceSnapshotUpload() {
       return {
         status: "cancel_requested",
@@ -1810,6 +1813,85 @@ function getLocalSnapshotIdentityOrThrow(db: Database): never {
     throw new ConnectServiceError("internal_error", "No device ID configured", 500);
   }
   throw deviceSyncDisabled();
+}
+
+function triggerLocalDeviceSyncCycle(db: Database): Record<string, unknown> {
+  const config = db
+    .query<{ device_id: string | null }, []>(
+      `
+        SELECT device_id
+        FROM sync_device_config
+        ORDER BY device_id
+        LIMIT 1
+      `,
+    )
+    .get();
+  const cursor =
+    db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
+  const lockVersion =
+    db
+      .query<
+        { lock_version: number },
+        []
+      >("SELECT lock_version FROM sync_engine_state WHERE id = 1")
+      .get()?.lock_version ?? 0;
+  if (!config) {
+    markLocalSyncCycleError(
+      db,
+      "config_error",
+      "No sync identity configured. Please enable sync first.",
+    );
+    return localSyncCycleResult("config_error", lockVersion, cursor);
+  }
+  if (!config.device_id) {
+    markLocalSyncCycleOutcome(db, "not_ready");
+    return localSyncCycleResult("not_ready", lockVersion, cursor);
+  }
+  throw deviceSyncDisabled();
+}
+
+function localSyncCycleResult(
+  status: string,
+  lockVersion: number,
+  cursor: number,
+): Record<string, unknown> {
+  return {
+    status,
+    lockVersion,
+    pushedCount: 0,
+    pulledCount: 0,
+    cursor,
+    needsBootstrap: status === "stale_cursor",
+    bootstrapSnapshotId: null,
+    bootstrapSnapshotSeq: null,
+    deadLetterCount: 0,
+  };
+}
+
+function markLocalSyncCycleError(db: Database, status: string, message: string): void {
+  markLocalSyncCycleOutcome(db, status, message);
+}
+
+function markLocalSyncCycleOutcome(
+  db: Database,
+  status: string,
+  lastError: string | null = null,
+): void {
+  const durationMs = 0;
+  db.prepare(
+    `
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_error, consecutive_failures, next_retry_at,
+        last_cycle_status, last_cycle_duration_ms
+      )
+      VALUES (1, 0, ?, 0, NULL, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        last_error = excluded.last_error,
+        next_retry_at = excluded.next_retry_at,
+        last_cycle_status = excluded.last_cycle_status,
+        last_cycle_duration_ms = excluded.last_cycle_duration_ms
+    `,
+  ).run(lastError, status, durationMs);
 }
 
 function localOverwriteRiskSummary(db: Database): {

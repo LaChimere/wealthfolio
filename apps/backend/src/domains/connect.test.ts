@@ -1312,6 +1312,60 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("records config error for local trigger cycle without sync identity", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 7, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 3);
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(service.triggerDeviceSyncCycle()).toEqual({
+        status: "config_error",
+        lockVersion: 3,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 7,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({
+        last_cycle_status: "config_error",
+        last_error: "No sync identity configured. Please enable sync first.",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports local pairing source status preconditions before cloud cursor checks", () => {
     const db = new Database(":memory:");
     db.exec(`

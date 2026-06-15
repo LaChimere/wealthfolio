@@ -3388,6 +3388,14 @@ contract:
   returning Rust-compatible no-identity and no-device-id errors before cloud
   upload paths, while trusted-device snapshot export/upload remains
   feature-gated.
+- `pr5-device-sync-trigger-cycle-precondition`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "trigger cycle|device sync local"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local `/connect/device/trigger-cycle`
+  recording a Rust-compatible `config_error` engine outcome and returning the
+  cycle summary with cursor/lock version and zero pushed/pulled counts before
+  cloud push/pull paths.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

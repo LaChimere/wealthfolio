@@ -1555,7 +1555,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, { method: "POST" }),
         jsonRequest("/api/v1/sync/device/register", {
           displayName: "MacBook",
           platform: "macos",
@@ -1644,6 +1643,19 @@ describe("TS backend runtime composition", () => {
       expect(pairingSourceResponse.status).toBe(500);
       await expect(pairingSourceResponse.json()).resolves.toMatchObject({
         message: "No sync identity configured. Please enable sync first.",
+      });
+
+      const triggerCycleResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/trigger-cycle`,
+        { method: "POST" },
+      );
+      expect(triggerCycleResponse.status).toBe(200);
+      await expect(triggerCycleResponse.json()).resolves.toMatchObject({
+        status: "config_error",
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 0,
+        needsBootstrap: false,
       });
 
       const overwriteCheckResponse = await fetch(
