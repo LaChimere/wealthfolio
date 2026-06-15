@@ -23,6 +23,10 @@ export interface LocalConnectServiceDependencies {
   fetch?: typeof fetch;
 }
 
+export interface LocalConnectDeviceSyncServiceDependencies {
+  db: Database;
+}
+
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
 
 export interface ConnectSyncBrokerDataResult {
@@ -1370,6 +1374,77 @@ export function createDisabledConnectDeviceSyncService(): ConnectDeviceSyncServi
     async cancelDeviceSnapshotUpload() {
       throw deviceSyncDisabled();
     },
+  };
+}
+
+interface SyncEngineStateRow {
+  last_push_at: string | null;
+  last_pull_at: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
+  next_retry_at: string | null;
+  last_cycle_status: string | null;
+  last_cycle_duration_ms: number | null;
+}
+
+interface SyncCursorRow {
+  cursor: number;
+}
+
+interface SyncDeviceConfigRow {
+  device_id: string;
+  last_bootstrap_at: string | null;
+}
+
+export function createLocalConnectDeviceSyncService({
+  db,
+}: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
+  const disabledService = createDisabledConnectDeviceSyncService();
+  return {
+    ...disabledService,
+    getDeviceSyncEngineStatus() {
+      return getLocalDeviceSyncEngineStatus(db);
+    },
+  };
+}
+
+function getLocalDeviceSyncEngineStatus(db: Database): Record<string, unknown> {
+  const cursor =
+    db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
+  const state = db
+    .query<SyncEngineStateRow, []>(
+      `
+      SELECT
+        last_push_at, last_pull_at, last_error, consecutive_failures, next_retry_at,
+        last_cycle_status, last_cycle_duration_ms
+      FROM sync_engine_state
+      WHERE id = 1
+    `,
+    )
+    .get();
+  const deviceConfig = db
+    .query<SyncDeviceConfigRow, []>(
+      `
+      SELECT device_id, last_bootstrap_at
+      FROM sync_device_config
+      ORDER BY device_id
+      LIMIT 1
+    `,
+    )
+    .get();
+  const staleCursor = state?.last_cycle_status === "stale_cursor";
+  return {
+    cursor,
+    lastPushAt: state?.last_push_at ?? null,
+    lastPullAt: state?.last_pull_at ?? null,
+    lastError: state?.last_error ?? null,
+    consecutiveFailures: state?.consecutive_failures ?? 0,
+    nextRetryAt: state?.next_retry_at ?? null,
+    lastCycleStatus: state?.last_cycle_status ?? null,
+    lastCycleDurationMs: state?.last_cycle_duration_ms ?? null,
+    backgroundRunning: false,
+    bootstrapRequired:
+      deviceConfig === null || deviceConfig.last_bootstrap_at === null || staleCursor,
   };
 }
 

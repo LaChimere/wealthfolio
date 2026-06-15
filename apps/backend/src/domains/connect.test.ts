@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import type { SecretService } from "./secrets";
-import { createLocalConnectService } from "./connect";
+import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./connect";
 
 function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
   const entries = new Map<string, string>();
@@ -34,7 +34,6 @@ describe("TS Connect local session service", () => {
         saveBrokerSyncProfileRules: (request) => request,
       },
     });
-
     try {
       await expect(service.getSyncSessionStatus()).resolves.toEqual({ isConfigured: false });
 
@@ -753,6 +752,65 @@ describe("TS Connect local session service", () => {
         sync_enabled: true,
         owner: { user_id: "user-1", is_own_account: true },
       });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("TS Connect device sync local service", () => {
+  test("reads local sync engine status and bootstrap requirement", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_push_at, last_pull_at, last_error, consecutive_failures,
+        next_retry_at, last_cycle_status, last_cycle_duration_ms
+      ) VALUES (
+        1, 5, '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z', 'last-error', 2,
+        '2026-01-04T00:00:00Z', 'ok', 123
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 7, 'trusted', '2026-01-01T00:00:00Z');
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(service.getDeviceSyncEngineStatus()).toEqual({
+        cursor: 42,
+        lastPushAt: "2026-01-02T00:00:00Z",
+        lastPullAt: "2026-01-03T00:00:00Z",
+        lastError: "last-error",
+        consecutiveFailures: 2,
+        nextRetryAt: "2026-01-04T00:00:00Z",
+        lastCycleStatus: "ok",
+        lastCycleDurationMs: 123,
+        backgroundRunning: false,
+        bootstrapRequired: false,
+      });
+
+      db.prepare(
+        "UPDATE sync_engine_state SET last_cycle_status = 'stale_cursor' WHERE id = 1",
+      ).run();
+      expect(service.getDeviceSyncEngineStatus()).toMatchObject({ bootstrapRequired: true });
     } finally {
       db.close();
     }

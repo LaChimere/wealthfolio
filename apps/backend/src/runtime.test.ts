@@ -1545,7 +1545,6 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/sync-data`, { method: "DELETE" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/engine-status`),
         new Request(`${server.baseUrl}/api/v1/connect/device/pairing-source-status`),
         new Request(`${server.baseUrl}/api/v1/connect/device/bootstrap-overwrite-check`),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
@@ -1632,6 +1631,16 @@ describe("TS backend runtime composition", () => {
         const response = await fetch(request);
         expect(response.status).toBe(501);
       }
+
+      const engineStatusResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/engine-status`,
+      );
+      expect(engineStatusResponse.status).toBe(200);
+      await expect(engineStatusResponse.json()).resolves.toMatchObject({
+        cursor: 0,
+        backgroundRunning: false,
+        bootstrapRequired: true,
+      });
     } finally {
       server.stop();
       await runtime.close();

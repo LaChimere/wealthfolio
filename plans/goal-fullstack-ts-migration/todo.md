@@ -3308,6 +3308,15 @@ contract:
   creating SNAPTRADE HOLDINGS accounts through the account service, matching
   platforms by external ID/name, preserving broker metadata JSON, and returning
   Rust-compatible created/skipped/new-account payloads.
+- `pr5-device-sync-engine-status-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local|stores, reports"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local `/connect/device/engine-status`
+  reading `sync_cursor`, `sync_engine_state`, and `sync_device_config` from
+  SQLite, Rust-compatible response field mapping, bootstrap-required detection
+  from missing bootstrap data or stale cursors, and keeping cloud/device
+  mutation routes feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

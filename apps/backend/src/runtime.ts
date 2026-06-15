@@ -14,10 +14,7 @@ import { createAlternativeAssetService } from "./domains/alternative-assets";
 import { createAiProviderService } from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
-import {
-  createDisabledConnectDeviceSyncService,
-  createLocalConnectService,
-} from "./domains/connect";
+import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./domains/connect";
 import {
   createContributionDepositCalculator,
   createContributionLimitRepository,
@@ -501,7 +498,7 @@ function createServicesFromDatabase(
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
       prepareDatabaseRestore,
     }),
-    connectDeviceSyncService: createDisabledConnectDeviceSyncService(),
+    connectDeviceSyncService: createLocalConnectDeviceSyncService({ db }),
     connectService: createLocalConnectService({
       db,
       activityService,
