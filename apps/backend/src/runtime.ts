@@ -25,7 +25,7 @@ import {
   createCustomProviderRepository,
   createCustomProviderService,
 } from "./domains/custom-providers";
-import { createDisabledDeviceSyncService } from "./domains/device-sync";
+import { createLocalDeviceSyncService } from "./domains/device-sync";
 import {
   createExchangeRateRepository,
   createExchangeRateService,
@@ -422,6 +422,14 @@ function createServicesFromDatabase(
     },
   });
 
+  const connectService = createLocalConnectService({
+    db,
+    activityService,
+    accountService,
+    secretService,
+    env: runtimeOptions.env,
+    fetch: runtimeOptions.marketDataFetch,
+  });
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService,
@@ -504,14 +512,7 @@ function createServicesFromDatabase(
       env: runtimeOptions.env,
       fetch: runtimeOptions.marketDataFetch,
     }),
-    connectService: createLocalConnectService({
-      db,
-      activityService,
-      accountService,
-      secretService,
-      env: runtimeOptions.env,
-      fetch: runtimeOptions.marketDataFetch,
-    }),
+    connectService,
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
         queueSyncEvent: (event) =>
@@ -538,7 +539,7 @@ function createServicesFromDatabase(
     ),
     customProviderService,
     eventBus,
-    deviceSyncService: createDisabledDeviceSyncService(),
+    deviceSyncService: createLocalDeviceSyncService({ connectService, secretService }),
     exchangeRateService,
     goalService,
     goalValuationProvider,

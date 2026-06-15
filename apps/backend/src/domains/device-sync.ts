@@ -123,7 +123,26 @@ export class DeviceSyncNotImplementedError extends Error {
   }
 }
 
+export class DeviceSyncServiceError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "DeviceSyncServiceError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
+const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
+const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
+
+export interface LocalDeviceSyncServiceDependencies {
+  connectService?: Pick<ConnectService, "restoreSyncSession">;
+  secretService?: SecretService;
+}
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
   return {
@@ -208,6 +227,48 @@ export function createDisabledDeviceSyncService(): DeviceSyncService {
   };
 }
 
+export function createLocalDeviceSyncService({
+  connectService,
+  secretService,
+}: LocalDeviceSyncServiceDependencies): DeviceSyncService {
+  const disabledService = createDisabledDeviceSyncService();
+  return {
+    ...disabledService,
+    async getCurrentDevice() {
+      if (!connectService || !secretService) {
+        throw deviceSyncDisabled();
+      }
+      await connectService.restoreSyncSession();
+      const deviceId = await getLocalDeviceId(secretService);
+      if (!deviceId) {
+        throw new DeviceSyncServiceError("bad_request", "No device ID configured", 400);
+      }
+      throw deviceSyncDisabled();
+    },
+  };
+}
+
+async function getLocalDeviceId(secretService: SecretService): Promise<string | null> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity) {
+    try {
+      const parsed = JSON.parse(rawIdentity) as unknown;
+      if (isRecord(parsed) && typeof parsed.deviceId === "string") {
+        return parsed.deviceId;
+      }
+    } catch {
+      // Match Rust get_device_id: parse failures still fall back to the legacy key.
+    }
+  }
+  return await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function deviceSyncDisabled(): DeviceSyncNotImplementedError {
   return new DeviceSyncNotImplementedError(DEVICE_SYNC_DISABLED_MESSAGE);
 }
+import type { ConnectService } from "./connect";
+import type { SecretService } from "./secrets";

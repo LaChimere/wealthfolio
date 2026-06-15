@@ -1672,7 +1672,6 @@ describe("TS backend runtime composition", () => {
           platform: "macos",
           instanceId: "instance-1",
         }),
-        new Request(`${server.baseUrl}/api/v1/sync/device/current`),
         new Request(`${server.baseUrl}/api/v1/sync/devices?scope=team`),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1`),
         new Request(`${server.baseUrl}/api/v1/sync/device/device-1`, {
@@ -1738,6 +1737,14 @@ describe("TS backend runtime composition", () => {
         const response = await fetch(request);
         expect(response.status).toBe(501);
       }
+
+      const currentDeviceWithoutSessionResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/device/current`,
+      );
+      expect(currentDeviceWithoutSessionResponse.status).toBe(403);
+      await expect(currentDeviceWithoutSessionResponse.json()).resolves.toMatchObject({
+        message: "No sync session configured",
+      });
 
       const engineStatusResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/device/engine-status`,
