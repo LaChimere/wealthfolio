@@ -1011,6 +1011,76 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
   ]) {
     assertOptionalConnectBooleanField(account, field, "accounts response");
   }
+  validateBrokerAccountBalance(account.balance);
+  validateBrokerAccountOwner(account.owner);
+  validateBrokerAccountSyncStatus(account.sync_status ?? account.syncStatus);
+}
+
+function validateBrokerAccountBalance(value: unknown): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  const total = value.total;
+  if (total === undefined || total === null) {
+    return;
+  }
+  if (!isRecord(total)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  assertOptionalConnectNumberField(total, "amount", "accounts response");
+  assertOptionalConnectStringField(total, "currency", "accounts response");
+}
+
+function validateBrokerAccountOwner(value: unknown): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  for (const field of [
+    "user_id",
+    "userId",
+    "full_name",
+    "fullName",
+    "user_full_name",
+    "email",
+    "avatar_url",
+    "avatarUrl",
+  ]) {
+    assertOptionalConnectStringField(value, field, "accounts response");
+  }
+  assertOptionalConnectBooleanField(value, "is_own_account", "accounts response");
+  assertOptionalConnectBooleanField(value, "isOwnAccount", "accounts response");
+}
+
+function validateBrokerAccountSyncStatus(value: unknown): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  validateBrokerSyncStatusDetail(value.transactions);
+  validateBrokerSyncStatusDetail(value.holdings);
+}
+
+function validateBrokerSyncStatusDetail(value: unknown): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  assertOptionalConnectBooleanField(value, "initial_sync_completed", "accounts response");
+  assertOptionalConnectBooleanField(value, "initialSyncCompleted", "accounts response");
+  assertOptionalConnectStringField(value, "last_successful_sync", "accounts response");
+  assertOptionalConnectStringField(value, "lastSuccessfulSync", "accounts response");
+  assertOptionalConnectStringField(value, "first_transaction_date", "accounts response");
+  assertOptionalConnectStringField(value, "firstTransactionDate", "accounts response");
 }
 
 function syncBrokerConnectionsToPlatforms(

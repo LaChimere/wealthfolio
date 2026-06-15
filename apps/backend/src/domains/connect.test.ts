@@ -837,6 +837,47 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects broker account nested fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          accounts: [
+            {
+              id: "broker-account",
+              balance: { total: { amount: "100", currency: "USD" } },
+              owner: { user_id: 123, is_own_account: "true" },
+              sync_status: { transactions: { initial_sync_completed: "false" } },
+            },
+          ],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs broker connections into local platforms", async () => {
     const db = new Database(":memory:");
     db.exec(`

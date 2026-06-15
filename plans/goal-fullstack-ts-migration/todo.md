@@ -3527,6 +3527,13 @@ contract:
   rejecting malformed optional string, boolean, and numeric fields on user/team
   payloads, matching Rust serde behavior instead of silently nulling invalid
   cloud values.
+- `pr5-connect-broker-account-nested-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account|nested fields|malformed broker|empty lists"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes broker account
+  reads rejecting malformed balance totals, owner fields, and sync-status detail
+  fields when their scalar types do not match Rust models, instead of silently
+  preserving invalid cloud payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
