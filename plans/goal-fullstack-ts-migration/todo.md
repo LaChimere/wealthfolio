@@ -3499,6 +3499,13 @@ contract:
   rejecting malformed cloud responses when required user or team IDs are missing
   or non-string, matching Rust serde-required `ApiUser.id`/`ApiTeam.id` behavior
   instead of silently returning empty IDs.
+- `pr5-connect-broker-read-entry-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connection|broker account|empty lists|malformed broker"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes broker connection
+  entries requiring the Rust-required `id` field even when `authorization_id` is
+  present, broker account entries rejecting non-object values, and removal of
+  the old unused string fallback helper.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

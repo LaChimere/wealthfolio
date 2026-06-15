@@ -835,8 +835,9 @@ function brokerConnectionFromApi(value: unknown): unknown {
     throw new ConnectServiceError("internal_error", "Failed to parse connection response", 500);
   }
   const brokerage = brokerageFromApi(value);
+  const id = requiredStringValue(value.id, "connection response");
   return {
-    id: optionalString(value.authorization_id ?? value.authorizationId) ?? stringValue(value.id),
+    id: optionalString(value.authorization_id ?? value.authorizationId) ?? id,
     brokerage,
     type: null,
     status: optionalString(value.status),
@@ -885,6 +886,9 @@ function brokerAccountsFromApi(value: unknown): unknown[] {
     return [];
   }
   if (!Array.isArray(value.accounts)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  if (!value.accounts.every(isRecord)) {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
   return value.accounts;
@@ -1535,10 +1539,6 @@ function readPath(record: Record<string, unknown>, path: string[]): unknown {
     value = value[key];
   }
   return value;
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }
 
 function optionalString(value: unknown): string | null {
