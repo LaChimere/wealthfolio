@@ -807,6 +807,111 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("runs bounded broker data sync through migrated connection, account, and holdings no-op slices", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const localAccounts: Array<{
+      id: string;
+      providerAccountId: string | null;
+      trackingMode: "HOLDINGS";
+    }> = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({
+            connections: [
+              { id: "connection-1", brokerage_name: "Brokerage", brokerage_slug: "brokerage" },
+            ],
+          });
+        }
+        return Response.json({
+          accounts: [
+            {
+              id: "broker-account-1",
+              name: "Broker Account",
+              currency: "USD",
+              brokerage_authorization: "brokerage",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () =>
+          localAccounts.map((account) => ({
+            ...account,
+            name: "Broker Account",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            createdAt: "",
+            updatedAt: "",
+            platformId: "brokerage",
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+          })),
+        createAccount: async (account) => {
+          const created = {
+            id: "created-local",
+            providerAccountId: account.providerAccountId ?? null,
+            trackingMode: (account.trackingMode ?? "NOT_SET") as "HOLDINGS",
+          };
+          localAccounts.push(created);
+          return {
+            ...created,
+            name: account.name,
+            accountType: account.accountType,
+            group: account.group ?? null,
+            currency: account.currency,
+            isDefault: account.isDefault,
+            isActive: account.isActive,
+            isArchived: account.isArchived ?? false,
+            createdAt: "",
+            updatedAt: "",
+            platformId: account.platformId ?? null,
+            accountNumber: account.accountNumber ?? null,
+            meta: account.meta ?? null,
+            provider: account.provider ?? null,
+          };
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "accepted" });
+      expect(localAccounts).toEqual([
+        { id: "created-local", providerAccountId: "broker-account-1", trackingMode: "HOLDINGS" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps transaction-mode activity sync feature-gated until broker activity mapping lands", async () => {
     const db = new Database(":memory:");
     const service = createLocalConnectService({

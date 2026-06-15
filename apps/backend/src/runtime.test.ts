@@ -1334,7 +1334,7 @@ describe("TS backend runtime composition", () => {
       const syncResponse = await fetch(`${server.baseUrl}/api/v1/connect/sync`, {
         method: "POST",
       });
-      expect(syncResponse.status).toBe(501);
+      expect(syncResponse.status).toBe(202);
 
       const syncActivitiesResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/sync/activities`,

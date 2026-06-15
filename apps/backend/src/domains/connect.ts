@@ -121,8 +121,8 @@ export function createDisabledConnectService(): ConnectService {
     async listBrokerAccounts() {
       throw connectSyncDisabled();
     },
-    syncBrokerData() {
-      return { status: "not_implemented" };
+    async syncBrokerData() {
+      return await syncBrokerDataBounded(this);
     },
     async syncBrokerConnections() {
       throw connectSyncDisabled();
@@ -1013,6 +1013,18 @@ function syncBrokerActivitiesForHoldingsOnly(
     accountsWarned: 0,
     newAssetIds: [],
   };
+}
+
+async function syncBrokerDataBounded(
+  service: Pick<
+    ConnectService,
+    "syncBrokerConnections" | "syncBrokerAccounts" | "syncBrokerActivities"
+  >,
+): Promise<ConnectSyncBrokerDataResult> {
+  await service.syncBrokerConnections();
+  await service.syncBrokerAccounts();
+  await service.syncBrokerActivities();
+  return { status: "accepted" };
 }
 
 function brokerAccountDisplayName(account: Record<string, unknown>): string {

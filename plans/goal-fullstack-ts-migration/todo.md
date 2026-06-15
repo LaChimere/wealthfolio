@@ -3342,6 +3342,14 @@ contract:
   returning Rust-compatible `skipped` when no sync identity is configured,
   `/connect/device/stop-background` returning `stopped`, and keeping
   cloud/push/pull mutations feature-gated.
+- `pr5-connect-bounded-full-sync-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled cloud routes|Connect refresh sessions|broker sync profile"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes `/connect/sync` running the migrated
+  connections sync, accounts sync, and HOLDINGS-mode activities no-op path,
+  returning accepted while TRANSACTIONS-mode broker activity mapping remains
+  feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
