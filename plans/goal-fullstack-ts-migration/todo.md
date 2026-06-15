@@ -3466,6 +3466,12 @@ contract:
   request query strings using Rust client parameter order: `offset`, `limit`,
   optional `start_date`, then `end_date`, with focused assertions for
   incremental start-date syncs.
+- `pr5-readme-legacy-runtime-wording`: verification passed:
+  `rg "temporary Rust compatibility server|Temporary Rust compatibility server|legacy Rust compatibility/reference|Axum" README.md`,
+  full `bun run check`, and `git diff --check`. Coverage includes README backend
+  technology and folder structure wording now describing Rust/Axum as legacy
+  compatibility/reference tooling and `apps/server` as a legacy Rust
+  compatibility/reference server instead of a temporary runtime server.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
