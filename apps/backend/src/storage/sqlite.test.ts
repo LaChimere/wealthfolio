@@ -57,9 +57,9 @@ describe("TS SQLite storage foundation", () => {
   test("loads current Rust SQL migrations as the TS source of truth", () => {
     const migrations = loadSqlMigrations(resolveMigrationsDir(repositoryRoot));
 
-    expect(migrations).toHaveLength(30);
+    expect(migrations).toHaveLength(32);
     expect(migrations[0]?.version).toBe("2023-11-08-162221_init_db");
-    expect(migrations.at(-1)?.version).toBe("2026-04-29-000001_sync_entity_metadata_last_op");
+    expect(migrations.at(-1)?.version).toBe("2026-05-19-000001_lots_and_snapshot_positions");
     expect(migrations.every((migration) => migration.upSql.trim().length > 0)).toBe(true);
     expect(migrations.every((migration) => typeof migration.downSql === "string")).toBe(true);
   });

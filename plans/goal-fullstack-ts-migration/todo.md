@@ -3127,6 +3127,12 @@ contract:
   and `git diff --check`. Coverage includes E2E no longer passing `RUST_LOG` to
   the Bun backend, wait-script readiness checks no longer mentioning Axum, and
   E2E setup docs no longer requiring Rust for the backend server.
+- `pr5-sqlite-migration-count-refresh`: verification passed:
+  `bun test apps/backend/src/storage/sqlite.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and
+  `git diff --check`. Coverage includes TS storage parity tests recognizing the
+  current Rust migration source of truth: 32 migrations ending at
+  `2026-05-19-000001_lots_and_snapshot_positions`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
