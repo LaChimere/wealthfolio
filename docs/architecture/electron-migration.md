@@ -7,9 +7,9 @@ shell with Electron.
 
 - Keep the React/Vite UI and adapter contract stable while the desktop runtime
   changes.
-- Run the Bun/TypeScript backend locally while preserving behavior from the
-  legacy Rust business logic, SQLite storage, sync, AI, and market data
-  services.
+- Run the Bun/TypeScript backend locally while preserving behavior proven
+  against the legacy Rust reference implementation for SQLite storage, sync, AI,
+  and market data services.
 - Preserve local desktop data and secrets from earlier desktop releases.
 - Keep web mode separate and functional throughout the migration.
 

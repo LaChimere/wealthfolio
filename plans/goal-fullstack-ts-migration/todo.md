@@ -3472,6 +3472,12 @@ contract:
   technology and folder structure wording now describing Rust/Axum as legacy
   compatibility/reference tooling and `apps/server` as a legacy Rust
   compatibility/reference server instead of a temporary runtime server.
+- `pr5-electron-architecture-reference-wording`: verification passed:
+  `rg "legacy Rust business logic|legacy Rust reference implementation|Bun/TypeScript backend locally" docs/architecture/electron-migration.md`,
+  full `bun run check`, and `git diff --check`. Coverage includes the Electron
+  architecture doc describing the TS backend as preserving behavior proven
+  against the legacy Rust reference implementation rather than implying the
+  current runtime still uses legacy Rust business logic.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
