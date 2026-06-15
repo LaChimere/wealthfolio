@@ -3573,6 +3573,14 @@ contract:
   `bun run check`, and `git diff --check`. Coverage includes malformed local
   sync identity JSON/field types surfacing parse errors after Connect session
   restore in `/connect/device/sync-state`, instead of falling through to FRESH.
+- `pr5-connect-device-sync-background-runnable-gate`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "background engine|snapshot cancellation|device sync local"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/connect/device/start-background` returning local `skipped` only when sync
+  identity is absent or not runnable, while a local identity with both device ID
+  and root key remains feature-gated until background engine runtime lands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

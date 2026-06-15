@@ -2122,7 +2122,10 @@ export function createLocalConnectDeviceSyncService({
     async generateDeviceSnapshotNow() {
       return getLocalSnapshotIdentityOrThrow(db);
     },
-    startDeviceSyncBackgroundEngine() {
+    async startDeviceSyncBackgroundEngine() {
+      if (await localSyncIdentityCanRunBackground(secretService)) {
+        throw deviceSyncDisabled();
+      }
       return {
         status: "skipped",
         message: "Background engine not started because sync identity is not configured",
@@ -2144,6 +2147,24 @@ export function createLocalConnectDeviceSyncService({
       };
     },
   };
+}
+
+async function localSyncIdentityCanRunBackground(
+  secretService: SecretService | undefined,
+): Promise<boolean> {
+  if (!secretService) {
+    return false;
+  }
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
+    return false;
+  }
+  try {
+    const parsed = parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+    return parsed.deviceId !== null && parsed.rootKey !== null;
+  } catch {
+    return false;
+  }
 }
 
 async function getLocalDeviceSyncFreshStateOrThrow(

@@ -2139,12 +2139,12 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("returns local background and snapshot cancellation no-op responses", () => {
+  test("returns local background and snapshot cancellation no-op responses", async () => {
     const db = new Database(":memory:");
     const service = createLocalConnectDeviceSyncService({ db });
 
     try {
-      expect(service.startDeviceSyncBackgroundEngine()).toEqual({
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
         status: "skipped",
         message: "Background engine not started because sync identity is not configured",
       });
@@ -2155,6 +2155,31 @@ describe("TS Connect device sync local service", () => {
       expect(service.cancelDeviceSnapshotUpload()).toEqual({
         status: "cancel_requested",
         message: "Snapshot upload cancellation requested",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps background engine start feature-gated when sync identity can run", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.startDeviceSyncBackgroundEngine()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
       });
     } finally {
       db.close();
