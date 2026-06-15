@@ -164,15 +164,9 @@ export function createLocalConnectService({
       return getLocalImportRuns(db, request);
     },
     async getBrokerSyncProfile(accountId, sourceSystem) {
-      if (!activityService.getBrokerSyncProfile) {
-        throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
-      }
       return await activityService.getBrokerSyncProfile(accountId, sourceSystem);
     },
     async saveBrokerSyncProfileRules(request) {
-      if (!activityService.saveBrokerSyncProfileRules) {
-        throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
-      }
       return await activityService.saveBrokerSyncProfileRules(request);
     },
   };
