@@ -811,6 +811,63 @@ describe("TS Connect device sync local service", () => {
         "UPDATE sync_engine_state SET last_cycle_status = 'stale_cursor' WHERE id = 1",
       ).run();
       expect(service.getDeviceSyncEngineStatus()).toMatchObject({ bootstrapRequired: true });
+      expect(service.getDeviceSyncBootstrapOverwriteCheck()).toEqual({
+        bootstrapRequired: true,
+        hasLocalData: false,
+        localRows: 0,
+        nonEmptyTables: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("summarizes local overwrite risk rows for bootstrap checks", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE assets (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL);
+      CREATE TABLE quotes (id TEXT PRIMARY KEY NOT NULL, source TEXT NOT NULL);
+      CREATE TABLE import_templates (id TEXT PRIMARY KEY NOT NULL, scope TEXT NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      INSERT INTO accounts (id) VALUES ('account-1');
+      INSERT INTO assets (id, kind) VALUES ('asset-1', 'PROPERTY'), ('asset-2', 'EQUITY');
+      INSERT INTO quotes (id, source) VALUES ('quote-1', 'MANUAL'), ('quote-2', 'YAHOO');
+      INSERT INTO import_templates (id, scope) VALUES ('template-1', 'USER'), ('template-2', 'SYSTEM');
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      expect(service.getDeviceSyncBootstrapOverwriteCheck()).toEqual({
+        bootstrapRequired: true,
+        hasLocalData: true,
+        localRows: 4,
+        nonEmptyTables: [
+          { table: "accounts", rows: 1 },
+          { table: "assets", rows: 1 },
+          { table: "import_templates", rows: 1 },
+          { table: "quotes", rows: 1 },
+        ],
+      });
     } finally {
       db.close();
     }

@@ -3317,6 +3317,15 @@ contract:
   SQLite, Rust-compatible response field mapping, bootstrap-required detection
   from missing bootstrap data or stale cursors, and keeping cloud/device
   mutation routes feature-gated.
+- `pr5-device-sync-bootstrap-overwrite-runtime`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local|overwrite risk|stores, reports"`,
+  `bun test apps/backend/src/runtime.test.ts -t "device-sync state|disabled cloud routes"`,
+  `bun run --cwd apps/backend type-check`, full `bun run check`, and
+  `git diff --check`. Coverage includes local
+  `/connect/device/bootstrap-overwrite-check` reading the Rust overwrite-risk
+  table set from SQLite, applying manual/user-data filters, sorting
+  non-empty-table counts by rows then table, and keeping device-sync mutation
+  routes feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
