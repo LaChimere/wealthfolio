@@ -789,6 +789,12 @@ function subscriptionPlanFromApi(value: unknown): Record<string, unknown> {
   if (!isRecord(pricing) || !isRecord(limits)) {
     throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
   }
+  assertOptionalConnectStringField(value, "tagline", "plans response");
+  assertOptionalConnectBooleanField(value, "isAvailable", "plans response");
+  assertOptionalConnectBooleanField(value, "isComingSoon", "plans response");
+  assertOptionalConnectStringField(value, "badge", "plans response");
+  assertOptionalConnectNumberField(value, "yearlyDiscountPercent", "plans response");
+  assertOptionalConnectNumberField(pricing, "yearlyPerMonth", "plans response");
   const features = value.features;
   const featuresExtended = value.featuresExtended;
   if (features !== undefined && (!Array.isArray(features) || !features.every(isStringValue))) {

@@ -3550,6 +3550,13 @@ contract:
   normalizing serde-default fields (`features`, availability flags, badge,
   discount metadata), and rejecting malformed plan payloads instead of returning
   raw partial responses.
+- `pr5-connect-plan-optional-scalar-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "subscription plan|authenticated plans|public subscription|concurrent authenticated"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes optional plan
+  fields such as `tagline`, `isAvailable`, `isComingSoon`, `badge`,
+  `yearlyDiscountPercent`, and `pricing.yearlyPerMonth` rejecting malformed
+  scalar types like Rust serde instead of being silently defaulted or nulled.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

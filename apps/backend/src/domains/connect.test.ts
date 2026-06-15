@@ -376,6 +376,39 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects malformed subscription plan optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        Response.json({
+          plans: [
+            {
+              ...connectSubscriptionPlan("free"),
+              tagline: 123,
+              isAvailable: "yes",
+            },
+          ],
+        }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("fetches authenticated plans and maps user info with restored access tokens", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
