@@ -4,9 +4,11 @@ import {
   chmodSync,
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
@@ -20,6 +22,7 @@ const backendEntryPath = path.join(repositoryRoot, "apps", "backend", "src", "ma
 const sidecarOutputDir = path.join(repositoryRoot, "apps", "electron", "resources", "sidecars");
 const sidecarBinaryBaseName = "wealthfolio-backend";
 const sidecarAssetsDirName = "backend-assets";
+const packageVersion = readPackageVersion();
 const requestedTargets = parseTargets(process.env.WF_ELECTRON_SIDECAR_TARGETS);
 const legacyTarget = process.env.WF_ELECTRON_SIDECAR_TARGET;
 const targets = requestedTargets.length > 0 ? requestedTargets : [legacyTarget || undefined];
@@ -69,6 +72,8 @@ async function buildAndStageSidecar(target) {
     backendEntryPath,
     "--compile",
     `--target=${descriptor.bunTarget}`,
+    "--define",
+    `WF_COMPILED_APP_VERSION="${packageVersion}"`,
     "--outfile",
     sidecarOutputPath,
   ];
@@ -85,7 +90,7 @@ async function buildAndStageSidecar(target) {
   if (descriptor.platform !== "win32") {
     chmodSync(sidecarOutputPath, 0o755);
   }
-  stageBackendAssets(targetOutputDir);
+  stageBackendAssets(targetOutputDir, descriptor);
 
   if (shouldSmokeTest(descriptor)) {
     await smokeTestSidecar(sidecarOutputPath, path.join(targetOutputDir, sidecarAssetsDirName));
@@ -94,7 +99,7 @@ async function buildAndStageSidecar(target) {
   console.log(`Staged Electron TS backend at ${path.relative(repositoryRoot, sidecarOutputPath)}`);
 }
 
-function stageBackendAssets(targetOutputDir) {
+function stageBackendAssets(targetOutputDir, descriptor) {
   const assetsOutputDir = path.join(targetOutputDir, sidecarAssetsDirName);
   rmSync(assetsOutputDir, { force: true, recursive: true });
   mkdirSync(assetsOutputDir, { recursive: true });
@@ -113,10 +118,17 @@ function stageBackendAssets(targetOutputDir) {
     path.join(repositoryRoot, "crates/ai/src/ai_providers.json"),
     path.join(assetsOutputDir, "ai_providers.json"),
   );
+  const nativeOutputDir = path.join(assetsOutputDir, "native");
+  mkdirSync(nativeOutputDir, { recursive: true });
+  copyFileSync(
+    resolveKeyringNativeBindingPath(descriptor),
+    path.join(nativeOutputDir, "keyring.node"),
+  );
 }
 
 async function smokeTestSidecar(sidecarPath, assetsPath) {
   const tempDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-smoke-"));
+  const sidecarToken = Buffer.from("electron-sidecar-smoke-token").toString("base64url");
   const child = spawn(sidecarPath, [], {
     cwd: path.dirname(sidecarPath),
     env: {
@@ -127,9 +139,11 @@ async function smokeTestSidecar(sidecarPath, assetsPath) {
       WF_EXCHANGE_CATALOG_PATH: path.join(assetsPath, "exchanges.json"),
       WF_LISTEN_ADDR: "127.0.0.1:0",
       WF_MIGRATIONS_DIR: path.join(assetsPath, "migrations"),
+      WF_APP_VERSION: packageVersion,
       WF_SECRET_BACKEND: "keyring",
       WF_SECRET_KEY: Buffer.alloc(32).toString("base64"),
-      WF_SIDECAR_TOKEN: Buffer.from("electron-sidecar-smoke-token").toString("base64url"),
+      WF_SIDECAR_TOKEN: sidecarToken,
+      NAPI_RS_NATIVE_LIBRARY_PATH: path.join(assetsPath, "native", "keyring.node"),
     },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
@@ -153,10 +167,14 @@ async function smokeTestSidecar(sidecarPath, assetsPath) {
       () => stdout,
       () => spawnError,
     );
-    const response = await fetch(`${baseUrl}/api/v1/readyz`);
-    if (response.status !== 200) {
-      throw new Error(`Compiled backend ready check returned HTTP ${response.status}`);
+    await assertHttpStatus(`${baseUrl}/api/v1/readyz`, 200);
+    const authHeaders = { authorization: `Bearer ${sidecarToken}` };
+    const appInfoResponse = await assertHttpStatus(`${baseUrl}/api/v1/app/info`, 200, authHeaders);
+    const appInfo = await appInfoResponse.json();
+    if (appInfo.version !== packageVersion) {
+      throw new Error(`Compiled backend app info returned version ${appInfo.version}`);
     }
+    await assertHttpStatus(`${baseUrl}/api/v1/ai/providers`, 200, authHeaders);
   } catch (error) {
     throw new Error(
       `Compiled Electron TS backend smoke test failed: ${errorMessage(error)}\n${stdout}\n${stderr}`,
@@ -165,6 +183,14 @@ async function smokeTestSidecar(sidecarPath, assetsPath) {
     child.kill("SIGTERM");
     await waitForExit(child);
     rmSync(tempDir, { force: true, recursive: true });
+  }
+
+  async function assertHttpStatus(url, expectedStatus, headers = {}) {
+    const response = await fetch(url, { headers });
+    if (response.status !== expectedStatus) {
+      throw new Error(`${url} returned HTTP ${response.status}; expected ${expectedStatus}`);
+    }
+    return response;
   }
 }
 
@@ -200,6 +226,66 @@ function cleanupNewBunBuildArtifacts(previousArtifacts) {
       unlinkSync(path.join(repositoryRoot, artifact));
     }
   }
+}
+
+function readPackageVersion() {
+  const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, "package.json"), "utf8"));
+  if (typeof packageJson.version !== "string" || !packageJson.version.trim()) {
+    throw new Error("package.json must contain a non-empty version.");
+  }
+  return packageJson.version.trim();
+}
+
+function resolveKeyringNativeBindingPath(descriptor) {
+  const native = keyringNativeBindingDescriptor(descriptor);
+  const directPath = path.join(repositoryRoot, "node_modules", native.packageName, native.fileName);
+  if (fileExists(directPath)) {
+    return directPath;
+  }
+
+  const bunStoreDir = path.join(repositoryRoot, "node_modules", ".bun");
+  for (const entry of readdirSync(bunStoreDir)) {
+    const candidate = path.join(
+      bunStoreDir,
+      entry,
+      "node_modules",
+      native.packageName,
+      native.fileName,
+    );
+    if (fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Missing ${native.packageName}/${native.fileName}; install dependencies for ${descriptor.platform}-${descriptor.arch} before building the Electron backend sidecar.`,
+  );
+}
+
+function keyringNativeBindingDescriptor(descriptor) {
+  if (descriptor.platform === "darwin") {
+    return {
+      packageName: `@napi-rs/keyring-darwin-${descriptor.arch}`,
+      fileName: `keyring.darwin-${descriptor.arch}.node`,
+    };
+  }
+  if (descriptor.platform === "win32") {
+    return {
+      packageName: `@napi-rs/keyring-win32-${descriptor.arch}-msvc`,
+      fileName: `keyring.win32-${descriptor.arch}-msvc.node`,
+    };
+  }
+  if (descriptor.platform === "linux") {
+    return {
+      packageName: `@napi-rs/keyring-linux-${descriptor.arch}-gnu`,
+      fileName: `keyring.linux-${descriptor.arch}-gnu.node`,
+    };
+  }
+  throw new Error(`Unsupported keyring native binding platform "${descriptor.platform}".`);
+}
+
+function fileExists(filePath) {
+  return existsSync(filePath);
 }
 
 function waitForExit(child) {

@@ -79,6 +79,21 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("uses packaged app version env when repository package metadata is unavailable", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-version-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: { WF_APP_VERSION: "9.8.7" },
+      secretKey: new Uint8Array(32),
+    });
+
+    try {
+      expect(runtime.options.appUtilityService?.getAppInfo()).toMatchObject({ version: "9.8.7" });
+    } finally {
+      await runtime.close();
+    }
+  });
+
   test("starts a TS server with SQLite-backed low-risk services", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-"));
     const runtime = createSqliteBackedBackendServices({

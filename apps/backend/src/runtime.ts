@@ -75,6 +75,8 @@ import {
 import { createSyncOutboxQueue } from "./sync-outbox";
 import { createDomainEventWorker, type DomainEventWorkerHandle } from "./domain-events/worker";
 
+declare const WF_COMPILED_APP_VERSION: string | undefined;
+
 export interface SqliteBackedBackendServicesOptions {
   appDataDir?: string;
   env?: NodeJS.ProcessEnv;
@@ -428,7 +430,7 @@ function createServicesFromDatabase(
     activityService,
     addonService: createLocalAddonService({
       appDataDir,
-      appVersion: readPackageVersion(runtimeOptions.repositoryRoot),
+      appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),
       instanceId: () => settingsService.getSettings().instanceId,
     }),
     alternativeAssetService: createAlternativeAssetService(db, {
@@ -492,7 +494,7 @@ function createServicesFromDatabase(
     }),
     appUtilityService: createAppUtilityService({
       appDataDir,
-      appVersion: readPackageVersion(runtimeOptions.repositoryRoot),
+      appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),
       dbPath: initialized.dbPath,
       env: runtimeOptions.env,
       instanceId: () => settingsService.getSettings().instanceId,
@@ -806,7 +808,17 @@ function defaultRepositoryRoot(): string {
   return path.resolve(import.meta.dir, "../../..");
 }
 
-function readPackageVersion(repositoryRoot: string): string {
+function readPackageVersion(env: NodeJS.ProcessEnv, repositoryRoot: string): string {
+  const envVersion = env.WF_APP_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+  if (typeof WF_COMPILED_APP_VERSION === "string") {
+    const compiledVersion = WF_COMPILED_APP_VERSION.trim();
+    if (compiledVersion) {
+      return compiledVersion;
+    }
+  }
   try {
     const packageJson = JSON.parse(
       readFileSync(path.join(repositoryRoot, "package.json"), "utf8"),

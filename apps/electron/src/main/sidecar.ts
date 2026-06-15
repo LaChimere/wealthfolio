@@ -117,6 +117,7 @@ export function createPackagedTsBackendCommand(
       WF_AI_PROVIDER_CATALOG_PATH: path.join(assetsPath, "ai_providers.json"),
       WF_EXCHANGE_CATALOG_PATH: path.join(assetsPath, "exchanges.json"),
       WF_MIGRATIONS_DIR: path.join(assetsPath, "migrations"),
+      NAPI_RS_NATIVE_LIBRARY_PATH: path.join(assetsPath, "native", "keyring.node"),
     },
   };
 }

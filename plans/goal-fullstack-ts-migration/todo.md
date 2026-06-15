@@ -3207,6 +3207,20 @@ contract:
   `git diff --check`. Coverage includes removing stale exported
   `NotImplementedError` classes for TS-backed holdings, portfolio metrics, and
   market-data domains.
+- `pr5-packaged-bun-backend-review-fixes`: verification passed:
+  `bun run build:electron:sidecar`, `bun run test:backend`,
+  `bun run test:electron`,
+  `bun test apps/backend/src/runtime.test.ts -t "packaged app version|packaged runtime resource paths"`,
+  `bun test apps/electron/src/main/sidecar.test.ts`,
+  `bun test apps/backend/src/domains/secrets.test.ts`, full `bun run check`, and
+  `git diff --check`. Coverage includes staging the target keyring native
+  binding beside packaged Electron sidecars, loading
+  `NAPI_RS_NATIVE_LIBRARY_PATH` directly in the TS keyring service, embedding or
+  injecting app versions for compiled Electron/prebuild backends, extending
+  compiled sidecar smoke tests to `/api/v1/app/info` and `/api/v1/ai/providers`,
+  pinning Electron release jobs to matching-architecture runners, uploading only
+  release files, and using one canonical release tag/version for workflow
+  dispatch prebuild artifacts.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

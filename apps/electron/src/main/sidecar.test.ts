@@ -129,6 +129,10 @@ describe("Electron sidecar configuration", () => {
           ),
           WF_EXCHANGE_CATALOG_PATH: path.join(tempRoot, "sidecars/backend-assets/exchanges.json"),
           WF_MIGRATIONS_DIR: path.join(tempRoot, "sidecars/backend-assets/migrations"),
+          NAPI_RS_NATIVE_LIBRARY_PATH: path.join(
+            tempRoot,
+            "sidecars/backend-assets/native/keyring.node",
+          ),
         },
       });
     } finally {

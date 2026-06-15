@@ -176,6 +176,15 @@ function loadKeyringModule(): typeof import("@napi-rs/keyring") {
   if (keyringModule) {
     return keyringModule;
   }
+  const nativeLibraryPath = process.env.NAPI_RS_NATIVE_LIBRARY_PATH?.trim();
+  if (nativeLibraryPath) {
+    try {
+      keyringModule = require(nativeLibraryPath) as typeof import("@napi-rs/keyring");
+      return keyringModule;
+    } catch (error) {
+      throw new Error("Failed to load @napi-rs/keyring native binding", { cause: error });
+    }
+  }
   try {
     keyringModule = require("@napi-rs/keyring") as typeof import("@napi-rs/keyring");
     return keyringModule;

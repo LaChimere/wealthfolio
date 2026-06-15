@@ -14,11 +14,11 @@ jobs:
       matrix:
         include:
           - id: "macos-x64"
-            platform: "macos-latest"
+            platform: "macos-15-intel"
             sidecar_target: "bun-darwin-x64"
             electron_args: "--mac --x64"
           - id: "macos-arm64"
-            platform: "macos-latest"
+            platform: "macos-15-arm64"
             sidecar_target: "bun-darwin-arm64"
             electron_args: "--mac --arm64"
           - id: "windows-x64"
@@ -26,7 +26,7 @@ jobs:
             sidecar_target: "bun-windows-x64"
             electron_args: "--win --x64"
           - id: "windows-arm64"
-            platform: "windows-latest"
+            platform: "windows-11-arm"
             sidecar_target: "bun-windows-arm64"
             electron_args: "--win --arm64"
           - id: "linux-x64"
@@ -146,7 +146,12 @@ jobs:
             gh release create "${TAG}" --draft --title "${TITLE}" --notes "See the assets to download and install this version."
           fi
           shopt -s globstar nullglob
-          gh release upload "${TAG}" target/electron-release-assets/**/* --clobber
+          mapfile -t RELEASE_FILES < <(find target/electron-release-assets -type f | sort)
+          if [[ "${#RELEASE_FILES[@]}" -eq 0 ]]; then
+            echo "No Electron release files found"
+            exit 1
+          fi
+          gh release upload "${TAG}" "${RELEASE_FILES[@]}" --clobber
 
   prebuild-server-linux:
     # Standalone server tarball for self-hosters (Proxmox LXC, bare metal, systemd).
@@ -176,6 +181,20 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Resolve release version
+        id: release-version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "WF_RELEASE_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "WF_RELEASE_TAG=v${VERSION}" >> "${GITHUB_ENV}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
       - name: Build frontend (web target)
         env:
           BUILD_TARGET: web
@@ -193,6 +212,7 @@ jobs:
           bun build apps/backend/src/main.ts \
             --compile \
             --target=bun-linux-x64-baseline \
+            --define WF_COMPILED_APP_VERSION="\"${WF_RELEASE_VERSION}\"" \
             --outfile target/prebuild-server/wealthfolio-backend
 
       - name: Stage backend runtime assets
@@ -209,6 +229,7 @@ jobs:
           TMP_DIR="$(mktemp -d)"
           WF_LISTEN_ADDR=127.0.0.1:0 \
             WF_SECRET_KEY="$(openssl rand -base64 32)" \
+            WF_APP_VERSION="${WF_RELEASE_VERSION}" \
             WF_AUTH_REQUIRED=false \
             WF_DB_PATH="${TMP_DIR}/app.db" \
             WF_STATIC_DIR="${PWD}/dist" \
@@ -228,6 +249,8 @@ jobs:
           for _ in {1..80}; do
             SERVER_URL="$(sed -n 's/.*listening on //p' "${TMP_DIR}/server.log" | tail -1)"
             if [[ -n "${SERVER_URL}" ]] && curl -fsS "${SERVER_URL}/api/v1/readyz" >/dev/null; then
+              APP_INFO="$(curl -fsS "${SERVER_URL}/api/v1/app/info")"
+              node -e 'const info = JSON.parse(process.argv[1]); if (info.version !== process.env.WF_RELEASE_VERSION) { throw new Error(`Unexpected app version ${info.version}`); }' "${APP_INFO}"
               exit 0
             fi
             if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
@@ -241,8 +264,7 @@ jobs:
 
       - name: Stage tarball contents
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="wealthfolio-backend-${VERSION}-linux-amd64"
+          STAGE="wealthfolio-backend-${WF_RELEASE_VERSION}-linux-amd64"
           mkdir -p "${STAGE}"
           cp target/prebuild-server/wealthfolio-backend "${STAGE}/wealthfolio-backend"
           cp -r target/prebuild-server/backend-assets "${STAGE}/backend-assets"
@@ -253,15 +275,14 @@ jobs:
 
       - name: Create tarball + checksum
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="wealthfolio-backend-${VERSION}-linux-amd64"
+          STAGE="wealthfolio-backend-${WF_RELEASE_VERSION}-linux-amd64"
           tar -czf "${STAGE}.tar.gz" "${STAGE}"
           sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
 
       - name: Upload to GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.release-version.outputs.tag }}
           draft: true
           files: |
             wealthfolio-backend-*-linux-amd64.tar.gz
