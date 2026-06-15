@@ -1,11 +1,6 @@
-import {
-  startRustSidecar,
-  startTsBackendSidecar,
-  type SidecarHandle,
-  type StartSidecarOptions,
-} from "./sidecar";
+import { startTsBackendSidecar, type SidecarHandle, type StartSidecarOptions } from "./sidecar";
 
-export type ElectronBackendRuntimeKind = "rust" | "ts";
+export type ElectronBackendRuntimeKind = "ts";
 
 export interface StartElectronBackendRuntimeOptions extends StartSidecarOptions {
   runtime?: ElectronBackendRuntimeKind;
@@ -14,14 +9,13 @@ export interface StartElectronBackendRuntimeOptions extends StartSidecarOptions 
 
 export function resolveElectronBackendRuntimeKind(
   env: NodeJS.ProcessEnv = process.env,
-  defaultRuntime: ElectronBackendRuntimeKind = "ts",
 ): ElectronBackendRuntimeKind {
   const raw = env.WF_BACKEND_RUNTIME?.trim().toLowerCase();
   if (!raw) {
-    return defaultRuntime;
+    return "ts";
   }
   if (raw === "rust" || raw === "rust-sidecar") {
-    return "rust";
+    throw new Error("WF_BACKEND_RUNTIME=rust is no longer supported; use the TypeScript backend.");
   }
   if (raw === "ts" || raw === "typescript" || raw === "bun") {
     return "ts";
@@ -32,6 +26,8 @@ export function resolveElectronBackendRuntimeKind(
 export async function startElectronBackendRuntime(
   options: StartElectronBackendRuntimeOptions,
 ): Promise<SidecarHandle> {
-  const runtime = options.runtime ?? resolveElectronBackendRuntimeKind(options.env);
-  return runtime === "ts" ? await startTsBackendSidecar(options) : await startRustSidecar(options);
+  if ((options.runtime ?? resolveElectronBackendRuntimeKind(options.env)) !== "ts") {
+    throw new Error("Electron only supports the TypeScript backend runtime.");
+  }
+  return await startTsBackendSidecar(options);
 }

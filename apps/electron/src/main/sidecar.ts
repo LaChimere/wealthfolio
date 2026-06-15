@@ -41,6 +41,8 @@ export interface StartSidecarOptions {
   log?: (level: "info" | "error", message: string) => void;
 }
 
+type StartSidecarProcessOptions = StartSidecarOptions & { command: SidecarCommand };
+
 interface SidecarEnvironmentOptions {
   legacyPaths: LegacyTauriPaths;
   listenAddr: string;
@@ -87,20 +89,6 @@ export function createSidecarEnvironment({
   return env;
 }
 
-export function createRustSidecarCommand(repositoryRoot: string): SidecarCommand {
-  return {
-    command: "cargo",
-    args: [
-      "run",
-      "--quiet",
-      "--manifest-path",
-      path.join(repositoryRoot, "apps/server/Cargo.toml"),
-      "--features",
-      "keyring-backend",
-    ],
-  };
-}
-
 export function createTsBackendCommand(
   repositoryRoot: string,
   platform: NodeJS.Platform = process.platform,
@@ -110,18 +98,6 @@ export function createTsBackendCommand(
     args: ["run", "start"],
     cwd: path.join(repositoryRoot, "apps/backend"),
   };
-}
-
-export function createPackagedRustSidecarCommand(
-  resourcesPath: string,
-  platform: NodeJS.Platform = process.platform,
-): SidecarCommand {
-  const binaryName = platform === "win32" ? "wealthfolio-server.exe" : "wealthfolio-server";
-  const command = path.join(resourcesPath, "sidecars", binaryName);
-  if (!existsSync(command)) {
-    throw new Error(`Electron sidecar binary is not bundled at ${command}.`);
-  }
-  return { command, args: [] };
 }
 
 export function createPackagedTsBackendCommand(
@@ -145,7 +121,9 @@ export function createPackagedTsBackendCommand(
   };
 }
 
-export async function startRustSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
+export async function startBackendSidecarProcess(
+  options: StartSidecarProcessOptions,
+): Promise<SidecarHandle> {
   assertNotAborted(options.signal);
 
   const port = await findAvailablePort();
@@ -160,12 +138,7 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
     secretKey,
   });
 
-  const sidecarCommand =
-    options.command ??
-    (options.packaged
-      ? createPackagedRustSidecarCommand(options.resourcesPath)
-      : createRustSidecarCommand(options.repositoryRoot));
-
+  const sidecarCommand = options.command;
   const child = spawn(sidecarCommand.command, sidecarCommand.args, {
     cwd:
       sidecarCommand.cwd ??
@@ -235,7 +208,7 @@ export async function startRustSidecar(options: StartSidecarOptions): Promise<Si
 }
 
 export async function startTsBackendSidecar(options: StartSidecarOptions): Promise<SidecarHandle> {
-  return await startRustSidecar({
+  return await startBackendSidecarProcess({
     ...options,
     command:
       options.command ??

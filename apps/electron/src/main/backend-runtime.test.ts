@@ -15,12 +15,13 @@ const legacyPaths = {
 const repositoryRoot = path.resolve(import.meta.dir, "../../../..");
 
 describe("Electron backend runtime selector", () => {
-  test("defaults to the TypeScript backend unless Rust sidecar is explicitly selected", () => {
+  test("defaults to the TypeScript backend and rejects removed Rust runtime selection", () => {
     expect(resolveElectronBackendRuntimeKind({})).toBe("ts");
-    expect(resolveElectronBackendRuntimeKind({}, "rust")).toBe("rust");
-    expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "rust-sidecar" })).toBe("rust");
     expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "ts" })).toBe("ts");
     expect(resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "bun" })).toBe("ts");
+    expect(() => resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "rust-sidecar" })).toThrow(
+      "WF_BACKEND_RUNTIME=rust is no longer supported",
+    );
     expect(() => resolveElectronBackendRuntimeKind({ WF_BACKEND_RUNTIME: "node" })).toThrow(
       'Unsupported WF_BACKEND_RUNTIME "node"',
     );

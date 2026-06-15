@@ -6,11 +6,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, spyOn, test } from "bun:test";
 
 import {
-  createPackagedRustSidecarCommand,
   createPackagedTsBackendCommand,
-  createRustSidecarCommand,
   createSidecarEnvironment,
-  startRustSidecar,
+  startBackendSidecarProcess,
   toPublicSidecarStatus,
 } from "./sidecar";
 
@@ -106,14 +104,6 @@ describe("Electron sidecar configuration", () => {
     expect(env.WF_SECRET_NAMESPACE).toBe("dev");
   });
 
-  test("starts the development sidecar with the keyring backend feature", () => {
-    const command = createRustSidecarCommand("/repo");
-
-    expect(command.command).toBe("cargo");
-    expect(command.args).toContain("keyring-backend");
-    expect(command.args).toContain(path.join("/repo", "apps/server/Cargo.toml"));
-  });
-
   test("resolves the packaged TS backend from Electron resources", () => {
     const tempRoot = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-electron-sidecar-resource-test-"),
@@ -146,28 +136,6 @@ describe("Electron sidecar configuration", () => {
     }
   });
 
-  test("keeps explicit packaged Rust sidecar fallback separate", () => {
-    const tempRoot = mkdtempSync(
-      path.join(tmpdir(), "wealthfolio-electron-rust-sidecar-resource-test-"),
-    );
-    const sidecarDir = path.join(tempRoot, "sidecars");
-    const sidecarPath = path.join(
-      sidecarDir,
-      process.platform === "win32" ? "wealthfolio-server.exe" : "wealthfolio-server",
-    );
-    mkdirSync(sidecarDir, { recursive: true });
-    writeFileSync(sidecarPath, "");
-
-    try {
-      expect(createPackagedRustSidecarCommand(tempRoot)).toEqual({
-        command: sidecarPath,
-        args: [],
-      });
-    } finally {
-      rmSync(tempRoot, { force: true, recursive: true });
-    }
-  });
-
   test("reports missing packaged sidecar binaries explicitly", () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), "wealthfolio-electron-sidecar-missing-test-"));
 
@@ -186,7 +154,7 @@ describe("Electron sidecar configuration", () => {
     process.env.WF_SIDECAR_TEST_ENV_CAPTURE = envCapture;
 
     try {
-      const handle = await startRustSidecar({
+      const handle = await startBackendSidecarProcess({
         legacyPaths,
         repositoryRoot: process.cwd(),
         packaged: false,
@@ -236,7 +204,7 @@ describe("Electron sidecar configuration", () => {
     const startedAt = Date.now();
 
     await expect(
-      startRustSidecar({
+      startBackendSidecarProcess({
         legacyPaths,
         repositoryRoot: process.cwd(),
         packaged: false,
@@ -256,7 +224,7 @@ describe("Electron sidecar configuration", () => {
     const controller = new AbortController();
 
     try {
-      const startPromise = startRustSidecar({
+      const startPromise = startBackendSidecarProcess({
         legacyPaths,
         repositoryRoot: process.cwd(),
         packaged: false,
@@ -294,7 +262,7 @@ describe("Electron sidecar configuration", () => {
 
     try {
       await expect(
-        startRustSidecar({
+        startBackendSidecarProcess({
           legacyPaths,
           repositoryRoot: process.cwd(),
           packaged: false,

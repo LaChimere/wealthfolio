@@ -3179,6 +3179,12 @@ contract:
   `wealthfolio-backend-*-linux-amd64` tarballs, updating the systemd/quick-start
   prebuild docs, and removing Rust server release-build checks from PR/local
   full checks.
+- `pr5-electron-rust-runtime-fallback-removal`: verification passed:
+  `bun run test:electron`, `bun run build:electron:sidecar`, full
+  `bun run check`, and `git diff --check`. Coverage includes Electron accepting
+  only the TypeScript/Bun backend runtime, rejecting `WF_BACKEND_RUNTIME=rust`,
+  and removing Electron main helpers that constructed `cargo run apps/server` or
+  packaged `wealthfolio-server` commands.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
