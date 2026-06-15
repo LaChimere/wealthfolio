@@ -612,10 +612,11 @@ for maintained addon examples including:
 ### Backend
 
 - **Electron**: Desktop shell, native integrations, packaging, and updates.
-- **Bun TypeScript backend**: Local web/Docker backend runtime.
+- **Bun TypeScript backend**: Local web, Docker, packaged Electron sidecar, and
+  standalone prebuild runtime.
 - **Rust**: Systems programming language for legacy core services and the
-  temporary packaged Electron sidecar fallback.
-- **Axum**: HTTP framework used by the temporary Rust sidecar/prebuild server.
+  temporary compatibility fallback.
+- **Axum**: HTTP framework used by the temporary Rust compatibility server.
 - **SQLite**: Embedded database for local data storage.
 - **Diesel**: Safe, extensible ORM and query builder for Rust.
 
@@ -656,7 +657,7 @@ wealthfolio/
 │   │   └── vite.config.ts       # Vite build config
 │   ├── backend/                 # Bun TypeScript backend runtime
 │   ├── electron/                # Electron main/preload desktop shell
-│   └── server/                  # Rust sidecar / prebuild fallback
+│   └── server/                  # Temporary Rust compatibility server
 ├── crates/                      # Rust crates (shared backend logic)
 │   ├── core/                    # Core business logic, services, models
 │   ├── storage-sqlite/          # SQLite storage layer (Diesel ORM)

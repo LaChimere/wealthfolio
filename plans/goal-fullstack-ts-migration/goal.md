@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 347
+turns_used: 348
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-15T23:51:06+08:00"
+updated_at: "2026-06-15T23:57:56+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2172,6 +2172,15 @@ updated_at: "2026-06-15T23:51:06+08:00"
   targets use Bun compile targets without Rust setup/cache. Verified with
   `bun run build:electron:sidecar`, `bun run test:backend`,
   `bun run test:electron`, full `bun run check`, and `git diff --check`.
+- Turn 348: Cut the standalone Linux prebuild release path from the Rust
+  `wealthfolio-server` binary to a Bun-compiled TypeScript backend prebuild.
+  Release now builds `wealthfolio-backend` with `bun build --compile`, stages
+  migrations and runtime catalogs as `backend-assets`, smoke-tests the compiled
+  backend with the same env paths used by systemd, uploads
+  `wealthfolio-backend-*-linux-amd64` artifacts, and no longer runs the Rust
+  server release-build checks in PR/local full checks. Verified with
+  `bun build apps/backend/src/main.ts --compile --target=bun-linux-x64-baseline`,
+  `bash -n scripts/ci-check.sh`, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

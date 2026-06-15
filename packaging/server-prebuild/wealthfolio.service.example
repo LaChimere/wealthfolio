@@ -7,7 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/wealthfolio
 EnvironmentFile=/opt/wealthfolio/.env
-ExecStart=/usr/local/bin/wealthfolio-server
+ExecStart=/usr/local/bin/wealthfolio-backend
 Restart=on-failure
 RestartSec=5
 

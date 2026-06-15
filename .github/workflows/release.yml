@@ -163,19 +163,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libsqlite3-dev build-essential
-
-      - name: Rust setup
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          key: prebuild-server-linux-amd64
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -196,28 +183,69 @@ jobs:
           CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
         run: bun run build
 
-      - name: Build server binary
+      - name: Build TS backend binary
         env:
-          OPENSSL_STATIC: "1"
           CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
           CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
           CONNECT_API_URL: ${{ vars.CONNECT_API_URL }}
-        run: cargo build --release --manifest-path apps/server/Cargo.toml
-
-      - name: Verify server binary runtime dependencies
         run: |
-          ldd target/release/wealthfolio-server
-          if ldd target/release/wealthfolio-server | grep -E 'lib(ssl|crypto)\.so'; then
-            echo "Server binary still links dynamically to OpenSSL"
-            exit 1
-          fi
+          mkdir -p target/prebuild-server
+          bun build apps/backend/src/main.ts \
+            --compile \
+            --target=bun-linux-x64-baseline \
+            --outfile target/prebuild-server/wealthfolio-backend
+
+      - name: Stage backend runtime assets
+        run: |
+          mkdir -p target/prebuild-server/backend-assets
+          cp -r crates/storage-sqlite/migrations target/prebuild-server/backend-assets/migrations
+          cp crates/market-data/src/resolver/exchanges.json target/prebuild-server/backend-assets/exchanges.json
+          cp crates/ai/src/ai_providers.json target/prebuild-server/backend-assets/ai_providers.json
+
+      - name: Smoke test TS backend binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP_DIR="$(mktemp -d)"
+          WF_LISTEN_ADDR=127.0.0.1:0 \
+            WF_SECRET_KEY="$(openssl rand -base64 32)" \
+            WF_AUTH_REQUIRED=false \
+            WF_DB_PATH="${TMP_DIR}/app.db" \
+            WF_STATIC_DIR="${PWD}/dist" \
+            WF_MIGRATIONS_DIR="${PWD}/target/prebuild-server/backend-assets/migrations" \
+            WF_EXCHANGE_CATALOG_PATH="${PWD}/target/prebuild-server/backend-assets/exchanges.json" \
+            WF_AI_PROVIDER_CATALOG_PATH="${PWD}/target/prebuild-server/backend-assets/ai_providers.json" \
+            target/prebuild-server/wealthfolio-backend >"${TMP_DIR}/server.log" 2>&1 &
+          SERVER_PID="$!"
+          cleanup() {
+            if kill -0 "${SERVER_PID}" 2>/dev/null; then
+              kill "${SERVER_PID}"
+              wait "${SERVER_PID}" || true
+            fi
+            rm -rf "${TMP_DIR}"
+          }
+          trap cleanup EXIT
+          for _ in {1..80}; do
+            SERVER_URL="$(sed -n 's/.*listening on //p' "${TMP_DIR}/server.log" | tail -1)"
+            if [[ -n "${SERVER_URL}" ]] && curl -fsS "${SERVER_URL}/api/v1/readyz" >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+              cat "${TMP_DIR}/server.log"
+              exit 1
+            fi
+            sleep 0.25
+          done
+          cat "${TMP_DIR}/server.log"
+          exit 1
 
       - name: Stage tarball contents
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="wealthfolio-server-${VERSION}-linux-amd64"
+          STAGE="wealthfolio-backend-${VERSION}-linux-amd64"
           mkdir -p "${STAGE}"
-          cp target/release/wealthfolio-server "${STAGE}/wealthfolio-server"
+          cp target/prebuild-server/wealthfolio-backend "${STAGE}/wealthfolio-backend"
+          cp -r target/prebuild-server/backend-assets "${STAGE}/backend-assets"
           cp -r dist "${STAGE}/dist"
           cp LICENSE "${STAGE}/LICENSE" 2>/dev/null || true
           cp packaging/server-prebuild/wealthfolio.service.example "${STAGE}/wealthfolio.service.example"
@@ -226,7 +254,7 @@ jobs:
       - name: Create tarball + checksum
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="wealthfolio-server-${VERSION}-linux-amd64"
+          STAGE="wealthfolio-backend-${VERSION}-linux-amd64"
           tar -czf "${STAGE}.tar.gz" "${STAGE}"
           sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
 
@@ -236,5 +264,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           draft: true
           files: |
-            wealthfolio-server-*-linux-amd64.tar.gz
-            wealthfolio-server-*-linux-amd64.tar.gz.sha256
+            wealthfolio-backend-*-linux-amd64.tar.gz
+            wealthfolio-backend-*-linux-amd64.tar.gz.sha256

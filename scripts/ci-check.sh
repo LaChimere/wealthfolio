@@ -127,9 +127,6 @@ if [[ "$RUN_RUST" == "true" ]]; then
   if [[ "$FULL" == "true" ]]; then
     echo "=== cargo test ===" >&2
     CONNECT_API_URL=http://test.local cargo test --workspace
-
-    echo "=== cargo build (wealthfolio-server) ===" >&2
-    cargo build -p wealthfolio-server --release
   fi
 fi
 

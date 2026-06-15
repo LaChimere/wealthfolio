@@ -3154,8 +3154,7 @@ contract:
 - `pr5-readme-backend-summary-refresh`: verification passed: full
   `bun run check` and `git diff --check`. Coverage includes README technology
   and folder-structure sections naming `apps/backend` as the Bun TypeScript
-  backend runtime and `apps/server` as the temporary Rust sidecar/prebuild
-  fallback.
+  backend runtime and `apps/server` as the temporary Rust compatibility server.
 - `pr5-vscode-tauri-extension-cleanup`: verification passed:
   `python3 -m json.tool .vscode/extensions.json`, full `bun run check`, and
   `git diff --check`. Coverage includes VS Code recommendations no longer
@@ -3170,6 +3169,16 @@ contract:
   `/api/v1/readyz`, copying TS backend resources in `afterPack`, defaulting
   packaged Electron runtime to TS, and removing Rust setup/cache from the
   Electron release job's sidecar build.
+- `pr5-standalone-prebuild-ts-backend`: verification passed:
+  `bun build apps/backend/src/main.ts --compile --target=bun-linux-x64-baseline`,
+  `bash -n scripts/ci-check.sh`, full `bun run check`, and `git diff --check`.
+  Coverage includes release building `wealthfolio-backend` from the Bun
+  TypeScript backend instead of `cargo build --manifest-path apps/server`,
+  staging `backend-assets` with migrations and runtime catalogs, smoke-testing
+  the compiled backend with prebuild env paths, publishing
+  `wealthfolio-backend-*-linux-amd64` tarballs, updating the systemd/quick-start
+  prebuild docs, and removing Rust server release-build checks from PR/local
+  full checks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
