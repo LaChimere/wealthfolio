@@ -3060,12 +3060,20 @@ async function bootstrapSnapshotIfNotReady(
       };
     }
   }
-  const latestSnapshotMissing = await localLatestSnapshotMissingBestEffort(
+  const latestSnapshotStatus = await localLatestSnapshotStatusBestEffort(
     env,
     fetchImpl,
     session.accessToken,
     deviceId,
   );
+  if (latestSnapshotStatus.kind === "present" && latestSnapshotStatus.schemaVersion > 1) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Snapshot schema version ${latestSnapshotStatus.schemaVersion} is newer than local version 1. Please update the app.`,
+      500,
+    );
+  }
+  const latestSnapshotMissing = latestSnapshotStatus.kind === "missing";
   if (freshnessGateExists && latestSnapshotMissing) {
     return {
       status: "requested",
@@ -3177,12 +3185,17 @@ function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): bo
   }
 }
 
-async function localLatestSnapshotMissingBestEffort(
+type LocalLatestSnapshotStatus =
+  | { kind: "missing" }
+  | { kind: "present"; snapshotId: string; schemaVersion: number; oplogSeq: number }
+  | { kind: "unknown" };
+
+async function localLatestSnapshotStatusBestEffort(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
   deviceId: string,
-): Promise<boolean> {
+): Promise<LocalLatestSnapshotStatus> {
   try {
     const response = await fetchImpl(
       `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/latest`,
@@ -3196,34 +3209,59 @@ async function localLatestSnapshotMissingBestEffort(
       },
     );
     if (response.status === 404) {
-      return true;
+      return { kind: "missing" };
+    }
+    const bodyText = await response.text();
+    if (response.status === 400 && isSnapshotIdValidationErrorBody(bodyText)) {
+      return await localCursorLatestSnapshotStatusBestEffort(env, fetchImpl, accessToken, deviceId);
     }
     if (!response.ok) {
-      return false;
+      return { kind: "unknown" };
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
+    const parsed = JSON.parse(bodyText) as unknown;
     if (!isRecord(parsed)) {
-      return false;
+      return { kind: "unknown" };
     }
     if (!validSnapshotLatestMetadataShape(parsed)) {
-      return false;
+      return { kind: "unknown" };
     }
     const snapshotId = optionalString(parsed.snapshotId ?? parsed.snapshot_id);
     if (snapshotId === null || snapshotId.trim() !== "") {
-      return false;
+      const latestStatus: LocalLatestSnapshotStatus = {
+        kind: "present",
+        snapshotId: snapshotId ?? "",
+        schemaVersion: requiredInteger(
+          parsed.schemaVersion ?? parsed.schema_version,
+          "snapshot metadata",
+        ),
+        oplogSeq: requiredInteger(parsed.oplogSeq ?? parsed.oplog_seq, "snapshot metadata"),
+      };
+      if (snapshotId !== null && isBackendStrictUuid(snapshotId)) {
+        return latestStatus;
+      }
+      const cursorStatus = await localCursorLatestSnapshotStatusBestEffort(
+        env,
+        fetchImpl,
+        accessToken,
+        deviceId,
+      );
+      if (cursorStatus.kind !== "present") {
+        return latestStatus;
+      }
+      return chooseLocalSnapshotStatus(latestStatus, cursorStatus);
     }
-    return await localCursorLatestSnapshotMissingBestEffort(env, fetchImpl, accessToken, deviceId);
+    return await localCursorLatestSnapshotStatusBestEffort(env, fetchImpl, accessToken, deviceId);
   } catch {
-    return false;
+    return { kind: "unknown" };
   }
 }
 
-async function localCursorLatestSnapshotMissingBestEffort(
+async function localCursorLatestSnapshotStatusBestEffort(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
   deviceId: string,
-): Promise<boolean> {
+): Promise<LocalLatestSnapshotStatus> {
   try {
     const response = await fetchImpl(
       `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/cursor`,
@@ -3237,19 +3275,82 @@ async function localCursorLatestSnapshotMissingBestEffort(
       },
     );
     if (!response.ok) {
-      return false;
+      return { kind: "unknown" };
     }
     const parsed = JSON.parse(await response.text()) as unknown;
     if (!isRecord(parsed)) {
-      return false;
+      return { kind: "unknown" };
     }
     if (!validSyncCursorShape(parsed)) {
-      return false;
+      return { kind: "unknown" };
     }
-    return (parsed.latestSnapshot ?? parsed.latest_snapshot) == null;
+    const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
+    if (latestSnapshot == null) {
+      return { kind: "missing" };
+    }
+    if (!validSyncLatestSnapshotRefShape(latestSnapshot)) {
+      return { kind: "unknown" };
+    }
+    return {
+      kind: "present",
+      snapshotId:
+        optionalString(
+          (latestSnapshot as Record<string, unknown>).snapshotId ??
+            (latestSnapshot as Record<string, unknown>).snapshot_id,
+        ) ?? "",
+      schemaVersion: requiredInteger(
+        (latestSnapshot as Record<string, unknown>).schemaVersion ??
+          (latestSnapshot as Record<string, unknown>).schema_version,
+        "cursor latest snapshot",
+      ),
+      oplogSeq: requiredInteger(
+        (latestSnapshot as Record<string, unknown>).oplogSeq ??
+          (latestSnapshot as Record<string, unknown>).oplog_seq,
+        "cursor latest snapshot",
+      ),
+    };
   } catch {
-    return false;
+    return { kind: "unknown" };
   }
+}
+
+function chooseLocalSnapshotStatus(
+  latest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
+  cursorLatest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
+): Extract<LocalLatestSnapshotStatus, { kind: "present" }> {
+  const latestId = latest.snapshotId.trim();
+  const cursorId = cursorLatest.snapshotId.trim();
+  if (!cursorId) {
+    return latest;
+  }
+  if (!isBackendStrictUuid(latestId) && isBackendStrictUuid(cursorId)) {
+    return cursorLatest;
+  }
+  if (cursorLatest.oplogSeq > latest.oplogSeq) {
+    return cursorLatest;
+  }
+  return latest;
+}
+
+function isBackendStrictUuid(input: string): boolean {
+  const value = input.trim();
+  if (
+    value.toLowerCase() === "00000000-0000-0000-0000-000000000000" ||
+    value.toLowerCase() === "ffffffff-ffff-ffff-ffff-ffffffffffff"
+  ) {
+    return true;
+  }
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
+    value,
+  );
+}
+
+function isSnapshotIdValidationErrorBody(bodyText: string): boolean {
+  const lower = bodyText.toLowerCase();
+  return (
+    bodyText.includes("snapshotId") &&
+    (lower.includes("invalid uuid") || lower.includes("invalid_format"))
+  );
 }
 
 function validSnapshotLatestMetadataShape(value: Record<string, unknown>): boolean {
@@ -3263,6 +3364,17 @@ function validSnapshotLatestMetadataShape(value: Record<string, unknown>): boole
     isSafeI64Integer(value.sizeBytes ?? value.size_bytes) &&
     optionalString(value.checksum) !== null &&
     optionalString(value.createdAt ?? value.created_at) !== null
+  );
+}
+
+function validSyncLatestSnapshotRefShape(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    optionalString(value.snapshotId ?? value.snapshot_id) !== null &&
+    isI32Integer(value.schemaVersion ?? value.schema_version) &&
+    isSafeI64Integer(value.oplogSeq ?? value.oplog_seq)
   );
 }
 

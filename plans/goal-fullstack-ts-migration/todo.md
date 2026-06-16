@@ -3970,6 +3970,15 @@ contract:
   snapshot classification `WAIT_SNAPSHOT`/`BOOTSTRAP_SNAPSHOT` returning
   Rust-shaped `requested`, and sync outbox preservation in wait paths. Dual
   GPT/Claude xhigh review found no actionable issues.
+- `pr5-connect-device-bootstrap-schema-version`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes newer snapshot
+  schema 500 responses before real apply, Rust-equivalent non-strict UUID cursor
+  fallback schema selection, snapshotId-validation cursor fallback support, and
+  strict malformed-metadata boundaries that preserve sync outbox. Dual
+  GPT/Claude xhigh review found and verified cursor-resolution parity.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
