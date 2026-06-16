@@ -326,9 +326,29 @@ export function createLocalDeviceSyncService({
         },
       ).then(initializeKeysResultFromCloud);
     },
-    async commitInitializeTeamKeys() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async commitInitializeTeamKeys(request) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/keys/initialize/commit",
+        {
+          method: "POST",
+          deviceId,
+          body: {
+            device_id: deviceId,
+            key_version: request.keyVersion,
+            device_key_envelope: request.deviceKeyEnvelope,
+            signature: request.signature,
+            challenge_response: request.challengeResponse,
+            recovery_envelope: request.recoveryEnvelope,
+          },
+        },
+      ).then(commitInitializeKeysResponseFromCloud);
     },
     async rotateTeamKeys() {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -347,9 +367,30 @@ export function createLocalDeviceSyncService({
         },
       ).then(rotateKeysResponseFromCloud);
     },
-    async commitRotateTeamKeys() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async commitRotateTeamKeys(request) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/keys/rotate/commit",
+        {
+          method: "POST",
+          deviceId,
+          body: {
+            new_key_version: request.newKeyVersion,
+            envelopes: request.envelopes.map((envelope) => ({
+              device_id: envelope.deviceId,
+              device_key_envelope: envelope.deviceKeyEnvelope,
+            })),
+            signature: request.signature,
+            challenge_response: request.challengeResponse,
+          },
+        },
+      ).then(commitRotateKeysResponseFromCloud);
     },
     async resetTeamSync() {
       await restoreSessionOrDisabled(connectService);
@@ -660,6 +701,38 @@ function rotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
   };
 }
 
+function commitInitializeKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse commit initialize keys response",
+      500,
+    );
+  }
+  const keyState = requiredKeyState(
+    value.keyState ?? value.key_state,
+    "commit initialize keys response",
+  );
+  return {
+    success: value.success,
+    keyState,
+  };
+}
+
+function commitRotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse commit rotate keys response",
+      500,
+    );
+  }
+  return {
+    success: value.success,
+    keyVersion: requiredI32(value.keyVersion ?? value.key_version, "commit rotate keys response"),
+  };
+}
+
 function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     throw new DeviceSyncServiceError(
@@ -838,6 +911,13 @@ function requiredI32(value: unknown, context: string): number {
 function requiredTrustState(value: unknown): string {
   if (value !== "untrusted" && value !== "trusted" && value !== "revoked") {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return value;
+}
+
+function requiredKeyState(value: unknown, context: string): string {
+  if (value !== "ACTIVE" && value !== "PENDING") {
+    throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
 }

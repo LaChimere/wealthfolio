@@ -3791,6 +3791,15 @@ contract:
   READY initialize results and rotate challenges, and leaving commit operations
   deferred. Dual GPT/Claude xhigh review found no actionable issues after
   response-shape and request-ID fixes.
+- `pr5-device-sync-team-key-commit-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/keys/initialize/commit` and `/api/v1/sync/keys/rotate/commit`
+  restoring the Connect session, resolving the local device ID, sending
+  Rust-compatible `x-wf-device-id` headers and snake_case payloads, and parsing
+  commit success responses. Dual GPT/Claude xhigh review found no actionable
+  issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

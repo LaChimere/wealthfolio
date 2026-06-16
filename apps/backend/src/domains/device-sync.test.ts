@@ -555,6 +555,77 @@ describe("TS local device sync service", () => {
     });
   });
 
+  test("runs team key commit operations through cloud when device id is configured", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (String(input).endsWith("/rotate/commit")) {
+          return Response.json({ success: true, key_version: 3 });
+        }
+        return Response.json({ success: true, key_state: "ACTIVE" });
+      },
+    });
+
+    await expect(
+      service.commitInitializeTeamKeys?.({
+        keyVersion: 2,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+        challengeResponse: "challenge",
+        recoveryEnvelope: "recovery",
+      }),
+    ).resolves.toEqual({ success: true, keyState: "ACTIVE" });
+    await expect(
+      service.commitRotateTeamKeys?.({
+        newKeyVersion: 3,
+        envelopes: [{ deviceId: "device-2", deviceKeyEnvelope: "envelope-2" }],
+        signature: "signature",
+        challengeResponse: "challenge",
+      }),
+    ).resolves.toEqual({ success: true, keyVersion: 3 });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/initialize/commit",
+        method: "POST",
+        body: JSON.stringify({
+          device_id: "device-1",
+          key_version: 2,
+          device_key_envelope: "envelope",
+          signature: "signature",
+          challenge_response: "challenge",
+          recovery_envelope: "recovery",
+        }),
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/rotate/commit",
+        method: "POST",
+        body: JSON.stringify({
+          new_key_version: 3,
+          envelopes: [{ device_id: "device-2", device_key_envelope: "envelope-2" }],
+          signature: "signature",
+          challenge_response: "challenge",
+        }),
+        deviceId: "device-1",
+      },
+    ]);
+  });
+
   test("requires Connect session before reset team sync and keeps it feature-gated after restore", async () => {
     const noSessionService = createLocalDeviceSyncService({
       connectService: {
