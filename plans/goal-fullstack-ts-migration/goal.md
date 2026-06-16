@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 413
+turns_used: 414
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2597,6 +2597,15 @@ updated_at: "2026-06-16T07:45:14+08:00"
   `/api/v1/connect/device/reconcile-ready-state` now returns Rust-shaped
   reconcile results for token/sync-state read failures and non-READY local
   states, while keeping READY/cloud bootstrap paths feature-gated. Dual
+  GPT/Claude xhigh review found no actionable issues. Verified with focused
+  Connect-device/runtime tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check`.
+- Turn 414: Aligned Connect snapshot/bootstrap identity preconditions with the
+  Rust engine. `/api/v1/connect/device/bootstrap-snapshot` and
+  `/api/v1/connect/device/generate-snapshot` now read `sync_identity` from the
+  secret store instead of stale `sync_device_config`, preserve the
+  no-legacy-fallback behavior, report `No device ID configured` for nonce-only
+  identities, and remain feature-gated once a device ID is present. Dual
   GPT/Claude xhigh review found no actionable issues. Verified with focused
   Connect-device/runtime tests, backend type-check, backend test suite, full
   `bun run check`, and `git diff --check`.

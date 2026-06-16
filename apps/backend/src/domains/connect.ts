@@ -2154,10 +2154,10 @@ export function createLocalConnectDeviceSyncService({
       return getLocalDeviceSyncPairingSourceStatus(db);
     },
     async bootstrapDeviceSnapshot() {
-      return getLocalSnapshotIdentityOrThrow(db);
+      return await getLocalSnapshotIdentityOrThrow(secretService);
     },
     async generateDeviceSnapshotNow() {
-      return getLocalSnapshotIdentityOrThrow(db);
+      return await getLocalSnapshotIdentityOrThrow(secretService);
     },
     async startDeviceSyncBackgroundEngine() {
       if (await localSyncIdentityCanRunBackground(secretService)) {
@@ -2538,25 +2538,31 @@ function getLocalDeviceSyncPairingSourceStatus(db: Database): Record<string, unk
   throw deviceSyncDisabled();
 }
 
-function getLocalSnapshotIdentityOrThrow(db: Database): never {
-  const config = db
-    .query<{ device_id: string | null }, []>(
-      `
-        SELECT device_id
-        FROM sync_device_config
-        ORDER BY device_id
-        LIMIT 1
-      `,
-    )
-    .get();
-  if (!config) {
+async function getLocalSnapshotIdentityOrThrow(
+  secretService: SecretService | undefined,
+): Promise<never> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
     throw new ConnectServiceError(
       "internal_error",
       "No sync identity configured. Please enable sync first.",
       500,
     );
   }
-  if (!config.device_id) {
+  let identity: ReturnType<typeof parseSyncIdentity>;
+  try {
+    identity = parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+  } catch {
+    throw new ConnectServiceError(
+      "internal_error",
+      "No sync identity configured. Please enable sync first.",
+      500,
+    );
+  }
+  if (!identity.deviceId) {
     throw new ConnectServiceError("internal_error", "No device ID configured", 500);
   }
   throw deviceSyncDisabled();

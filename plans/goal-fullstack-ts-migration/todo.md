@@ -3698,6 +3698,18 @@ contract:
   results for token/sync-state read failures and non-READY local states, while
   keeping READY/cloud bootstrap paths feature-gated. Dual GPT/Claude xhigh
   review found no actionable issues.
+- `pr5-connect-device-snapshot-identity-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/bootstrap-snapshot` and
+  `/api/v1/connect/device/generate-snapshot` reading `sync_identity` from the
+  secret store instead of stale `sync_device_config`, preserving Rust's
+  no-legacy-fallback snapshot engine precondition, reporting
+  `No device ID configured` for nonce-only identities, and remaining
+  feature-gated once a device ID is present. Dual GPT/Claude xhigh review found
+  no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

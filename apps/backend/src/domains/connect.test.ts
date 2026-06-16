@@ -2564,6 +2564,7 @@ describe("TS Connect device sync local service", () => {
 
   test("reports local snapshot preconditions before cloud upload paths", async () => {
     const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
     db.exec(`
       CREATE TABLE sync_device_config (
         device_id TEXT PRIMARY KEY NOT NULL,
@@ -2572,7 +2573,10 @@ describe("TS Connect device sync local service", () => {
         last_bootstrap_at TEXT
       );
     `);
-    const service = createLocalConnectDeviceSyncService({ db });
+    db.prepare(
+      "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('legacy-device', 1, 'trusted', NULL)",
+    ).run();
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow(
@@ -2581,6 +2585,18 @@ describe("TS Connect device sync local service", () => {
       await expect(service.generateDeviceSnapshotNow()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
+
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow("No device ID configured");
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
     } finally {
       db.close();
     }

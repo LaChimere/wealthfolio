@@ -1893,7 +1893,7 @@ describe("TS backend runtime composition", () => {
         const response = await fetch(`${server.baseUrl}${pathName}`, { method: "POST" });
         expect(response.status).toBe(500);
         await expect(response.json()).resolves.toMatchObject({
-          message: "No sync identity configured. Please enable sync first.",
+          message: "No device ID configured",
         });
       }
 
