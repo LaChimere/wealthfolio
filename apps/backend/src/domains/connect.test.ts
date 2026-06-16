@@ -58,6 +58,50 @@ function snapshotDownloadResponse(
   });
 }
 
+function createDeviceSyncStateDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE sync_cursor (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      cursor BIGINT NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE sync_engine_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      lock_version INTEGER NOT NULL DEFAULT 0,
+      last_push_at TEXT,
+      last_pull_at TEXT,
+      last_error TEXT,
+      consecutive_failures INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      last_cycle_status TEXT,
+      last_cycle_duration_ms INTEGER
+    );
+    CREATE TABLE sync_device_config (
+      device_id TEXT PRIMARY KEY NOT NULL,
+      key_version INTEGER,
+      trust_state TEXT NOT NULL DEFAULT 'untrusted',
+      last_bootstrap_at TEXT,
+      min_snapshot_created_at TEXT
+    );
+    CREATE TABLE sync_outbox (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_entity_metadata (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_applied_events (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_table_state (id TEXT PRIMARY KEY);
+    INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+    INSERT INTO sync_engine_state (id, lock_version, last_cycle_status, last_error)
+      VALUES (1, 7, 'stale_cursor', 'stale');
+    INSERT INTO sync_device_config (
+      device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+    ) VALUES ('old-device', 1, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+    INSERT INTO sync_outbox (id) VALUES ('pending-event');
+    INSERT INTO sync_entity_metadata (id) VALUES ('meta');
+    INSERT INTO sync_applied_events (id) VALUES ('applied');
+    INSERT INTO sync_table_state (id) VALUES ('state');
+  `);
+  return db;
+}
+
 describe("TS Connect local session service", () => {
   test("stores, reports, and clears cloud refresh session secrets", async () => {
     const db = new Database(":memory:");
@@ -2370,16 +2414,566 @@ describe("TS Connect device sync local service", () => {
         needsPairing: false,
         trustedDevices: [],
       });
-      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+    } finally {
+      db.close();
+    }
+  });
+
+  test("enables FRESH device sync through bootstrap key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: Array<{ url: string; method: string; body: Record<string, unknown> | null }> =
+      [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      appVersion: "3.4.0",
+      reinitializeDelayMs: 0,
+      fetch: async (input, init) => {
+        const body =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : null;
+        requests.push({ url: String(input), method: init?.method ?? "GET", body });
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 3,
+        serverKeyVersion: 3,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+
+      const enrollBody = requests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/devices"),
+      )?.body;
+      expect(enrollBody).toMatchObject({
+        display_name: "Wealthfolio Server",
+        platform:
+          process.platform === "darwin"
+            ? "mac"
+            : process.platform === "win32"
+              ? "windows"
+              : process.platform === "linux"
+                ? "linux"
+                : "web",
+        app_version: "3.4.0",
+      });
+      expect(typeof enrollBody?.device_nonce).toBe("string");
+
+      const commitBody = requests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/keys/initialize/commit"),
+      )?.body;
+      expect(commitBody).toMatchObject({
+        device_id: "device-1",
+        key_version: 3,
+        challenge_response: "f5d35df7861e15897ad1fe167b9b76a5c6d01afe9d4cb565c2f0166ea49d61b7",
+      });
+      expect(typeof commitBody?.device_key_envelope).toBe("string");
+      expect(typeof commitBody?.signature).toBe("string");
+      expect(commitBody).not.toHaveProperty("recovery_envelope");
+
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        keyVersion: 3,
+      });
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(typeof identity.rootKey).toBe("string");
+      expect(typeof identity.deviceSecretKey).toBe("string");
+      expect(typeof identity.devicePublicKey).toBe("string");
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toMatchObject({ cursor: 0 });
+      expect(
+        db
+          .query<
+            {
+              key_version: number;
+              trust_state: string;
+              last_bootstrap_at: string | null;
+              min_snapshot_created_at: string | null;
+            },
+            []
+          >(
+            "SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'",
+          )
+          .get(),
+      ).toMatchObject({
+        key_version: 3,
+        trust_state: "trusted",
+        min_snapshot_created_at: null,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toMatchObject({ count: 0 });
+      expect(
+        db
+          .query<
+            { lock_version: number; last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT lock_version, last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({ lock_version: 0, last_cycle_status: null, last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("adds a missing legacy device nonce before resuming existing sync", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: "legacy-root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: Array<{ url: string; method: string }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({ url, method: init?.method ?? "GET" });
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-1")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+      expect(requests.some((request) => request.url.endsWith("/api/v1/sync/team/devices"))).toBe(
+        false,
+      );
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(identity).toMatchObject({
+        deviceId: "device-1",
+        rootKey: "legacy-root-key",
+        keyVersion: 2,
       });
     } finally {
       db.close();
     }
   });
 
-  test("keeps enable feature-gated for RECOVERY sync state", async () => {
+  test("serializes Connect token restoration during concurrent state and enable calls", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let activeTokenRestores = 0;
+    let maxActiveTokenRestores = 0;
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push(`${init?.method ?? "GET"} ${url}`);
+        if (url.includes("/auth/v1/token")) {
+          activeTokenRestores += 1;
+          maxActiveTokenRestores = Math.max(maxActiveTokenRestores, activeTokenRestores);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          activeTokenRestores -= 1;
+          return Response.json({
+            access_token: "access-token",
+            refresh_token: "rotated-refresh-token",
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-1")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.getDeviceSyncState(), service.enableDeviceSync()]),
+      ).resolves.toHaveLength(2);
+      expect(maxActiveTokenRestores).toBe(1);
+      expect(requests.filter((request) => request.includes("/auth/v1/token"))).toHaveLength(2);
+      expect(requests.filter((request) => request.endsWith("/api/v1/sync/team/devices"))).toEqual([
+        "POST https://api.example.test/api/v1/sync/team/devices",
+      ]);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh-token");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("shares Connect token restoration between Connect and device-sync services", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let tokenRequests = 0;
+    let activeTokenRestores = 0;
+    let maxActiveTokenRestores = 0;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/auth/v1/token")) {
+        tokenRequests += 1;
+        activeTokenRestores += 1;
+        maxActiveTokenRestores = Math.max(maxActiveTokenRestores, activeTokenRestores);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activeTokenRestores -= 1;
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh-token",
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+    const connectService = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: fetchImpl,
+      accountService: {
+        getAllAccounts: () => [],
+        getBaseCurrency: () => "USD",
+        createAccount: () => {
+          throw new Error("not used");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => {
+          throw new Error("not used");
+        },
+        saveBrokerSyncProfileRules: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+    const deviceSyncService = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: fetchImpl,
+      restoreSyncSession: () => connectService.restoreSyncSession(),
+    });
+
+    try {
+      await expect(
+        Promise.all([connectService.restoreSyncSession(), deviceSyncService.getDeviceSyncState()]),
+      ).resolves.toHaveLength(2);
+      expect(tokenRequests).toBe(1);
+      expect(maxActiveTokenRestores).toBe(1);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh-token");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("serializes clearing local sync data with enable key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.enableDeviceSync(), service.clearDeviceSyncData()]),
+      ).resolves.toHaveLength(2);
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(secretService.entries.get("sync_device_id")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("enables FRESH device sync as registered when pairing is required", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          mode: "PAIR",
+          device_id: "device-1",
+          e2ee_key_version: 4,
+          require_sas: true,
+          pairing_ttl_seconds: 300,
+          trusted_devices: [
+            { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+          ],
+        });
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "REGISTERED",
+        keyVersion: null,
+        serverKeyVersion: 4,
+        needsPairing: true,
+        trustedDevices: [{ id: "device-2", name: "iPhone", platform: "ios", lastSeenAt: null }],
+      });
+      expect(requests.some((url) => url.includes("/sync/team/keys/initialize"))).toBe(false);
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'old-device'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reinitializes only after cloud reset succeeds and preserves the device nonce", async () => {
+    const failingDb = createDeviceSyncStateDb();
+    const failingSecretService = createMemorySecretService();
+    const originalIdentity = {
+      version: 2,
+      deviceNonce: "existing-nonce",
+      deviceId: "old-device",
+      rootKey: "root",
+      keyVersion: 1,
+      deviceSecretKey: "secret",
+      devicePublicKey: "public",
+    };
+    failingSecretService.entries.set("sync_refresh_token", "refresh-token");
+    failingSecretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+    const failingService = createLocalConnectDeviceSyncService({
+      db: failingDb,
+      secretService: failingSecretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ success: false, key_version: 1, reset_at: null });
+      },
+    });
+
+    try {
+      await expect(failingService.reinitializeDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message:
+          "Team sync reset was not accepted. Please verify account permissions and try again.",
+      });
+      expect(JSON.parse(failingSecretService.entries.get("sync_identity") ?? "{}")).toEqual(
+        originalIdentity,
+      );
+    } finally {
+      failingDb.close();
+    }
+
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input, init) => {
+        const url = String(input);
+        const body =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : null;
+        requests.push({ url, body });
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/reset")) {
+          return Response.json({ success: true, key_version: 1, reset_at: "2026-01-01T00:00:00Z" });
+        }
+        return Response.json({
+          mode: "PAIR",
+          device_id: "new-device",
+          e2ee_key_version: 4,
+          require_sas: true,
+          pairing_ttl_seconds: 300,
+          trusted_devices: [
+            { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+          ],
+        });
+      },
+    });
+
+    try {
+      await expect(service.reinitializeDeviceSync()).resolves.toMatchObject({
+        deviceId: "new-device",
+        state: "REGISTERED",
+        needsPairing: true,
+      });
+      expect(
+        requests.find((request) => request.url.endsWith("/api/v1/sync/team/keys/reset"))?.body,
+      ).toEqual({ reason: "reinitialize" });
+      expect(
+        requests.find((request) => request.url.endsWith("/api/v1/sync/team/devices"))?.body,
+      ).toMatchObject({ device_nonce: "existing-nonce" });
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        deviceNonce: "existing-nonce",
+        deviceId: "new-device",
+        rootKey: null,
+        keyVersion: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("re-enrolls device sync from RECOVERY state", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -2397,18 +2991,38 @@ describe("TS Connect device sync local service", () => {
       db,
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test" },
-      fetch: async (input) => {
-        if (String(input).includes("/auth/v1/token")) {
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "PAIR",
+            device_id: "device-2",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "trusted-1", name: "iPhone", platform: "ios", last_seen_at: null },
+            ],
+          });
         }
         return Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 });
       },
     });
 
     try {
-      await expect(service.enableDeviceSync()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.enableDeviceSync()).resolves.toMatchObject({
+        deviceId: "device-2",
+        state: "REGISTERED",
+        needsPairing: true,
+      });
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        deviceNonce: "nonce-1",
+        deviceId: "device-2",
+        rootKey: null,
+        keyVersion: null,
       });
     } finally {
       db.close();

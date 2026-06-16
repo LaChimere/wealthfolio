@@ -435,6 +435,8 @@ function createServicesFromDatabase(
     secretService,
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,
+    restoreSyncSession: () => connectService.restoreSyncSession(),
+    appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),
   });
   const options: BackendRequestHandlerOptions = {
     accountService,

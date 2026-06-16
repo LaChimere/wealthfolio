@@ -6,6 +6,7 @@ import type { ActivityService } from "./activities";
 import { localOverwriteRiskSummary } from "./device-sync-overwrite-risk";
 import { normalizeSyncDatetime } from "./device-sync-time";
 import type { SecretService } from "./secrets";
+import { createSyncCryptoService } from "./sync-crypto";
 
 export interface ConnectImportRunsRequest {
   runType?: string;
@@ -31,6 +32,11 @@ export interface LocalConnectDeviceSyncServiceDependencies {
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
+  restoreSyncSession?: () => Promise<unknown> | unknown;
+  appVersion?: string;
+  deviceDisplayName?: string;
+  platform?: string;
+  reinitializeDelayMs?: number;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -109,6 +115,8 @@ const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
 const DEFAULT_CONNECT_AUTH_URL = "https://auth.wealthfolio.app";
 const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
 const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
+const DEVICE_ENROLL_DISPLAY_NAME = "Wealthfolio Server";
+const RESET_REASON_REINITIALIZE = "reinitialize";
 
 export function createDisabledConnectService(): ConnectService {
   return {
@@ -2127,46 +2135,78 @@ export function createLocalConnectDeviceSyncService({
   secretService,
   env = process.env,
   fetch: fetchImpl = fetch,
+  restoreSyncSession,
+  appVersion,
+  deviceDisplayName = DEVICE_ENROLL_DISPLAY_NAME,
+  platform = detectDevicePlatform(process.platform),
+  reinitializeDelayMs = 350,
 }: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
   const disabledService = createDisabledConnectDeviceSyncService();
+  const runWithEnrollLock = createAsyncOperationLock();
+  const runWithSessionRestoreLock = createAsyncOperationLock();
+  const restoreDeviceSyncSession = () => {
+    if (!secretService) {
+      throw deviceSyncDisabled();
+    }
+    if (restoreSyncSession) {
+      return Promise.resolve(restoreSyncSession()).then(restoredConnectSessionFromValue);
+    }
+    return runWithSessionRestoreLock(() =>
+      restoreLocalSyncSession(secretService, env, fetchImpl, () => 0),
+    );
+  };
   return {
     ...disabledService,
     async getDeviceSyncState() {
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      const session = await restoreDeviceSyncSession();
       return await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
     },
     async enableDeviceSync() {
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
-      const state = await getLocalDeviceSyncState(
-        secretService,
-        env,
-        fetchImpl,
-        session.accessToken,
-      );
-      if (state.state === "READY" || state.state === "REGISTERED" || state.state === "STALE") {
-        return enableSyncResultFromState(state);
-      }
-      throw deviceSyncDisabled();
+      return await runWithEnrollLock(async () => {
+        const session = await restoreDeviceSyncSession();
+        return await enableLocalDeviceSync({
+          db,
+          secretService,
+          env,
+          fetchImpl,
+          accessToken: session.accessToken,
+          deviceDisplayName,
+          platform,
+          appVersion,
+        });
+      });
     },
     async reinitializeDeviceSync() {
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
-      throw deviceSyncDisabled();
+      return await runWithEnrollLock(async () => {
+        const session = await restoreDeviceSyncSession();
+        return await reinitializeLocalDeviceSync({
+          db,
+          secretService,
+          env,
+          fetchImpl,
+          accessToken: session.accessToken,
+          deviceDisplayName,
+          platform,
+          appVersion,
+          delayMs: reinitializeDelayMs,
+        });
+      });
     },
     async reconcileDeviceSyncReadyState() {
       if (!secretService) {
         throw deviceSyncDisabled();
       }
       try {
-        await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+        await restoreDeviceSyncSession();
         await getLocalDeviceSyncFreshStateOrThrow(secretService);
       } catch (error) {
         if (error instanceof ConnectNotImplementedError) {
@@ -2190,16 +2230,34 @@ export function createLocalConnectDeviceSyncService({
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      await clearLocalDeviceSyncData(db, secretService);
+      await runWithEnrollLock(() => clearLocalDeviceSyncData(db, secretService));
     },
     async getDeviceSyncPairingSourceStatus() {
-      return await getLocalDeviceSyncPairingSourceStatus(db, secretService, env, fetchImpl);
+      return await getLocalDeviceSyncPairingSourceStatus(
+        db,
+        secretService,
+        env,
+        fetchImpl,
+        restoreDeviceSyncSession,
+      );
     },
     async bootstrapDeviceSnapshot() {
-      return await bootstrapSnapshotIfNotReady(db, secretService, env, fetchImpl);
+      return await bootstrapSnapshotIfNotReady(
+        db,
+        secretService,
+        env,
+        fetchImpl,
+        restoreDeviceSyncSession,
+      );
     },
     async generateDeviceSnapshotNow() {
-      return await generateSnapshotIfTrusted(db, secretService, env, fetchImpl);
+      return await generateSnapshotIfTrusted(
+        db,
+        secretService,
+        env,
+        fetchImpl,
+        restoreDeviceSyncSession,
+      );
     },
     async startDeviceSyncBackgroundEngine() {
       if (await localSyncIdentityCanRunBackground(secretService)) {
@@ -2217,7 +2275,13 @@ export function createLocalConnectDeviceSyncService({
       };
     },
     async triggerDeviceSyncCycle() {
-      return await triggerLocalDeviceSyncCycle(db, secretService, env, fetchImpl);
+      return await triggerLocalDeviceSyncCycle(
+        db,
+        secretService,
+        env,
+        fetchImpl,
+        restoreDeviceSyncSession,
+      );
     },
     cancelDeviceSnapshotUpload() {
       return {
@@ -2226,6 +2290,649 @@ export function createLocalConnectDeviceSyncService({
       };
     },
   };
+}
+
+interface EnableLocalDeviceSyncOptions {
+  db: Database;
+  secretService: SecretService;
+  env: NodeJS.ProcessEnv;
+  fetchImpl: typeof fetch;
+  accessToken: string;
+  deviceDisplayName: string;
+  platform: string;
+  appVersion?: string;
+}
+
+interface ReinitializeLocalDeviceSyncOptions extends EnableLocalDeviceSyncOptions {
+  delayMs: number;
+}
+
+interface StoredSyncIdentity {
+  version: number;
+  deviceNonce: string | null;
+  deviceId: string | null;
+  rootKey: string | null;
+  keyVersion: number | null;
+  deviceSecretKey: string | null;
+  devicePublicKey: string | null;
+}
+
+type EnrollDeviceResponse =
+  | { mode: "BOOTSTRAP"; deviceId: string; e2eeKeyVersion: number }
+  | {
+      mode: "PAIR";
+      deviceId: string;
+      e2eeKeyVersion: number;
+      requireSas: boolean;
+      pairingTtlSeconds: number;
+      trustedDevices: Array<Record<string, unknown>>;
+    }
+  | { mode: "READY"; deviceId: string; e2eeKeyVersion: number; trustState: string };
+
+type InitializeTeamKeysResult =
+  | { mode: "BOOTSTRAP"; challenge: string; nonce: string; keyVersion: number }
+  | {
+      mode: "PAIRING_REQUIRED";
+      e2eeKeyVersion: number;
+      requireSas: boolean;
+      pairingTtlSeconds: number;
+      trustedDevices: Array<Record<string, unknown>>;
+    }
+  | { mode: "READY"; e2eeKeyVersion: number };
+
+type KeyInitializationOutcome =
+  | { kind: "initialized"; keyVersion: number }
+  | {
+      kind: "pairing_required";
+      serverKeyVersion: number;
+      trustedDevices: Array<Record<string, unknown>>;
+    };
+
+type RestoredConnectSession = { accessToken: string; refreshToken: string };
+
+type RestoreConnectSession = () => Promise<RestoredConnectSession>;
+
+function createAsyncOperationLock(): <T>(operation: () => Promise<T>) => Promise<T> {
+  let tail: Promise<void> = Promise.resolve();
+  return async (operation) => {
+    const previous = tail;
+    let release: () => void = () => undefined;
+    tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  };
+}
+
+function restoredConnectSessionFromValue(value: unknown): RestoredConnectSession {
+  if (!isRecord(value) || typeof value.accessToken !== "string" || !value.accessToken.trim()) {
+    throw new ConnectServiceError("internal_error", "Failed to restore Connect access token", 500);
+  }
+  return {
+    accessToken: value.accessToken,
+    refreshToken: typeof value.refreshToken === "string" ? value.refreshToken : "",
+  };
+}
+
+async function enableLocalDeviceSync(
+  options: EnableLocalDeviceSyncOptions,
+): Promise<Record<string, unknown>> {
+  const identity = await readStoredSyncIdentityOrDefault(options.secretService);
+  await ensureLocalDeviceNonce(options.secretService, identity);
+  const existingResult = await tryResumeExistingLocalSync(options);
+  if (existingResult) {
+    await applyLocalEnableSyncSideEffects(options.db, options.secretService, existingResult);
+    return existingResult;
+  }
+
+  return await enableLocalDeviceSyncInner(options);
+}
+
+async function reinitializeLocalDeviceSync(
+  options: ReinitializeLocalDeviceSyncOptions,
+): Promise<Record<string, unknown>> {
+  const existingIdentity = await readStoredSyncIdentityOrDefault(options.secretService);
+  const deviceNonce = existingIdentity.deviceNonce ?? randomUUID();
+  await resetLocalTeamSyncChecked(options);
+  if (options.delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+  }
+  await saveStoredSyncIdentity(options.secretService, freshSyncIdentity(deviceNonce));
+  return await enableLocalDeviceSyncInner(options);
+}
+
+async function enableLocalDeviceSyncInner(
+  options: EnableLocalDeviceSyncOptions,
+): Promise<Record<string, unknown>> {
+  const identity = await readStoredSyncIdentityOrDefault(options.secretService);
+  const deviceNonce = await ensureLocalDeviceNonce(options.secretService, identity);
+  const enrollResponse = await enrollLocalDevice(options, deviceNonce);
+
+  if (enrollResponse.mode === "PAIR") {
+    await saveEnrolledSyncIdentity(options.secretService, deviceNonce, enrollResponse.deviceId);
+    if (enrollResponse.trustedDevices.length > 0) {
+      const result = {
+        deviceId: enrollResponse.deviceId,
+        state: "REGISTERED",
+        keyVersion: null,
+        serverKeyVersion: enrollResponse.e2eeKeyVersion,
+        needsPairing: true,
+        trustedDevices: enrollResponse.trustedDevices,
+      };
+      await applyLocalEnableSyncSideEffects(options.db, options.secretService, result);
+      return result;
+    }
+    const outcome = await initializeLocalE2eeKeys(options, enrollResponse.deviceId);
+    const result = localEnableResultFromKeyInitialization(enrollResponse.deviceId, outcome);
+    await applyLocalEnableSyncSideEffects(options.db, options.secretService, result);
+    return result;
+  }
+
+  await saveEnrolledSyncIdentity(options.secretService, deviceNonce, enrollResponse.deviceId);
+  const outcome = await initializeLocalE2eeKeys(options, enrollResponse.deviceId);
+  const result = localEnableResultFromKeyInitialization(enrollResponse.deviceId, outcome);
+  await applyLocalEnableSyncSideEffects(options.db, options.secretService, result);
+  return result;
+}
+
+async function tryResumeExistingLocalSync(
+  options: EnableLocalDeviceSyncOptions,
+): Promise<Record<string, unknown> | null> {
+  const identity = await readStoredSyncIdentityOrDefault(options.secretService);
+  if (!identity.deviceId) {
+    return null;
+  }
+  const state = await getLocalDeviceSyncState(
+    options.secretService,
+    options.env,
+    options.fetchImpl,
+    options.accessToken,
+  );
+  if (state.state === "READY" || state.state === "REGISTERED" || state.state === "STALE") {
+    return enableSyncResultFromState(state);
+  }
+  return null;
+}
+
+async function ensureLocalDeviceNonce(
+  secretService: SecretService,
+  identity: StoredSyncIdentity,
+): Promise<string> {
+  if (identity.deviceNonce) {
+    return identity.deviceNonce;
+  }
+  const deviceNonce = randomUUID();
+  await saveStoredSyncIdentity(secretService, { ...identity, version: 2, deviceNonce });
+  return deviceNonce;
+}
+
+async function enrollLocalDevice(
+  options: EnableLocalDeviceSyncOptions,
+  deviceNonce: string,
+): Promise<EnrollDeviceResponse> {
+  return enrollDeviceResponseFromCloud(
+    await fetchConnectDeviceSyncJson(
+      options.env,
+      options.fetchImpl,
+      options.accessToken,
+      "/api/v1/sync/team/devices",
+      {
+        method: "POST",
+        body: {
+          device_nonce: deviceNonce,
+          display_name: options.deviceDisplayName,
+          platform: options.platform,
+          os_version: undefined,
+          app_version: options.appVersion,
+        },
+      },
+    ),
+  );
+}
+
+async function initializeLocalE2eeKeys(
+  options: EnableLocalDeviceSyncOptions,
+  deviceId: string,
+): Promise<KeyInitializationOutcome> {
+  const initResult = initializeTeamKeysResultFromCloud(
+    await fetchConnectDeviceSyncJson(
+      options.env,
+      options.fetchImpl,
+      options.accessToken,
+      "/api/v1/sync/team/keys/initialize",
+      {
+        method: "POST",
+        deviceId,
+        body: { device_id: deviceId },
+      },
+    ),
+  );
+
+  if (initResult.mode === "PAIRING_REQUIRED") {
+    return {
+      kind: "pairing_required",
+      serverKeyVersion: initResult.e2eeKeyVersion,
+      trustedDevices: initResult.trustedDevices,
+    };
+  }
+  if (initResult.mode === "READY") {
+    return {
+      kind: "pairing_required",
+      serverKeyVersion: initResult.e2eeKeyVersion,
+      trustedDevices: await getTrustedDevicesBestEffort(
+        options.env,
+        options.fetchImpl,
+        options.accessToken,
+      ),
+    };
+  }
+
+  const crypto = createSyncCryptoService();
+  const rootKey = (await crypto.generateRootKey()).value;
+  const deviceKeypair = await crypto.generateKeypair();
+  const envelopeKey = (await crypto.deriveSessionKey(rootKey, "envelope")).value;
+  const deviceKeyEnvelope = (await crypto.encrypt(envelopeKey, rootKey)).value;
+  const signature = (
+    await crypto.hmacSha256(
+      rootKey,
+      `${initResult.challenge}:${initResult.keyVersion}:${deviceKeyEnvelope}`,
+    )
+  ).value;
+  const challengeResponse = createHash("sha256")
+    .update(`${initResult.challenge}:${initResult.nonce}`, "utf8")
+    .digest("hex");
+
+  const commitResult = commitInitializeKeysResponseFromCloud(
+    await fetchConnectDeviceSyncJson(
+      options.env,
+      options.fetchImpl,
+      options.accessToken,
+      "/api/v1/sync/team/keys/initialize/commit",
+      {
+        method: "POST",
+        deviceId,
+        body: {
+          device_id: deviceId,
+          key_version: initResult.keyVersion,
+          device_key_envelope: deviceKeyEnvelope,
+          signature,
+          challenge_response: challengeResponse,
+        },
+      },
+    ),
+  );
+  if (!commitResult.success) {
+    throw new ConnectServiceError("internal_error", "Server rejected key commitment", 500);
+  }
+
+  const identity = await readStoredSyncIdentityOrDefault(options.secretService);
+  await saveStoredSyncIdentity(options.secretService, {
+    ...identity,
+    deviceId,
+    rootKey,
+    keyVersion: initResult.keyVersion,
+    deviceSecretKey: deviceKeypair.secretKey,
+    devicePublicKey: deviceKeypair.publicKey,
+  });
+  return { kind: "initialized", keyVersion: initResult.keyVersion };
+}
+
+function localEnableResultFromKeyInitialization(
+  deviceId: string,
+  outcome: KeyInitializationOutcome,
+): Record<string, unknown> {
+  if (outcome.kind === "initialized") {
+    return {
+      deviceId,
+      state: "READY",
+      keyVersion: outcome.keyVersion,
+      serverKeyVersion: outcome.keyVersion,
+      needsPairing: false,
+      trustedDevices: [],
+    };
+  }
+  const orphaned = outcome.trustedDevices.length === 0 && outcome.serverKeyVersion > 0;
+  return {
+    deviceId,
+    state: orphaned ? "ORPHANED" : "REGISTERED",
+    keyVersion: null,
+    serverKeyVersion: outcome.serverKeyVersion,
+    needsPairing: !orphaned,
+    trustedDevices: outcome.trustedDevices,
+  };
+}
+
+async function applyLocalEnableSyncSideEffects(
+  db: Database,
+  secretService: SecretService,
+  result: Record<string, unknown>,
+): Promise<void> {
+  const deviceId = requiredStringValue(result.deviceId, "enable sync response");
+  await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
+  clearAllDeviceSyncFreshnessGates(db);
+  if (result.state !== "READY" || !sqliteTableExists(db, "sync_device_config")) {
+    return;
+  }
+  const keyVersion = optionalNumber(result.keyVersion);
+  if (keyVersion === null) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Missing key version in enable sync result",
+      500,
+    );
+  }
+  resetAndMarkLocalBootstrapComplete(db, {
+    deviceNonce: null,
+    deviceId,
+    rootKey: null,
+    keyVersion,
+  });
+}
+
+async function resetLocalTeamSyncChecked(
+  options: ReinitializeLocalDeviceSyncOptions,
+): Promise<void> {
+  const resetResult = resetTeamSyncResponseFromCloud(
+    await fetchConnectDeviceSyncJson(
+      options.env,
+      options.fetchImpl,
+      options.accessToken,
+      "/api/v1/sync/team/keys/reset",
+      {
+        method: "POST",
+        body: { reason: RESET_REASON_REINITIALIZE },
+      },
+    ),
+  );
+  if (!resetResult.success) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Team sync reset was not accepted. Please verify account permissions and try again.",
+      500,
+    );
+  }
+}
+
+async function readStoredSyncIdentityOrDefault(
+  secretService: SecretService,
+): Promise<StoredSyncIdentity> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
+    return freshSyncIdentity(null);
+  }
+  const parsed = parseStoredSyncIdentity(rawIdentity);
+  return {
+    version: 2,
+    deviceNonce: parsed.deviceNonce,
+    deviceId: parsed.deviceId,
+    rootKey: parsed.rootKey,
+    keyVersion: parsed.keyVersion,
+    deviceSecretKey: optionalString(
+      (JSON.parse(rawIdentity) as Record<string, unknown>).deviceSecretKey,
+    ),
+    devicePublicKey: optionalString(
+      (JSON.parse(rawIdentity) as Record<string, unknown>).devicePublicKey,
+    ),
+  };
+}
+
+function freshSyncIdentity(deviceNonce: string | null): StoredSyncIdentity {
+  return {
+    version: 2,
+    deviceNonce,
+    deviceId: null,
+    rootKey: null,
+    keyVersion: null,
+    deviceSecretKey: null,
+    devicePublicKey: null,
+  };
+}
+
+async function saveEnrolledSyncIdentity(
+  secretService: SecretService,
+  deviceNonce: string,
+  deviceId: string,
+): Promise<void> {
+  await saveStoredSyncIdentity(secretService, {
+    ...freshSyncIdentity(deviceNonce),
+    deviceId,
+  });
+}
+
+async function saveStoredSyncIdentity(
+  secretService: SecretService,
+  identity: StoredSyncIdentity,
+): Promise<void> {
+  await secretService.setSecret(
+    DEVICE_SYNC_IDENTITY_KEY,
+    JSON.stringify({
+      version: 2,
+      deviceNonce: identity.deviceNonce,
+      deviceId: identity.deviceId,
+      rootKey: identity.rootKey,
+      keyVersion: identity.keyVersion,
+      deviceSecretKey: identity.deviceSecretKey,
+      devicePublicKey: identity.devicePublicKey,
+    }),
+  );
+}
+
+async function fetchConnectDeviceSyncJson(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  path: string,
+  options: { method?: string; body?: unknown; deviceId?: string } = {},
+): Promise<unknown> {
+  let response: Response;
+  try {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+      "x-wf-client-request-id": deviceSyncClientRequestId(options.deviceId),
+    };
+    if (options.deviceId !== undefined) {
+      headers["x-wf-device-id"] = options.deviceId;
+    }
+    response = await fetchImpl(`${normalizeConnectApiUrl(env.CONNECT_API_URL)}${path}`, {
+      method: options.method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw new ConnectServiceError(
+      "internal_error",
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      500,
+    );
+  }
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse device sync response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+}
+
+function enrollDeviceResponseFromCloud(value: unknown): EnrollDeviceResponse {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse enroll response", 500);
+  }
+  const mode = requiredStringValue(value.mode, "enroll response");
+  if (mode === "BOOTSTRAP") {
+    return {
+      mode,
+      deviceId: requiredStringValue(value.deviceId ?? value.device_id, "enroll response"),
+      e2eeKeyVersion: requiredI32Value(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+    };
+  }
+  if (mode === "PAIR") {
+    return {
+      mode,
+      deviceId: requiredStringValue(value.deviceId ?? value.device_id, "enroll response"),
+      e2eeKeyVersion: requiredI32Value(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+      requireSas: requiredBooleanValue(value.requireSas ?? value.require_sas, "enroll response"),
+      pairingTtlSeconds: requiredI32Value(
+        value.pairingTtlSeconds ?? value.pairing_ttl_seconds,
+        "enroll response",
+      ),
+      trustedDevices: trustedDevicesFromCloud(value.trustedDevices ?? value.trusted_devices),
+    };
+  }
+  if (mode === "READY") {
+    return {
+      mode,
+      deviceId: requiredStringValue(value.deviceId ?? value.device_id, "enroll response"),
+      e2eeKeyVersion: requiredI32Value(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+      trustState: requiredDeviceTrustState(value.trustState ?? value.trust_state),
+    };
+  }
+  throw new ConnectServiceError("internal_error", "Failed to parse enroll response", 500);
+}
+
+function initializeTeamKeysResultFromCloud(value: unknown): InitializeTeamKeysResult {
+  if (!isRecord(value)) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse initialize keys response",
+      500,
+    );
+  }
+  const mode = requiredStringValue(value.mode, "initialize keys response");
+  if (mode === "BOOTSTRAP") {
+    return {
+      mode,
+      challenge: requiredStringValue(value.challenge, "initialize keys response"),
+      nonce: requiredStringValue(value.nonce, "initialize keys response"),
+      keyVersion: requiredI32Value(
+        value.keyVersion ?? value.key_version,
+        "initialize keys response",
+      ),
+    };
+  }
+  if (mode === "PAIRING_REQUIRED") {
+    return {
+      mode,
+      e2eeKeyVersion: requiredI32Value(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "initialize keys response",
+      ),
+      requireSas: requiredBooleanValue(
+        value.requireSas ?? value.require_sas,
+        "initialize keys response",
+      ),
+      pairingTtlSeconds: requiredI32Value(
+        value.pairingTtlSeconds ?? value.pairing_ttl_seconds,
+        "initialize keys response",
+      ),
+      trustedDevices: trustedDevicesFromCloud(value.trustedDevices ?? value.trusted_devices),
+    };
+  }
+  if (mode === "READY") {
+    return {
+      mode,
+      e2eeKeyVersion: requiredI32Value(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "initialize keys response",
+      ),
+    };
+  }
+  throw new ConnectServiceError("internal_error", "Failed to parse initialize keys response", 500);
+}
+
+function commitInitializeKeysResponseFromCloud(value: unknown): { success: boolean } {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse commit initialize keys response",
+      500,
+    );
+  }
+  return { success: value.success };
+}
+
+function resetTeamSyncResponseFromCloud(value: unknown): { success: boolean } {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse reset team sync response",
+      500,
+    );
+  }
+  return { success: value.success };
+}
+
+function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse initialize keys response",
+      500,
+    );
+  }
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new ConnectServiceError(
+        "internal_error",
+        "Failed to parse initialize keys response",
+        500,
+      );
+    }
+    return {
+      id: requiredStringValue(entry.id, "initialize keys response"),
+      name: requiredStringValue(entry.name, "initialize keys response"),
+      platform: requiredStringValue(entry.platform, "initialize keys response"),
+      lastSeenAt: optionalString(entry.lastSeenAt ?? entry.last_seen_at),
+    };
+  });
+}
+
+function requiredBooleanValue(value: unknown, context: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredI32Value(value: unknown, context: string): number {
+  if (!isI32Integer(value)) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function detectDevicePlatform(platform: NodeJS.Platform): string {
+  switch (platform) {
+    case "darwin":
+      return "mac";
+    case "win32":
+      return "windows";
+    case "linux":
+      return "linux";
+    default:
+      return "web";
+  }
 }
 
 async function localSyncIdentityCanRunBackground(
@@ -3042,6 +3749,7 @@ async function getLocalDeviceSyncPairingSourceStatus(
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
+  restoreSession?: RestoreConnectSession,
 ): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
@@ -3049,7 +3757,9 @@ async function getLocalDeviceSyncPairingSourceStatus(
   const deviceId = await requireLocalSyncIdentityDeviceId(secretService);
   let session: { accessToken: string; refreshToken: string };
   try {
-    session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+    session = restoreSession
+      ? await restoreSession()
+      : await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
   } catch (error) {
     throw new ConnectServiceError("internal_error", errorMessage(error), 500);
   }
@@ -3089,13 +3799,16 @@ async function bootstrapSnapshotIfNotReady(
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
+  restoreSession?: RestoreConnectSession,
 ): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
   const identity = await requireLocalSyncIdentity(secretService);
   const deviceId = identity.deviceId;
-  const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+  const session = restoreSession
+    ? await restoreSession()
+    : await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
   const state = await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
   if (state.state !== "READY") {
     return {
@@ -3786,12 +4499,15 @@ async function generateSnapshotIfTrusted(
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
+  restoreSession?: RestoreConnectSession,
 ): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
   const deviceId = await requireLocalSyncIdentityDeviceId(secretService);
-  const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+  const session = restoreSession
+    ? await restoreSession()
+    : await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
   const device = await fetchLocalDeviceSyncDevice(env, fetchImpl, session.accessToken, deviceId);
   if (device.trustState !== "trusted") {
     return {
@@ -3873,6 +4589,7 @@ async function triggerLocalDeviceSyncCycle(
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
+  restoreSession?: RestoreConnectSession,
 ): Promise<Record<string, unknown>> {
   const cursor =
     db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
@@ -3905,7 +4622,11 @@ async function triggerLocalDeviceSyncCycle(
     return localSyncCycleResult("not_ready", lockVersion, cursor);
   }
   try {
-    await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+    if (restoreSession) {
+      await restoreSession();
+    } else {
+      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+    }
     await getLocalDeviceSyncFreshStateOrThrow(secretService);
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {

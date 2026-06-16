@@ -278,12 +278,15 @@
     local Connect synced-account/platform/sync-state/import-run reads, local
     broker sync profile persistence, disabled device-sync route responses, and
     local device-sync status/precondition/no-op/clear-data behavior now have TS
-    runtime parity, while real Connect token lifecycle, cloud HTTP clients,
-    broker sync orchestration, subscription entitlement checks, event
-    production, E2EE enrollment, sync engine, trusted-device snapshot/upload
-    runtime, background workers, device-sync cloud clients, token lifecycle,
-    team-key operations, key material handling, pairing flows, freshness gate
-    persistence, bootstrap transfer, and remaining secret side effects are
+    runtime parity; Connect token restore, device-sync fresh/recovery
+    enrollment, BOOTSTRAP E2EE key initialization, PAIR/ORPHANED registration
+    responses, reinitialize reset ordering, legacy device-id storage, freshness
+    cleanup, and READY bootstrap-complete side effects now have bounded TS
+    runtime parity, while broker sync orchestration, subscription entitlement
+    checks, event production, sync engine push/pull, trusted-device
+    snapshot/upload runtime, background workers, remaining device-sync cloud
+    clients, team-key operations beyond initialization, pairing flows, freshness
+    gate persistence, bootstrap transfer, and remaining secret side effects are
     deferred to Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
@@ -4039,6 +4042,17 @@ contract:
   the feature gate, plus preservation of existing 404/header/checksum/apply-gate
   behavior. Dual GPT/Claude xhigh review found no actionable issues after the
   non-404 error mapping fix.
+- `pr5-connect-device-enrollment-reinitialize`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes FRESH BOOTSTRAP
+  enrollment/key commit/identity persistence, PAIR registration without key
+  material, legacy identity nonce-before-resume behavior, Connect/device-sync
+  shared token-restore coalescing, enable/clear serialization, reinitialize
+  reset failure preserving identity, successful reinitialize nonce preservation,
+  and RECOVERY re-enrollment. Dual GPT/Claude xhigh review found and verified
+  fixes for nonce-before-resume, token restore serialization, clear/enable
+  races, and shared Connect/device-sync token-restorer coalescing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
