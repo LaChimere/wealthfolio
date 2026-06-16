@@ -3851,8 +3851,10 @@ contract:
   `/api/v1/sync/pairing/{id}/confirm` restoring the Connect session, resolving
   the local device ID, sending Rust-compatible confirm payloads, parsing
   `ConfirmPairingResponse`, and persisting `minSnapshotCreatedAt` to SQLite when
-  available with Rust-compatible timestamp normalization. Dual GPT/Claude xhigh
-  review found no actionable issues after the timestamp parser fix.
+  available with Rust-compatible timestamp normalization. It also wires
+  complete-pairing post-success background-start notification as a non-blocking
+  best-effort hook. Dual GPT/Claude xhigh review found no actionable issues
+  after the timestamp parser and fire-and-forget hook fixes.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -430,6 +430,12 @@ function createServicesFromDatabase(
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,
   });
+  const connectDeviceSyncService = createLocalConnectDeviceSyncService({
+    db,
+    secretService,
+    env: runtimeOptions.env,
+    fetch: runtimeOptions.marketDataFetch,
+  });
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService,
@@ -506,12 +512,7 @@ function createServicesFromDatabase(
       logsDir: runtimeOptions.env.WF_LOGS_DIR?.trim() || path.join(appDataDir, "logs"),
       prepareDatabaseRestore,
     }),
-    connectDeviceSyncService: createLocalConnectDeviceSyncService({
-      db,
-      secretService,
-      env: runtimeOptions.env,
-      fetch: runtimeOptions.marketDataFetch,
-    }),
+    connectDeviceSyncService,
     connectService,
     contributionLimitService: createContributionLimitService(
       createContributionLimitRepository(db, {
@@ -539,7 +540,12 @@ function createServicesFromDatabase(
     ),
     customProviderService,
     eventBus,
-    deviceSyncService: createLocalDeviceSyncService({ connectService, secretService, db }),
+    deviceSyncService: createLocalDeviceSyncService({
+      connectService,
+      secretService,
+      db,
+      onPairingComplete: () => connectDeviceSyncService.startDeviceSyncBackgroundEngine(),
+    }),
     exchangeRateService,
     goalService,
     goalValuationProvider,

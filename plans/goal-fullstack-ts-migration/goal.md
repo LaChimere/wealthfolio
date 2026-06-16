@@ -2725,8 +2725,8 @@ updated_at: "2026-06-16T07:45:14+08:00"
   `ConfirmPairingResponse`, and persists `minSnapshotCreatedAt` to SQLite when
   available using Rust-compatible timestamp normalization. Dual GPT/Claude xhigh
   review found no actionable issues after the timestamp parser fix. Verified
-  with focused device-sync tests, backend type-check, backend test suite, full
-  `bun run check`, and `git diff --check`.
+  with focused device-sync/runtime tests, backend type-check, backend test
+  suite, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

@@ -787,9 +787,14 @@ describe("TS local device sync service", () => {
     secretService.entries.set("sync_device_id", "device-1");
     const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
       [];
+    let pairingCompleteNotifications = 0;
     const service = createLocalDeviceSyncService({
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test/" },
+      onPairingComplete: () => {
+        pairingCompleteNotifications += 1;
+        return new Promise(() => undefined);
+      },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
@@ -849,6 +854,7 @@ describe("TS local device sync service", () => {
         signature: "signature",
       }),
     ).resolves.toEqual({ success: true, remoteSeedPresent: false });
+    expect(pairingCompleteNotifications).toBe(1);
     await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
     expect(requests).toEqual([
       {

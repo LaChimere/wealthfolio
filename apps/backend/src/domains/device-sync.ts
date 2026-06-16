@@ -153,6 +153,7 @@ export interface LocalDeviceSyncServiceDependencies {
   db?: Database;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
+  onPairingComplete?: () => Promise<unknown> | unknown;
 }
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
@@ -244,6 +245,7 @@ export function createLocalDeviceSyncService({
   db,
   env = process.env,
   fetch: fetchImpl = fetch,
+  onPairingComplete,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   return {
@@ -481,7 +483,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const result = await fetchDeviceSyncJson(
         accessToken,
         env,
         fetchImpl,
@@ -496,6 +498,8 @@ export function createLocalDeviceSyncService({
           },
         },
       ).then(completePairingResponseFromCloud);
+      void notifyPairingComplete(onPairingComplete);
+      return result;
     },
     async cancelPairing(pairingId) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1489,6 +1493,19 @@ function applyMinSnapshotCreatedAtBestEffort(
     ).run(deviceId, normalized);
   } catch (error) {
     console.warn(`[DeviceSync] Failed to persist freshness gate to SQLite: ${errorMessage(error)}`);
+  }
+}
+
+async function notifyPairingComplete(
+  onPairingComplete: (() => Promise<unknown> | unknown) | undefined,
+): Promise<void> {
+  if (!onPairingComplete) {
+    return;
+  }
+  try {
+    await onPairingComplete();
+  } catch (error) {
+    console.warn(`[DeviceSync] Post-pairing engine start failed: ${errorMessage(error)}`);
   }
 }
 
