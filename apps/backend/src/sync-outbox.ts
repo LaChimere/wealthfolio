@@ -38,6 +38,8 @@ const SYNC_ENTITY_BY_EVENT_ENTITY: Record<string, string> = {
   taxonomies: "custom_taxonomy",
   market_data_custom_providers: "custom_provider",
   import_runs: "import_run",
+  portfolios: "portfolio",
+  portfolio_accounts: "portfolio_account",
 };
 
 export function createSyncOutboxQueue(db: Database): SyncOutboxQueue {

@@ -72,6 +72,51 @@ describe("TS sync outbox queue", () => {
         last_event_id: updateEventId,
         last_op: "update",
       });
+
+      const portfolioEventId = queue.queueSyncEvent({
+        entity: "portfolios",
+        entityId: "portfolio-1",
+        operation: "Update",
+        payload: { id: "portfolio-1", name: "Core" },
+      });
+      const portfolioAccountEventId = queue.queueSyncEvent({
+        entity: "portfolio_accounts",
+        entityId: "membership-1",
+        operation: "Delete",
+        payload: { id: "membership-1", portfolioId: "portfolio-1", accountId: "account-1" },
+      });
+
+      expect(readOutboxRows(db)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_id: portfolioEventId,
+            entity: "portfolio",
+            entity_id: "portfolio-1",
+            op: "update",
+          }),
+          expect.objectContaining({
+            event_id: portfolioAccountEventId,
+            entity: "portfolio_account",
+            entity_id: "membership-1",
+            op: "delete",
+          }),
+        ]),
+      );
+      expect(readMetadataRows(db)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            entity: "portfolio",
+            entity_id: "portfolio-1",
+            last_event_id: portfolioEventId,
+          }),
+          expect.objectContaining({
+            entity: "portfolio_account",
+            entity_id: "membership-1",
+            last_event_id: portfolioAccountEventId,
+            last_op: "delete",
+          }),
+        ]),
+      );
     } finally {
       db.close();
     }

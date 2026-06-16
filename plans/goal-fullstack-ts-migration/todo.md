@@ -4063,6 +4063,13 @@ contract:
   non-basic plans, basic-plan forbidden responses before connection/account
   fetches, entitlement verification failures mapping to forbidden, and runtime
   smoke behavior. Dual GPT/Claude xhigh review found no actionable issues.
+- `pr5-sync-outbox-portfolio-entities`: verification passed:
+  `bun test apps/backend/src/sync-outbox.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes `portfolios` ->
+  `portfolio` and `portfolio_accounts` -> `portfolio_account` mapping, outbox
+  row persistence, and metadata upserts. Dual GPT/Claude xhigh review found no
+  actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
