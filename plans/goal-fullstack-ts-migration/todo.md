@@ -3764,6 +3764,15 @@ contract:
   objects, wrapping cloud failures as local 500s, rejecting malformed optional
   device fields, and preserving no-session errors. Dual GPT/Claude xhigh review
   found no actionable issues after the error/optional-field fixes.
+- `pr5-device-sync-device-read-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/device/{id}` restoring the Connect session and reading
+  `/api/v1/sync/team/devices/{id}`, `/api/v1/sync/device/current` preserving
+  token-first behavior and malformed-identity legacy fallback before cloud read,
+  update/delete/revoke remaining feature-gated, and dual GPT/Claude xhigh review
+  finding no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

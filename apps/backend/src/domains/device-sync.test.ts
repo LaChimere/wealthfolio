@@ -87,23 +87,40 @@ describe("TS local device sync service", () => {
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_identity", "{not-json");
     secretService.entries.set("sync_device_id", "legacy-device");
+    const requests: string[] = [];
     const service = createLocalDeviceSyncService({
       secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({
+          id: "legacy-device",
+          userId: "user-1",
+          displayName: "MacBook",
+          platform: "mac",
+          trustState: "trusted",
+          createdAt: "2026-01-01T00:00:00Z",
+        });
+      },
     });
 
-    await expect(service.getCurrentDevice()).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+    await expect(service.getCurrentDevice()).resolves.toMatchObject({
+      id: "legacy-device",
+      userId: "user-1",
     });
 
     secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
-    await expect(service.getCurrentDevice()).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+    await expect(service.getCurrentDevice()).resolves.toMatchObject({
+      id: "legacy-device",
+      userId: "user-1",
     });
+    expect(requests).toEqual([
+      "https://api.example.test/api/v1/sync/team/devices/legacy-device",
+      "https://api.example.test/api/v1/sync/team/devices/legacy-device",
+    ]);
   });
 
   test("reports sync identity preconditions for beginning pairing flow confirmation", async () => {
@@ -333,14 +350,32 @@ describe("TS local device sync service", () => {
     await expect(service.revokeDevice("device-1")).rejects.toMatchObject({ code: "forbidden" });
   });
 
-  test("keeps device get, update, delete, and revoke feature-gated after session restore", async () => {
+  test("gets a device from the cloud after session restore and keeps mutations gated", async () => {
+    const requests: string[] = [];
     const service = createLocalDeviceSyncService({
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({
+          id: "device-1",
+          user_id: "user-1",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          created_at: "2026-01-01T00:00:00Z",
+        });
+      },
     });
 
-    await expect(service.getDevice("device-1")).rejects.toMatchObject({ code: "not_implemented" });
+    await expect(service.getDevice("device-1")).resolves.toMatchObject({
+      id: "device-1",
+      userId: "user-1",
+      displayName: "MacBook",
+    });
+    expect(requests).toEqual(["https://api.example.test/api/v1/sync/team/devices/device-1"]);
     await expect(
       service.updateDevice("device-1", { displayName: "Renamed" }),
     ).rejects.toMatchObject({ code: "not_implemented" });

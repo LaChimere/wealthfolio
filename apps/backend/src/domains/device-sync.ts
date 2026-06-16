@@ -252,12 +252,12 @@ export function createLocalDeviceSyncService({
       if (!connectService || !secretService) {
         throw deviceSyncDisabled();
       }
-      await connectService.restoreSyncSession();
+      const accessToken = await restoreAccessToken(connectService);
       const deviceId = await getLocalDeviceId(secretService);
       if (!deviceId) {
         throw new DeviceSyncServiceError("bad_request", "No device ID configured", 400);
       }
-      throw deviceSyncDisabled();
+      return await fetchDeviceFromCloud(accessToken, env, fetchImpl, deviceId);
     },
     async listDevices(scope) {
       if (!connectService) {
@@ -270,9 +270,9 @@ export function createLocalDeviceSyncService({
           : `/api/v1/sync/team/devices?scope=${encodeURIComponent(scope)}`;
       return await fetchDeviceSyncJson(accessToken, env, fetchImpl, path).then(devicesFromCloud);
     },
-    async getDevice() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async getDevice(deviceId) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      return await fetchDeviceFromCloud(accessToken, env, fetchImpl, deviceId);
     },
     async updateDevice() {
       await restoreSessionOrDisabled(connectService);
@@ -423,6 +423,31 @@ async function restoreAccessToken(
     );
   }
   return session.accessToken;
+}
+
+async function restoreAccessTokenOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+): Promise<string> {
+  if (!connectService) {
+    throw deviceSyncDisabled();
+  }
+  return await restoreAccessToken(connectService);
+}
+
+async function fetchDeviceFromCloud(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  deviceId: string,
+): Promise<Record<string, unknown>> {
+  return deviceFromCloud(
+    await fetchDeviceSyncJson(
+      accessToken,
+      env,
+      fetchImpl,
+      `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+    ),
+  );
 }
 
 async function fetchDeviceSyncJson(
