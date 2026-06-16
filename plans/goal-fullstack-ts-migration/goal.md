@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 418
+turns_used: 419
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2643,6 +2643,15 @@ updated_at: "2026-06-16T07:45:14+08:00"
   without legacy fallback. Dual GPT/Claude xhigh review found no actionable
   issues. Verified with focused Connect/device-sync tests, backend type-check,
   backend test suite, full `bun run check`, and `git diff --check`.
+- Turn 419: Migrated standalone device listing from a feature gate to the TS
+  cloud read path. `/api/v1/sync/devices` now restores the Connect session,
+  sends Rust-shaped device-sync headers and request IDs to
+  `/api/v1/sync/team/devices`, parses snake_case/camelCase cloud device fields
+  into Rust-compatible camelCase responses, and preserves session precondition
+  errors. Dual GPT/Claude xhigh review found no actionable issues after cloud
+  error wrapping and optional-field validation fixes. Verified with focused
+  device-sync tests, backend type-check, backend test suite, full
+  `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

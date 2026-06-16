@@ -3753,6 +3753,17 @@ contract:
   identity fields, core device-ID legacy fallback on malformed identity, and
   composite/flow no-legacy-fallback behavior. Dual GPT/Claude xhigh review found
   no actionable issues.
+- `pr5-device-sync-list-devices-cloud-read`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/devices` restoring the Connect session, calling
+  `/api/v1/sync/team/devices` with bearer auth, JSON content type, and
+  `x-wf-client-request-id: app:<uuid>`, forwarding scope, mapping
+  snake_case/camelCase cloud device fields to Rust-compatible camelCase response
+  objects, wrapping cloud failures as local 500s, rejecting malformed optional
+  device fields, and preserving no-session errors. Dual GPT/Claude xhigh review
+  found no actionable issues after the error/optional-field fixes.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

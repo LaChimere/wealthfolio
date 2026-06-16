@@ -199,16 +199,117 @@ describe("TS local device sync service", () => {
     });
   });
 
-  test("keeps device listing feature-gated after restoring Connect session", async () => {
+  test("lists devices from the cloud after restoring Connect session", async () => {
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    const service = createLocalDeviceSyncService({
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          headers: {
+            authorization: headers.get("authorization") ?? "",
+            contentType: headers.get("content-type") ?? "",
+            requestId: headers.get("x-wf-client-request-id") ?? "",
+          },
+        });
+        return Response.json([
+          {
+            id: "device-1",
+            user_id: "user-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+            created_at: "2026-01-01T00:00:00Z",
+            last_seen_at: null,
+          },
+        ]);
+      },
+    });
+
+    await expect(service.listDevices("team")).resolves.toEqual([
+      {
+        id: "device-1",
+        userId: "user-1",
+        displayName: "MacBook",
+        platform: "mac",
+        devicePublicKey: null,
+        trustState: "trusted",
+        trustedKeyVersion: 2,
+        osVersion: null,
+        appVersion: null,
+        lastSeenAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("https://api.example.test/api/v1/sync/team/devices?scope=team");
+    expect(requests[0]?.headers.authorization).toBe("Bearer token");
+    expect(requests[0]?.headers.contentType).toBe("application/json");
+    expect(requests[0]?.headers.requestId.startsWith("app:")).toBe(true);
+  });
+
+  test("maps device listing cloud failures to internal errors", async () => {
+    const service = createLocalDeviceSyncService({
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        Response.json(
+          { code: "AUTH_EXPIRED", message: "expired" },
+          { status: 403, headers: { "x-request-id": "server-request" } },
+        ),
+    });
+
+    await expect(service.listDevices()).rejects.toMatchObject({
+      code: "internal_error",
+      message: expect.stringContaining("API error (403): AUTH_EXPIRED: expired"),
+      status: 500,
+    });
+
+    const failingService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () => {
+        throw new Error("network down");
+      },
+    });
+    await expect(failingService.listDevices()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "network down",
+      status: 500,
+    });
+  });
+
+  test("rejects malformed optional fields in cloud device listing", async () => {
     const service = createLocalDeviceSyncService({
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () =>
+        Response.json([
+          {
+            id: "device-1",
+            user_id: "user-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            created_at: "2026-01-01T00:00:00Z",
+            last_seen_at: 123,
+          },
+        ]),
     });
 
     await expect(service.listDevices()).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+      code: "internal_error",
+      message: "Failed to parse device response",
+      status: 500,
     });
   });
 

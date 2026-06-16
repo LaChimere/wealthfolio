@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { ConnectService } from "./connect";
 import type { SecretService } from "./secrets";
 
@@ -141,10 +143,13 @@ export class DeviceSyncServiceError extends Error {
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
 const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
 const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
+const DEFAULT_DEVICE_SYNC_API_URL = "https://api.wealthfolio.app";
 
 export interface LocalDeviceSyncServiceDependencies {
   connectService?: Pick<ConnectService, "restoreSyncSession">;
   secretService?: SecretService;
+  env?: NodeJS.ProcessEnv;
+  fetch?: typeof fetch;
 }
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
@@ -233,6 +238,8 @@ export function createDisabledDeviceSyncService(): DeviceSyncService {
 export function createLocalDeviceSyncService({
   connectService,
   secretService,
+  env = process.env,
+  fetch: fetchImpl = fetch,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   return {
@@ -252,12 +259,16 @@ export function createLocalDeviceSyncService({
       }
       throw deviceSyncDisabled();
     },
-    async listDevices() {
+    async listDevices(scope) {
       if (!connectService) {
         throw deviceSyncDisabled();
       }
-      await connectService.restoreSyncSession();
-      throw deviceSyncDisabled();
+      const accessToken = await restoreAccessToken(connectService);
+      const path =
+        scope === undefined
+          ? "/api/v1/sync/team/devices"
+          : `/api/v1/sync/team/devices?scope=${encodeURIComponent(scope)}`;
+      return await fetchDeviceSyncJson(accessToken, env, fetchImpl, path).then(devicesFromCloud);
     },
     async getDevice() {
       await restoreSessionOrDisabled(connectService);
@@ -396,6 +407,95 @@ async function restoreSessionOrDisabled(
   await connectService.restoreSyncSession();
 }
 
+async function restoreAccessToken(
+  connectService: Pick<ConnectService, "restoreSyncSession">,
+): Promise<string> {
+  const session = await connectService.restoreSyncSession();
+  if (
+    !isRecord(session) ||
+    typeof session.accessToken !== "string" ||
+    !session.accessToken.trim()
+  ) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to restore Connect access token",
+      500,
+    );
+  }
+  return session.accessToken;
+}
+
+async function fetchDeviceSyncJson(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+): Promise<unknown> {
+  const clientRequestId = `app:${randomUUID()}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(`${normalizeDeviceSyncApiUrl(env.CONNECT_API_URL)}${path}`, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "x-wf-client-request-id": clientRequestId,
+      },
+    });
+  } catch (error) {
+    throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
+  }
+  const requestId = response.headers.get("x-request-id")?.trim() || "none";
+  const metadata = `(clientRequestId=${clientRequestId}, requestId=${requestId})`;
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
+  }
+  if (!response.ok) {
+    throw deviceSyncApiError(response.status, bodyText, metadata);
+  }
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      `Failed to parse response: ${errorMessage(error)} ${metadata}`,
+      500,
+    );
+  }
+}
+
+function devicesFromCloud(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse devices response", 500);
+  }
+  return value.map(deviceFromCloud);
+}
+
+function deviceFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  const trustState = requiredTrustState(value.trustState ?? value.trust_state);
+  return {
+    id: requiredString(value.id, "device response"),
+    userId: requiredString(value.userId ?? value.user_id, "device response"),
+    displayName: requiredString(value.displayName ?? value.display_name, "device response"),
+    platform: requiredString(value.platform, "device response"),
+    devicePublicKey: optionalDeviceString(
+      value.devicePublicKey ?? value.device_public_key,
+      "device response",
+    ),
+    trustState,
+    trustedKeyVersion: optionalNumber(value.trustedKeyVersion ?? value.trusted_key_version),
+    osVersion: optionalDeviceString(value.osVersion ?? value.os_version, "device response"),
+    appVersion: optionalDeviceString(value.appVersion ?? value.app_version, "device response"),
+    lastSeenAt: optionalDeviceString(value.lastSeenAt ?? value.last_seen_at, "device response"),
+    createdAt: requiredString(value.createdAt ?? value.created_at, "device response"),
+  };
+}
+
 async function getLocalDeviceId(secretService: SecretService): Promise<string | null> {
   const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
   if (rawIdentity) {
@@ -487,6 +587,73 @@ function assertOptionalI32Field(record: Record<string, unknown>, key: string): v
   if (value !== undefined && value !== null && !isI32Integer(value)) {
     throw new Error("invalid sync identity");
   }
+}
+
+function deviceSyncApiError(
+  status: number,
+  bodyText: string,
+  metadata: string,
+): DeviceSyncServiceError {
+  const trimmed = bodyText.trim();
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (isRecord(parsed)) {
+        const code = optionalString(parsed.code) ?? optionalString(parsed.error) ?? "";
+        const message = optionalString(parsed.message) ?? `HTTP ${status}`;
+        return new DeviceSyncServiceError(
+          "internal_error",
+          `API error (${status}): ${code}: ${message} ${metadata}`,
+          500,
+        );
+      }
+    } catch {
+      return new DeviceSyncServiceError(
+        "internal_error",
+        `API error (${status}): Request failed: ${trimmed} ${metadata}`,
+        500,
+      );
+    }
+  }
+  return new DeviceSyncServiceError(
+    "internal_error",
+    `API error (${status}): Request failed ${metadata}`,
+    500,
+  );
+}
+
+function requiredString(value: unknown, context: string): string {
+  if (typeof value !== "string") {
+    throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredTrustState(value: unknown): string {
+  if (value !== "untrusted" && value !== "trusted" && value !== "revoked") {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return value;
+}
+
+function optionalNumber(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "number") {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return value;
+}
+
+function optionalDeviceString(value: unknown, context: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
 }
 
 function isI32Integer(value: unknown): value is number {
@@ -641,6 +808,15 @@ function skipJsonComposite(rawJson: string, index: number): number {
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function normalizeDeviceSyncApiUrl(value: string | undefined): string {
+  const trimmed = value?.trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_DEVICE_SYNC_API_URL;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
