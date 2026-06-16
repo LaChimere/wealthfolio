@@ -237,6 +237,10 @@ export function createLocalDeviceSyncService({
   const disabledService = createDisabledDeviceSyncService();
   return {
     ...disabledService,
+    async registerDevice() {
+      await restoreSessionOrDisabled(connectService);
+      throw deviceSyncDisabled();
+    },
     async getCurrentDevice() {
       if (!connectService || !secretService) {
         throw deviceSyncDisabled();

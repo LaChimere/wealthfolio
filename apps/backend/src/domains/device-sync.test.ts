@@ -20,6 +20,39 @@ function createMemorySecretService(): SecretService & { entries: Map<string, str
 }
 
 describe("TS local device sync service", () => {
+  test("requires Connect session before device registration and keeps it feature-gated after restore", async () => {
+    const noSessionService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => {
+          throw Object.assign(new Error("No sync session configured"), {
+            code: "forbidden",
+            status: 403,
+          });
+        },
+      },
+    });
+    const request = {
+      displayName: "MacBook",
+      platform: "macos",
+      instanceId: "instance-1",
+    };
+
+    await expect(noSessionService.registerDevice(request)).rejects.toMatchObject({
+      code: "forbidden",
+      status: 403,
+    });
+
+    const restoredService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+    });
+    await expect(restoredService.registerDevice(request)).rejects.toMatchObject({
+      code: "not_implemented",
+      status: 501,
+    });
+  });
+
   test("reports missing current device id after restoring Connect session", async () => {
     const secretService = createMemorySecretService();
     const service = createLocalDeviceSyncService({

@@ -3670,6 +3670,15 @@ contract:
   `state`/`approve-overwrite` returning `Flow not found`, and `flow/cancel`
   returning the Rust-shaped local success no-op. Dual GPT/Claude xhigh review
   found no actionable issues.
+- `pr5-device-sync-register-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/device/register` restoring the Connect session before deferred
+  cloud enrollment work, returning the same forbidden session error when no
+  session is configured, remaining feature-gated after a valid session, and dual
+  GPT/Claude xhigh review finding no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

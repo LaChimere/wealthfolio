@@ -1667,15 +1667,22 @@ describe("TS backend runtime composition", () => {
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
         new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(501);
+      }
+
+      const registerDeviceWithoutSessionResponse = await fetch(
         jsonRequest("/api/v1/sync/device/register", {
           displayName: "MacBook",
           platform: "macos",
           instanceId: "instance-1",
         }),
-      ]) {
-        const response = await fetch(request);
-        expect(response.status).toBe(501);
-      }
+      );
+      expect(registerDeviceWithoutSessionResponse.status).toBe(403);
+      await expect(registerDeviceWithoutSessionResponse.json()).resolves.toMatchObject({
+        message: "No sync session configured",
+      });
 
       const currentDeviceWithoutSessionResponse = await fetch(
         `${server.baseUrl}/api/v1/sync/device/current`,
