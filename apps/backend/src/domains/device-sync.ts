@@ -249,6 +249,8 @@ export function createLocalDeviceSyncService({
   onPairingComplete,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
+  const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
+
   return {
     ...disabledService,
     async registerDevice(request) {
@@ -646,15 +648,55 @@ export function createLocalDeviceSyncService({
           phase: { phase: "success" },
         };
       }
+      if (db) {
+        const summary = localOverwriteRiskSummary(db);
+        if (summary.totalRows > 0) {
+          const flowId = randomUUID();
+          const phase = {
+            phase: "overwrite_required",
+            info: {
+              localRows: summary.totalRows,
+              nonEmptyTables: summary.nonEmptyTables,
+            },
+          };
+          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          return { flowId, phase };
+        }
+      }
       throw deviceSyncDisabled();
     },
-    async getPairingFlowState() {
-      throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+    async getPairingFlowState(request) {
+      const flow = pairingFlows.get(request.flowId);
+      if (!flow) {
+        throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+      }
+      return { flowId: request.flowId, phase: flow.phase };
     },
-    async approvePairingOverwrite() {
-      throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+    async approvePairingOverwrite(request) {
+      const flow = pairingFlows.get(request.flowId);
+      if (!flow) {
+        throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
+      }
+      throw deviceSyncDisabled();
     },
-    cancelPairingFlow(request) {
+    async cancelPairingFlow(request) {
+      const flow = pairingFlows.get(request.flowId);
+      try {
+        if (flow) {
+          await abortPairingFlowLocalState({
+            connectService,
+            secretService,
+            db,
+            env,
+            fetchImpl,
+            pairingId: flow.pairingId,
+          });
+        }
+      } catch (error) {
+        console.warn(`[DeviceSync] Failed to clean up pairing flow: ${errorMessage(error)}`);
+      } finally {
+        pairingFlows.delete(request.flowId);
+      }
       return {
         flowId: request.flowId,
         phase: { phase: "success" },
@@ -1209,6 +1251,7 @@ async function getLocalSyncIdentityDeviceId(
 
 function parseStoredSyncIdentity(rawIdentity: string): {
   deviceId: string | null;
+  deviceNonce: string | null;
 } {
   assertNoDuplicateSyncIdentityFields(rawIdentity);
   assertRawI32Token(rawIdentity, "version", false);
@@ -1224,7 +1267,10 @@ function parseStoredSyncIdentity(rawIdentity: string): {
   assertOptionalI32Field(parsed, "keyVersion");
   assertOptionalStringField(parsed, "deviceSecretKey");
   assertOptionalStringField(parsed, "devicePublicKey");
-  return { deviceId: optionalString(parsed.deviceId) };
+  return {
+    deviceId: optionalString(parsed.deviceId),
+    deviceNonce: optionalString(parsed.deviceNonce),
+  };
 }
 
 const SYNC_IDENTITY_FIELDS = new Set([
@@ -1607,6 +1653,157 @@ function localBootstrapRequired(db: Database, deviceId: string): boolean {
   }
 }
 
+async function abortPairingFlowLocalState({
+  connectService,
+  secretService,
+  db,
+  env,
+  fetchImpl,
+  pairingId,
+}: {
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined;
+  secretService: SecretService | undefined;
+  db: Database | undefined;
+  env: NodeJS.ProcessEnv;
+  fetchImpl: typeof fetch;
+  pairingId: string;
+}): Promise<void> {
+  let deviceId: string | null | undefined;
+  if (secretService) {
+    try {
+      deviceId = await getLocalSyncIdentityDeviceId(secretService);
+    } catch (error) {
+      console.warn(`[DeviceSync] Failed to read sync identity while cancelling flow: ${error}`);
+    }
+  }
+
+  if (deviceId && connectService) {
+    try {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      try {
+        await fetchDeviceSyncJson(
+          accessToken,
+          env,
+          fetchImpl,
+          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/cancel`,
+          { method: "POST", deviceId },
+        );
+      } catch {
+        // Rust intentionally ignores cloud pairing-cancel failures during flow abort.
+      }
+      try {
+        await fetchDeviceSyncJson(
+          accessToken,
+          env,
+          fetchImpl,
+          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+          { method: "DELETE" },
+        );
+      } catch (error) {
+        console.warn(
+          `[DeviceSync] Failed to delete confirmed pairing device while cancelling flow: ${errorMessage(error)}`,
+        );
+      }
+    } catch {
+      // Match Rust's best-effort abort: local cleanup still proceeds if token minting fails.
+    }
+  }
+
+  if (secretService) {
+    try {
+      await clearLocalSyncIdentityBestEffort(secretService);
+    } catch (error) {
+      console.warn(`[DeviceSync] Failed to clear sync identity while cancelling flow: ${error}`);
+    }
+    try {
+      await secretService.deleteSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+    } catch (error) {
+      console.warn(`[DeviceSync] Failed to delete sync device ID while cancelling flow: ${error}`);
+    }
+  }
+  if (db) {
+    try {
+      resetLocalSyncSession(db);
+    } catch (error) {
+      console.warn(
+        `[DeviceSync] Failed to reset local sync session while cancelling flow: ${error}`,
+      );
+    }
+  }
+}
+
+async function clearLocalSyncIdentityBestEffort(secretService: SecretService): Promise<void> {
+  let deviceNonce: string | null = null;
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity) {
+    try {
+      deviceNonce = parseStoredSyncIdentity(rawIdentity).deviceNonce;
+    } catch (error) {
+      console.warn(`[DeviceSync] Failed to parse sync identity while cancelling flow: ${error}`);
+    }
+  }
+  await secretService.setSecret(
+    DEVICE_SYNC_IDENTITY_KEY,
+    JSON.stringify({
+      version: 2,
+      deviceNonce,
+      deviceId: null,
+      rootKey: null,
+      keyVersion: null,
+      deviceSecretKey: null,
+      devicePublicKey: null,
+    }),
+  );
+}
+
+function resetLocalSyncSession(db: Database): void {
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    for (const tableName of [
+      "sync_outbox",
+      "sync_entity_metadata",
+      "sync_applied_events",
+      "sync_table_state",
+      "sync_device_config",
+    ]) {
+      if (sqliteTableExists(db, tableName)) {
+        db.prepare(`DELETE FROM "${tableName}"`).run();
+      }
+    }
+    if (sqliteTableExists(db, "sync_cursor")) {
+      db.prepare(
+        `
+          INSERT INTO sync_cursor (id, cursor, updated_at)
+          VALUES (1, 0, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            cursor = excluded.cursor,
+            updated_at = excluded.updated_at
+        `,
+      ).run(now);
+    }
+    if (sqliteTableExists(db, "sync_engine_state")) {
+      db.prepare(
+        `
+          INSERT INTO sync_engine_state (
+            id, lock_version, last_push_at, last_pull_at, last_error,
+            consecutive_failures, next_retry_at, last_cycle_status, last_cycle_duration_ms
+          )
+          VALUES (1, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL)
+          ON CONFLICT(id) DO UPDATE SET
+            lock_version = excluded.lock_version,
+            last_push_at = excluded.last_push_at,
+            last_pull_at = excluded.last_pull_at,
+            last_error = excluded.last_error,
+            consecutive_failures = excluded.consecutive_failures,
+            next_retry_at = excluded.next_retry_at,
+            last_cycle_status = excluded.last_cycle_status,
+            last_cycle_duration_ms = excluded.last_cycle_duration_ms
+        `,
+      ).run();
+    }
+  })();
+}
+
 async function notifyPairingComplete(
   onPairingComplete: (() => Promise<unknown> | unknown) | undefined,
 ): Promise<void> {
@@ -1763,6 +1960,17 @@ function sqliteColumnExists(db: Database, tableName: string, columnName: string)
     .query<{ name: string }, []>(`PRAGMA table_info(${tableName})`)
     .all()
     .some((column) => column.name === columnName);
+}
+
+function sqliteTableExists(db: Database, tableName: string): boolean {
+  return (
+    db
+      .query<
+        { name: string },
+        [string]
+      >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(tableName) !== null
+  );
 }
 
 function deviceSyncClientRequestId(deviceId: string | undefined): string {

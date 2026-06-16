@@ -214,8 +214,9 @@ describe("TS local device sync service", () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
       "sync_identity",
-      JSON.stringify({ version: 2, deviceId: "device-1" }),
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
     );
+    secretService.entries.set("sync_device_id", "device-1");
     const noSessionService = createLocalDeviceSyncService({
       secretService,
       connectService: {
@@ -271,8 +272,9 @@ describe("TS local device sync service", () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
       "sync_identity",
-      JSON.stringify({ version: 2, deviceId: "device-1" }),
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
     );
+    secretService.entries.set("sync_device_id", "device-1");
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -291,6 +293,184 @@ describe("TS local device sync service", () => {
     }
   });
 
+  test("returns overwrite flow when pairing begin confirm would replace local data", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE quotes (id TEXT PRIMARY KEY NOT NULL, source TEXT NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+      INSERT INTO quotes (id, source) VALUES ('quote-1', 'MANUAL'), ('quote-2', 'YAHOO');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const result = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      });
+      expect(result).toMatchObject({
+        phase: {
+          phase: "overwrite_required",
+          info: {
+            localRows: 2,
+            nonEmptyTables: [
+              { table: "accounts", rows: 1 },
+              { table: "quotes", rows: 1 },
+            ],
+          },
+        },
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+      ]);
+
+      const flowId = (result as { flowId: string }).flowId;
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual(result);
+      await expect(service.approvePairingOverwrite?.({ flowId })).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      await expect(service.cancelPairingFlow?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "success" },
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/cancel",
+          method: "POST",
+          body: null,
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1",
+          method: "DELETE",
+          body: null,
+          deviceId: "",
+        },
+      ]);
+      await expect(service.getPairingFlowState?.({ flowId })).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Flow not found",
+        status: 500,
+      });
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toEqual({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(secretService.entries.has("sync_device_id")).toBe(false);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_device_config").get()
+          ?.count,
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("removes pairing flow when cancel cleanup cannot update secrets", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService: {
+        ...secretService,
+        setSecret() {
+          throw new Error("keyring unavailable");
+        },
+      },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
+    });
+
+    try {
+      const result = (await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      })) as { flowId: string };
+
+      await expect(service.cancelPairingFlow?.({ flowId: result.flowId })).resolves.toEqual({
+        flowId: result.flowId,
+        phase: { phase: "success" },
+      });
+      await expect(service.getPairingFlowState?.({ flowId: result.flowId })).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Flow not found",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports missing pairing flows and cancels missing flows locally", async () => {
     const service = createLocalDeviceSyncService({});
 
@@ -304,7 +484,7 @@ describe("TS local device sync service", () => {
       message: "Flow not found",
       status: 500,
     });
-    expect(service.cancelPairingFlow?.({ flowId: "flow-1" })).toEqual({
+    await expect(service.cancelPairingFlow?.({ flowId: "flow-1" })).resolves.toEqual({
       flowId: "flow-1",
       phase: { phase: "success" },
     });
