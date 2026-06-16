@@ -3863,6 +3863,14 @@ contract:
   already-confirmed/already-completed retries, persisting freshness gates, and
   returning Rust-shaped `already_complete` when bootstrap is not required while
   keeping real bootstrap paths feature-gated.
+- `pr5-device-sync-pairing-flow-begin-success`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes pairing
+  `flow/begin` reusing cloud confirm, tolerating already-confirmed retries,
+  persisting freshness gates, returning Rust-shaped success flow responses when
+  bootstrap is not required, and keeping real bootstrap/overwrite flow paths
+  feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -604,8 +604,36 @@ export function createLocalDeviceSyncService({
       }
       throw deviceSyncDisabled();
     },
-    async beginPairingConfirm() {
-      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
+    async beginPairingConfirm(request) {
+      const { accessToken, deviceId } =
+        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+          connectService,
+          secretService,
+        );
+      try {
+        await fetchDeviceSyncJson(
+          accessToken,
+          env,
+          fetchImpl,
+          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(request.pairingId)}/confirm`,
+          {
+            method: "POST",
+            deviceId,
+            body: { proof: request.proof },
+          },
+        ).then(confirmPairingResponseFromCloud);
+      } catch (error) {
+        if (!isPairingAlreadyConfirmedError(error)) {
+          throw error;
+        }
+      }
+      applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
+      if (db && !localBootstrapRequired(db, deviceId)) {
+        return {
+          flowId: randomUUID(),
+          phase: { phase: "success" },
+        };
+      }
       throw deviceSyncDisabled();
     },
     async getPairingFlowState() {

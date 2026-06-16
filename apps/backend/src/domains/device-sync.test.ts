@@ -236,10 +236,59 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
     });
     await expect(
       restoredService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
     ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+  });
+
+  test("returns success flow when pairing begin confirm needs no bootstrap", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
+    });
+
+    try {
+      await expect(
+        service.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
+      ).resolves.toMatchObject({ phase: { phase: "success" } });
+    } finally {
+      db.close();
+    }
   });
 
   test("reports missing pairing flows and cancels missing flows locally", async () => {
