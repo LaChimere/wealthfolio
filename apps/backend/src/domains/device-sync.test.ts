@@ -626,7 +626,7 @@ describe("TS local device sync service", () => {
     ]);
   });
 
-  test("requires Connect session before reset team sync and keeps it feature-gated after restore", async () => {
+  test("requires Connect session before reset team sync and calls cloud after restore", async () => {
     const noSessionService = createLocalDeviceSyncService({
       connectService: {
         restoreSyncSession: () => {
@@ -642,15 +642,44 @@ describe("TS local device sync service", () => {
       status: 403,
     });
 
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
     const restoredService = createLocalDeviceSyncService({
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 1, reset_at: "2026-01-01T00:00:00Z" });
+      },
     });
-    await expect(restoredService.resetTeamSync?.({ reason: "test" })).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+    await expect(restoredService.resetTeamSync?.({ reason: "test" })).resolves.toEqual({
+      success: true,
+      keyVersion: 1,
+      resetAt: "2026-01-01T00:00:00Z",
     });
+    await expect(restoredService.resetTeamSync?.({})).resolves.toMatchObject({ success: true });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/reset",
+        method: "POST",
+        body: JSON.stringify({ reason: "test" }),
+        deviceId: "",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/reset",
+        method: "POST",
+        body: JSON.stringify({}),
+        deviceId: "",
+      },
+    ]);
   });
 
   test("reports missing device id for pairing operations after session restore", async () => {

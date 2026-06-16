@@ -392,9 +392,18 @@ export function createLocalDeviceSyncService({
         },
       ).then(commitRotateKeysResponseFromCloud);
     },
-    async resetTeamSync() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async resetTeamSync(request) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/keys/reset",
+        {
+          method: "POST",
+          body: request.reason === undefined ? {} : { reason: request.reason },
+        },
+      ).then(resetTeamSyncResponseFromCloud);
     },
     async createPairing() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
@@ -730,6 +739,21 @@ function commitRotateKeysResponseFromCloud(value: unknown): Record<string, unkno
   return {
     success: value.success,
     keyVersion: requiredI32(value.keyVersion ?? value.key_version, "commit rotate keys response"),
+  };
+}
+
+function resetTeamSyncResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse reset team sync response",
+      500,
+    );
+  }
+  return {
+    success: value.success,
+    keyVersion: requiredI32(value.keyVersion ?? value.key_version, "reset team sync response"),
+    resetAt: optionalDeviceString(value.resetAt ?? value.reset_at, "reset team sync response"),
   };
 }
 

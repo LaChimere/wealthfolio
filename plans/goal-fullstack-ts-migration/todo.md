@@ -3800,6 +3800,14 @@ contract:
   Rust-compatible `x-wf-device-id` headers and snake_case payloads, and parsing
   commit success responses. Dual GPT/Claude xhigh review found no actionable
   issues.
+- `pr5-device-sync-reset-team-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/team/reset` restoring the Connect session, posting
+  `/api/v1/sync/team/keys/reset`, omitting `reason` when absent, parsing
+  `ResetTeamSyncResponse`, preserving no-session errors, and dual GPT/Claude
+  xhigh review finding no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
