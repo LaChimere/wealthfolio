@@ -446,21 +446,113 @@ describe("TS local device sync service", () => {
     ).rejects.toMatchObject({ code: "bad_request" });
   });
 
-  test("keeps team key operations feature-gated when device id is configured", async () => {
+  test("runs team key phase-one operations through cloud when device id is configured", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      deviceId: string;
+      requestId: string;
+    }> = [];
+    const service = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        if (String(input).endsWith("/rotate")) {
+          return Response.json({ challenge: "challenge", nonce: "nonce", new_key_version: 2 });
+        }
+        return Response.json({
+          mode: "BOOTSTRAP",
+          challenge: "challenge",
+          nonce: "nonce",
+          key_version: 1,
+        });
+      },
+    });
+
+    await expect(service.initializeTeamKeys?.()).resolves.toEqual({
+      mode: "BOOTSTRAP",
+      challenge: "challenge",
+      nonce: "nonce",
+      key_version: 1,
+    });
+    await expect(service.rotateTeamKeys?.()).resolves.toEqual({
+      challenge: "challenge",
+      nonce: "nonce",
+      newKeyVersion: 2,
+    });
+    expect(
+      requests.map((request) => ({
+        url: request.url,
+        method: request.method,
+        body: request.body,
+        deviceId: request.deviceId,
+      })),
+    ).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/initialize",
+        method: "POST",
+        body: JSON.stringify({ device_id: "device-1" }),
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/keys/rotate",
+        method: "POST",
+        body: JSON.stringify({ initiator_device_id: "device-1" }),
+        deviceId: "device-1",
+      },
+    ]);
+    expect(requests.map((request) => request.requestId)).toEqual([
+      expect.stringMatching(/^device-1:/),
+      expect.stringMatching(/^device-1:/),
+    ]);
+  });
+
+  test("preserves Rust initialize team key response field names", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const responses = [
+      {
+        mode: "PAIRING_REQUIRED",
+        e2ee_key_version: 3,
+        require_sas: true,
+        pairing_ttl_seconds: 300,
+        trusted_devices: [{ id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null }],
+      },
+      { mode: "READY", e2ee_key_version: 4 },
+    ];
     const service = createLocalDeviceSyncService({
       secretService,
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () => Response.json(responses.shift()),
     });
 
-    await expect(service.initializeTeamKeys?.()).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+    await expect(service.initializeTeamKeys?.()).resolves.toEqual({
+      mode: "PAIRING_REQUIRED",
+      e2ee_key_version: 3,
+      require_sas: true,
+      pairing_ttl_seconds: 300,
+      trusted_devices: [{ id: "device-2", name: "iPhone", platform: "ios", lastSeenAt: null }],
     });
-    await expect(service.rotateTeamKeys?.()).rejects.toMatchObject({ code: "not_implemented" });
+    await expect(service.initializeTeamKeys?.()).resolves.toEqual({
+      mode: "READY",
+      e2ee_key_version: 4,
+    });
   });
 
   test("requires Connect session before reset team sync and keeps it feature-gated after restore", async () => {

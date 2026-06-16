@@ -310,16 +310,42 @@ export function createLocalDeviceSyncService({
       ).then(successResponseFromCloud);
     },
     async initializeTeamKeys() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/keys/initialize",
+        {
+          method: "POST",
+          deviceId,
+          body: { device_id: deviceId },
+        },
+      ).then(initializeKeysResultFromCloud);
     },
     async commitInitializeTeamKeys() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
       throw deviceSyncDisabled();
     },
     async rotateTeamKeys() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/keys/rotate",
+        {
+          method: "POST",
+          deviceId,
+          body: { initiator_device_id: deviceId },
+        },
+      ).then(rotateKeysResponseFromCloud);
     },
     async commitRotateTeamKeys() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
@@ -410,7 +436,18 @@ async function requireSessionDeviceIdOrDisabled(
   connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
   secretService: SecretService | undefined,
 ): Promise<string> {
-  await restoreSessionOrDisabled(connectService);
+  const { deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+    connectService,
+    secretService,
+  );
+  return deviceId;
+}
+
+async function requireSessionDeviceIdWithTokenOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+  secretService: SecretService | undefined,
+): Promise<{ accessToken: string; deviceId: string }> {
+  const accessToken = await restoreAccessTokenOrDisabled(connectService);
   if (!secretService) {
     throw deviceSyncDisabled();
   }
@@ -418,7 +455,7 @@ async function requireSessionDeviceIdOrDisabled(
   if (!deviceId) {
     throw new DeviceSyncServiceError("bad_request", "No device ID configured", 400);
   }
-  return deviceId;
+  return { accessToken, deviceId };
 }
 
 async function restoreSessionOrDisabled(
@@ -478,18 +515,22 @@ async function fetchDeviceSyncJson(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; deviceId?: string } = {},
 ): Promise<unknown> {
-  const clientRequestId = `app:${randomUUID()}`;
+  const clientRequestId = deviceSyncClientRequestId(options.deviceId);
   let response: Response;
   try {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+      "x-wf-client-request-id": clientRequestId,
+    };
+    if (options.deviceId !== undefined) {
+      headers["x-wf-device-id"] = options.deviceId;
+    }
     response = await fetchImpl(`${normalizeDeviceSyncApiUrl(env.CONNECT_API_URL)}${path}`, {
       method: options.method,
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-        "x-wf-client-request-id": clientRequestId,
-      },
+      headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
   } catch (error) {
@@ -552,6 +593,99 @@ function successResponseFromCloud(value: unknown): Record<string, unknown> {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse success response", 500);
   }
   return { success: value.success };
+}
+
+function initializeKeysResultFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse initialize keys response",
+      500,
+    );
+  }
+  const mode = requiredString(value.mode, "initialize keys response");
+  if (mode === "BOOTSTRAP") {
+    return {
+      mode,
+      challenge: requiredString(value.challenge, "initialize keys response"),
+      nonce: requiredString(value.nonce, "initialize keys response"),
+      key_version: requiredI32(value.keyVersion ?? value.key_version, "initialize keys response"),
+    };
+  }
+  if (mode === "PAIRING_REQUIRED") {
+    return {
+      mode,
+      e2ee_key_version: requiredI32(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "initialize keys response",
+      ),
+      require_sas: requiredBoolean(
+        value.requireSas ?? value.require_sas,
+        "initialize keys response",
+      ),
+      pairing_ttl_seconds: requiredI32(
+        value.pairingTtlSeconds ?? value.pairing_ttl_seconds,
+        "initialize keys response",
+      ),
+      trusted_devices: trustedDevicesFromCloud(value.trustedDevices ?? value.trusted_devices),
+    };
+  }
+  if (mode === "READY") {
+    return {
+      mode,
+      e2ee_key_version: requiredI32(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "initialize keys response",
+      ),
+    };
+  }
+  throw new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse initialize keys response",
+    500,
+  );
+}
+
+function rotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse rotate keys response", 500);
+  }
+  return {
+    challenge: requiredString(value.challenge, "rotate keys response"),
+    nonce: requiredString(value.nonce, "rotate keys response"),
+    newKeyVersion: requiredI32(
+      value.newKeyVersion ?? value.new_key_version,
+      "rotate keys response",
+    ),
+  };
+}
+
+function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse initialize keys response",
+      500,
+    );
+  }
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new DeviceSyncServiceError(
+        "internal_error",
+        "Failed to parse initialize keys response",
+        500,
+      );
+    }
+    return {
+      id: requiredString(entry.id, "initialize keys response"),
+      name: requiredString(entry.name, "initialize keys response"),
+      platform: requiredString(entry.platform, "initialize keys response"),
+      lastSeenAt: optionalDeviceString(
+        entry.lastSeenAt ?? entry.last_seen_at,
+        "initialize keys response",
+      ),
+    };
+  });
 }
 
 async function getLocalDeviceId(secretService: SecretService): Promise<string | null> {
@@ -682,6 +816,20 @@ function deviceSyncApiError(
 
 function requiredString(value: unknown, context: string): string {
   if (typeof value !== "string") {
+    throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredBoolean(value: unknown, context: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredI32(value: unknown, context: string): number {
+  if (!isI32Integer(value)) {
     throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
@@ -871,6 +1019,26 @@ function optionalString(value: unknown): string | null {
 function normalizeDeviceSyncApiUrl(value: string | undefined): string {
   const trimmed = value?.trim().replace(/\/+$/, "");
   return trimmed || DEFAULT_DEVICE_SYNC_API_URL;
+}
+
+function deviceSyncClientRequestId(deviceId: string | undefined): string {
+  const requestUuid = randomUUID();
+  const trimmedDeviceId = deviceId?.trim();
+  if (trimmedDeviceId && isLogSafeRequestId(trimmedDeviceId)) {
+    const candidate = `${trimmedDeviceId}:${requestUuid}`;
+    if (isLogSafeRequestId(candidate)) {
+      return candidate;
+    }
+  }
+  return `app:${requestUuid}`;
+}
+
+function isLogSafeRequestId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 128 &&
+    [...value].every((char) => /[A-Za-z0-9._:-]/.test(char))
+  );
 }
 
 function errorMessage(error: unknown): string {
