@@ -810,6 +810,87 @@ describe("TS local device sync service", () => {
     ]);
   });
 
+  test("runs claimer pairing operations through cloud when device id is configured", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (String(input).endsWith("/messages")) {
+          return Response.json({
+            session_status: "approved",
+            messages: [
+              {
+                id: "message-1",
+                payload_type: "rk_transfer_v1",
+                payload: "payload",
+                created_at: "2026-01-01T00:00:00Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          session_id: "pairing-1",
+          issuer_ephemeral_pub: "issuer-key",
+          e2ee_key_version: 2,
+          require_sas: true,
+          expires_at: "2026-01-01T00:00:00Z",
+        });
+      },
+    });
+
+    await expect(
+      service.claimPairing?.({ code: "123456", ephemeralPublicKey: "public-key" }),
+    ).resolves.toEqual({
+      sessionId: "pairing-1",
+      issuerEphemeralPub: "issuer-key",
+      e2eeKeyVersion: 2,
+      requireSas: true,
+      expiresAt: "2026-01-01T00:00:00Z",
+    });
+    await expect(service.getPairingMessages?.("pairing-1")).resolves.toEqual({
+      sessionStatus: "approved",
+      messages: [
+        {
+          id: "message-1",
+          payloadType: "rk_transfer_v1",
+          payload: "payload",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
+      code: "not_implemented",
+    });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/claim",
+        method: "POST",
+        body: JSON.stringify({ code: "123456", ephemeral_public_key: "public-key" }),
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/messages",
+        method: "GET",
+        body: null,
+        deviceId: "device-1",
+      },
+    ]);
+  });
+
   test("reports sync identity preconditions for composite pairing operations", async () => {
     const secretService = createMemorySecretService();
     const service = createLocalDeviceSyncService({
