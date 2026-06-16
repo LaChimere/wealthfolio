@@ -3855,6 +3855,14 @@ contract:
   complete-pairing post-success background-start notification as a non-blocking
   best-effort hook. Dual GPT/Claude xhigh review found no actionable issues
   after the timestamp parser and fire-and-forget hook fixes.
+- `pr5-device-sync-composite-confirm-already-complete`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `confirm-with-bootstrap` reusing the cloud confirm path, tolerating
+  already-confirmed/already-completed retries, persisting freshness gates, and
+  returning Rust-shaped `already_complete` when bootstrap is not required while
+  keeping real bootstrap paths feature-gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

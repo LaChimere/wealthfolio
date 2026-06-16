@@ -121,6 +121,7 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
     });
 
     await expect(service.getCurrentDevice()).rejects.toMatchObject({
@@ -191,6 +192,7 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
     });
     const request = { pairingId: "pairing-1", proof: "proof" };
 
@@ -1197,6 +1199,7 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
     });
 
     await expect(
@@ -1213,5 +1216,86 @@ describe("TS local device sync service", () => {
         allowOverwrite: false,
       }),
     ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+  });
+
+  test("returns already complete from composite confirm when bootstrap is not required", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json(
+          { code: "PAIRING_ALREADY_CONFIRMED", message: "already confirmed" },
+          { status: 409 },
+        );
+      },
+    });
+
+    try {
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "already_complete",
+        message: "No bootstrap needed",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
   });
 });

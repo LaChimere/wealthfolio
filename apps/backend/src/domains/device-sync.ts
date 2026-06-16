@@ -570,8 +570,38 @@ export function createLocalDeviceSyncService({
       await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
       throw deviceSyncDisabled();
     },
-    async confirmPairingWithBootstrap() {
-      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
+    async confirmPairingWithBootstrap(request) {
+      const { accessToken, deviceId } =
+        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+          connectService,
+          secretService,
+        );
+      try {
+        await fetchDeviceSyncJson(
+          accessToken,
+          env,
+          fetchImpl,
+          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(request.pairingId)}/confirm`,
+          {
+            method: "POST",
+            deviceId,
+            body: request.proof === undefined ? {} : { proof: request.proof },
+          },
+        ).then(confirmPairingResponseFromCloud);
+      } catch (error) {
+        if (!isPairingAlreadyConfirmedError(error)) {
+          throw error;
+        }
+      }
+      applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
+      if (db && !localBootstrapRequired(db, deviceId)) {
+        return {
+          status: "already_complete",
+          message: "No bootstrap needed",
+          localRows: null,
+          nonEmptyTables: null,
+        };
+      }
       throw deviceSyncDisabled();
     },
     async beginPairingConfirm() {
@@ -597,6 +627,17 @@ async function requireCompositePairingPrerequisitesOrDisabled(
   connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
   secretService: SecretService | undefined,
 ): Promise<string> {
+  const { deviceId } = await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+    connectService,
+    secretService,
+  );
+  return deviceId;
+}
+
+async function requireCompositePairingPrerequisitesWithTokenOrDisabled(
+  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
+  secretService: SecretService | undefined,
+): Promise<{ accessToken: string; deviceId: string }> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
@@ -607,8 +648,8 @@ async function requireCompositePairingPrerequisitesOrDisabled(
   if (deviceId === null) {
     throw new DeviceSyncServiceError("internal_error", "No device ID configured", 500);
   }
-  await restoreSessionOrDisabled(connectService);
-  return deviceId;
+  const accessToken = await restoreAccessTokenOrDisabled(connectService);
+  return { accessToken, deviceId };
 }
 
 async function requireSessionDeviceIdWithTokenOrDisabled(
@@ -624,15 +665,6 @@ async function requireSessionDeviceIdWithTokenOrDisabled(
     throw new DeviceSyncServiceError("bad_request", "No device ID configured", 400);
   }
   return { accessToken, deviceId };
-}
-
-async function restoreSessionOrDisabled(
-  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
-): Promise<void> {
-  if (!connectService) {
-    throw deviceSyncDisabled();
-  }
-  await connectService.restoreSyncSession();
 }
 
 async function restoreAccessToken(
@@ -1239,6 +1271,19 @@ function requiredString(value: unknown, context: string): string {
   return value;
 }
 
+function isPairingAlreadyConfirmedError(error: unknown): boolean {
+  if (!(error instanceof DeviceSyncServiceError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    /api error \((400|409)\)/.test(message) &&
+    (message.includes("already_confirmed") ||
+      message.includes("already confirmed") ||
+      message.includes("already completed"))
+  );
+}
+
 function requiredBoolean(value: unknown, context: string): boolean {
   if (typeof value !== "boolean") {
     throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
@@ -1493,6 +1538,32 @@ function applyMinSnapshotCreatedAtBestEffort(
     ).run(deviceId, normalized);
   } catch (error) {
     console.warn(`[DeviceSync] Failed to persist freshness gate to SQLite: ${errorMessage(error)}`);
+  }
+}
+
+function localBootstrapRequired(db: Database, deviceId: string): boolean {
+  try {
+    const row = db
+      .query<{ last_bootstrap_at: string | null }, [string]>(
+        `
+          SELECT last_bootstrap_at
+          FROM sync_device_config
+          WHERE device_id = ?
+        `,
+      )
+      .get(deviceId);
+    if (!row || row.last_bootstrap_at === null) {
+      return true;
+    }
+    const cycleStatus = db
+      .query<
+        { last_cycle_status: string | null },
+        []
+      >("SELECT last_cycle_status FROM sync_engine_state WHERE id = 1")
+      .get()?.last_cycle_status;
+    return cycleStatus === "stale_cursor";
+  } catch {
+    return true;
   }
 }
 
