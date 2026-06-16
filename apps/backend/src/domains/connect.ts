@@ -271,6 +271,16 @@ export function createLocalConnectService({
         ),
       );
     },
+    async syncBrokerData() {
+      try {
+        if (!(await hasBrokerSyncEntitlement(restoreSession, env, fetchImpl))) {
+          return { status: "forbidden" };
+        }
+      } catch {
+        return { status: "forbidden" };
+      }
+      return await syncBrokerDataBounded(this);
+    },
     async syncBrokerConnections() {
       const connections = brokerConnectionsFromApi(
         await fetchAuthenticatedConnectJson(
@@ -892,6 +902,25 @@ function userInfoFromApi(value: unknown): unknown {
         }
       : null,
   };
+}
+
+async function hasBrokerSyncEntitlement(
+  restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  const userInfo = userInfoFromApi(
+    await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, "/api/v1/user/me"),
+  );
+  if (!isRecord(userInfo) || !isRecord(userInfo.team)) {
+    return false;
+  }
+  const subscriptionStatus = optionalString(userInfo.team.subscription_status);
+  if (subscriptionStatus !== "active" && subscriptionStatus !== "trialing") {
+    return false;
+  }
+  const plan = optionalString(userInfo.team.plan);
+  return plan !== null && plan !== "basic";
 }
 
 function validateUserInfoFromApi(value: Record<string, unknown>): void {

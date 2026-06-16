@@ -282,12 +282,13 @@
     enrollment, BOOTSTRAP E2EE key initialization, PAIR/ORPHANED registration
     responses, reinitialize reset ordering, legacy device-id storage, freshness
     cleanup, and READY bootstrap-complete side effects now have bounded TS
-    runtime parity, while broker sync orchestration, subscription entitlement
-    checks, event production, sync engine push/pull, trusted-device
-    snapshot/upload runtime, background workers, remaining device-sync cloud
-    clients, team-key operations beyond initialization, pairing flows, freshness
-    gate persistence, bootstrap transfer, and remaining secret side effects are
-    deferred to Connect/device-sync parity slices.
+    runtime parity; broker-sync entitlement preflights now have TS runtime
+    parity for `/connect/sync`, while broker sync orchestration, event
+    production, sync engine push/pull, trusted-device snapshot/upload runtime,
+    background workers, remaining device-sync cloud clients, team-key operations
+    beyond initialization, pairing flows, freshness gate persistence, bootstrap
+    transfer, and remaining secret side effects are deferred to
+    Connect/device-sync parity slices.
 - [ ] PR 8: Default TS backend cutover.
   - Acceptance criteria: Electron and web use TS backend by default with
     rollback/fallback documented for stabilization plus benchmark gates.
@@ -4053,6 +4054,15 @@ contract:
   and RECOVERY re-enrollment. Dual GPT/Claude xhigh review found and verified
   fixes for nonce-before-resume, token restore serialization, clear/enable
   races, and shared Connect/device-sync token-restorer coalescing.
+- `pr5-connect-broker-entitlement`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker data sync"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "local Connect runtime"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes allowed active
+  non-basic plans, basic-plan forbidden responses before connection/account
+  fetches, entitlement verification failures mapping to forbidden, and runtime
+  smoke behavior. Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

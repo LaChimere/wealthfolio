@@ -1471,6 +1471,19 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            fullName: null,
+            email: "user@example.test",
+            team: {
+              id: "team-1",
+              name: "Team",
+              plan: "pro",
+              subscriptionStatus: "active",
+            },
+          });
+        }
         if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
           return Response.json({
             connections: [
@@ -1544,6 +1557,91 @@ describe("TS Connect local session service", () => {
       expect(localAccounts).toEqual([
         { id: "created-local", providerAccountId: "broker-account-1", trackingMode: "HOLDINGS" },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when the Connect plan lacks broker sync", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            team: {
+              id: "team-1",
+              name: "Team",
+              plan: "basic",
+              subscription_status: "active",
+            },
+          });
+        }
+        throw new Error(`broker sync should not fetch ${String(input)}`);
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when forbidden");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
+      expect(requests).toEqual([
+        "POST https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/user/me",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when entitlement verification fails", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ code: "ENTITLEMENT_UNAVAILABLE" }, { status: 503 });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when entitlement fails");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
     } finally {
       db.close();
     }

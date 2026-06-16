@@ -1271,7 +1271,16 @@ describe("TS backend runtime composition", () => {
           });
         }
         if (String(input).endsWith("/api/v1/user/me")) {
-          return Response.json({ id: "user-1", email: "user@example.test" });
+          return Response.json({
+            id: "user-1",
+            email: "user@example.test",
+            team: {
+              id: "team-1",
+              name: "Team",
+              plan: "pro",
+              subscription_status: "active",
+            },
+          });
         }
         return Response.json({ plans: [connectSubscriptionPlan("free")] });
       }) as typeof fetch,
