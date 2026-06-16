@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { Database } from "bun:sqlite";
+
 import type { ConnectService } from "./connect";
 import type { SecretService } from "./secrets";
 
@@ -148,6 +150,7 @@ const DEFAULT_DEVICE_SYNC_API_URL = "https://api.wealthfolio.app";
 export interface LocalDeviceSyncServiceDependencies {
   connectService?: Pick<ConnectService, "restoreSyncSession">;
   secretService?: SecretService;
+  db?: Database;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
 }
@@ -238,6 +241,7 @@ export function createDisabledDeviceSyncService(): DeviceSyncService {
 export function createLocalDeviceSyncService({
   connectService,
   secretService,
+  db,
   env = process.env,
   fetch: fetchImpl = fetch,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
@@ -539,9 +543,24 @@ export function createLocalDeviceSyncService({
         { deviceId },
       ).then(pairingMessagesFromCloud);
     },
-    async confirmPairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async confirmPairing(pairingId, request) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      const result = await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/confirm`,
+        {
+          method: "POST",
+          deviceId,
+          body: { proof: request.proof },
+        },
+      ).then(confirmPairingResponseFromCloud);
+      applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
+      return result;
     },
     async completePairingWithTransfer() {
       await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
@@ -585,17 +604,6 @@ async function requireCompositePairingPrerequisitesOrDisabled(
     throw new DeviceSyncServiceError("internal_error", "No device ID configured", 500);
   }
   await restoreSessionOrDisabled(connectService);
-  return deviceId;
-}
-
-async function requireSessionDeviceIdOrDisabled(
-  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
-  secretService: SecretService | undefined,
-): Promise<string> {
-  const { deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
-    connectService,
-    secretService,
-  );
   return deviceId;
 }
 
@@ -867,6 +875,33 @@ function completePairingResponseFromCloud(value: unknown): Record<string, unknow
   }
   return {
     success: value.success,
+    remoteSeedPresent: remoteSeedPresent ?? null,
+  };
+}
+
+function confirmPairingResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse confirm pairing response",
+      500,
+    );
+  }
+  const remoteSeedPresent = value.remoteSeedPresent ?? value.remote_seed_present;
+  if (
+    remoteSeedPresent !== undefined &&
+    remoteSeedPresent !== null &&
+    typeof remoteSeedPresent !== "boolean"
+  ) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse confirm pairing response",
+      500,
+    );
+  }
+  return {
+    success: value.success,
+    keyVersion: requiredI32(value.keyVersion ?? value.key_version, "confirm pairing response"),
     remoteSeedPresent: remoteSeedPresent ?? null,
   };
 }
@@ -1419,6 +1454,187 @@ function optionalString(value: unknown): string | null {
 function normalizeDeviceSyncApiUrl(value: string | undefined): string {
   const trimmed = value?.trim().replace(/\/+$/, "");
   return trimmed || DEFAULT_DEVICE_SYNC_API_URL;
+}
+
+function applyMinSnapshotCreatedAtBestEffort(
+  db: Database | undefined,
+  deviceId: string,
+  value: string | undefined,
+): void {
+  if (!db || value === undefined) {
+    return;
+  }
+  const normalized = normalizeSyncDatetime(value);
+  if (normalized === null) {
+    console.warn(`[DeviceSync] Ignoring invalid minSnapshotCreatedAt value: ${value}`);
+    return;
+  }
+  const parsedTime = new Date(normalized).getTime();
+  if (parsedTime > Date.now() + 10 * 60 * 1000) {
+    console.warn(`[DeviceSync] Ignoring minSnapshotCreatedAt too far in the future: ${value}`);
+    return;
+  }
+  if (!sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    return;
+  }
+  try {
+    db.prepare(
+      `
+        INSERT INTO sync_device_config (
+          device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+        ) VALUES (?, NULL, 'untrusted', NULL, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+          min_snapshot_created_at = excluded.min_snapshot_created_at
+      `,
+    ).run(deviceId, normalized);
+  } catch (error) {
+    console.warn(`[DeviceSync] Failed to persist freshness gate to SQLite: ${errorMessage(error)}`);
+  }
+}
+
+function normalizeSyncDatetime(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const candidates = [trimmed];
+  if (trimmed.includes(" ")) {
+    candidates.push(trimmed.replace(" ", "T"));
+  }
+  for (const candidate of candidates) {
+    const normalizedOffset = normalizeRfc3339Offset(candidate);
+    if (normalizedOffset !== null) {
+      const parsed = parseRfc3339LikeDatetime(normalizedOffset);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+  }
+  return parseNaiveUtcDatetime(trimmed);
+}
+
+function normalizeRfc3339Offset(value: string): string | null {
+  const match = /^(.+?)(Z|[+-]\d{2}|[+-]\d{4}|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const prefix = match[1] ?? "";
+  const suffix = match[2] ?? "";
+  if (suffix === "Z") {
+    return value;
+  }
+  if (/^[+-]\d{2}$/.test(suffix)) {
+    return `${prefix}${suffix}:00`;
+  }
+  if (/^[+-]\d{4}$/.test(suffix)) {
+    return `${prefix}${suffix.slice(0, 3)}:${suffix.slice(3)}`;
+  }
+  return value;
+}
+
+function parseRfc3339LikeDatetime(value: string): string | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const parts = datetimePartsFromMatch(match);
+  if (!validDateParts(parts)) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function parseNaiveUtcDatetime(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.(\d+))?$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const parts = datetimePartsFromMatch(match);
+  if (!validDateParts(parts)) {
+    return null;
+  }
+  return new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+      parts.ms,
+    ),
+  ).toISOString();
+}
+
+function datetimePartsFromMatch(match: RegExpExecArray): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  ms: number;
+} {
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6]),
+    ms: Number((match[8] ?? "").padEnd(3, "0").slice(0, 3) || "0"),
+  };
+}
+
+function validDateParts(parts: {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  ms: number;
+}): boolean {
+  if (
+    parts.month < 1 ||
+    parts.month > 12 ||
+    parts.hour > 23 ||
+    parts.minute > 59 ||
+    parts.second > 59
+  ) {
+    return false;
+  }
+  const date = new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+      parts.ms,
+    ),
+  );
+  return (
+    date.getUTCFullYear() === parts.year &&
+    date.getUTCMonth() === parts.month - 1 &&
+    date.getUTCDate() === parts.day &&
+    date.getUTCHours() === parts.hour &&
+    date.getUTCMinutes() === parts.minute &&
+    date.getUTCSeconds() === parts.second
+  );
+}
+
+function sqliteColumnExists(db: Database, tableName: string, columnName: string): boolean {
+  return db
+    .query<{ name: string }, []>(`PRAGMA table_info(${tableName})`)
+    .all()
+    .some((column) => column.name === columnName);
 }
 
 function deviceSyncClientRequestId(deviceId: string | undefined): string {

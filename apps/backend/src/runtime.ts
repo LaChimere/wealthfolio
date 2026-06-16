@@ -539,7 +539,7 @@ function createServicesFromDatabase(
     ),
     customProviderService,
     eventBus,
-    deviceSyncService: createLocalDeviceSyncService({ connectService, secretService }),
+    deviceSyncService: createLocalDeviceSyncService({ connectService, secretService, db }),
     exchangeRateService,
     goalService,
     goalValuationProvider,

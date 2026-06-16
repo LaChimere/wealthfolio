@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 
 import { createLocalDeviceSyncService } from "./device-sync";
 import type { SecretService } from "./secrets";
@@ -849,9 +850,6 @@ describe("TS local device sync service", () => {
       }),
     ).resolves.toEqual({ success: true, remoteSeedPresent: false });
     await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
-    await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
-      code: "not_implemented",
-    });
     expect(requests).toEqual([
       {
         url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings",
@@ -891,11 +889,22 @@ describe("TS local device sync service", () => {
   });
 
   test("runs claimer pairing operations through cloud when device id is configured", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+    `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_device_id", "device-1");
     const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
       [];
     const service = createLocalDeviceSyncService({
+      db,
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
@@ -922,6 +931,9 @@ describe("TS local device sync service", () => {
             ],
           });
         }
+        if (String(input).endsWith("/confirm")) {
+          return Response.json({ success: true, key_version: 2, remote_seed_present: true });
+        }
         return Response.json({
           session_id: "pairing-1",
           issuer_ephemeral_pub: "issuer-key",
@@ -932,43 +944,106 @@ describe("TS local device sync service", () => {
       },
     });
 
-    await expect(
-      service.claimPairing?.({ code: "123456", ephemeralPublicKey: "public-key" }),
-    ).resolves.toEqual({
-      sessionId: "pairing-1",
-      issuerEphemeralPub: "issuer-key",
-      e2eeKeyVersion: 2,
-      requireSas: true,
-      expiresAt: "2026-01-01T00:00:00Z",
-    });
-    await expect(service.getPairingMessages?.("pairing-1")).resolves.toEqual({
-      sessionStatus: "approved",
-      messages: [
+    try {
+      await expect(
+        service.claimPairing?.({ code: "123456", ephemeralPublicKey: "public-key" }),
+      ).resolves.toEqual({
+        sessionId: "pairing-1",
+        issuerEphemeralPub: "issuer-key",
+        e2eeKeyVersion: 2,
+        requireSas: true,
+        expiresAt: "2026-01-01T00:00:00Z",
+      });
+      await expect(service.getPairingMessages?.("pairing-1")).resolves.toEqual({
+        sessionStatus: "approved",
+        messages: [
+          {
+            id: "message-1",
+            payloadType: "rk_transfer_v1",
+            payload: "payload",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      await expect(
+        service.confirmPairing?.("pairing-1", {
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01 00:00:00.123456",
+        }),
+      ).resolves.toEqual({ success: true, keyVersion: 2, remoteSeedPresent: true });
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: "2026-01-01T00:00:00.123Z" });
+      expect(requests).toEqual([
         {
-          id: "message-1",
-          payloadType: "rk_transfer_v1",
-          payload: "payload",
-          createdAt: "2026-01-01T00:00:00Z",
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/claim",
+          method: "POST",
+          body: JSON.stringify({ code: "123456", ephemeral_public_key: "public-key" }),
+          deviceId: "device-1",
         },
-      ],
-    });
-    await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
-      code: "not_implemented",
-    });
-    expect(requests).toEqual([
-      {
-        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/claim",
-        method: "POST",
-        body: JSON.stringify({ code: "123456", ephemeral_public_key: "public-key" }),
-        deviceId: "device-1",
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/messages",
+          method: "GET",
+          body: null,
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("ignores invalid min snapshot dates after confirming pairing", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
-      {
-        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/messages",
-        method: "GET",
-        body: null,
-        deviceId: "device-1",
-      },
-    ]);
+      fetch: async () => Response.json({ success: true, key_version: 2 }),
+    });
+
+    try {
+      await expect(
+        service.confirmPairing?.("pairing-1", {
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-02-30T00:00:00Z",
+        }),
+      ).resolves.toEqual({ success: true, keyVersion: 2, remoteSeedPresent: null });
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toBeNull();
+    } finally {
+      db.close();
+    }
   });
 
   test("reports sync identity preconditions for composite pairing operations", async () => {
