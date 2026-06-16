@@ -3679,6 +3679,16 @@ contract:
   cloud enrollment work, returning the same forbidden session error when no
   session is configured, remaining feature-gated after a valid session, and dual
   GPT/Claude xhigh review finding no actionable issues.
+- `pr5-connect-device-enable-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/enable` and `/api/v1/connect/device/reinitialize`
+  restoring the Connect session before deferred enroll/reinitialize work,
+  returning the same forbidden session error when no session is configured, and
+  remaining feature-gated after a valid session. Dual GPT/Claude xhigh review
+  found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

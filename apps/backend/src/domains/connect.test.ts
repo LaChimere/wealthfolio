@@ -2059,6 +2059,39 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("requires a Connect session before enable and reinitialize then keeps them feature-gated", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads local sync engine status and bootstrap requirement", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

@@ -2105,6 +2105,20 @@ export function createLocalConnectDeviceSyncService({
       await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
       return getLocalDeviceSyncFreshStateOrThrow(secretService);
     },
+    async enableDeviceSync() {
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      throw deviceSyncDisabled();
+    },
+    async reinitializeDeviceSync() {
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      throw deviceSyncDisabled();
+    },
     async getDeviceSyncEngineStatus() {
       return getLocalDeviceSyncEngineStatus(db, secretService);
     },

@@ -1664,12 +1664,21 @@ describe("TS backend runtime composition", () => {
       });
 
       for (const request of [
-        new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
-        new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
       ]) {
         const response = await fetch(request);
         expect(response.status).toBe(501);
+      }
+
+      for (const request of [
+        new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),
+        new Request(`${server.baseUrl}/api/v1/connect/device/reinitialize`, { method: "POST" }),
+      ]) {
+        const response = await fetch(request);
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          message: "No sync session configured",
+        });
       }
 
       const registerDeviceWithoutSessionResponse = await fetch(
