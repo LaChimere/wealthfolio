@@ -3912,6 +3912,15 @@ contract:
   reads gated like Rust, best-effort trusted-device fetch failures,
   initialize-team-key probing when server key version is omitted, and
   Rust-shaped REGISTERED/ORPHANED trusted-device sync-state results.
+- `pr5-device-sync-confirm-bootstrap-overwrite-required`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes idempotent cloud
+  pairing confirm followed by Rust-shaped `overwrite_required` when bootstrap is
+  required, overwrite is not approved, and local syncable rows exist. The local
+  overwrite-risk table/filter rules are now shared with Connect bootstrap
+  checks. Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

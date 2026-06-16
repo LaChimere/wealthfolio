@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
 import type { ConnectService } from "./connect";
+import { localOverwriteRiskSummary } from "./device-sync-overwrite-risk";
 import type { SecretService } from "./secrets";
 
 export interface RegisterDeviceRequest {
@@ -601,6 +602,17 @@ export function createLocalDeviceSyncService({
           localRows: null,
           nonEmptyTables: null,
         };
+      }
+      if (db && !request.allowOverwrite) {
+        const summary = localOverwriteRiskSummary(db);
+        if (summary.totalRows > 0) {
+          return {
+            status: "overwrite_required",
+            message: `Local data (${summary.totalRows} rows) will be replaced by remote snapshot`,
+            localRows: summary.totalRows,
+            nonEmptyTables: summary.nonEmptyTables,
+          };
+        }
       }
       throw deviceSyncDisabled();
     },

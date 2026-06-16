@@ -1347,4 +1347,82 @@ describe("TS local device sync service", () => {
       db.close();
     }
   });
+
+  test("returns overwrite required from composite confirm before snapshot bootstrap", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE assets (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL);
+      CREATE TABLE quotes (id TEXT PRIMARY KEY NOT NULL, source TEXT NOT NULL);
+      CREATE TABLE import_templates (id TEXT PRIMARY KEY NOT NULL, scope TEXT NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+      INSERT INTO assets (id, kind) VALUES ('asset-1', 'PROPERTY'), ('asset-2', 'EQUITY');
+      INSERT INTO quotes (id, source) VALUES ('quote-1', 'MANUAL'), ('quote-2', 'YAHOO');
+      INSERT INTO import_templates (id, scope) VALUES ('template-1', 'USER'), ('template-2', 'SYSTEM');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "overwrite_required",
+        message: "Local data (4 rows) will be replaced by remote snapshot",
+        localRows: 4,
+        nonEmptyTables: [
+          { table: "accounts", rows: 1 },
+          { table: "assets", rows: 1 },
+          { table: "import_templates", rows: 1 },
+          { table: "quotes", rows: 1 },
+        ],
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });
