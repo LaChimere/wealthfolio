@@ -3689,6 +3689,15 @@ contract:
   returning the same forbidden session error when no session is configured, and
   remaining feature-gated after a valid session. Dual GPT/Claude xhigh review
   found no actionable issues.
+- `pr5-connect-device-reconcile-preconditions`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/reconcile-ready-state` returning Rust-shaped reconcile
+  results for token/sync-state read failures and non-READY local states, while
+  keeping READY/cloud bootstrap paths feature-gated. Dual GPT/Claude xhigh
+  review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

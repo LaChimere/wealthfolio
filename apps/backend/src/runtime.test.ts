@@ -1663,12 +1663,14 @@ describe("TS backend runtime composition", () => {
         message: "No sync session configured",
       });
 
-      for (const request of [
+      const reconcileWithoutSessionResponse = await fetch(
         jsonRequest("/api/v1/connect/device/reconcile-ready-state", { allowOverwrite: false }),
-      ]) {
-        const response = await fetch(request);
-        expect(response.status).toBe(501);
-      }
+      );
+      expect(reconcileWithoutSessionResponse.status).toBe(200);
+      await expect(reconcileWithoutSessionResponse.json()).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: No sync session configured",
+      });
 
       for (const request of [
         new Request(`${server.baseUrl}/api/v1/connect/device/enable`, { method: "POST" }),

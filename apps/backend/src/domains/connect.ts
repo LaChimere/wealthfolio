@@ -2119,6 +2119,25 @@ export function createLocalConnectDeviceSyncService({
       await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
       throw deviceSyncDisabled();
     },
+    async reconcileDeviceSyncReadyState() {
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      try {
+        await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+        await getLocalDeviceSyncFreshStateOrThrow(secretService);
+      } catch (error) {
+        if (error instanceof ConnectNotImplementedError) {
+          throw error;
+        }
+        return localReadyReconcileError(`Failed to read sync state: ${errorMessage(error)}`);
+      }
+      return {
+        ...localReadyReconcileBase(),
+        status: "skipped_not_ready",
+        message: "Device is not in READY state",
+      };
+    },
     async getDeviceSyncEngineStatus() {
       return getLocalDeviceSyncEngineStatus(db, secretService);
     },
@@ -2464,6 +2483,30 @@ async function getLocalDeviceSyncBootstrapOverwriteCheck(
     hasLocalData: summary.totalRows > 0,
     localRows: summary.totalRows,
     nonEmptyTables: summary.nonEmptyTables,
+  };
+}
+
+function localReadyReconcileBase(): Record<string, unknown> {
+  return {
+    status: "ok",
+    message: "Device sync reconcile completed",
+    bootstrapAction: "NO_BOOTSTRAP",
+    bootstrapStatus: "not_attempted",
+    bootstrapMessage: null,
+    bootstrapSnapshotId: null,
+    cycleStatus: null,
+    cycleNeedsBootstrap: false,
+    retryAttempted: false,
+    retryCycleStatus: null,
+    backgroundStatus: "skipped",
+  };
+}
+
+function localReadyReconcileError(message: string): Record<string, unknown> {
+  return {
+    ...localReadyReconcileBase(),
+    status: "error",
+    message,
   };
 }
 

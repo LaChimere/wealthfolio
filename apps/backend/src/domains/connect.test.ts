@@ -2092,6 +2092,60 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("reconciles ready state locally for auth and non-ready preconditions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: No sync session configured",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "not_attempted",
+        backgroundStatus: "skipped",
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "skipped_not_ready",
+        message: "Device is not in READY state",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "not_attempted",
+        backgroundStatus: "skipped",
+      });
+
+      secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: Failed to parse identity",
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads local sync engine status and bootstrap requirement", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
