@@ -3172,10 +3172,87 @@ async function localLatestSnapshotMissingBestEffort(
         },
       },
     );
-    return response.status === 404;
+    if (response.status === 404) {
+      return true;
+    }
+    if (!response.ok) {
+      return false;
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!isRecord(parsed)) {
+      return false;
+    }
+    if (!validSnapshotLatestMetadataShape(parsed)) {
+      return false;
+    }
+    const snapshotId = optionalString(parsed.snapshotId ?? parsed.snapshot_id);
+    if (snapshotId === null || snapshotId.trim() !== "") {
+      return false;
+    }
+    return await localCursorLatestSnapshotMissingBestEffort(env, fetchImpl, accessToken, deviceId);
   } catch {
     return false;
   }
+}
+
+async function localCursorLatestSnapshotMissingBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/cursor`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+    if (!response.ok) {
+      return false;
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!isRecord(parsed)) {
+      return false;
+    }
+    if (!validSyncCursorShape(parsed)) {
+      return false;
+    }
+    return (parsed.latestSnapshot ?? parsed.latest_snapshot) == null;
+  } catch {
+    return false;
+  }
+}
+
+function validSnapshotLatestMetadataShape(value: Record<string, unknown>): boolean {
+  const coversTables = value.coversTables ?? value.covers_tables;
+  return (
+    optionalString(value.snapshotId ?? value.snapshot_id) !== null &&
+    isI32Integer(value.schemaVersion ?? value.schema_version) &&
+    Array.isArray(coversTables) &&
+    coversTables.every((entry) => typeof entry === "string") &&
+    isSafeI64Integer(value.oplogSeq ?? value.oplog_seq) &&
+    isSafeI64Integer(value.sizeBytes ?? value.size_bytes) &&
+    optionalString(value.checksum) !== null &&
+    optionalString(value.createdAt ?? value.created_at) !== null
+  );
+}
+
+function validSyncCursorShape(value: Record<string, unknown>): boolean {
+  const gcWatermark = value.gcWatermark ?? value.gc_watermark;
+  return (
+    isSafeI64Integer(value.cursor) &&
+    (gcWatermark === undefined || gcWatermark === null || isSafeI64Integer(gcWatermark))
+  );
+}
+
+function isSafeI64Integer(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 function resetAndMarkLocalBootstrapComplete(

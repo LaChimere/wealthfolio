@@ -3951,6 +3951,16 @@ contract:
   second `NOOP`, and destructive-boundary preservation for continuing
   `WAIT_SNAPSHOT` or existing-snapshot paths. Dual GPT/Claude xhigh review found
   and verified the race-path and reset-boundary refinements.
+- `pr5-connect-device-bootstrap-empty-snapshot-fallback`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes Rust-valid empty
+  `/snapshots/latest` metadata plus empty `/events/cursor.latest_snapshot`
+  completing bootstrap, cursor fallback snapshots preserving the 501 boundary,
+  and malformed snapshot/cursor payloads preserving sync outbox without
+  destructive reset. Dual GPT/Claude xhigh review found and verified shape,
+  integer range, and cursor `gc_watermark` validator refinements.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
