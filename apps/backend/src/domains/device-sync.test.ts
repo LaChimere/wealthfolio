@@ -350,15 +350,26 @@ describe("TS local device sync service", () => {
     await expect(service.revokeDevice("device-1")).rejects.toMatchObject({ code: "forbidden" });
   });
 
-  test("gets a device from the cloud after session restore and keeps mutations gated", async () => {
-    const requests: string[] = [];
+  test("runs device reads and mutations through cloud endpoints after session restore", async () => {
+    const requests: Array<{ url: string; method: string; body: string | null }> = [];
     const service = createLocalDeviceSyncService({
       env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
-      fetch: async (input) => {
-        requests.push(String(input));
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        if (
+          String(input).endsWith("/revoke") ||
+          init?.method === "DELETE" ||
+          init?.method === "PATCH"
+        ) {
+          return Response.json({ success: true });
+        }
         return Response.json({
           id: "device-1",
           user_id: "user-1",
@@ -375,16 +386,33 @@ describe("TS local device sync service", () => {
       userId: "user-1",
       displayName: "MacBook",
     });
-    expect(requests).toEqual(["https://api.example.test/api/v1/sync/team/devices/device-1"]);
-    await expect(
-      service.updateDevice("device-1", { displayName: "Renamed" }),
-    ).rejects.toMatchObject({ code: "not_implemented" });
-    await expect(service.deleteDevice("device-1")).rejects.toMatchObject({
-      code: "not_implemented",
+    await expect(service.updateDevice("device-1", { displayName: "Renamed" })).resolves.toEqual({
+      success: true,
     });
-    await expect(service.revokeDevice("device-1")).rejects.toMatchObject({
-      code: "not_implemented",
-    });
+    await expect(service.deleteDevice("device-1")).resolves.toEqual({ success: true });
+    await expect(service.revokeDevice("device-1")).resolves.toEqual({ success: true });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1",
+        method: "GET",
+        body: null,
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1",
+        method: "PATCH",
+        body: JSON.stringify({ display_name: "Renamed" }),
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1",
+        method: "DELETE",
+        body: null,
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/revoke",
+        method: "POST",
+        body: null,
+      },
+    ]);
   });
 
   test("reports missing device id for team key operations after session restore", async () => {

@@ -274,17 +274,40 @@ export function createLocalDeviceSyncService({
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
       return await fetchDeviceFromCloud(accessToken, env, fetchImpl, deviceId);
     },
-    async updateDevice() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async updateDevice(deviceId, request) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+        {
+          method: "PATCH",
+          body: {
+            display_name: request.displayName,
+          },
+        },
+      ).then(successResponseFromCloud);
     },
-    async deleteDevice() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async deleteDevice(deviceId) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+        { method: "DELETE" },
+      ).then(successResponseFromCloud);
     },
-    async revokeDevice() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async revokeDevice(deviceId) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/revoke`,
+        { method: "POST" },
+      ).then(successResponseFromCloud);
     },
     async initializeTeamKeys() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
@@ -455,16 +478,19 @@ async function fetchDeviceSyncJson(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   path: string,
+  options: { method?: string; body?: unknown } = {},
 ): Promise<unknown> {
   const clientRequestId = `app:${randomUUID()}`;
   let response: Response;
   try {
     response = await fetchImpl(`${normalizeDeviceSyncApiUrl(env.CONNECT_API_URL)}${path}`, {
+      method: options.method,
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
         "x-wf-client-request-id": clientRequestId,
       },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
   } catch (error) {
     throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
@@ -519,6 +545,13 @@ function deviceFromCloud(value: unknown): Record<string, unknown> {
     lastSeenAt: optionalDeviceString(value.lastSeenAt ?? value.last_seen_at, "device response"),
     createdAt: requiredString(value.createdAt ?? value.created_at, "device response"),
   };
+}
+
+function successResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse success response", 500);
+  }
+  return { success: value.success };
 }
 
 async function getLocalDeviceId(secretService: SecretService): Promise<string | null> {

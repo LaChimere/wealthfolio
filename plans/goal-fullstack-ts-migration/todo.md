@@ -3773,6 +3773,14 @@ contract:
   token-first behavior and malformed-identity legacy fallback before cloud read,
   update/delete/revoke remaining feature-gated, and dual GPT/Claude xhigh review
   finding no actionable issues.
+- `pr5-device-sync-device-mutations-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/device/{id}` PATCH/DELETE and `/api/v1/sync/device/{id}/revoke`
+  restoring the Connect session, calling the Rust-compatible cloud endpoints,
+  serializing `display_name`, parsing `SuccessResponse`, and preserving
+  no-session errors. Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
