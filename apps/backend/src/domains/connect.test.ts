@@ -2932,4 +2932,41 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("skips bootstrap snapshot when cloud sync state is not ready", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "untrusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped_not_ready",
+        message: "Device is not in READY state",
+        snapshotId: null,
+        cursor: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -2163,7 +2163,7 @@ export function createLocalConnectDeviceSyncService({
       return await getLocalDeviceSyncPairingSourceStatus(secretService, env, fetchImpl);
     },
     async bootstrapDeviceSnapshot() {
-      return await getLocalSnapshotIdentityOrThrow(secretService);
+      return await bootstrapSnapshotIfNotReady(secretService, env, fetchImpl);
     },
     async generateDeviceSnapshotNow() {
       return await getLocalSnapshotIdentityOrThrow(secretService);
@@ -2937,6 +2937,28 @@ async function getLocalSnapshotIdentityOrThrow(
   secretService: SecretService | undefined,
 ): Promise<never> {
   await requireLocalSyncIdentityDeviceId(secretService);
+  throw deviceSyncDisabled();
+}
+
+async function bootstrapSnapshotIfNotReady(
+  secretService: SecretService | undefined,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  await requireLocalSyncIdentityDeviceId(secretService);
+  const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+  const state = await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
+  if (state.state !== "READY") {
+    return {
+      status: "skipped_not_ready",
+      message: "Device is not in READY state",
+      snapshotId: null,
+      cursor: null,
+    };
+  }
   throw deviceSyncDisabled();
 }
 

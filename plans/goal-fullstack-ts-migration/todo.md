@@ -3888,6 +3888,15 @@ contract:
   existing READY/REGISTERED/STALE sync states while keeping true FRESH/RECOVERY
   enrollment paths feature-gated. Dual GPT/Claude xhigh review found no
   actionable issues.
+- `pr5-connect-device-bootstrap-not-ready`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/bootstrap-snapshot` reading cloud sync state and
+  returning Rust-shaped `skipped_not_ready` when the current device is not
+  READY, while keeping actual READY snapshot bootstrap feature-gated. Dual
+  GPT/Claude xhigh review found no actionable issues after checking the Rust
+  HTTP wrapper response shape.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
