@@ -2949,20 +2949,51 @@ describe("TS Connect device sync local service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE sync_device_config (
         device_id TEXT PRIMARY KEY NOT NULL,
         key_version INTEGER,
         trust_state TEXT NOT NULL DEFAULT 'untrusted',
         last_bootstrap_at TEXT
       );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 10, '2026-01-01T00:00:00Z');
     `);
     db.prepare(
       "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('legacy-device', 1, 'trusted', NULL)",
     ).run();
+    let trustState = "untrusted";
+    let serverCursor = 8;
+    let failureMode: "none" | "device" | "cursor" = "none";
+    const requests: string[] = [];
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
-      fetch: async () => Response.json({ access_token: "access-token" }),
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (failureMode === "cursor") {
+            throw new Error("cursor offline");
+          }
+          return Response.json({ cursor: serverCursor });
+        }
+        if (failureMode === "device") {
+          throw new Error("device offline");
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: trustState,
+          trusted_key_version: 1,
+        });
+      },
     });
 
     try {
@@ -2983,10 +3014,43 @@ describe("TS Connect device sync local service", () => {
         status: 500,
       });
       secretService.entries.set("sync_refresh_token", "refresh-token");
+      failureMode = "device";
       await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "device offline",
+        status: 500,
       });
+      failureMode = "none";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Current device is not ready to connect another device yet.",
+        status: 500,
+      });
+
+      trustState = "trusted";
+      failureMode = "cursor";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "cursor offline",
+        status: 500,
+      });
+      failureMode = "none";
+      await expect(service.getDeviceSyncPairingSourceStatus()).resolves.toEqual({
+        status: "restore_required",
+        message: "This device needs to set up sync again before you add another device.",
+        localCursor: 10,
+        serverCursor: 8,
+      });
+      serverCursor = 10;
+      await expect(service.getDeviceSyncPairingSourceStatus()).resolves.toEqual({
+        status: "ready",
+        message: "This device is ready to connect another device.",
+        localCursor: 10,
+        serverCursor: 10,
+      });
+      expect(
+        requests.filter((request) => request.includes("/api/v1/sync/events/cursor")),
+      ).toHaveLength(3);
     } finally {
       db.close();
     }

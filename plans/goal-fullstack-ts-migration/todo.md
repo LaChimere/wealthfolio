@@ -4005,6 +4005,15 @@ contract:
   `x-snapshot-schema-version`, missing `x-snapshot-covers-tables`, missing
   `x-snapshot-checksum`, and Rust-shaped `Invalid request` errors before
   checksum comparison. Dual GPT/Claude xhigh review found no actionable issues.
+- `pr5-connect-device-pairing-source-status`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes untrusted-device
+  internal errors, `restore_required` when local cursor is ahead of server,
+  `ready` when cursors are aligned, and device/cursor transport failures mapping
+  to internal errors. Dual GPT/Claude xhigh review found and verified the
+  transport-error mapping fix.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

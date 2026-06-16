@@ -2162,7 +2162,7 @@ export function createLocalConnectDeviceSyncService({
       await clearLocalDeviceSyncData(db, secretService);
     },
     async getDeviceSyncPairingSourceStatus() {
-      return await getLocalDeviceSyncPairingSourceStatus(secretService, env, fetchImpl);
+      return await getLocalDeviceSyncPairingSourceStatus(db, secretService, env, fetchImpl);
     },
     async bootstrapDeviceSnapshot() {
       return await bootstrapSnapshotIfNotReady(db, secretService, env, fetchImpl);
@@ -2374,17 +2374,27 @@ async function fetchLocalDeviceSyncDevice(
   accessToken: string,
   deviceId: string,
 ): Promise<Record<string, unknown>> {
-  const response = await fetchImpl(
-    `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
-    {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-        "x-wf-client-request-id": `app:${randomUUID()}`,
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": `app:${randomUUID()}`,
+        },
       },
-    },
-  );
-  const bodyText = await response.text();
+    );
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
   if (!response.ok) {
     throw new ConnectServiceError(
       "internal_error",
@@ -2997,20 +3007,50 @@ function localReadyReconcileError(message: string): Record<string, unknown> {
 }
 
 async function getLocalDeviceSyncPairingSourceStatus(
+  db: Database,
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
-): Promise<never> {
+): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
-  await requireLocalSyncIdentityDeviceId(secretService);
+  const deviceId = await requireLocalSyncIdentityDeviceId(secretService);
+  let session: { accessToken: string; refreshToken: string };
   try {
-    await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+    session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
   } catch (error) {
     throw new ConnectServiceError("internal_error", errorMessage(error), 500);
   }
-  throw deviceSyncDisabled();
+  const device = await fetchLocalDeviceSyncDevice(env, fetchImpl, session.accessToken, deviceId);
+  if (device.trustState !== "trusted") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Current device is not ready to connect another device yet.",
+      500,
+    );
+  }
+  const localCursor = getLocalSyncCursor(db);
+  const serverCursor = await fetchLocalEventsCursorOrThrow(
+    env,
+    fetchImpl,
+    session.accessToken,
+    deviceId,
+  );
+  if (localCursor > serverCursor) {
+    return {
+      status: "restore_required",
+      message: "This device needs to set up sync again before you add another device.",
+      localCursor,
+      serverCursor,
+    };
+  }
+  return {
+    status: "ready",
+    message: "This device is ready to connect another device.",
+    localCursor,
+    serverCursor,
+  };
 }
 
 async function bootstrapSnapshotIfNotReady(
@@ -3383,6 +3423,57 @@ async function localSnapshotSatisfiesFreshnessGate(
   }
   const remoteCursor = await localEventsCursorBestEffort(env, fetchImpl, accessToken, deviceId);
   return remoteCursor !== null && latest.oplogSeq >= remoteCursor;
+}
+
+async function fetchLocalEventsCursorOrThrow(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<number> {
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/cursor`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  if (!response.ok) {
+    throw new ConnectServiceError(
+      "internal_error",
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      500,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse cursor response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed) || !validSyncCursorShape(parsed)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse cursor response", 500);
+  }
+  return requiredInteger(parsed.cursor, "cursor response");
 }
 
 async function localEventsCursorBestEffort(
