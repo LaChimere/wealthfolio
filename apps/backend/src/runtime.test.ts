@@ -1839,7 +1839,7 @@ describe("TS backend runtime composition", () => {
       );
       expect(pairingSourceResponse.status).toBe(500);
       await expect(pairingSourceResponse.json()).resolves.toMatchObject({
-        message: "No sync identity configured. Please enable sync first.",
+        message: "No device ID configured",
       });
 
       const triggerCycleResponse = await fetch(

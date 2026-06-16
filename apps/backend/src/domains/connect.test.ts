@@ -2537,6 +2537,7 @@ describe("TS Connect device sync local service", () => {
 
   test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
     db.exec(`
       CREATE TABLE sync_device_config (
         device_id TEXT PRIMARY KEY NOT NULL,
@@ -2545,18 +2546,37 @@ describe("TS Connect device sync local service", () => {
         last_bootstrap_at TEXT
       );
     `);
-    const service = createLocalConnectDeviceSyncService({ db });
+    db.prepare(
+      "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('legacy-device', 1, 'trusted', NULL)",
+    ).run();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
 
     try {
       await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
-      db.prepare(
-        "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('device-1', 1, 'untrusted', NULL)",
-      ).run();
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
       await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
-        "Current device is not ready to connect another device yet.",
+        "No device ID configured",
       );
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "No sync session configured",
+        status: 500,
+      });
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
     } finally {
       db.close();
     }

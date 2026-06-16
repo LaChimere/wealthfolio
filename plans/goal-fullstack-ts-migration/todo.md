@@ -3710,6 +3710,17 @@ contract:
   `No device ID configured` for nonce-only identities, and remaining
   feature-gated once a device ID is present. Dual GPT/Claude xhigh review found
   no actionable issues.
+- `pr5-connect-device-pairing-source-identity-preconditions`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/runtime.test.ts -t "disabled device sync runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/pairing-source-status` reading `sync_identity` from
+  the secret store instead of stale `sync_device_config`, reporting missing
+  identity/device-ID before token/cloud checks, mapping token restore failures
+  through the Rust-like internal-error path, and remaining feature-gated after a
+  valid session. Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

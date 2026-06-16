@@ -2151,7 +2151,7 @@ export function createLocalConnectDeviceSyncService({
       await clearLocalDeviceSyncData(db, secretService);
     },
     async getDeviceSyncPairingSourceStatus() {
-      return getLocalDeviceSyncPairingSourceStatus(db);
+      return await getLocalDeviceSyncPairingSourceStatus(secretService, env, fetchImpl);
     },
     async bootstrapDeviceSnapshot() {
       return await getLocalSnapshotIdentityOrThrow(secretService);
@@ -2510,30 +2510,19 @@ function localReadyReconcileError(message: string): Record<string, unknown> {
   };
 }
 
-function getLocalDeviceSyncPairingSourceStatus(db: Database): Record<string, unknown> {
-  const config = db
-    .query<{ device_id: string; trust_state: string }, []>(
-      `
-        SELECT device_id, trust_state
-        FROM sync_device_config
-        ORDER BY device_id
-        LIMIT 1
-      `,
-    )
-    .get();
-  if (!config) {
-    throw new ConnectServiceError(
-      "internal_error",
-      "No sync identity configured. Please enable sync first.",
-      500,
-    );
+async function getLocalDeviceSyncPairingSourceStatus(
+  secretService: SecretService | undefined,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<never> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
   }
-  if (config.trust_state !== "trusted") {
-    throw new ConnectServiceError(
-      "internal_error",
-      "Current device is not ready to connect another device yet.",
-      500,
-    );
+  await requireLocalSyncIdentityDeviceId(secretService);
+  try {
+    await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
   }
   throw deviceSyncDisabled();
 }
@@ -2541,6 +2530,13 @@ function getLocalDeviceSyncPairingSourceStatus(db: Database): Record<string, unk
 async function getLocalSnapshotIdentityOrThrow(
   secretService: SecretService | undefined,
 ): Promise<never> {
+  await requireLocalSyncIdentityDeviceId(secretService);
+  throw deviceSyncDisabled();
+}
+
+async function requireLocalSyncIdentityDeviceId(
+  secretService: SecretService | undefined,
+): Promise<string> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
@@ -2565,7 +2561,7 @@ async function getLocalSnapshotIdentityOrThrow(
   if (!identity.deviceId) {
     throw new ConnectServiceError("internal_error", "No device ID configured", 500);
   }
-  throw deviceSyncDisabled();
+  return identity.deviceId;
 }
 
 function triggerLocalDeviceSyncCycle(db: Database): Record<string, unknown> {
