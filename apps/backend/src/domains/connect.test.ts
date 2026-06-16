@@ -3322,6 +3322,86 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("handles trusted generate-snapshot pre-export cursor checks", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 10, '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    let serverCursor = 8;
+    let latestSnapshotOplogSeq: number | null = null;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: serverCursor });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (latestSnapshotOplogSeq === null) {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: latestSnapshotOplogSeq,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "SYNC_SOURCE_RESTORE_REQUIRED: This device needs to set up sync again before you add another device.",
+      });
+      serverCursor = 10;
+      latestSnapshotOplogSeq = 10;
+      await expect(service.generateDeviceSnapshotNow()).resolves.toEqual({
+        status: "uploaded",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        oplogSeq: 10,
+        message: "Latest remote snapshot already covers current cursor",
+      });
+      latestSnapshotOplogSeq = 9;
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("skips bootstrap snapshot when READY local bootstrap is already complete", async () => {
     const db = new Database(":memory:");
     db.exec(`

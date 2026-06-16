@@ -2199,7 +2199,7 @@ export function createLocalConnectDeviceSyncService({
       return await bootstrapSnapshotIfNotReady(db, secretService, env, fetchImpl);
     },
     async generateDeviceSnapshotNow() {
-      return await generateSnapshotIfTrusted(secretService, env, fetchImpl);
+      return await generateSnapshotIfTrusted(db, secretService, env, fetchImpl);
     },
     async startDeviceSyncBackgroundEngine() {
       if (await localSyncIdentityCanRunBackground(secretService)) {
@@ -3762,6 +3762,7 @@ function reconcileActionRequiresSnapshot(action: string | null): boolean {
 }
 
 async function generateSnapshotIfTrusted(
+  db: Database,
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
@@ -3778,6 +3779,34 @@ async function generateSnapshotIfTrusted(
       snapshotId: null,
       oplogSeq: null,
       message: "Current device is not trusted",
+    };
+  }
+  const localCursor = getLocalSyncCursor(db);
+  const serverCursor = await fetchLocalEventsCursorOrThrow(
+    env,
+    fetchImpl,
+    session.accessToken,
+    deviceId,
+  );
+  if (localCursor > serverCursor) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "SYNC_SOURCE_RESTORE_REQUIRED: This device needs to set up sync again before you add another device.",
+      500,
+    );
+  }
+  const latestSnapshotStatus = await localLatestSnapshotStatusBestEffort(
+    env,
+    fetchImpl,
+    session.accessToken,
+    deviceId,
+  );
+  if (latestSnapshotStatus.kind === "present" && latestSnapshotStatus.oplogSeq >= localCursor) {
+    return {
+      status: "uploaded",
+      snapshotId: latestSnapshotStatus.snapshotId,
+      oplogSeq: latestSnapshotStatus.oplogSeq,
+      message: "Latest remote snapshot already covers current cursor",
     };
   }
   throw deviceSyncDisabled();
