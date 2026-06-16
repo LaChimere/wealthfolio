@@ -3826,6 +3826,15 @@ contract:
   Rust-compatible device-scoped endpoints/request IDs, parsing claim/message
   responses, leaving confirm/complete flows deferred, and dual GPT/Claude xhigh
   review finding no actionable issues.
+- `pr5-device-sync-register-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/device/register` restoring the Connect session, enrolling via
+  `/api/v1/sync/team/devices`, mapping request fields to Rust's
+  `RegisterDeviceRequest`, persisting the returned `sync_device_id`, and
+  returning Rust-shaped enrollment responses. Dual GPT/Claude xhigh review found
+  no actionable issues after persistence-error wrapping.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

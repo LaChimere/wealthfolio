@@ -20,7 +20,7 @@ function createMemorySecretService(): SecretService & { entries: Map<string, str
 }
 
 describe("TS local device sync service", () => {
-  test("requires Connect session before device registration and keeps it feature-gated after restore", async () => {
+  test("requires Connect session before device registration and enrolls after restore", async () => {
     const noSessionService = createLocalDeviceSyncService({
       connectService: {
         restoreSyncSession: () => {
@@ -42,14 +42,74 @@ describe("TS local device sync service", () => {
       status: 403,
     });
 
+    const secretService = createMemorySecretService();
+    const requests: Array<{ url: string; method: string; body: string | null }> = [];
     const restoredService = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        return Response.json({
+          mode: "READY",
+          device_id: "device-1",
+          e2ee_key_version: 2,
+          trust_state: "trusted",
+        });
+      },
     });
-    await expect(restoredService.registerDevice(request)).rejects.toMatchObject({
-      code: "not_implemented",
-      status: 501,
+    await expect(
+      restoredService.registerDevice({ ...request, osVersion: "14.0", appVersion: "1.2.3" }),
+    ).resolves.toEqual({
+      mode: "READY",
+      device_id: "device-1",
+      e2ee_key_version: 2,
+      trust_state: "trusted",
+    });
+    expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices",
+        method: "POST",
+        body: JSON.stringify({
+          device_nonce: "instance-1",
+          display_name: "MacBook",
+          platform: "macos",
+          os_version: "14.0",
+          app_version: "1.2.3",
+        }),
+      },
+    ]);
+
+    const failingSecretService = createMemorySecretService();
+    const failingService = createLocalDeviceSyncService({
+      secretService: {
+        ...failingSecretService,
+        setSecret: () => {
+          throw new Error("keyring unavailable");
+        },
+      },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        Response.json({
+          mode: "READY",
+          device_id: "device-1",
+          e2ee_key_version: 2,
+          trust_state: "trusted",
+        }),
+    });
+    await expect(failingService.registerDevice(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to store device ID: keyring unavailable",
+      status: 500,
     });
   });
 

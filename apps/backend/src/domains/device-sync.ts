@@ -244,9 +244,36 @@ export function createLocalDeviceSyncService({
   const disabledService = createDisabledDeviceSyncService();
   return {
     ...disabledService,
-    async registerDevice() {
-      await restoreSessionOrDisabled(connectService);
-      throw deviceSyncDisabled();
+    async registerDevice(request) {
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
+      if (!secretService) {
+        throw deviceSyncDisabled();
+      }
+      const result = enrollDeviceResponseFromCloud(
+        await fetchDeviceSyncJson(accessToken, env, fetchImpl, "/api/v1/sync/team/devices", {
+          method: "POST",
+          body: {
+            device_nonce: request.instanceId,
+            display_name: request.displayName,
+            platform: request.platform,
+            os_version: request.osVersion,
+            app_version: request.appVersion,
+          },
+        }),
+      );
+      try {
+        await secretService.setSecret(
+          DEVICE_SYNC_DEVICE_ID_KEY,
+          requiredString(result.device_id, "enroll response"),
+        );
+      } catch (error) {
+        throw new DeviceSyncServiceError(
+          "internal_error",
+          `Failed to store device ID: ${errorMessage(error)}`,
+          500,
+        );
+      }
+      return result;
     },
     async getCurrentDevice() {
       if (!connectService || !secretService) {
@@ -716,6 +743,51 @@ function deviceFromCloud(value: unknown): Record<string, unknown> {
     lastSeenAt: optionalDeviceString(value.lastSeenAt ?? value.last_seen_at, "device response"),
     createdAt: requiredString(value.createdAt ?? value.created_at, "device response"),
   };
+}
+
+function enrollDeviceResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
+  }
+  const mode = requiredString(value.mode, "enroll response");
+  if (mode === "BOOTSTRAP") {
+    return {
+      mode,
+      device_id: requiredString(value.deviceId ?? value.device_id, "enroll response"),
+      e2ee_key_version: requiredI32(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+    };
+  }
+  if (mode === "PAIR") {
+    return {
+      mode,
+      device_id: requiredString(value.deviceId ?? value.device_id, "enroll response"),
+      e2ee_key_version: requiredI32(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+      require_sas: requiredBoolean(value.requireSas ?? value.require_sas, "enroll response"),
+      pairing_ttl_seconds: requiredI32(
+        value.pairingTtlSeconds ?? value.pairing_ttl_seconds,
+        "enroll response",
+      ),
+      trusted_devices: trustedDevicesFromCloud(value.trustedDevices ?? value.trusted_devices),
+    };
+  }
+  if (mode === "READY") {
+    return {
+      mode,
+      device_id: requiredString(value.deviceId ?? value.device_id, "enroll response"),
+      e2ee_key_version: requiredI32(
+        value.e2eeKeyVersion ?? value.e2ee_key_version,
+        "enroll response",
+      ),
+      trust_state: requiredTrustState(value.trustState ?? value.trust_state),
+    };
+  }
+  throw new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
 }
 
 function successResponseFromCloud(value: unknown): Record<string, unknown> {
