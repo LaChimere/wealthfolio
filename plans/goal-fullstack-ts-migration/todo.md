@@ -4014,6 +4014,13 @@ contract:
   `ready` when cursors are aligned, and device/cursor transport failures mapping
   to internal errors. Dual GPT/Claude xhigh review found and verified the
   transport-error mapping fix.
+- `pr5-connect-activity-pagination-guard`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "TS Connect local session service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes repeated first
+  activity ID stuck-pagination failure recording, per-account failure summary,
+  and mapper-gate precedence when a page has any mappable activity. Dual
+  GPT/Claude xhigh review found and verified the mapper-gate ordering fix.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

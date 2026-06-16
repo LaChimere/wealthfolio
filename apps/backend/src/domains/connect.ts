@@ -101,6 +101,7 @@ const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this 
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
 const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not yet available in the TS backend runtime";
+const BROKER_ACTIVITY_MAX_PAGES = 10_000;
 const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
 const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
@@ -1420,7 +1421,16 @@ async function syncEmptyTransactionActivityPages(
     const startDate = brokerActivitySyncStartDate(db, account.id, endDate);
     let offset = 0;
     let accountFailed = false;
+    let pagesFetched = 0;
+    let lastPageFirstId: string | null = null;
     for (;;) {
+      if (pagesFetched >= BROKER_ACTIVITY_MAX_PAGES) {
+        const message = `Pagination exceeded max pages (${BROKER_ACTIVITY_MAX_PAGES}). Aborting.`;
+        upsertBrokerSyncFailure(db, account.id, message);
+        summary.accountsFailed += 1;
+        accountFailed = true;
+        break;
+      }
       const path = brokerActivitiesPath(
         account.providerAccountId,
         startDate,
@@ -1439,6 +1449,7 @@ async function syncEmptyTransactionActivityPages(
         break;
       }
       const data = brokerActivityPageData(page);
+      pagesFetched += 1;
       const received = data.length;
       if (received === 0) {
         break;
@@ -1447,6 +1458,18 @@ async function syncEmptyTransactionActivityPages(
         const message = "Broker activity mapping is not yet available in the TS backend runtime";
         upsertBrokerSyncFailure(db, account.id, message);
         throw new ConnectNotImplementedError(message);
+      }
+      const firstId = brokerActivityFirstId(data);
+      if (firstId !== null) {
+        if (offset > 0 && lastPageFirstId === firstId) {
+          const message =
+            "Pagination appears stuck (same first activity id returned for multiple pages).";
+          upsertBrokerSyncFailure(db, account.id, message);
+          summary.accountsFailed += 1;
+          accountFailed = true;
+          break;
+        }
+        lastPageFirstId = firstId;
       }
       offset += received;
       if (!brokerActivityPageHasMore(page, received, offset, pageLimit)) {
@@ -1510,6 +1533,14 @@ function brokerActivityPagePagination(page: unknown): Record<string, unknown> | 
 
 function hasBrokerActivityMappableId(activity: unknown): boolean {
   return isRecord(activity) && typeof activity.id === "string" && activity.id.trim().length > 0;
+}
+
+function brokerActivityFirstId(data: unknown[]): string | null {
+  const first = data[0];
+  if (!isRecord(first) || typeof first.id !== "string") {
+    return null;
+  }
+  return first.id;
 }
 
 function brokerActivitiesPath(
