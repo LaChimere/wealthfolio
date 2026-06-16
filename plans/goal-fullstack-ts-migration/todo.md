@@ -3979,6 +3979,15 @@ contract:
   fallback schema selection, snapshotId-validation cursor fallback support, and
   strict malformed-metadata boundaries that preserve sync outbox. Dual
   GPT/Claude xhigh review found and verified cursor-resolution parity.
+- `pr5-connect-device-bootstrap-freshness-gate`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes valid freshness
+  gates with older latest snapshots returning Rust-shaped `requested`, remote
+  cursor coverage preserving the feature-gated apply boundary, sync outbox
+  preservation, and invalid latest `created_at` error parity. Dual GPT/Claude
+  xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

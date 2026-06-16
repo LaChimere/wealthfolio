@@ -3040,7 +3040,8 @@ async function bootstrapSnapshotIfNotReady(
     console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
   }
   const engineStatus = await getLocalDeviceSyncEngineStatus(db, secretService);
-  const freshnessGateExists = localMinSnapshotFreshnessGateExists(db, deviceId);
+  const freshnessGate = localMinSnapshotFreshnessGate(db, deviceId);
+  const freshnessGateExists = freshnessGate.kind !== "none";
   let reconcileAction: string | null = null;
   if (!freshnessGateExists) {
     reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
@@ -3074,7 +3075,26 @@ async function bootstrapSnapshotIfNotReady(
     );
   }
   const latestSnapshotMissing = latestSnapshotStatus.kind === "missing";
-  if (freshnessGateExists && latestSnapshotMissing) {
+  if (freshnessGate.kind === "present" && latestSnapshotMissing) {
+    return {
+      status: "requested",
+      message: "Waiting for a snapshot generated after pairing confirmation",
+      snapshotId: null,
+      cursor: optionalNumber(engineStatus.cursor),
+    };
+  }
+  if (
+    freshnessGate.kind === "present" &&
+    latestSnapshotStatus.kind === "present" &&
+    !(await localSnapshotSatisfiesFreshnessGate(
+      env,
+      fetchImpl,
+      session.accessToken,
+      deviceId,
+      latestSnapshotStatus,
+      freshnessGate.value,
+    ))
+  ) {
     return {
       status: "requested",
       message: "Waiting for a snapshot generated after pairing confirmation",
@@ -3152,9 +3172,14 @@ function persistReadyDeviceConfigFromIdentity(
   ).run(identity.deviceId, identity.keyVersion);
 }
 
-function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): boolean {
+type LocalFreshnessGate =
+  | { kind: "none" }
+  | { kind: "present"; value: string }
+  | { kind: "unknown" };
+
+function localMinSnapshotFreshnessGate(db: Database, deviceId: string): LocalFreshnessGate {
   if (!sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
-    return false;
+    return { kind: "none" };
   }
   try {
     const value = db
@@ -3167,10 +3192,11 @@ function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): bo
       )
       .get(deviceId)?.min_snapshot_created_at;
     if (value === undefined || value === null) {
-      return false;
+      return { kind: "none" };
     }
-    if (normalizeSyncDatetime(value) !== null) {
-      return true;
+    const normalized = normalizeSyncDatetime(value);
+    if (normalized !== null) {
+      return { kind: "present", value: normalized };
     }
     db.prepare(
       `
@@ -3179,15 +3205,21 @@ function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): bo
         WHERE device_id = ?
       `,
     ).run(deviceId);
-    return false;
+    return { kind: "none" };
   } catch {
-    return true;
+    return { kind: "unknown" };
   }
 }
 
 type LocalLatestSnapshotStatus =
   | { kind: "missing" }
-  | { kind: "present"; snapshotId: string; schemaVersion: number; oplogSeq: number }
+  | {
+      kind: "present";
+      snapshotId: string;
+      schemaVersion: number;
+      oplogSeq: number;
+      createdAt: string;
+    }
   | { kind: "unknown" };
 
 async function localLatestSnapshotStatusBestEffort(
@@ -3235,6 +3267,7 @@ async function localLatestSnapshotStatusBestEffort(
           "snapshot metadata",
         ),
         oplogSeq: requiredInteger(parsed.oplogSeq ?? parsed.oplog_seq, "snapshot metadata"),
+        createdAt: requiredStringValue(parsed.createdAt ?? parsed.created_at, "snapshot metadata"),
       };
       if (snapshotId !== null && isBackendStrictUuid(snapshotId)) {
         return latestStatus;
@@ -3308,9 +3341,66 @@ async function localCursorLatestSnapshotStatusBestEffort(
           (latestSnapshot as Record<string, unknown>).oplog_seq,
         "cursor latest snapshot",
       ),
+      createdAt: "",
     };
   } catch {
     return { kind: "unknown" };
+  }
+}
+
+async function localSnapshotSatisfiesFreshnessGate(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  latest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
+  minSnapshotCreatedAt: string,
+): Promise<boolean> {
+  const latestCreatedAt = normalizeSyncDatetime(latest.createdAt);
+  if (latestCreatedAt === null) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Invalid snapshot created_at in metadata: invalid datetime",
+      500,
+    );
+  }
+  const latestTime = new Date(latestCreatedAt).getTime();
+  const minTime = new Date(minSnapshotCreatedAt).getTime();
+  if (latestTime + 120 * 1000 > minTime) {
+    return true;
+  }
+  const remoteCursor = await localEventsCursorBestEffort(env, fetchImpl, accessToken, deviceId);
+  return remoteCursor !== null && latest.oplogSeq >= remoteCursor;
+}
+
+async function localEventsCursorBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<number | null> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/cursor`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!isRecord(parsed) || !validSyncCursorShape(parsed)) {
+      return null;
+    }
+    return requiredInteger(parsed.cursor, "cursor response");
+  } catch {
+    return null;
   }
 }
 
