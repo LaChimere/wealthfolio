@@ -2209,6 +2209,100 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("reads READY, REGISTERED, and RECOVERY sync states from cloud device status", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const deviceResponses: Response[] = [
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        trust_state: "trusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        trust_state: "untrusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        trust_state: "untrusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 }),
+    ];
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return deviceResponses.shift() ?? Response.json({}, { status: 500 });
+      },
+    });
+
+    try {
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "READY",
+        deviceId: "device-1",
+        deviceName: "MacBook",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        isTrusted: true,
+        trustedDevices: [],
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: false,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: false,
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "RECOVERY",
+        deviceId: "device-1",
+        deviceName: null,
+        isTrusted: false,
+      });
+      expect(
+        requests.filter((request) => request.includes("/api/v1/sync/team/devices/device-1")),
+      ).toHaveLength(4);
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads local sync engine status and bootstrap requirement", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

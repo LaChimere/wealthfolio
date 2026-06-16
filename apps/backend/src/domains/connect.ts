@@ -2102,8 +2102,8 @@ export function createLocalConnectDeviceSyncService({
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
-      return getLocalDeviceSyncFreshStateOrThrow(secretService);
+      const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      return await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
     },
     async enableDeviceSync() {
       if (!secretService) {
@@ -2251,6 +2251,180 @@ async function getLocalDeviceSyncFreshStateOrThrow(
     );
   }
   throw deviceSyncDisabled();
+}
+
+async function getLocalDeviceSyncState(
+  secretService: SecretService,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+): Promise<Record<string, unknown>> {
+  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  if (rawIdentity === null) {
+    return freshDeviceSyncState();
+  }
+  let identity: ReturnType<typeof parseSyncIdentity>;
+  try {
+    identity = parseStoredSyncIdentity(rawIdentity);
+  } catch (error) {
+    if (error instanceof ConnectServiceError) {
+      throw error;
+    }
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse identity: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!identity.deviceNonce || !identity.deviceId) {
+    return freshDeviceSyncState();
+  }
+  let device: Record<string, unknown>;
+  try {
+    device = await fetchLocalDeviceSyncDevice(env, fetchImpl, accessToken, identity.deviceId);
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes("404") || message.toLowerCase().includes("not found")) {
+      return {
+        state: "RECOVERY",
+        deviceId: identity.deviceId,
+        deviceName: null,
+        keyVersion: identity.keyVersion,
+        serverKeyVersion: null,
+        isTrusted: false,
+        trustedDevices: [],
+      };
+    }
+
+    throw error;
+  }
+  const trustedKeyVersion = optionalNumber(device.trustedKeyVersion);
+  if (device.trustState === "revoked") {
+    return {
+      state: "RECOVERY",
+      deviceId: identity.deviceId,
+      deviceName: optionalString(device.displayName),
+      keyVersion: identity.keyVersion,
+      serverKeyVersion: trustedKeyVersion,
+      isTrusted: false,
+      trustedDevices: [],
+    };
+  }
+  const isTrusted = device.trustState === "trusted";
+  if (!identity.rootKey || identity.keyVersion === null || !isTrusted) {
+    return {
+      state: "REGISTERED",
+      deviceId: identity.deviceId,
+      deviceName: optionalString(device.displayName),
+      keyVersion: null,
+      serverKeyVersion: trustedKeyVersion,
+      isTrusted,
+      trustedDevices: [],
+    };
+  }
+  if (trustedKeyVersion !== null && identity.keyVersion !== trustedKeyVersion) {
+    return {
+      state: "STALE",
+      deviceId: identity.deviceId,
+      deviceName: optionalString(device.displayName),
+      keyVersion: identity.keyVersion,
+      serverKeyVersion: trustedKeyVersion,
+      isTrusted,
+      trustedDevices: [],
+    };
+  }
+  return {
+    state: "READY",
+    deviceId: identity.deviceId,
+    deviceName: optionalString(device.displayName),
+    keyVersion: identity.keyVersion,
+    serverKeyVersion: trustedKeyVersion,
+    isTrusted,
+    trustedDevices: [],
+  };
+}
+
+async function fetchLocalDeviceSyncDevice(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<Record<string, unknown>> {
+  const response = await fetchImpl(
+    `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "x-wf-client-request-id": `app:${randomUUID()}`,
+      },
+    },
+  );
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw new ConnectServiceError(
+      "internal_error",
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      500,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse device response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return {
+    id: requiredStringValue(parsed.id, "device response"),
+    displayName: requiredStringValue(parsed.displayName ?? parsed.display_name, "device response"),
+    trustState: requiredDeviceTrustState(parsed.trustState ?? parsed.trust_state),
+    trustedKeyVersion: optionalDeviceNumber(
+      parsed.trustedKeyVersion ?? parsed.trusted_key_version,
+      "device response",
+    ),
+  };
+}
+
+function connectDeviceSyncApiErrorMessage(status: number, bodyText: string): string {
+  const trimmed = bodyText.trim();
+  if (!trimmed) {
+    return `API error (${status}): Request failed`;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (isRecord(parsed)) {
+      const code = optionalString(parsed.code) ?? optionalString(parsed.error) ?? "";
+      const message = optionalString(parsed.message) ?? `HTTP ${status}`;
+      return `API error (${status}): ${code}: ${message}`;
+    }
+  } catch {
+    return `API error (${status}): Request failed: ${trimmed}`;
+  }
+  return `API error (${status}): Request failed: ${trimmed}`;
+}
+
+function requiredDeviceTrustState(value: unknown): string {
+  if (value !== "untrusted" && value !== "trusted" && value !== "revoked") {
+    throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return value;
+}
+
+function optionalDeviceNumber(value: unknown, context: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "number") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
 }
 
 function freshDeviceSyncState(): Record<string, unknown> {

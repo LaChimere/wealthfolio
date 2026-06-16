@@ -3871,6 +3871,15 @@ contract:
   persisting freshness gates, returning Rust-shaped success flow responses when
   bootstrap is not required, and keeping real bootstrap/overwrite flow paths
   feature-gated.
+- `pr5-connect-device-sync-state-cloud`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/sync-state` reading cloud device status for stored
+  `sync_identity` device IDs and returning Rust-shaped READY, REGISTERED, STALE,
+  and RECOVERY states for safe non-engine cases while preserving FRESH and
+  malformed-identity behavior. Dual GPT/Claude xhigh review found no actionable
+  issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
