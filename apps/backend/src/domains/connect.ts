@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
@@ -3132,6 +3132,15 @@ async function bootstrapSnapshotIfNotReady(
       cursor: optionalNumber(engineStatus.cursor),
     };
   }
+  if (latestSnapshotStatus.kind === "present") {
+    await assertLocalSnapshotDownloadPreconditions(
+      env,
+      fetchImpl,
+      session.accessToken,
+      deviceId,
+      latestSnapshotStatus,
+    );
+  }
   throw deviceSyncDisabled();
 }
 
@@ -3219,6 +3228,7 @@ type LocalLatestSnapshotStatus =
       schemaVersion: number;
       oplogSeq: number;
       createdAt: string;
+      checksum: string | null;
     }
   | { kind: "unknown" };
 
@@ -3268,6 +3278,7 @@ async function localLatestSnapshotStatusBestEffort(
         ),
         oplogSeq: requiredInteger(parsed.oplogSeq ?? parsed.oplog_seq, "snapshot metadata"),
         createdAt: requiredStringValue(parsed.createdAt ?? parsed.created_at, "snapshot metadata"),
+        checksum: optionalString(parsed.checksum),
       };
       if (snapshotId !== null && isBackendStrictUuid(snapshotId)) {
         return latestStatus;
@@ -3342,6 +3353,7 @@ async function localCursorLatestSnapshotStatusBestEffort(
         "cursor latest snapshot",
       ),
       createdAt: "",
+      checksum: null,
     };
   } catch {
     return { kind: "unknown" };
@@ -3401,6 +3413,53 @@ async function localEventsCursorBestEffort(
     return requiredInteger(parsed.cursor, "cursor response");
   } catch {
     return null;
+  }
+}
+
+async function assertLocalSnapshotDownloadPreconditions(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  latest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
+): Promise<void> {
+  const response = await fetchImpl(
+    `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/${encodeURIComponent(latest.snapshotId.trim())}`,
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/octet-stream",
+        "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+        "x-wf-device-id": deviceId,
+      },
+    },
+  );
+  if (response.status === 404) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Snapshot ${latest.snapshotId.trim()} is no longer available. No valid snapshot to download.`,
+      500,
+    );
+  }
+  if (!response.ok) {
+    throw deviceSyncDisabled();
+  }
+  const expectedHeaderChecksum = response.headers.get("x-snapshot-checksum") ?? "";
+  const blob = new Uint8Array(await response.arrayBuffer());
+  const actualChecksum = `sha256:${createHash("sha256").update(blob).digest("hex")}`;
+  if (expectedHeaderChecksum !== actualChecksum) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Snapshot checksum mismatch (download header): expected=${expectedHeaderChecksum}, got=${actualChecksum}`,
+      500,
+    );
+  }
+  if (latest.checksum !== null && latest.checksum.trim() && latest.checksum !== actualChecksum) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Snapshot checksum mismatch (latest metadata): expected=${latest.checksum}, got=${actualChecksum}`,
+      500,
+    );
   }
 }
 

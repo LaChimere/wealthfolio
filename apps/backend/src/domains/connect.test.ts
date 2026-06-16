@@ -37,6 +37,18 @@ function connectSubscriptionPlan(id: string): Record<string, unknown> {
   };
 }
 
+function snapshotDownloadResponse(
+  checksum = "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+): Response {
+  return new Response("snapshot", {
+    headers: {
+      "x-snapshot-schema-version": "1",
+      "x-snapshot-covers-tables": "accounts",
+      "x-snapshot-checksum": checksum,
+    },
+  });
+}
+
 describe("TS Connect local session service", () => {
   test("stores, reports, and clears cloud refresh session secrets", async () => {
     const db = new Database(":memory:");
@@ -3445,6 +3457,9 @@ describe("TS Connect device sync local service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
+        if (String(input).includes("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return snapshotDownloadResponse();
+        }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
             snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
@@ -3453,7 +3468,7 @@ describe("TS Connect device sync local service", () => {
             schema_version: 1,
             covers_tables: [],
             size_bytes: 128,
-            checksum: "sha256:snapshot",
+            checksum: "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
           });
         }
         if (String(input).includes("/api/v1/sync/events/cursor")) {
@@ -4275,6 +4290,124 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("reports bootstrap snapshot download preflight errors", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    let mode: "missing" | "bad-header" | "bad-metadata" = "missing";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          if (mode === "missing") {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          return snapshotDownloadResponse(mode === "bad-header" ? "sha256:bad" : undefined);
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum:
+              mode === "bad-metadata"
+                ? "sha256:bad-metadata"
+                : "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot snapshot-1 is no longer available. No valid snapshot to download.",
+      });
+      mode = "bad-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "Snapshot checksum mismatch (download header): expected=sha256:bad, got=sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+      });
+      mode = "bad-metadata";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "Snapshot checksum mismatch (latest metadata): expected=sha256:bad-metadata, got=sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
   test("uses cursor fallback schema for non-UUID latest snapshot metadata", async () => {
     const db = new Database(":memory:");
     db.exec(`
@@ -4330,6 +4463,9 @@ describe("TS Connect device sync local service", () => {
       fetch: async (input) => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return snapshotDownloadResponse();
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
@@ -4438,12 +4574,18 @@ describe("TS Connect device sync local service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          return snapshotDownloadResponse();
+        }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
             snapshot_id: "snapshot-1",
             oplog_seq: 42,
             created_at: "2026-01-01T00:00:00Z",
             schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
           });
         }
         if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
@@ -4524,6 +4666,9 @@ describe("TS Connect device sync local service", () => {
       fetch: async (input) => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          return snapshotDownloadResponse();
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
