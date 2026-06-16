@@ -3040,22 +3040,44 @@ async function bootstrapSnapshotIfNotReady(
     console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
   }
   const engineStatus = await getLocalDeviceSyncEngineStatus(db, secretService);
-  if (
-    engineStatus.bootstrapRequired !== true &&
-    !localMinSnapshotFreshnessGateExists(db, deviceId)
-  ) {
-    const reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
+  const freshnessGateExists = localMinSnapshotFreshnessGateExists(db, deviceId);
+  let reconcileAction: string | null = null;
+  if (!freshnessGateExists) {
+    reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
       env,
       fetchImpl,
       session.accessToken,
       deviceId,
     );
+  }
+  if (engineStatus.bootstrapRequired !== true && !freshnessGateExists) {
     if (!reconcileActionRequiresSnapshot(reconcileAction)) {
       return {
         status: "skipped",
         message: "Snapshot bootstrap already completed",
         snapshotId: null,
         cursor: optionalNumber(engineStatus.cursor),
+      };
+    }
+  }
+  if (
+    !freshnessGateExists &&
+    (engineStatus.bootstrapRequired === true || reconcileActionRequiresSnapshot(reconcileAction)) &&
+    (await localLatestSnapshotMissingBestEffort(env, fetchImpl, session.accessToken, deviceId))
+  ) {
+    const missingSnapshotAction = await fetchLocalReconcileReadyActionBestEffort(
+      env,
+      fetchImpl,
+      session.accessToken,
+      deviceId,
+    );
+    if (missingSnapshotAction === "NOOP" || missingSnapshotAction === "PULL_TAIL") {
+      resetAndMarkLocalBootstrapComplete(db, identity);
+      return {
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: getLocalSyncCursor(db),
       };
     }
   }
@@ -3130,6 +3152,70 @@ function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): bo
   } catch {
     return true;
   }
+}
+
+async function localLatestSnapshotMissingBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/latest`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+    return response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+function resetAndMarkLocalBootstrapComplete(
+  db: Database,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): void {
+  resetLocalSyncSession(db);
+  const now = new Date().toISOString();
+  if (sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    db.prepare(
+      `
+        INSERT INTO sync_device_config (
+          device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+        )
+        VALUES (?, ?, 'trusted', ?, NULL)
+        ON CONFLICT(device_id) DO UPDATE SET
+          key_version = excluded.key_version,
+          trust_state = excluded.trust_state,
+          last_bootstrap_at = excluded.last_bootstrap_at,
+          min_snapshot_created_at = excluded.min_snapshot_created_at
+      `,
+    ).run(identity.deviceId, identity.keyVersion, now);
+    return;
+  }
+  db.prepare(
+    `
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES (?, ?, 'trusted', ?)
+      ON CONFLICT(device_id) DO UPDATE SET
+        key_version = excluded.key_version,
+        trust_state = excluded.trust_state,
+        last_bootstrap_at = excluded.last_bootstrap_at
+    `,
+  ).run(identity.deviceId, identity.keyVersion, now);
+}
+
+function getLocalSyncCursor(db: Database): number {
+  return (
+    db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0
+  );
 }
 
 async function fetchLocalReconcileReadyActionBestEffort(

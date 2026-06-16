@@ -3941,6 +3941,16 @@ contract:
   fallthrough, and reconcile `WAIT_SNAPSHOT` feature-gated fallthrough. Dual
   GPT/Claude xhigh review found and verified fixes for reconcile gating,
   freshness-gate normalization, and best-effort config persistence.
+- `pr5-connect-device-bootstrap-missing-snapshot`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes READY
+  bootstrap-required 404 + reconcile `NOOP` reset/mark-complete `skipped`
+  responses, the completed-local + initial `WAIT_SNAPSHOT` race clearing after a
+  second `NOOP`, and destructive-boundary preservation for continuing
+  `WAIT_SNAPSHOT` or existing-snapshot paths. Dual GPT/Claude xhigh review found
+  and verified the race-path and reset-boundary refinements.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

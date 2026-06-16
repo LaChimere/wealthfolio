@@ -3458,4 +3458,381 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("marks READY bootstrap complete when no remote snapshot is required", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: 0,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({
+        count: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              key_version: number | null;
+              trust_state: string;
+              last_bootstrap_at: string | null;
+              min_snapshot_created_at: string | null;
+            },
+            []
+          >(
+            "SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'",
+          )
+          .get(),
+      ).toMatchObject({
+        key_version: 2,
+        trust_state: "trusted",
+        min_snapshot_created_at: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks completed READY bootstrap complete after reconcile snapshot race clears", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const reconcileActions = ["WAIT_SNAPSHOT", "NOOP"];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: reconcileActions.shift() ?? "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: 0,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps READY missing-snapshot bootstrap feature-gated when reconcile still waits", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps READY bootstrap feature-gated when latest snapshot exists", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
 });
