@@ -400,10 +400,10 @@ async function getLocalDeviceId(secretService: SecretService): Promise<string | 
   const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
   if (rawIdentity) {
     try {
-      const parsed = JSON.parse(rawIdentity) as unknown;
-      if (isRecord(parsed) && typeof parsed.deviceId === "string") {
-        return parsed.deviceId;
-      }
+      return (
+        parseStoredSyncIdentity(rawIdentity).deviceId ??
+        (await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY))
+      );
     } catch {
       // Match Rust get_device_id: parse failures still fall back to the legacy key.
     }
@@ -419,20 +419,52 @@ async function getLocalSyncIdentityDeviceId(
     return undefined;
   }
   try {
-    const parsed = JSON.parse(rawIdentity) as unknown;
-    if (!isRecord(parsed)) {
-      return undefined;
-    }
-    assertDefaultedIntegerField(parsed, "version");
-    assertOptionalStringField(parsed, "deviceNonce");
-    assertOptionalStringField(parsed, "deviceId");
-    assertOptionalStringField(parsed, "rootKey");
-    assertOptionalIntegerField(parsed, "keyVersion");
-    assertOptionalStringField(parsed, "deviceSecretKey");
-    assertOptionalStringField(parsed, "devicePublicKey");
-    return optionalString(parsed.deviceId);
+    return parseStoredSyncIdentity(rawIdentity).deviceId;
   } catch {
     return undefined;
+  }
+}
+
+function parseStoredSyncIdentity(rawIdentity: string): {
+  deviceId: string | null;
+} {
+  assertNoDuplicateSyncIdentityFields(rawIdentity);
+  assertRawI32Token(rawIdentity, "version", false);
+  assertRawI32Token(rawIdentity, "keyVersion", true);
+  const parsed = JSON.parse(rawIdentity) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("invalid sync identity");
+  }
+  assertDefaultedI32Field(parsed, "version");
+  assertOptionalStringField(parsed, "deviceNonce");
+  assertOptionalStringField(parsed, "deviceId");
+  assertOptionalStringField(parsed, "rootKey");
+  assertOptionalI32Field(parsed, "keyVersion");
+  assertOptionalStringField(parsed, "deviceSecretKey");
+  assertOptionalStringField(parsed, "devicePublicKey");
+  return { deviceId: optionalString(parsed.deviceId) };
+}
+
+const SYNC_IDENTITY_FIELDS = new Set([
+  "version",
+  "deviceNonce",
+  "deviceId",
+  "rootKey",
+  "keyVersion",
+  "deviceSecretKey",
+  "devicePublicKey",
+]);
+
+function assertNoDuplicateSyncIdentityFields(rawJson: string): void {
+  const seen = new Set<string>();
+  for (const key of topLevelJsonKeys(rawJson)) {
+    if (!SYNC_IDENTITY_FIELDS.has(key)) {
+      continue;
+    }
+    if (seen.has(key)) {
+      throw new Error("invalid sync identity");
+    }
+    seen.add(key);
   }
 }
 
@@ -443,22 +475,168 @@ function assertOptionalStringField(record: Record<string, unknown>, key: string)
   }
 }
 
-function assertDefaultedIntegerField(record: Record<string, unknown>, key: string): void {
+function assertDefaultedI32Field(record: Record<string, unknown>, key: string): void {
   const value = record[key];
-  if (value !== undefined && (!Number.isInteger(value) || typeof value !== "number")) {
+  if (value !== undefined && !isI32Integer(value)) {
     throw new Error("invalid sync identity");
   }
 }
 
-function assertOptionalIntegerField(record: Record<string, unknown>, key: string): void {
+function assertOptionalI32Field(record: Record<string, unknown>, key: string): void {
   const value = record[key];
-  if (
-    value !== undefined &&
-    value !== null &&
-    (!Number.isInteger(value) || typeof value !== "number")
-  ) {
+  if (value !== undefined && value !== null && !isI32Integer(value)) {
     throw new Error("invalid sync identity");
   }
+}
+
+function isI32Integer(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= -2_147_483_648 &&
+    value <= 2_147_483_647
+  );
+}
+
+function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (token === "null") {
+      if (allowNull) {
+        continue;
+      }
+      throw new Error("invalid sync identity");
+    }
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw new Error("invalid sync identity");
+    }
+  }
+}
+
+function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
+  const tokens: string[] = [];
+  for (const entry of topLevelJsonEntries(rawJson)) {
+    if (entry.key === targetKey) {
+      tokens.push(entry.valueToken);
+    }
+  }
+  return tokens;
+}
+
+function topLevelJsonKeys(rawJson: string): string[] {
+  return topLevelJsonEntries(rawJson).map((entry) => entry.key);
+}
+
+function topLevelJsonEntries(rawJson: string): Array<{ key: string; valueToken: string }> {
+  const entries: Array<{ key: string; valueToken: string }> = [];
+  let index = skipJsonWhitespace(rawJson, 0);
+  if (rawJson[index] !== "{") {
+    return entries;
+  }
+  index += 1;
+  while (index < rawJson.length) {
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === "}") {
+      break;
+    }
+    if (rawJson[index] !== '"') {
+      return entries;
+    }
+    const keyStart = index;
+    index = skipJsonString(rawJson, index);
+    if (index < 0) {
+      return entries;
+    }
+    let key: string;
+    try {
+      key = JSON.parse(rawJson.slice(keyStart, index)) as string;
+    } catch {
+      return entries;
+    }
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] !== ":") {
+      return entries;
+    }
+    index = skipJsonWhitespace(rawJson, index + 1);
+    const valueStart = index;
+    index = skipJsonValue(rawJson, index);
+    if (index < 0) {
+      return entries;
+    }
+    entries.push({ key, valueToken: rawJson.slice(valueStart, index).trim() });
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === ",") {
+      index += 1;
+      continue;
+    }
+    if (rawJson[index] === "}") {
+      break;
+    }
+    return entries;
+  }
+  return entries;
+}
+
+function skipJsonWhitespace(rawJson: string, index: number): number {
+  while (/\s/.test(rawJson[index] ?? "")) {
+    index += 1;
+  }
+  return index;
+}
+
+function skipJsonString(rawJson: string, index: number): number {
+  index += 1;
+  while (index < rawJson.length) {
+    const char = rawJson[index];
+    if (char === "\\") {
+      index += 2;
+      continue;
+    }
+    if (char === '"') {
+      return index + 1;
+    }
+    index += 1;
+  }
+  return -1;
+}
+
+function skipJsonValue(rawJson: string, index: number): number {
+  const char = rawJson[index];
+  if (char === '"') {
+    return skipJsonString(rawJson, index);
+  }
+  if (char === "{" || char === "[") {
+    return skipJsonComposite(rawJson, index);
+  }
+  while (index < rawJson.length && rawJson[index] !== "," && rawJson[index] !== "}") {
+    index += 1;
+  }
+  return index;
+}
+
+function skipJsonComposite(rawJson: string, index: number): number {
+  const stack: string[] = [];
+  while (index < rawJson.length) {
+    const char = rawJson[index];
+    if (char === '"') {
+      index = skipJsonString(rawJson, index);
+      if (index < 0) {
+        return -1;
+      }
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+    } else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) {
+        return -1;
+      }
+      if (stack.length === 0) {
+        return index + 1;
+      }
+    }
+    index += 1;
+  }
+  return -1;
 }
 
 function optionalString(value: unknown): string | null {

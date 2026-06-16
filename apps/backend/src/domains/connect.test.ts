@@ -2077,6 +2077,18 @@ describe("TS Connect device sync local service", () => {
         message: "Failed to parse identity",
         status: 500,
       });
+      secretService.entries.set("sync_identity", '{"version":2,"version":3,"deviceId":"device-1"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set("sync_identity", '{"version":2,"deviceId":"a","deviceId":"b"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
       secretService.entries.set(
         "sync_identity",
         JSON.stringify({ version: 2, deviceId: "device-1", keyVersion: 1.5 }),

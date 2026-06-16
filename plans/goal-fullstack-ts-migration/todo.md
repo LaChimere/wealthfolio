@@ -3743,6 +3743,16 @@ contract:
   including escaped/duplicate field spellings and device-ID-only consumers. Dual
   GPT/Claude xhigh review found and then verified the raw-token/device-ID
   consumer fix.
+- `pr5-device-sync-identity-i32-parse`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`, and
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes standalone and
+  Connect-device `sync_identity` parsing rejecting `version: null`, non-integer
+  `version`/`keyVersion` raw JSON tokens such as `2.0`/`1e0`, duplicate known
+  identity fields, core device-ID legacy fallback on malformed identity, and
+  composite/flow no-legacy-fallback behavior. Dual GPT/Claude xhigh review found
+  no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

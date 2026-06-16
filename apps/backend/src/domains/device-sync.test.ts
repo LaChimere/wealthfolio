@@ -67,6 +67,20 @@ describe("TS local device sync service", () => {
       message: "No device ID configured",
       status: 400,
     });
+
+    secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+    await expect(service.getCurrentDevice()).rejects.toMatchObject({
+      code: "bad_request",
+      message: "No device ID configured",
+      status: 400,
+    });
+
+    secretService.entries.set("sync_identity", '{"version":2,"deviceId":"a","deviceId":"b"}');
+    await expect(service.getCurrentDevice()).rejects.toMatchObject({
+      code: "bad_request",
+      message: "No device ID configured",
+      status: 400,
+    });
   });
 
   test("falls back to legacy device id when sync identity cannot be parsed", async () => {
@@ -80,6 +94,12 @@ describe("TS local device sync service", () => {
       },
     });
 
+    await expect(service.getCurrentDevice()).rejects.toMatchObject({
+      code: "not_implemented",
+      status: 501,
+    });
+
+    secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
     await expect(service.getCurrentDevice()).rejects.toMatchObject({
       code: "not_implemented",
       status: 501,
@@ -417,6 +437,47 @@ describe("TS local device sync service", () => {
       "sync_identity",
       JSON.stringify({ version: 2, deviceId: "device-1", keyVersion: 1.5 }),
     );
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set(
+      "sync_identity",
+      '{"version":2,"vers\\u0069on":2.0,"deviceId":"device-1"}',
+    );
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set(
+      "sync_identity",
+      '{"version":2,"keyVersion":1,"keyVersion":1e0,"deviceId":"device-1"}',
+    );
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_identity", '{"version":2,"version":3,"deviceId":"device-1"}');
+    await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "No sync identity configured",
+      status: 500,
+    });
+
+    secretService.entries.set("sync_identity", '{"version":2,"deviceId":"a","deviceId":"b"}');
     await expect(service.completePairingWithTransfer?.(completeRequest)).rejects.toMatchObject({
       code: "internal_error",
       message: "No sync identity configured",

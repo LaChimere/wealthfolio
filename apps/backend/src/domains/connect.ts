@@ -2328,9 +2328,33 @@ function parseSyncIdentity(identity: unknown): {
 }
 
 function parseStoredSyncIdentity(rawIdentity: string): ReturnType<typeof parseSyncIdentity> {
+  assertNoDuplicateSyncIdentityFields(rawIdentity);
   assertRawI32Token(rawIdentity, "version", false);
   assertRawI32Token(rawIdentity, "keyVersion", true);
   return parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+}
+
+const SYNC_IDENTITY_FIELDS = new Set([
+  "version",
+  "deviceNonce",
+  "deviceId",
+  "rootKey",
+  "keyVersion",
+  "deviceSecretKey",
+  "devicePublicKey",
+]);
+
+function assertNoDuplicateSyncIdentityFields(rawJson: string): void {
+  const seen = new Set<string>();
+  for (const key of topLevelJsonKeys(rawJson)) {
+    if (!SYNC_IDENTITY_FIELDS.has(key)) {
+      continue;
+    }
+    if (seen.has(key)) {
+      throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+    }
+    seen.add(key);
+  }
 }
 
 function assertOptionalStringField(record: Record<string, unknown>, key: string): void {
@@ -2379,9 +2403,23 @@ function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): vo
 
 function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
   const tokens: string[] = [];
+  for (const entry of topLevelJsonEntries(rawJson)) {
+    if (entry.key === targetKey) {
+      tokens.push(entry.valueToken);
+    }
+  }
+  return tokens;
+}
+
+function topLevelJsonKeys(rawJson: string): string[] {
+  return topLevelJsonEntries(rawJson).map((entry) => entry.key);
+}
+
+function topLevelJsonEntries(rawJson: string): Array<{ key: string; valueToken: string }> {
+  const entries: Array<{ key: string; valueToken: string }> = [];
   let index = skipJsonWhitespace(rawJson, 0);
   if (rawJson[index] !== "{") {
-    return tokens;
+    return entries;
   }
   index += 1;
   while (index < rawJson.length) {
@@ -2390,32 +2428,30 @@ function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
       break;
     }
     if (rawJson[index] !== '"') {
-      return tokens;
+      return entries;
     }
     const keyStart = index;
     index = skipJsonString(rawJson, index);
     if (index < 0) {
-      return tokens;
+      return entries;
     }
     let key: string;
     try {
       key = JSON.parse(rawJson.slice(keyStart, index)) as string;
     } catch {
-      return tokens;
+      return entries;
     }
     index = skipJsonWhitespace(rawJson, index);
     if (rawJson[index] !== ":") {
-      return tokens;
+      return entries;
     }
     index = skipJsonWhitespace(rawJson, index + 1);
     const valueStart = index;
     index = skipJsonValue(rawJson, index);
     if (index < 0) {
-      return tokens;
+      return entries;
     }
-    if (key === targetKey) {
-      tokens.push(rawJson.slice(valueStart, index).trim());
-    }
+    entries.push({ key, valueToken: rawJson.slice(valueStart, index).trim() });
     index = skipJsonWhitespace(rawJson, index);
     if (rawJson[index] === ",") {
       index += 1;
@@ -2424,9 +2460,9 @@ function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
     if (rawJson[index] === "}") {
       break;
     }
-    return tokens;
+    return entries;
   }
-  return tokens;
+  return entries;
 }
 
 function skipJsonWhitespace(rawJson: string, index: number): number {
