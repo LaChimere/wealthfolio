@@ -2109,7 +2109,16 @@ export function createLocalConnectDeviceSyncService({
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      const state = await getLocalDeviceSyncState(
+        secretService,
+        env,
+        fetchImpl,
+        session.accessToken,
+      );
+      if (state.state === "READY" || state.state === "REGISTERED" || state.state === "STALE") {
+        return enableSyncResultFromState(state);
+      }
       throw deviceSyncDisabled();
     },
     async reinitializeDeviceSync() {
@@ -2390,6 +2399,36 @@ async function fetchLocalDeviceSyncDevice(
       "device response",
     ),
   };
+}
+
+function enableSyncResultFromState(state: Record<string, unknown>): Record<string, unknown> {
+  const deviceId = optionalString(state.deviceId);
+  if (!deviceId) {
+    throw new ConnectServiceError("internal_error", "Missing device ID in sync state", 500);
+  }
+  const stateName = requiredSyncState(state.state);
+  return {
+    deviceId,
+    state: stateName,
+    keyVersion: optionalNumber(state.keyVersion),
+    serverKeyVersion: optionalNumber(state.serverKeyVersion),
+    needsPairing: stateName === "REGISTERED" || stateName === "STALE",
+    trustedDevices: Array.isArray(state.trustedDevices) ? state.trustedDevices : [],
+  };
+}
+
+function requiredSyncState(value: unknown): string {
+  if (
+    value !== "FRESH" &&
+    value !== "REGISTERED" &&
+    value !== "READY" &&
+    value !== "STALE" &&
+    value !== "RECOVERY" &&
+    value !== "ORPHANED"
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse sync state", 500);
+  }
+  return value;
 }
 
 function connectDeviceSyncApiErrorMessage(status: number, bodyText: string): string {

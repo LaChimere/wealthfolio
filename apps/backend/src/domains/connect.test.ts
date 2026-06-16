@@ -2122,13 +2122,24 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("requires a Connect session before enable and reinitialize then keeps them feature-gated", async () => {
+  test("requires a Connect session before enable and returns existing sync state when configured", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
-      fetch: async () => Response.json({ access_token: "access-token" }),
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
     });
 
     try {
@@ -2142,11 +2153,61 @@ describe("TS Connect device sync local service", () => {
       });
 
       secretService.entries.set("sync_refresh_token", "refresh-token");
-      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
       });
-      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps enable feature-gated for RECOVERY sync state", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
       });

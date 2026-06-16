@@ -3880,6 +3880,14 @@ contract:
   and RECOVERY states for safe non-engine cases while preserving FRESH and
   malformed-identity behavior. Dual GPT/Claude xhigh review found no actionable
   issues.
+- `pr5-connect-device-enable-existing-state`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/enable` returning Rust-shaped `EnableSyncResult` for
+  existing READY/REGISTERED/STALE sync states while keeping true FRESH/RECOVERY
+  enrollment paths feature-gated. Dual GPT/Claude xhigh review found no
+  actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

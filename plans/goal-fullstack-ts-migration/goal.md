@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 432
+turns_used: 433
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2747,6 +2747,12 @@ updated_at: "2026-06-16T07:45:14+08:00"
   focused Connect-device tests, backend type-check, backend test suite, full
   `bun run check`, and `git diff --check`. Dual GPT/Claude xhigh review found no
   actionable issues.
+- Turn 433: Added the safe Connect device enable resume path. When
+  `/api/v1/connect/device/enable` finds an existing READY, REGISTERED, or STALE
+  sync state, TS now returns Rust-shaped `EnableSyncResult`; true FRESH/RECOVERY
+  enrollment paths remain feature-gated. Verified with focused Connect-device
+  tests, backend type-check, backend test suite, full `bun run check`, and
+  `git diff --check`.
 
 ## Deferred items
 
