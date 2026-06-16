@@ -1848,7 +1848,7 @@ describe("TS backend runtime composition", () => {
       );
       expect(triggerCycleResponse.status).toBe(200);
       await expect(triggerCycleResponse.json()).resolves.toMatchObject({
-        status: "config_error",
+        status: "not_ready",
         pushedCount: 0,
         pulledCount: 0,
         cursor: 0,

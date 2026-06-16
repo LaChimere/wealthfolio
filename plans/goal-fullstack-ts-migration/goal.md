@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 415
+turns_used: 416
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2617,6 +2617,15 @@ updated_at: "2026-06-16T07:45:14+08:00"
   feature-gated after a valid session. Dual GPT/Claude xhigh review found no
   actionable issues. Verified with focused Connect-device/runtime tests, backend
   type-check, backend test suite, full `bun run check`, and `git diff --check`.
+- Turn 416: Aligned Connect trigger-cycle identity preconditions with the Rust
+  sync engine. `/api/v1/connect/device/trigger-cycle` now reads `sync_identity`
+  from the secret store instead of stale `sync_device_config`, reports
+  `config_error` only for missing/unparseable identity, reports `not_ready` for
+  identity without a device ID or non-READY local sync state, maps token/state
+  restore failures to `state_error`, and remains feature-gated for READY/cloud
+  cycle paths. Dual GPT/Claude xhigh review found no actionable issues. Verified
+  with focused Connect-device/runtime tests, backend type-check, backend test
+  suite, full `bun run check`, and `git diff --check`.
 
 ## Deferred items
 

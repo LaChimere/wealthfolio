@@ -2175,7 +2175,7 @@ export function createLocalConnectDeviceSyncService({
       };
     },
     async triggerDeviceSyncCycle() {
-      return triggerLocalDeviceSyncCycle(db);
+      return await triggerLocalDeviceSyncCycle(db, secretService, env, fetchImpl);
     },
     cancelDeviceSnapshotUpload() {
       return {
@@ -2207,17 +2207,24 @@ async function localSyncIdentityCanRunBackground(
 async function localSyncIdentityDeviceId(
   secretService: SecretService | undefined,
 ): Promise<string | null> {
+  const deviceId = await readLocalSyncIdentityDeviceId(secretService);
+  return deviceId ?? null;
+}
+
+async function readLocalSyncIdentityDeviceId(
+  secretService: SecretService | undefined,
+): Promise<string | null | undefined> {
   if (!secretService) {
-    return null;
+    return undefined;
   }
   const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
   if (rawIdentity === null) {
-    return null;
+    return undefined;
   }
   try {
     return parseSyncIdentity(JSON.parse(rawIdentity) as unknown).deviceId;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -2564,17 +2571,12 @@ async function requireLocalSyncIdentityDeviceId(
   return identity.deviceId;
 }
 
-function triggerLocalDeviceSyncCycle(db: Database): Record<string, unknown> {
-  const config = db
-    .query<{ device_id: string | null }, []>(
-      `
-        SELECT device_id
-        FROM sync_device_config
-        ORDER BY device_id
-        LIMIT 1
-      `,
-    )
-    .get();
+async function triggerLocalDeviceSyncCycle(
+  db: Database,
+  secretService: SecretService | undefined,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>> {
   const cursor =
     db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
   const lockVersion =
@@ -2584,7 +2586,7 @@ function triggerLocalDeviceSyncCycle(db: Database): Record<string, unknown> {
         []
       >("SELECT lock_version FROM sync_engine_state WHERE id = 1")
       .get()?.lock_version ?? 0;
-  if (!config) {
+  if (!secretService) {
     markLocalSyncCycleError(
       db,
       "config_error",
@@ -2592,11 +2594,31 @@ function triggerLocalDeviceSyncCycle(db: Database): Record<string, unknown> {
     );
     return localSyncCycleResult("config_error", lockVersion, cursor);
   }
-  if (!config.device_id) {
+  const deviceId = await readLocalSyncIdentityDeviceId(secretService);
+  if (deviceId === undefined) {
+    markLocalSyncCycleError(
+      db,
+      "config_error",
+      "No sync identity configured. Please enable sync first.",
+    );
+    return localSyncCycleResult("config_error", lockVersion, cursor);
+  }
+  if (deviceId === null) {
     markLocalSyncCycleOutcome(db, "not_ready");
     return localSyncCycleResult("not_ready", lockVersion, cursor);
   }
-  throw deviceSyncDisabled();
+  try {
+    await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+    await getLocalDeviceSyncFreshStateOrThrow(secretService);
+  } catch (error) {
+    if (error instanceof ConnectNotImplementedError) {
+      throw error;
+    }
+    markLocalSyncCycleError(db, "state_error", `Failed to read sync state: ${errorMessage(error)}`);
+    return localSyncCycleResult("state_error", lockVersion, cursor);
+  }
+  markLocalSyncCycleOutcome(db, "not_ready");
+  return localSyncCycleResult("not_ready", lockVersion, cursor);
 }
 
 function localSyncCycleResult(

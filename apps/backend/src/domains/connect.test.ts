@@ -2535,6 +2535,94 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("uses sync identity for local trigger cycle preconditions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 9, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 4);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('legacy-device', 1, 'trusted', '2026-01-01T00:00:00Z');
+    `);
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "config_error",
+        lockVersion: 4,
+        cursor: 9,
+      });
+
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+        lockVersion: 4,
+        cursor: 9,
+      });
+      expect(
+        db
+          .query<
+            { last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({
+        last_cycle_status: "state_error",
+        last_error: "Failed to read sync state: No sync session configured",
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
