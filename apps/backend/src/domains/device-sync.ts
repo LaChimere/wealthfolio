@@ -405,25 +405,62 @@ export function createLocalDeviceSyncService({
         },
       ).then(resetTeamSyncResponseFromCloud);
     },
-    async createPairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async createPairing(request) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings`,
+        {
+          method: "POST",
+          deviceId,
+          body: {
+            code_hash: request.codeHash,
+            ephemeral_public_key: request.ephemeralPublicKey,
+          },
+        },
+      ).then(createPairingResponseFromCloud);
     },
-    async getPairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async getPairing(pairingId) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchPairingFromCloud(accessToken, env, fetchImpl, deviceId, pairingId);
     },
-    async approvePairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async approvePairing(pairingId) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/approve`,
+        { method: "POST", deviceId },
+      ).then(successResponseFromCloud);
     },
     async completePairing() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
       throw deviceSyncDisabled();
     },
-    async cancelPairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async cancelPairing(pairingId) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/cancel`,
+        { method: "POST", deviceId },
+      ).then(successResponseFromCloud);
     },
     async claimPairing() {
       await requireSessionDeviceIdOrDisabled(connectService, secretService);
@@ -560,6 +597,24 @@ async function fetchDeviceFromCloud(
   );
 }
 
+async function fetchPairingFromCloud(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  deviceId: string,
+  pairingId: string,
+): Promise<Record<string, unknown>> {
+  return pairingFromCloud(
+    await fetchDeviceSyncJson(
+      accessToken,
+      env,
+      fetchImpl,
+      `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}`,
+      { deviceId },
+    ),
+  );
+}
+
 async function fetchDeviceSyncJson(
   accessToken: string,
   env: NodeJS.ProcessEnv,
@@ -643,6 +698,37 @@ function successResponseFromCloud(value: unknown): Record<string, unknown> {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse success response", 500);
   }
   return { success: value.success };
+}
+
+function createPairingResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
+  }
+  return {
+    pairingId: requiredString(value.pairingId ?? value.pairing_id, "pairing response"),
+    expiresAt: requiredString(value.expiresAt ?? value.expires_at, "pairing response"),
+    keyVersion: requiredI32(value.keyVersion ?? value.key_version, "pairing response"),
+    requireSas: requiredBoolean(value.requireSas ?? value.require_sas, "pairing response"),
+  };
+}
+
+function pairingFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
+  }
+  return {
+    pairingId: requiredString(value.pairingId ?? value.pairing_id, "pairing response"),
+    status: requiredPairingStatus(value.status),
+    claimerDeviceId: optionalDeviceString(
+      value.claimerDeviceId ?? value.claimer_device_id,
+      "pairing response",
+    ),
+    claimerEphemeralPub: optionalDeviceString(
+      value.claimerEphemeralPub ?? value.claimer_ephemeral_pub,
+      "pairing response",
+    ),
+    expiresAt: requiredString(value.expiresAt ?? value.expires_at, "pairing response"),
+  };
 }
 
 function initializeKeysResultFromCloud(value: unknown): Record<string, unknown> {
@@ -942,6 +1028,20 @@ function requiredTrustState(value: unknown): string {
 function requiredKeyState(value: unknown, context: string): string {
   if (value !== "ACTIVE" && value !== "PENDING") {
     throw new DeviceSyncServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredPairingStatus(value: unknown): string {
+  if (
+    value !== "open" &&
+    value !== "claimed" &&
+    value !== "approved" &&
+    value !== "completed" &&
+    value !== "cancelled" &&
+    value !== "expired"
+  ) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
   }
   return value;
 }

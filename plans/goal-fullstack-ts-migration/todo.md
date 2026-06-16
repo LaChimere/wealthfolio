@@ -3808,6 +3808,15 @@ contract:
   `/api/v1/sync/team/keys/reset`, omitting `reason` when absent, parsing
   `ResetTeamSyncResponse`, preserving no-session errors, and dual GPT/Claude
   xhigh review finding no actionable issues.
+- `pr5-device-sync-issuer-pairing-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes issuer-side
+  `/api/v1/sync/pairing` create, get, approve, and cancel operations restoring
+  the Connect session, resolving the local device ID, sending Rust-compatible
+  device-scoped pairing endpoints/request IDs, parsing create/get/success
+  responses, leaving complete/claimer flows deferred, and dual GPT/Claude xhigh
+  review finding no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

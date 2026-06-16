@@ -721,25 +721,93 @@ describe("TS local device sync service", () => {
     });
   });
 
-  test("keeps pairing operations feature-gated when device id is configured", async () => {
+  test("runs issuer pairing operations through cloud when device id is configured", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
     const service = createLocalDeviceSyncService({
       secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        const url = String(input);
+        if (url.endsWith("/approve") || url.endsWith("/cancel")) {
+          return Response.json({ success: true });
+        }
+        if (init?.method === "POST") {
+          return Response.json({
+            pairing_id: "pairing-1",
+            expires_at: "2026-01-01T00:00:00Z",
+            key_version: 2,
+            require_sas: true,
+          });
+        }
+        return Response.json({
+          pairing_id: "pairing-1",
+          status: "open",
+          claimer_device_id: null,
+          claimer_ephemeral_pub: null,
+          expires_at: "2026-01-01T00:00:00Z",
+        });
       },
     });
 
     await expect(
       service.createPairing?.({ codeHash: "hash", ephemeralPublicKey: "public-key" }),
-    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
-    await expect(service.getPairing?.("pairing-1")).rejects.toMatchObject({
-      code: "not_implemented",
+    ).resolves.toEqual({
+      pairingId: "pairing-1",
+      expiresAt: "2026-01-01T00:00:00Z",
+      keyVersion: 2,
+      requireSas: true,
     });
+    await expect(service.getPairing?.("pairing-1")).resolves.toEqual({
+      pairingId: "pairing-1",
+      status: "open",
+      claimerDeviceId: null,
+      claimerEphemeralPub: null,
+      expiresAt: "2026-01-01T00:00:00Z",
+    });
+    await expect(service.approvePairing?.("pairing-1")).resolves.toEqual({ success: true });
+    await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
     await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
       code: "not_implemented",
     });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings",
+        method: "POST",
+        body: JSON.stringify({ code_hash: "hash", ephemeral_public_key: "public-key" }),
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1",
+        method: "GET",
+        body: null,
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
+        method: "POST",
+        body: null,
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/cancel",
+        method: "POST",
+        body: null,
+        deviceId: "device-1",
+      },
+    ]);
   });
 
   test("reports sync identity preconditions for composite pairing operations", async () => {
