@@ -2321,17 +2321,30 @@ async function getLocalDeviceSyncState(
   }
   const isTrusted = device.trustState === "trusted";
   if (!identity.rootKey || identity.keyVersion === null || !isTrusted) {
+    const trustedDevices = isTrusted
+      ? []
+      : await getTrustedDevicesBestEffort(env, fetchImpl, accessToken);
+    let orphaned = !isTrusted && trustedDevices.length === 0 && (trustedKeyVersion ?? 0) > 0;
+    if (!orphaned && !isTrusted && trustedDevices.length === 0) {
+      orphaned = await detectOrphanedWithoutTrustedDevicesBestEffort(
+        env,
+        fetchImpl,
+        accessToken,
+        identity.deviceId,
+      );
+    }
     return {
-      state: "REGISTERED",
+      state: orphaned ? "ORPHANED" : "REGISTERED",
       deviceId: identity.deviceId,
       deviceName: optionalString(device.displayName),
       keyVersion: null,
       serverKeyVersion: trustedKeyVersion,
       isTrusted,
-      trustedDevices: [],
+      trustedDevices,
     };
   }
   if (trustedKeyVersion !== null && identity.keyVersion !== trustedKeyVersion) {
+    const trustedDevices = await getTrustedDevicesBestEffort(env, fetchImpl, accessToken);
     return {
       state: "STALE",
       deviceId: identity.deviceId,
@@ -2339,7 +2352,7 @@ async function getLocalDeviceSyncState(
       keyVersion: identity.keyVersion,
       serverKeyVersion: trustedKeyVersion,
       isTrusted,
-      trustedDevices: [],
+      trustedDevices,
     };
   }
   return {
@@ -2399,6 +2412,99 @@ async function fetchLocalDeviceSyncDevice(
       "device response",
     ),
   };
+}
+
+async function getTrustedDevicesBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/team/devices?scope=my`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": `app:${randomUUID()}`,
+        },
+      },
+    );
+    if (!response.ok) {
+      return [];
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter(isRecord)
+      .filter((device) => (device.trustState ?? device.trust_state) === "trusted")
+      .map((device) => ({
+        id: requiredStringValue(device.id, "device response"),
+        name: requiredStringValue(device.displayName ?? device.display_name, "device response"),
+        platform: requiredStringValue(device.platform, "device response"),
+        lastSeenAt: optionalString(device.lastSeenAt ?? device.last_seen_at),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function detectOrphanedWithoutTrustedDevicesBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/team/keys/initialize`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+        body: JSON.stringify({ device_id: deviceId }),
+      },
+    );
+    if (!response.ok) {
+      return false;
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!isRecord(parsed) || parsed.mode !== "PAIRING_REQUIRED") {
+      return false;
+    }
+    const e2eeKeyVersion = optionalNumber(parsed.e2eeKeyVersion ?? parsed.e2ee_key_version);
+    const trustedDevicesValue = parsed.trustedDevices ?? parsed.trusted_devices;
+    const trustedDevices = Array.isArray(trustedDevicesValue) ? trustedDevicesValue : [];
+    return (e2eeKeyVersion ?? 0) > 0 && trustedDevices.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function deviceSyncClientRequestId(deviceId: string | undefined): string {
+  const requestUuid = randomUUID();
+  const trimmedDeviceId = deviceId?.trim();
+  if (trimmedDeviceId && isLogSafeRequestId(trimmedDeviceId)) {
+    const candidate = `${trimmedDeviceId}:${requestUuid}`;
+    if (isLogSafeRequestId(candidate)) {
+      return candidate;
+    }
+  }
+  return `app:${requestUuid}`;
+}
+
+function isLogSafeRequestId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 128 &&
+    [...value].every((char) => /[A-Za-z0-9._:-]/.test(char))
+  );
 }
 
 function enableSyncResultFromState(state: Record<string, unknown>): Record<string, unknown> {

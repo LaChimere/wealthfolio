@@ -3905,6 +3905,13 @@ contract:
   returning Rust-shaped skipped snapshot responses when the current device is
   not trusted, while keeping actual trusted snapshot generation feature-gated.
   Dual GPT/Claude xhigh review found no actionable issues.
+- `pr5-connect-device-sync-state-orphaned`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes trusted-device list
+  reads gated like Rust, best-effort trusted-device fetch failures,
+  initialize-team-key probing when server key version is omitted, and
+  Rust-shaped REGISTERED/ORPHANED trusted-device sync-state results.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

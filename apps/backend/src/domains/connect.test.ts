@@ -2278,22 +2278,51 @@ describe("TS Connect device sync local service", () => {
       Response.json({
         id: "device-1",
         display_name: "MacBook",
+        platform: "mac",
         trust_state: "trusted",
         trusted_key_version: 2,
       }),
       Response.json({
         id: "device-1",
         display_name: "MacBook",
+        platform: "mac",
+        trust_state: "trusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
         trust_state: "untrusted",
         trusted_key_version: 2,
       }),
       Response.json({
         id: "device-1",
         display_name: "MacBook",
+        platform: "mac",
         trust_state: "untrusted",
         trusted_key_version: 2,
       }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "untrusted",
+      }),
       Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 }),
+    ];
+    const listResponses: Response[] = [
+      Response.json([
+        {
+          id: "trusted-device",
+          display_name: "iPhone",
+          platform: "ios",
+          trust_state: "trusted",
+          last_seen_at: "2026-01-01T00:00:00Z",
+        },
+      ]),
+      Response.json([]),
+      Response.json([]),
     ];
     const requests: string[] = [];
     const service = createLocalConnectDeviceSyncService({
@@ -2304,6 +2333,18 @@ describe("TS Connect device sync local service", () => {
         requests.push(String(input));
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/sync/team/devices?scope=my")) {
+          return listResponses.shift() ?? Response.json([]);
+        }
+        if (String(input).endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "PAIRING_REQUIRED",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [],
+          });
         }
         return deviceResponses.shift() ?? Response.json({}, { status: 500 });
       },
@@ -2330,12 +2371,38 @@ describe("TS Connect device sync local service", () => {
         trustedDevices: [],
       });
 
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: true,
+        trustedDevices: [],
+      });
+
       await expect(service.getDeviceSyncState()).resolves.toMatchObject({
         state: "REGISTERED",
         deviceId: "device-1",
         keyVersion: null,
         serverKeyVersion: 2,
         isTrusted: false,
+        trustedDevices: [
+          {
+            id: "trusted-device",
+            name: "iPhone",
+            platform: "ios",
+            lastSeenAt: "2026-01-01T00:00:00Z",
+          },
+        ],
       });
 
       secretService.entries.set(
@@ -2343,11 +2410,21 @@ describe("TS Connect device sync local service", () => {
         JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
       );
       await expect(service.getDeviceSyncState()).resolves.toMatchObject({
-        state: "REGISTERED",
+        state: "ORPHANED",
         deviceId: "device-1",
         keyVersion: null,
         serverKeyVersion: 2,
         isTrusted: false,
+        trustedDevices: [],
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "ORPHANED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: null,
+        isTrusted: false,
+        trustedDevices: [],
       });
 
       await expect(service.getDeviceSyncState()).resolves.toMatchObject({
@@ -2358,7 +2435,13 @@ describe("TS Connect device sync local service", () => {
       });
       expect(
         requests.filter((request) => request.includes("/api/v1/sync/team/devices/device-1")),
-      ).toHaveLength(4);
+      ).toHaveLength(6);
+      expect(
+        requests.filter((request) => request.endsWith("/api/v1/sync/team/devices?scope=my")),
+      ).toHaveLength(3);
+      expect(
+        requests.filter((request) => request.endsWith("/api/v1/sync/team/keys/initialize")),
+      ).toHaveLength(1);
     } finally {
       db.close();
     }
