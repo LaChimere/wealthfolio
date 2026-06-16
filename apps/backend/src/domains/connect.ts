@@ -2197,7 +2197,7 @@ async function localSyncIdentityCanRunBackground(
     return false;
   }
   try {
-    const parsed = parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+    const parsed = parseStoredSyncIdentity(rawIdentity);
     return parsed.deviceId !== null && parsed.rootKey !== null;
   } catch {
     return false;
@@ -2222,7 +2222,7 @@ async function readLocalSyncIdentityDeviceId(
     return undefined;
   }
   try {
-    return parseSyncIdentity(JSON.parse(rawIdentity) as unknown).deviceId;
+    return parseStoredSyncIdentity(rawIdentity).deviceId;
   } catch {
     return undefined;
   }
@@ -2235,19 +2235,20 @@ async function getLocalDeviceSyncFreshStateOrThrow(
   if (rawIdentity === null) {
     return freshDeviceSyncState();
   }
-  let identity: unknown;
   try {
-    identity = JSON.parse(rawIdentity);
+    const parsed = parseStoredSyncIdentity(rawIdentity);
+    if (!parsed.deviceNonce || !parsed.deviceId) {
+      return freshDeviceSyncState();
+    }
   } catch (error) {
+    if (error instanceof ConnectServiceError) {
+      throw error;
+    }
     throw new ConnectServiceError(
       "internal_error",
       `Failed to parse identity: ${errorMessage(error)}`,
       500,
     );
-  }
-  const parsed = parseSyncIdentity(identity);
-  if (!parsed.deviceNonce || !parsed.deviceId) {
-    return freshDeviceSyncState();
   }
   throw deviceSyncDisabled();
 }
@@ -2274,17 +2275,18 @@ async function clearLocalSyncIdentity(secretService: SecretService): Promise<voi
   const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
   let deviceNonce: string | null = null;
   if (rawIdentity !== null) {
-    let identity: unknown;
     try {
-      identity = JSON.parse(rawIdentity);
+      deviceNonce = parseStoredSyncIdentity(rawIdentity).deviceNonce;
     } catch (error) {
+      if (error instanceof ConnectServiceError) {
+        throw error;
+      }
       throw new ConnectServiceError(
         "internal_error",
         `Failed to parse identity: ${errorMessage(error)}`,
         500,
       );
     }
-    deviceNonce = parseSyncIdentityDeviceNonce(identity);
   }
   await secretService.setSecret(
     DEVICE_SYNC_IDENTITY_KEY,
@@ -2300,10 +2302,6 @@ async function clearLocalSyncIdentity(secretService: SecretService): Promise<voi
   );
 }
 
-function parseSyncIdentityDeviceNonce(identity: unknown): string | null {
-  return parseSyncIdentity(identity).deviceNonce;
-}
-
 function parseSyncIdentity(identity: unknown): {
   deviceNonce: string | null;
   deviceId: string | null;
@@ -2313,11 +2311,12 @@ function parseSyncIdentity(identity: unknown): {
   if (!isRecord(identity)) {
     throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
   }
-  assertOptionalNumberField(identity, "version");
+
+  assertDefaultedI32Field(identity, "version");
   assertOptionalStringField(identity, "deviceNonce");
   assertOptionalStringField(identity, "deviceId");
   assertOptionalStringField(identity, "rootKey");
-  assertOptionalNumberField(identity, "keyVersion");
+  assertOptionalI32Field(identity, "keyVersion");
   assertOptionalStringField(identity, "deviceSecretKey");
   assertOptionalStringField(identity, "devicePublicKey");
   return {
@@ -2328,6 +2327,12 @@ function parseSyncIdentity(identity: unknown): {
   };
 }
 
+function parseStoredSyncIdentity(rawIdentity: string): ReturnType<typeof parseSyncIdentity> {
+  assertRawI32Token(rawIdentity, "version", false);
+  assertRawI32Token(rawIdentity, "keyVersion", true);
+  return parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+}
+
 function assertOptionalStringField(record: Record<string, unknown>, key: string): void {
   const value = record[key];
   if (value !== undefined && value !== null && typeof value !== "string") {
@@ -2335,11 +2340,156 @@ function assertOptionalStringField(record: Record<string, unknown>, key: string)
   }
 }
 
-function assertOptionalNumberField(record: Record<string, unknown>, key: string): void {
+function assertDefaultedI32Field(record: Record<string, unknown>, key: string): void {
   const value = record[key];
-  if (value !== undefined && value !== null && typeof value !== "number") {
+  if (value !== undefined && !isI32Integer(value)) {
     throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
   }
+}
+
+function assertOptionalI32Field(record: Record<string, unknown>, key: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && !isI32Integer(value)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+  }
+}
+
+function isI32Integer(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= -2_147_483_648 &&
+    value <= 2_147_483_647
+  );
+}
+
+function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (token === "null") {
+      if (allowNull) {
+        continue;
+      }
+      throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+    }
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw new ConnectServiceError("internal_error", "Failed to parse identity", 500);
+    }
+  }
+}
+
+function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
+  const tokens: string[] = [];
+  let index = skipJsonWhitespace(rawJson, 0);
+  if (rawJson[index] !== "{") {
+    return tokens;
+  }
+  index += 1;
+  while (index < rawJson.length) {
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === "}") {
+      break;
+    }
+    if (rawJson[index] !== '"') {
+      return tokens;
+    }
+    const keyStart = index;
+    index = skipJsonString(rawJson, index);
+    if (index < 0) {
+      return tokens;
+    }
+    let key: string;
+    try {
+      key = JSON.parse(rawJson.slice(keyStart, index)) as string;
+    } catch {
+      return tokens;
+    }
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] !== ":") {
+      return tokens;
+    }
+    index = skipJsonWhitespace(rawJson, index + 1);
+    const valueStart = index;
+    index = skipJsonValue(rawJson, index);
+    if (index < 0) {
+      return tokens;
+    }
+    if (key === targetKey) {
+      tokens.push(rawJson.slice(valueStart, index).trim());
+    }
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === ",") {
+      index += 1;
+      continue;
+    }
+    if (rawJson[index] === "}") {
+      break;
+    }
+    return tokens;
+  }
+  return tokens;
+}
+
+function skipJsonWhitespace(rawJson: string, index: number): number {
+  while (/\s/.test(rawJson[index] ?? "")) {
+    index += 1;
+  }
+  return index;
+}
+
+function skipJsonString(rawJson: string, index: number): number {
+  index += 1;
+  while (index < rawJson.length) {
+    const char = rawJson[index];
+    if (char === "\\") {
+      index += 2;
+      continue;
+    }
+    if (char === '"') {
+      return index + 1;
+    }
+    index += 1;
+  }
+  return -1;
+}
+
+function skipJsonValue(rawJson: string, index: number): number {
+  const char = rawJson[index];
+  if (char === '"') {
+    return skipJsonString(rawJson, index);
+  }
+  if (char === "{" || char === "[") {
+    return skipJsonComposite(rawJson, index);
+  }
+  while (index < rawJson.length && rawJson[index] !== "," && rawJson[index] !== "}") {
+    index += 1;
+  }
+  return index;
+}
+
+function skipJsonComposite(rawJson: string, index: number): number {
+  const stack: string[] = [];
+  while (index < rawJson.length) {
+    const char = rawJson[index];
+    if (char === '"') {
+      index = skipJsonString(rawJson, index);
+      if (index < 0) {
+        return -1;
+      }
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+    } else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) {
+        return -1;
+      }
+      if (stack.length === 0) {
+        return index + 1;
+      }
+    }
+    index += 1;
+  }
+  return -1;
 }
 
 function resetLocalSyncSession(db: Database): void {
@@ -2557,7 +2707,7 @@ async function requireLocalSyncIdentityDeviceId(
   }
   let identity: ReturnType<typeof parseSyncIdentity>;
   try {
-    identity = parseSyncIdentity(JSON.parse(rawIdentity) as unknown);
+    identity = parseStoredSyncIdentity(rawIdentity);
   } catch {
     throw new ConnectServiceError(
       "internal_error",

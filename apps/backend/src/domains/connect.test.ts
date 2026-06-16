@@ -2035,6 +2035,57 @@ describe("TS Connect device sync local service", () => {
         message: "Failed to parse identity",
         status: 500,
       });
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: null, deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"deviceId":"device-1","keyVersion":1e0}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"vers\\u0069on":2.0,"deviceId":"device-1"}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"keyVersion":1,"keyVersion":1e0,"deviceId":"device-1"}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1", keyVersion: 1.5 }),
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
     } finally {
       db.close();
     }
@@ -2691,6 +2742,11 @@ describe("TS Connect device sync local service", () => {
         "No sync identity configured. Please enable sync first.",
       );
       await expect(service.generateDeviceSnapshotNow()).rejects.toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+
+      secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow(
         "No sync identity configured. Please enable sync first.",
       );
 

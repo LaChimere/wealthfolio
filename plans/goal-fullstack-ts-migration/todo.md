@@ -3733,6 +3733,16 @@ contract:
   device ID or non-READY local sync state, mapping token/state restore failures
   to `state_error`, and remaining feature-gated for READY/cloud cycle paths.
   Dual GPT/Claude xhigh review found no actionable issues.
+- `pr5-connect-device-sync-identity-i32-parse`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes Connect-side
+  `sync_identity` parsing rejecting `version: null`, non-integer
+  `version`/`keyVersion` raw JSON tokens such as `2.0`/`1e0`, and other
+  non-Rust-shaped identity fields before local device-sync state checks,
+  including escaped/duplicate field spellings and device-ID-only consumers. Dual
+  GPT/Claude xhigh review found and then verified the raw-token/device-ID
+  consumer fix.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
