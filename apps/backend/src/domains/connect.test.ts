@@ -4669,6 +4669,9 @@ describe("TS Connect device sync local service", () => {
     );
     let mode:
       | "missing"
+      | "transport"
+      | "body"
+      | "rate-limit"
       | "missing-schema-header"
       | "bad-schema-header"
       | "missing-covers-header"
@@ -4689,6 +4692,22 @@ describe("TS Connect device sync local service", () => {
               { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
               { status: 404 },
             );
+          }
+          if (mode === "transport") {
+            throw new Error("snapshot download offline");
+          }
+          if (mode === "rate-limit") {
+            return Response.json({ code: "RATE_LIMIT", message: "slow down" }, { status: 429 });
+          }
+          if (mode === "body") {
+            return {
+              ok: true,
+              status: 200,
+              headers: snapshotDownloadResponse().headers,
+              arrayBuffer: async () => {
+                throw new Error("snapshot body unreadable");
+              },
+            } as unknown as Response;
           }
           if (mode === "missing-schema-header") {
             return snapshotDownloadResponse(undefined, { "x-snapshot-schema-version": null });
@@ -4735,6 +4754,24 @@ describe("TS Connect device sync local service", () => {
         code: "internal_error",
         status: 500,
         message: "Snapshot snapshot-1 is no longer available. No valid snapshot to download.",
+      });
+      mode = "transport";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "snapshot download offline",
+      });
+      mode = "body";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "snapshot body unreadable",
+      });
+      mode = "rate-limit";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "API error (429): RATE_LIMIT: slow down",
       });
       mode = "missing-schema-header";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({

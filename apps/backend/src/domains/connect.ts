@@ -3545,17 +3545,22 @@ async function assertLocalSnapshotDownloadPreconditions(
   deviceId: string,
   latest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
 ): Promise<void> {
-  const response = await fetchImpl(
-    `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/${encodeURIComponent(latest.snapshotId.trim())}`,
-    {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/octet-stream",
-        "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
-        "x-wf-device-id": deviceId,
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/${encodeURIComponent(latest.snapshotId.trim())}`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/octet-stream",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
   if (response.status === 404) {
     throw new ConnectServiceError(
       "internal_error",
@@ -3564,7 +3569,17 @@ async function assertLocalSnapshotDownloadPreconditions(
     );
   }
   if (!response.ok) {
-    throw deviceSyncDisabled();
+    let bodyText = "";
+    try {
+      bodyText = await response.text();
+    } catch {
+      bodyText = "";
+    }
+    throw new ConnectServiceError(
+      "internal_error",
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      500,
+    );
   }
   parseRequiredSnapshotI32Header(response.headers, "x-snapshot-schema-version");
   parseRequiredSnapshotStringHeader(response.headers, "x-snapshot-covers-tables");
@@ -3572,7 +3587,12 @@ async function assertLocalSnapshotDownloadPreconditions(
     response.headers,
     "x-snapshot-checksum",
   );
-  const blob = new Uint8Array(await response.arrayBuffer());
+  let blob: Uint8Array;
+  try {
+    blob = new Uint8Array(await response.arrayBuffer());
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
   const actualChecksum = `sha256:${createHash("sha256").update(blob).digest("hex")}`;
   if (expectedHeaderChecksum !== actualChecksum) {
     throw new ConnectServiceError(

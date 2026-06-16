@@ -4030,6 +4030,15 @@ contract:
   already covering the local cursor returning Rust-shaped `uploaded`, and the
   real export/upload path preserving the explicit 501 gate. Dual GPT/Claude
   xhigh review found no actionable issues.
+- `pr5-connect-device-bootstrap-download-http-errors`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes non-404 snapshot
+  download HTTP failures returning Rust-shaped internal API errors instead of
+  the feature gate, plus preservation of existing 404/header/checksum/apply-gate
+  behavior. Dual GPT/Claude xhigh review found no actionable issues after the
+  non-404 error mapping fix.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
