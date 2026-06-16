@@ -3997,6 +3997,14 @@ contract:
   mismatch, successful download preflight preserving the explicit apply 501, and
   sync outbox preservation. Dual GPT/Claude xhigh review found no actionable
   issues.
+- `pr5-connect-device-bootstrap-download-headers`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes missing/invalid
+  `x-snapshot-schema-version`, missing `x-snapshot-covers-tables`, missing
+  `x-snapshot-checksum`, and Rust-shaped `Invalid request` errors before
+  checksum comparison. Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

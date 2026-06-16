@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 445
+turns_used: 446
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2858,6 +2858,15 @@ updated_at: "2026-06-16T07:45:14+08:00"
   Rust-shaped internal errors for missing snapshots, download-header checksum
   mismatch, and latest-metadata checksum mismatch before the real apply path.
   Successful downloads still stop at the explicit feature gate. Verified with
+  focused Connect-device and device-sync tests, backend type-check, backend test
+  suite, full `bun run check`, `git diff --check`, and dual GPT/Claude xhigh
+  review.
+- Turn 446: Tightened safe Connect bootstrap snapshot download header
+  validation. The TS runtime now mirrors Rust's required download headers before
+  checksum comparison: `x-snapshot-schema-version` must parse as `i32`, and
+  `x-snapshot-covers-tables` plus `x-snapshot-checksum` must be present. Missing
+  or invalid headers return Rust-shaped `Invalid request` internal errors while
+  preserving sync outbox and the explicit apply feature gate. Verified with
   focused Connect-device and device-sync tests, backend type-check, backend test
   suite, full `bun run check`, `git diff --check`, and dual GPT/Claude xhigh
   review.

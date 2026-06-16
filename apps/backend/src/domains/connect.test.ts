@@ -39,13 +39,22 @@ function connectSubscriptionPlan(id: string): Record<string, unknown> {
 
 function snapshotDownloadResponse(
   checksum = "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+  overrides: Record<string, string | null> = {},
 ): Response {
+  const headers: Record<string, string> = {
+    "x-snapshot-schema-version": "1",
+    "x-snapshot-covers-tables": "accounts",
+    "x-snapshot-checksum": checksum,
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) {
+      delete headers[key];
+    } else {
+      headers[key] = value;
+    }
+  }
   return new Response("snapshot", {
-    headers: {
-      "x-snapshot-schema-version": "1",
-      "x-snapshot-covers-tables": "accounts",
-      "x-snapshot-checksum": checksum,
-    },
+    headers,
   });
 }
 
@@ -4336,7 +4345,14 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 2,
       }),
     );
-    let mode: "missing" | "bad-header" | "bad-metadata" = "missing";
+    let mode:
+      | "missing"
+      | "missing-schema-header"
+      | "bad-schema-header"
+      | "missing-covers-header"
+      | "missing-checksum-header"
+      | "bad-header"
+      | "bad-metadata" = "missing";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -4351,6 +4367,18 @@ describe("TS Connect device sync local service", () => {
               { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
               { status: 404 },
             );
+          }
+          if (mode === "missing-schema-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-schema-version": null });
+          }
+          if (mode === "bad-schema-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-schema-version": "1.5" });
+          }
+          if (mode === "missing-covers-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-covers-tables": null });
+          }
+          if (mode === "missing-checksum-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-checksum": null });
           }
           return snapshotDownloadResponse(mode === "bad-header" ? "sha256:bad" : undefined);
         }
@@ -4385,6 +4413,30 @@ describe("TS Connect device sync local service", () => {
         code: "internal_error",
         status: 500,
         message: "Snapshot snapshot-1 is no longer available. No valid snapshot to download.",
+      });
+      mode = "missing-schema-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-schema-version",
+      });
+      mode = "bad-schema-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Invalid header x-snapshot-schema-version",
+      });
+      mode = "missing-covers-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-covers-tables",
+      });
+      mode = "missing-checksum-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-checksum",
       });
       mode = "bad-header";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({

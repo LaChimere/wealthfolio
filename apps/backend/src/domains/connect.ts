@@ -3444,7 +3444,12 @@ async function assertLocalSnapshotDownloadPreconditions(
   if (!response.ok) {
     throw deviceSyncDisabled();
   }
-  const expectedHeaderChecksum = response.headers.get("x-snapshot-checksum") ?? "";
+  parseRequiredSnapshotI32Header(response.headers, "x-snapshot-schema-version");
+  parseRequiredSnapshotStringHeader(response.headers, "x-snapshot-covers-tables");
+  const expectedHeaderChecksum = parseRequiredSnapshotStringHeader(
+    response.headers,
+    "x-snapshot-checksum",
+  );
   const blob = new Uint8Array(await response.arrayBuffer());
   const actualChecksum = `sha256:${createHash("sha256").update(blob).digest("hex")}`;
   if (expectedHeaderChecksum !== actualChecksum) {
@@ -3461,6 +3466,26 @@ async function assertLocalSnapshotDownloadPreconditions(
       500,
     );
   }
+}
+
+function parseRequiredSnapshotStringHeader(headers: Headers, name: string): string {
+  const value = headers.get(name);
+  if (value === null) {
+    throw new ConnectServiceError("internal_error", `Invalid request: Missing header ${name}`, 500);
+  }
+  return value;
+}
+
+function parseRequiredSnapshotI32Header(headers: Headers, name: string): number {
+  const value = parseRequiredSnapshotStringHeader(headers, name);
+  if (!/^[+-]?\d+$/.test(value)) {
+    throw new ConnectServiceError("internal_error", `Invalid request: Invalid header ${name}`, 500);
+  }
+  const parsed = Number(value);
+  if (!isI32Integer(parsed)) {
+    throw new ConnectServiceError("internal_error", `Invalid request: Invalid header ${name}`, 500);
+  }
+  return parsed;
 }
 
 function chooseLocalSnapshotStatus(
