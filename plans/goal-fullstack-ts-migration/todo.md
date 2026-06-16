@@ -3961,6 +3961,15 @@ contract:
   and malformed snapshot/cursor payloads preserving sync outbox without
   destructive reset. Dual GPT/Claude xhigh review found and verified shape,
   integer range, and cursor `gc_watermark` validator refinements.
+- `pr5-connect-device-bootstrap-requested`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes active freshness
+  gate + missing latest snapshot returning Rust-shaped `requested`, missing
+  snapshot classification `WAIT_SNAPSHOT`/`BOOTSTRAP_SNAPSHOT` returning
+  Rust-shaped `requested`, and sync outbox preservation in wait paths. Dual
+  GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

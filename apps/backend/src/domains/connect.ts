@@ -3060,10 +3060,24 @@ async function bootstrapSnapshotIfNotReady(
       };
     }
   }
+  const latestSnapshotMissing = await localLatestSnapshotMissingBestEffort(
+    env,
+    fetchImpl,
+    session.accessToken,
+    deviceId,
+  );
+  if (freshnessGateExists && latestSnapshotMissing) {
+    return {
+      status: "requested",
+      message: "Waiting for a snapshot generated after pairing confirmation",
+      snapshotId: null,
+      cursor: optionalNumber(engineStatus.cursor),
+    };
+  }
   if (
     !freshnessGateExists &&
     (engineStatus.bootstrapRequired === true || reconcileActionRequiresSnapshot(reconcileAction)) &&
-    (await localLatestSnapshotMissingBestEffort(env, fetchImpl, session.accessToken, deviceId))
+    latestSnapshotMissing
   ) {
     const missingSnapshotAction = await fetchLocalReconcileReadyActionBestEffort(
       env,
@@ -3080,6 +3094,15 @@ async function bootstrapSnapshotIfNotReady(
         cursor: getLocalSyncCursor(db),
       };
     }
+    return {
+      status: "requested",
+      message:
+        missingSnapshotAction === "WAIT_SNAPSHOT" || missingSnapshotAction === "BOOTSTRAP_SNAPSHOT"
+          ? "Waiting for a trusted device to upload a snapshot"
+          : "Snapshot is not available yet. Waiting for upload from a trusted device.",
+      snapshotId: null,
+      cursor: optionalNumber(engineStatus.cursor),
+    };
   }
   throw deviceSyncDisabled();
 }
