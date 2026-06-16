@@ -3835,6 +3835,15 @@ contract:
   `RegisterDeviceRequest`, persisting the returned `sync_device_id`, and
   returning Rust-shaped enrollment responses. Dual GPT/Claude xhigh review found
   no actionable issues after persistence-error wrapping.
+- `pr5-device-sync-complete-pairing-cloud`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/sync/pairing/{id}/complete` restoring the Connect session, resolving
+  the local device ID, sending Rust-compatible complete pairing payloads,
+  parsing `CompletePairingResponse`, and deferring post-complete
+  background-engine start to the sync-engine slice. Dual GPT/Claude xhigh review
+  found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

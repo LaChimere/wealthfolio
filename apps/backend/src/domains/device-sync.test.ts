@@ -804,6 +804,9 @@ describe("TS local device sync service", () => {
         if (url.endsWith("/approve") || url.endsWith("/cancel")) {
           return Response.json({ success: true });
         }
+        if (url.endsWith("/complete")) {
+          return Response.json({ success: true, remote_seed_present: false });
+        }
         if (init?.method === "POST") {
           return Response.json({
             pairing_id: "pairing-1",
@@ -838,6 +841,13 @@ describe("TS local device sync service", () => {
       expiresAt: "2026-01-01T00:00:00Z",
     });
     await expect(service.approvePairing?.("pairing-1")).resolves.toEqual({ success: true });
+    await expect(
+      service.completePairing?.("pairing-1", {
+        encryptedKeyBundle: "bundle",
+        sasProof: { ok: true },
+        signature: "signature",
+      }),
+    ).resolves.toEqual({ success: true, remoteSeedPresent: false });
     await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
     await expect(service.confirmPairing?.("pairing-1", { proof: "proof" })).rejects.toMatchObject({
       code: "not_implemented",
@@ -859,6 +869,16 @@ describe("TS local device sync service", () => {
         url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
         method: "POST",
         body: null,
+        deviceId: "device-1",
+      },
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/complete",
+        method: "POST",
+        body: JSON.stringify({
+          encrypted_key_bundle: "bundle",
+          sas_proof: { ok: true },
+          signature: "signature",
+        }),
         deviceId: "device-1",
       },
       {

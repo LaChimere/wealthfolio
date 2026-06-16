@@ -472,9 +472,26 @@ export function createLocalDeviceSyncService({
         { method: "POST", deviceId },
       ).then(successResponseFromCloud);
     },
-    async completePairing() {
-      await requireSessionDeviceIdOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async completePairing(pairingId, request) {
+      const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
+        connectService,
+        secretService,
+      );
+      return await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/complete`,
+        {
+          method: "POST",
+          deviceId,
+          body: {
+            encrypted_key_bundle: request.encryptedKeyBundle,
+            sas_proof: request.sasProof,
+            signature: request.signature,
+          },
+        },
+      ).then(completePairingResponseFromCloud);
     },
     async cancelPairing(pairingId) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -825,6 +842,32 @@ function pairingFromCloud(value: unknown): Record<string, unknown> {
       "pairing response",
     ),
     expiresAt: requiredString(value.expiresAt ?? value.expires_at, "pairing response"),
+  };
+}
+
+function completePairingResponseFromCloud(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse complete pairing response",
+      500,
+    );
+  }
+  const remoteSeedPresent = value.remoteSeedPresent ?? value.remote_seed_present;
+  if (
+    remoteSeedPresent !== undefined &&
+    remoteSeedPresent !== null &&
+    typeof remoteSeedPresent !== "boolean"
+  ) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse complete pairing response",
+      500,
+    );
+  }
+  return {
+    success: value.success,
+    remoteSeedPresent: remoteSeedPresent ?? null,
   };
 }
 
