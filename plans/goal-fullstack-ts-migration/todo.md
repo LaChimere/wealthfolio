@@ -3931,6 +3931,16 @@ contract:
   best-effort cloud cancel plus headerless device delete, local identity/device
   ID/session cleanup, and cleanup-failure resilience. Dual GPT/Claude xhigh
   review found and verified fixes for cancel cleanup and delete-header parity.
+- `pr5-connect-device-bootstrap-already-complete`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes READY
+  already-bootstrapped `skipped` responses, best-effort identity-derived device
+  config persistence, invalid freshness-gate clearing, valid freshness-gate 501
+  fallthrough, and reconcile `WAIT_SNAPSHOT` feature-gated fallthrough. Dual
+  GPT/Claude xhigh review found and verified fixes for reconcile gating,
+  freshness-gate normalization, and best-effort config persistence.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

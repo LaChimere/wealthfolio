@@ -4,6 +4,7 @@ import type { Database } from "bun:sqlite";
 import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
 import { localOverwriteRiskSummary } from "./device-sync-overwrite-risk";
+import { normalizeSyncDatetime } from "./device-sync-time";
 import type { SecretService } from "./secrets";
 
 export interface ConnectImportRunsRequest {
@@ -2164,7 +2165,7 @@ export function createLocalConnectDeviceSyncService({
       return await getLocalDeviceSyncPairingSourceStatus(secretService, env, fetchImpl);
     },
     async bootstrapDeviceSnapshot() {
-      return await bootstrapSnapshotIfNotReady(secretService, env, fetchImpl);
+      return await bootstrapSnapshotIfNotReady(db, secretService, env, fetchImpl);
     },
     async generateDeviceSnapshotNow() {
       return await generateSnapshotIfTrusted(secretService, env, fetchImpl);
@@ -3013,6 +3014,7 @@ async function getLocalDeviceSyncPairingSourceStatus(
 }
 
 async function bootstrapSnapshotIfNotReady(
+  db: Database,
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
@@ -3020,7 +3022,8 @@ async function bootstrapSnapshotIfNotReady(
   if (!secretService) {
     throw deviceSyncDisabled();
   }
-  await requireLocalSyncIdentityDeviceId(secretService);
+  const identity = await requireLocalSyncIdentity(secretService);
+  const deviceId = identity.deviceId;
   const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
   const state = await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
   if (state.state !== "READY") {
@@ -3031,7 +3034,137 @@ async function bootstrapSnapshotIfNotReady(
       cursor: null,
     };
   }
+  try {
+    persistReadyDeviceConfigFromIdentity(db, identity);
+  } catch (error) {
+    console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
+  }
+  const engineStatus = await getLocalDeviceSyncEngineStatus(db, secretService);
+  if (
+    engineStatus.bootstrapRequired !== true &&
+    !localMinSnapshotFreshnessGateExists(db, deviceId)
+  ) {
+    const reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
+      env,
+      fetchImpl,
+      session.accessToken,
+      deviceId,
+    );
+    if (!reconcileActionRequiresSnapshot(reconcileAction)) {
+      return {
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: optionalNumber(engineStatus.cursor),
+      };
+    }
+  }
   throw deviceSyncDisabled();
+}
+
+function persistReadyDeviceConfigFromIdentity(
+  db: Database,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): void {
+  if (!sqliteTableExists(db, "sync_device_config")) {
+    return;
+  }
+  const hasFreshnessGateColumn = sqliteColumnExists(
+    db,
+    "sync_device_config",
+    "min_snapshot_created_at",
+  );
+  if (hasFreshnessGateColumn) {
+    db.prepare(
+      `
+        INSERT INTO sync_device_config (
+          device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+        )
+        VALUES (?, ?, 'trusted', NULL, NULL)
+        ON CONFLICT(device_id) DO UPDATE SET
+          key_version = excluded.key_version,
+          trust_state = excluded.trust_state
+      `,
+    ).run(identity.deviceId, identity.keyVersion);
+    return;
+  }
+  db.prepare(
+    `
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES (?, ?, 'trusted', NULL)
+      ON CONFLICT(device_id) DO UPDATE SET
+        key_version = excluded.key_version,
+        trust_state = excluded.trust_state
+    `,
+  ).run(identity.deviceId, identity.keyVersion);
+}
+
+function localMinSnapshotFreshnessGateExists(db: Database, deviceId: string): boolean {
+  if (!sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    return false;
+  }
+  try {
+    const value = db
+      .query<{ min_snapshot_created_at: string | null }, [string]>(
+        `
+          SELECT min_snapshot_created_at
+          FROM sync_device_config
+          WHERE device_id = ?
+        `,
+      )
+      .get(deviceId)?.min_snapshot_created_at;
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (normalizeSyncDatetime(value) !== null) {
+      return true;
+    }
+    db.prepare(
+      `
+        UPDATE sync_device_config
+        SET min_snapshot_created_at = NULL
+        WHERE device_id = ?
+      `,
+    ).run(deviceId);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function fetchLocalReconcileReadyActionBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<string | null> {
+  try {
+    const response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/reconcile-ready-state`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!isRecord(parsed)) {
+      return null;
+    }
+    return optionalString(parsed.action);
+  } catch {
+    return null;
+  }
+}
+
+function reconcileActionRequiresSnapshot(action: string | null): boolean {
+  return action === "WAIT_SNAPSHOT" || action === "BOOTSTRAP_SNAPSHOT";
 }
 
 async function generateSnapshotIfTrusted(
@@ -3059,6 +3192,12 @@ async function generateSnapshotIfTrusted(
 async function requireLocalSyncIdentityDeviceId(
   secretService: SecretService | undefined,
 ): Promise<string> {
+  return (await requireLocalSyncIdentity(secretService)).deviceId;
+}
+
+async function requireLocalSyncIdentity(
+  secretService: SecretService | undefined,
+): Promise<ReturnType<typeof parseSyncIdentity> & { deviceId: string }> {
   if (!secretService) {
     throw deviceSyncDisabled();
   }
@@ -3083,7 +3222,7 @@ async function requireLocalSyncIdentityDeviceId(
   if (!identity.deviceId) {
     throw new ConnectServiceError("internal_error", "No device ID configured", 500);
   }
-  return identity.deviceId;
+  return { ...identity, deviceId: identity.deviceId };
 }
 
 async function triggerLocalDeviceSyncCycle(

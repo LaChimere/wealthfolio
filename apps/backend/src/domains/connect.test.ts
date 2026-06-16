@@ -3058,4 +3058,404 @@ describe("TS Connect device sync local service", () => {
       db.close();
     }
   });
+
+  test("skips bootstrap snapshot when READY local bootstrap is already complete", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 1, 'untrusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({
+        key_version: 2,
+        trust_state: "trusted",
+        last_bootstrap_at: "2026-01-01T00:00:00Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps bootstrap snapshot feature-gated when READY reconcile requires snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps bootstrap snapshot feature-gated when READY freshness gate is active", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("drops invalid bootstrap freshness gates before READY completed skip", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-02-30T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toMatchObject({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+      });
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips bootstrap snapshot when READY config persistence is best-effort", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (device_id, last_bootstrap_at)
+      VALUES ('device-1', '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: 42,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
