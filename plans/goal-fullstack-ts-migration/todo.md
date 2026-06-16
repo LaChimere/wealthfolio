@@ -3897,6 +3897,14 @@ contract:
   READY, while keeping actual READY snapshot bootstrap feature-gated. Dual
   GPT/Claude xhigh review found no actionable issues after checking the Rust
   HTTP wrapper response shape.
+- `pr5-connect-device-generate-snapshot-not-trusted`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "device sync local service"`,
+  `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
+  `bun run check`, and `git diff --check`. Coverage includes
+  `/api/v1/connect/device/generate-snapshot` reading cloud device status and
+  returning Rust-shaped skipped snapshot responses when the current device is
+  not trusted, while keeping actual trusted snapshot generation feature-gated.
+  Dual GPT/Claude xhigh review found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

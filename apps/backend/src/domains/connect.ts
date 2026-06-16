@@ -2166,7 +2166,7 @@ export function createLocalConnectDeviceSyncService({
       return await bootstrapSnapshotIfNotReady(secretService, env, fetchImpl);
     },
     async generateDeviceSnapshotNow() {
-      return await getLocalSnapshotIdentityOrThrow(secretService);
+      return await generateSnapshotIfTrusted(secretService, env, fetchImpl);
     },
     async startDeviceSyncBackgroundEngine() {
       if (await localSyncIdentityCanRunBackground(secretService)) {
@@ -2933,13 +2933,6 @@ async function getLocalDeviceSyncPairingSourceStatus(
   throw deviceSyncDisabled();
 }
 
-async function getLocalSnapshotIdentityOrThrow(
-  secretService: SecretService | undefined,
-): Promise<never> {
-  await requireLocalSyncIdentityDeviceId(secretService);
-  throw deviceSyncDisabled();
-}
-
 async function bootstrapSnapshotIfNotReady(
   secretService: SecretService | undefined,
   env: NodeJS.ProcessEnv,
@@ -2957,6 +2950,28 @@ async function bootstrapSnapshotIfNotReady(
       message: "Device is not in READY state",
       snapshotId: null,
       cursor: null,
+    };
+  }
+  throw deviceSyncDisabled();
+}
+
+async function generateSnapshotIfTrusted(
+  secretService: SecretService | undefined,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  const deviceId = await requireLocalSyncIdentityDeviceId(secretService);
+  const session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+  const device = await fetchLocalDeviceSyncDevice(env, fetchImpl, session.accessToken, deviceId);
+  if (device.trustState !== "trusted") {
+    return {
+      status: "skipped",
+      snapshotId: null,
+      oplogSeq: null,
+      message: "Current device is not trusted",
     };
   }
   throw deviceSyncDisabled();

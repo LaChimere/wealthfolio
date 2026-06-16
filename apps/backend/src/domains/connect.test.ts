@@ -2925,15 +2925,15 @@ describe("TS Connect device sync local service", () => {
         JSON.stringify({ version: 2, deviceId: "device-1" }),
       );
       await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "forbidden",
+        status: 403,
       });
     } finally {
       db.close();
     }
   });
 
-  test("skips bootstrap snapshot when cloud sync state is not ready", async () => {
+  test("skips snapshot operations when cloud sync state is not ready", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -2964,6 +2964,12 @@ describe("TS Connect device sync local service", () => {
         message: "Device is not in READY state",
         snapshotId: null,
         cursor: null,
+      });
+      await expect(service.generateDeviceSnapshotNow()).resolves.toEqual({
+        status: "skipped",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Current device is not trusted",
       });
     } finally {
       db.close();
