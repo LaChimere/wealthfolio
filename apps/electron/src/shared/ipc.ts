@@ -70,6 +70,22 @@ export const ELECTRON_COMMANDS = {
     method: "DELETE",
     path: "/api/v1/accounts",
   },
+  get_portfolios: {
+    method: "GET",
+    path: "/api/v1/portfolios",
+  },
+  create_portfolio: {
+    method: "POST",
+    path: "/api/v1/portfolios",
+  },
+  update_portfolio_entry: {
+    method: "PUT",
+    path: "/api/v1/portfolios",
+  },
+  delete_portfolio_entry: {
+    method: "DELETE",
+    path: "/api/v1/portfolios",
+  },
   get_settings: {
     method: "GET",
     path: "/api/v1/settings",

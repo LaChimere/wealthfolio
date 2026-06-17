@@ -4070,6 +4070,20 @@ contract:
   `portfolio` and `portfolio_accounts` -> `portfolio_account` mapping, outbox
   row persistence, and metadata upserts. Dual GPT/Claude xhigh review found no
   actionable issues.
+- `pr5-electron-command-bridge-runtime`: verification passed:
+  `bun test apps/electron/src/main/commands.test.ts apps/backend/src/http.test.ts`,
+  `bun run --cwd apps/electron type-check`,
+  `bun run --cwd apps/backend type-check`, full `bun run type-check`,
+  `bun run lint`, and `git diff --check`. Coverage includes Electron
+  allowlist/proxy support for portfolio CRUD, scope-based
+  holdings/allocation/income query routing across Electron and the backend
+  parser, malformed scope rejection before fetch, and a clean
+  `bun run dev:electron` startup with renderer and sidecar ready. Dual
+  GPT/Claude xhigh review found and verified fixes for the unreachable income
+  summary query route and canonical `TOTAL` account routing for dashboard query
+  routes and portfolio-history export. Multi-account scopes remain bounded to
+  the current TOTAL fallback until the holdings/allocations/metrics services
+  grow true account-list aggregation methods.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

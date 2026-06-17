@@ -23,7 +23,7 @@ export interface DataExportServiceOptions {
 }
 
 const EXPORT_ACTIVITY_PAGE_SIZE = 9_007_199_254_740_991;
-const PORTFOLIO_TOTAL_ACCOUNT_ID = "$TOTAL";
+const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 
 export function parseExportDataType(value: string): ExportDataType {
   const normalized = value.toLowerCase();

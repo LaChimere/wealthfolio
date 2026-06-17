@@ -460,7 +460,7 @@ async function routeRequest(
     options.portfolioMetricsService &&
     (url.pathname.startsWith("/api/v1/net-worth") ||
       url.pathname.startsWith("/api/v1/performance") ||
-      url.pathname === "/api/v1/income/summary")
+      url.pathname.startsWith("/api/v1/income/summary"))
   ) {
     return routePortfolioMetricsRequest(request, url, config, options.portfolioMetricsService);
   }
@@ -1744,12 +1744,12 @@ function routeHoldingsRequest(
     return handleJsonMutation(request, parseHoldingsQuery, (query) => {
       let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       } else if (query.filter.type === "Account") {
         accountId = query.filter.accountId;
       } else {
         // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       }
       return Promise.resolve(holdingsService.getHoldings(accountId));
     });
@@ -1831,12 +1831,12 @@ function routeHoldingsRequest(
     return handleJsonMutation(request, parseHoldingsQuery, (query) => {
       let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       } else if (query.filter.type === "Account") {
         accountId = query.filter.accountId;
       } else {
         // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       }
       return Promise.resolve(holdingsService.getPortfolioAllocations(accountId));
     });
@@ -1866,12 +1866,12 @@ function routeHoldingsRequest(
     return handleJsonMutation(request, parseAllocationHoldingsQuery, (query) => {
       let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       } else if (query.filter.type === "Account") {
         accountId = query.filter.accountId;
       } else {
         // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = "$TOTAL";
+        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
       }
       return Promise.resolve(
         holdingsService.getHoldingsByAllocation(accountId, query.taxonomyId, query.categoryId),
@@ -4204,6 +4204,43 @@ type AccountScope =
   | { type: "Account"; accountId: string }
   | { type: "Accounts"; accountIds: string[] };
 
+const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
+
+function normalizeAccountScope(filter: Record<string, unknown>): AccountScope | Response {
+  const filterType = filter.type;
+
+  if (filterType === "TotalSnapshot" || filterType === "all" || filterType === "portfolio") {
+    return { type: "TotalSnapshot" };
+  }
+
+  if (filterType === "Account" || filterType === "account") {
+    const accountId = parseRequiredString(filter.accountId, "accountId for Account scope");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    return { type: "Account", accountId };
+  }
+
+  if (filterType === "Accounts" || filterType === "accounts") {
+    if (!Array.isArray(filter.accountIds)) {
+      return jsonResponse(
+        { code: 400, message: "Missing or invalid 'accountIds' for Accounts scope" },
+        400,
+      );
+    }
+    const accountIds: string[] = [];
+    for (const id of filter.accountIds) {
+      if (typeof id !== "string") {
+        return jsonResponse({ code: 400, message: "All 'accountIds' must be strings" }, 400);
+      }
+      accountIds.push(id);
+    }
+    return { type: "Accounts", accountIds };
+  }
+
+  return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
+}
+
 interface IncomeSummaryQuery {
   filter?: AccountScope;
 }
@@ -4227,39 +4264,12 @@ function parseIncomeSummaryQuery(payload: Record<string, unknown>): IncomeSummar
     return jsonResponse({ code: 400, message: "Invalid 'filter' field" }, 400);
   }
 
-  const filter = payload.filter as Record<string, unknown>;
-  const filterType = filter.type;
-
-  if (filterType === "TotalSnapshot") {
-    return { filter: { type: "TotalSnapshot" } };
+  const normalizedFilter = normalizeAccountScope(payload.filter as Record<string, unknown>);
+  if (normalizedFilter instanceof Response) {
+    return normalizedFilter;
   }
 
-  if (filterType === "Account") {
-    const accountId = parseRequiredString(filter.accountId, "accountId for Account scope");
-    if (accountId instanceof Response) {
-      return accountId;
-    }
-    return { filter: { type: "Account", accountId } };
-  }
-
-  if (filterType === "Accounts") {
-    if (!Array.isArray(filter.accountIds)) {
-      return jsonResponse(
-        { code: 400, message: "Missing or invalid 'accountIds' for Accounts scope" },
-        400,
-      );
-    }
-    const accountIds: string[] = [];
-    for (const id of filter.accountIds) {
-      if (typeof id !== "string") {
-        return jsonResponse({ code: 400, message: "All 'accountIds' must be strings" }, 400);
-      }
-      accountIds.push(id);
-    }
-    return { filter: { type: "Accounts", accountIds } };
-  }
-
-  return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
+  return { filter: normalizedFilter };
 }
 
 function parseHoldingsQuery(payload: Record<string, unknown>): HoldingsQuery | Response {
@@ -4267,39 +4277,12 @@ function parseHoldingsQuery(payload: Record<string, unknown>): HoldingsQuery | R
     return jsonResponse({ code: 400, message: "Missing or invalid 'filter' field" }, 400);
   }
 
-  const filter = payload.filter as Record<string, unknown>;
-  const filterType = filter.type;
-
-  if (filterType === "TotalSnapshot") {
-    return { filter: { type: "TotalSnapshot" } };
+  const normalizedFilter = normalizeAccountScope(payload.filter as Record<string, unknown>);
+  if (normalizedFilter instanceof Response) {
+    return normalizedFilter;
   }
 
-  if (filterType === "Account") {
-    const accountId = parseRequiredString(filter.accountId, "accountId for Account scope");
-    if (accountId instanceof Response) {
-      return accountId;
-    }
-    return { filter: { type: "Account", accountId } };
-  }
-
-  if (filterType === "Accounts") {
-    if (!Array.isArray(filter.accountIds)) {
-      return jsonResponse(
-        { code: 400, message: "Missing or invalid 'accountIds' for Accounts scope" },
-        400,
-      );
-    }
-    const accountIds: string[] = [];
-    for (const id of filter.accountIds) {
-      if (typeof id !== "string") {
-        return jsonResponse({ code: 400, message: "All 'accountIds' must be strings" }, 400);
-      }
-      accountIds.push(id);
-    }
-    return { filter: { type: "Accounts", accountIds } };
-  }
-
-  return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
+  return { filter: normalizedFilter };
 }
 
 function parseAllocationHoldingsQuery(
@@ -4319,39 +4302,12 @@ function parseAllocationHoldingsQuery(
     return categoryId;
   }
 
-  const filter = payload.filter as Record<string, unknown>;
-  const filterType = filter.type;
-
-  if (filterType === "TotalSnapshot") {
-    return { filter: { type: "TotalSnapshot" }, taxonomyId, categoryId };
+  const normalizedFilter = normalizeAccountScope(payload.filter as Record<string, unknown>);
+  if (normalizedFilter instanceof Response) {
+    return normalizedFilter;
   }
 
-  if (filterType === "Account") {
-    const accountId = parseRequiredString(filter.accountId, "accountId for Account scope");
-    if (accountId instanceof Response) {
-      return accountId;
-    }
-    return { filter: { type: "Account", accountId }, taxonomyId, categoryId };
-  }
-
-  if (filterType === "Accounts") {
-    if (!Array.isArray(filter.accountIds)) {
-      return jsonResponse(
-        { code: 400, message: "Missing or invalid 'accountIds' for Accounts scope" },
-        400,
-      );
-    }
-    const accountIds: string[] = [];
-    for (const id of filter.accountIds) {
-      if (typeof id !== "string") {
-        return jsonResponse({ code: 400, message: "All 'accountIds' must be strings" }, 400);
-      }
-      accountIds.push(id);
-    }
-    return { filter: { type: "Accounts", accountIds }, taxonomyId, categoryId };
-  }
-
-  return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
+  return { filter: normalizedFilter, taxonomyId, categoryId };
 }
 
 function parseActivitySearchRequest(

@@ -129,12 +129,12 @@ The Electron adapter preserves existing command names and typed adapter exports.
 Command parity tests compare Electron IPC coverage with the existing web command
 map so renderer invocations stay registered.
 
-The sidecar command paths cover account list/create/update/delete, settings
-read/update/auto-update preference reads, portfolio update/recalculate, and
-read-only portfolio dashboard data such as holdings, valuations, allocations,
-performance summaries, income summaries, goals, goal funding/plans, retirement
-planner simulations, activity CRUD/import-template workflows, exchange-rate
-management, contribution limits, asset profiles, market data quote
+The sidecar command paths cover account list/create/update/delete, portfolio
+CRUD, settings read/update/auto-update preference reads, portfolio
+update/recalculate, and portfolio dashboard data such as holdings, valuations,
+allocations, performance summaries, income summaries, goals, goal funding/plans,
+retirement planner simulations, activity CRUD/import-template workflows,
+exchange-rate management, contribution limits, asset profiles, market data quote
 search/history/import/sync operations, taxonomies, taxonomy assignments,
 taxonomy migration helpers, Health Center status/fix/config operations, and Net
 Worth calculations/history, AI provider settings/model listing, non-streaming AI
@@ -165,11 +165,17 @@ because Electron updater metadata is incompatible with the legacy Tauri update
 endpoint. The renderer still calls the typed preload IPC bridge, Electron main
 validates each command against an explicit allowlist, waits for sidecar
 readiness when a command needs backend services, and proxies those requests to
-the loopback sidecar with the per-run bearer token. Sidecar base URLs and tokens
-must stay confined to Electron main; public runtime status and command errors
-must redact loopback URLs and token-shaped values before crossing IPC. Electron
-app info must use sanitized runtime metadata and must not expose desktop DB or
-log paths to the renderer. JSON request bodies must be sent with
+the loopback sidecar with the per-run bearer token. Account-scope dashboard
+commands must keep the frontend scope shape, Electron proxy, and backend parser
+compatible: single-account scopes can use legacy query routes, while all,
+portfolio, and multi-account scopes use the POST query routes for holdings,
+allocations, allocation drill-down, and income summaries. Non-single-account
+dashboard scopes currently resolve through the canonical `TOTAL` snapshot until
+the backend services expose true account-list aggregation methods. Sidecar base
+URLs and tokens must stay confined to Electron main; public runtime status and
+command errors must redact loopback URLs and token-shaped values before crossing
+IPC. Electron app info must use sanitized runtime metadata and must not expose
+desktop DB or log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

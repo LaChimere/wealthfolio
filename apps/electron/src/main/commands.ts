@@ -16,6 +16,11 @@ interface ResolvedSidecarCommandOptions {
   fetchImpl: FetchLike;
 }
 
+type BackendAccountScope =
+  | { type: "TotalSnapshot" }
+  | { type: "Account"; accountId: string }
+  | { type: "Accounts"; accountIds: string[] };
+
 export async function invokeSidecarCommand<T>({
   command,
   payload,
@@ -31,6 +36,19 @@ export async function invokeSidecarCommand<T>({
       return await invokeUpdateAccount<T>({ payload, sidecar, fetchImpl });
     case "delete_account":
       return await invokeDeleteAccount<T>({ payload, sidecar, fetchImpl });
+    case "get_portfolios":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "create_portfolio":
+      return await invokePostJson<T>({
+        command,
+        body: requireRecord(payload?.portfolio, "portfolio", command),
+        sidecar,
+        fetchImpl,
+      });
+    case "update_portfolio_entry":
+      return await invokeUpdatePortfolioEntry<T>({ payload, sidecar, fetchImpl });
+    case "delete_portfolio_entry":
+      return await invokeDeletePortfolioEntry<T>({ payload, sidecar, fetchImpl });
     case "get_settings":
     case "is_auto_update_check_enabled":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
@@ -380,13 +398,7 @@ export async function invokeSidecarCommand<T>({
     case "recalculate_portfolio":
       return await invokePostOptionalJson<T>({ command, payload, sidecar, fetchImpl });
     case "get_holdings":
-      return await invokeGetWithQuery<T>({
-        command,
-        payload,
-        sidecar,
-        fetchImpl,
-        params: [["accountId", optionalString(payload?.accountId)]],
-      });
+      return await invokeGetHoldings<T>({ payload, sidecar, fetchImpl });
     case "get_holding":
       return await invokeGetWithQuery<T>({
         command,
@@ -427,37 +439,15 @@ export async function invokeSidecarCommand<T>({
         values: optionalStringArray(payload?.accountIds),
       });
     case "get_portfolio_allocations":
-      return await invokeGetWithQuery<T>({
-        command,
-        payload,
-        sidecar,
-        fetchImpl,
-        params: [["accountId", optionalString(payload?.accountId)]],
-      });
+      return await invokeGetPortfolioAllocations<T>({ payload, sidecar, fetchImpl });
     case "get_holdings_by_allocation":
-      return await invokeGetWithQuery<T>({
-        command,
-        payload,
-        sidecar,
-        fetchImpl,
-        params: [
-          ["accountId", optionalString(payload?.accountId)],
-          ["taxonomyId", optionalString(payload?.taxonomyId)],
-          ["categoryId", optionalString(payload?.categoryId)],
-        ],
-      });
+      return await invokeGetHoldingsByAllocation<T>({ payload, sidecar, fetchImpl });
     case "calculate_accounts_simple_performance":
     case "calculate_performance_history":
     case "calculate_performance_summary":
       return await invokePostJson<T>({ command, body: payload ?? {}, sidecar, fetchImpl });
     case "get_income_summary":
-      return await invokeGetWithQuery<T>({
-        command,
-        payload,
-        sidecar,
-        fetchImpl,
-        params: [["accountId", optionalString(payload?.accountId)]],
-      });
+      return await invokeGetIncomeSummary<T>({ payload, sidecar, fetchImpl });
     case "get_snapshots":
       return await invokeGetWithQuery<T>({
         command,
@@ -1203,6 +1193,205 @@ async function invokeDeleteAccount<T>({
   });
 }
 
+async function invokeUpdatePortfolioEntry<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const portfolio = requireRecord(payload?.portfolio, "portfolio", "update_portfolio_entry");
+  const portfolioId = requireString(portfolio.id, "portfolio.id", "update_portfolio_entry");
+  return await fetchSidecarJson<T>({
+    command: "update_portfolio_entry",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.update_portfolio_entry.path}/${encodeURIComponent(portfolioId)}`,
+      sidecar.baseUrl,
+    ),
+    init: {
+      method: ELECTRON_COMMANDS.update_portfolio_entry.method,
+      body: JSON.stringify(portfolio),
+    },
+  });
+}
+
+async function invokeDeletePortfolioEntry<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const portfolioId = requireString(payload?.portfolioId, "portfolioId", "delete_portfolio_entry");
+  return await fetchSidecarJson<T>({
+    command: "delete_portfolio_entry",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.delete_portfolio_entry.path}/${encodeURIComponent(portfolioId)}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.delete_portfolio_entry.method },
+  });
+}
+
+async function invokeGetHoldings<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const filter = optionalRecord(payload?.filter, "filter", "get_holdings");
+  if (!filter) {
+    return await invokeGetWithQuery<T>({
+      command: "get_holdings",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", optionalString(payload?.accountId)]],
+    });
+  }
+
+  const accountId = accountScopeAccountId(filter, "get_holdings");
+  if (accountId) {
+    return await invokeGetWithQuery<T>({
+      command: "get_holdings",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", accountId]],
+    });
+  }
+
+  return await invokePostJsonAtPath<T>({
+    command: "get_holdings",
+    path: "/api/v1/holdings/query",
+    body: { filter: normalizeBackendAccountScope(filter, "get_holdings") },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeGetPortfolioAllocations<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const filter = optionalRecord(payload?.filter, "filter", "get_portfolio_allocations");
+  if (!filter) {
+    return await invokeGetWithQuery<T>({
+      command: "get_portfolio_allocations",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", optionalString(payload?.accountId)]],
+    });
+  }
+
+  const accountId = accountScopeAccountId(filter, "get_portfolio_allocations");
+  if (accountId) {
+    return await invokeGetWithQuery<T>({
+      command: "get_portfolio_allocations",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", accountId]],
+    });
+  }
+
+  return await invokePostJsonAtPath<T>({
+    command: "get_portfolio_allocations",
+    path: "/api/v1/allocations/query",
+    body: { filter: normalizeBackendAccountScope(filter, "get_portfolio_allocations") },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeGetHoldingsByAllocation<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const taxonomyId = requireString(payload?.taxonomyId, "taxonomyId", "get_holdings_by_allocation");
+  const categoryId = requireString(payload?.categoryId, "categoryId", "get_holdings_by_allocation");
+  const filter = optionalRecord(payload?.filter, "filter", "get_holdings_by_allocation");
+
+  if (!filter) {
+    return await invokeGetWithQuery<T>({
+      command: "get_holdings_by_allocation",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [
+        ["accountId", optionalString(payload?.accountId)],
+        ["taxonomyId", taxonomyId],
+        ["categoryId", categoryId],
+      ],
+    });
+  }
+
+  const accountId = accountScopeAccountId(filter, "get_holdings_by_allocation");
+  if (accountId) {
+    return await invokeGetWithQuery<T>({
+      command: "get_holdings_by_allocation",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [
+        ["accountId", accountId],
+        ["taxonomyId", taxonomyId],
+        ["categoryId", categoryId],
+      ],
+    });
+  }
+
+  return await invokePostJsonAtPath<T>({
+    command: "get_holdings_by_allocation",
+    path: "/api/v1/allocations/holdings/query",
+    body: {
+      filter: normalizeBackendAccountScope(filter, "get_holdings_by_allocation"),
+      taxonomyId,
+      categoryId,
+    },
+    sidecar,
+    fetchImpl,
+  });
+}
+
+async function invokeGetIncomeSummary<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const filter = optionalRecord(payload?.filter, "filter", "get_income_summary");
+  if (!filter) {
+    return await invokeGetWithQuery<T>({
+      command: "get_income_summary",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", optionalString(payload?.accountId)]],
+    });
+  }
+
+  const accountId = accountScopeAccountId(filter, "get_income_summary");
+  if (accountId) {
+    return await invokeGetWithQuery<T>({
+      command: "get_income_summary",
+      payload,
+      sidecar,
+      fetchImpl,
+      params: [["accountId", accountId]],
+    });
+  }
+
+  return await invokePostJsonAtPath<T>({
+    command: "get_income_summary",
+    path: "/api/v1/income/summary/query",
+    body: { filter: normalizeBackendAccountScope(filter, "get_income_summary") },
+    sidecar,
+    fetchImpl,
+  });
+}
+
 async function invokeGetWithQuery<T>({
   command,
   sidecar,
@@ -1227,6 +1416,31 @@ async function invokeGetWithQuery<T>({
     sidecar,
     url,
     init: { method: ELECTRON_COMMANDS[command].method },
+  });
+}
+
+async function invokePostJsonAtPath<T>({
+  command,
+  path,
+  body,
+  sidecar,
+  fetchImpl,
+}: {
+  command: ElectronCommand;
+  path: string;
+  body: unknown;
+  sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
+  fetchImpl: FetchLike;
+}): Promise<T> {
+  return await fetchSidecarJson<T>({
+    command,
+    fetchImpl,
+    sidecar,
+    url: new URL(path, sidecar.baseUrl),
+    init: {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
   });
 }
 
@@ -2070,6 +2284,7 @@ async function invokeSimpleGet<T>({
     ElectronCommand,
     | "get_settings"
     | "is_auto_update_check_enabled"
+    | "get_portfolios"
     | "get_goals"
     | "list_import_templates"
     | "get_latest_exchange_rates"
@@ -2529,6 +2744,67 @@ function requireRecord(
     throw new Error(`Electron command "${command}" requires object payload field "${field}".`);
   }
   return value as Record<string, unknown>;
+}
+
+function optionalRecord(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Electron command "${command}" requires object payload field "${field}".`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function normalizeBackendAccountScope(
+  filter: Record<string, unknown>,
+  command: ElectronCommand,
+): BackendAccountScope {
+  if (filter.type === "TotalSnapshot" || filter.type === "all" || filter.type === "portfolio") {
+    return { type: "TotalSnapshot" };
+  }
+
+  if (filter.type === "Account" || filter.type === "account") {
+    return {
+      type: "Account",
+      accountId: requireString(filter.accountId, "filter.accountId", command),
+    };
+  }
+
+  if (filter.type === "Accounts" || filter.type === "accounts") {
+    if (!Array.isArray(filter.accountIds)) {
+      throw new Error(
+        `Electron command "${command}" requires string array payload field "filter.accountIds".`,
+      );
+    }
+    const accountIds: string[] = [];
+    for (const item of filter.accountIds) {
+      if (typeof item !== "string") {
+        throw new Error(
+          `Electron command "${command}" requires string array payload field "filter.accountIds".`,
+        );
+      }
+      accountIds.push(item);
+    }
+    return { type: "Accounts", accountIds };
+  }
+
+  throw new Error(
+    `Electron command "${command}" received unsupported account filter type "${String(filter.type)}".`,
+  );
+}
+
+function accountScopeAccountId(
+  filter: Record<string, unknown>,
+  command: ElectronCommand,
+): string | undefined {
+  return filter.type === "Account" || filter.type === "account"
+    ? requireString(filter.accountId, "filter.accountId", command)
+    : undefined;
 }
 
 function requireStringRecord(

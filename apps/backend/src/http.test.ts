@@ -2475,6 +2475,16 @@ describe("TS backend HTTP skeleton", () => {
         headers: { authorization: "Bearer sidecar-token" },
       }),
     );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/income/summary/query", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ filter: { type: "all" } }),
+      }),
+    );
 
     const invalidDateResponse = await handler(
       new Request("http://127.0.0.1/api/v1/net-worth?date=2026-02-31", {
@@ -2499,6 +2509,7 @@ describe("TS backend HTTP skeleton", () => {
       ],
       ["performance-summary", { itemType: "account", itemId: "acc-1" }],
       ["income-summary", "acc-1"],
+      ["income-summary", undefined],
     ]);
   });
 
@@ -2622,6 +2633,38 @@ describe("TS backend HTTP skeleton", () => {
         "http://127.0.0.1/api/v1/allocations/holdings?accountId=acc-1&taxonomyId=tax-1&categoryId=cat-1",
         { headers: authHeaders },
       ),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/holdings/query", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ filter: { type: "all" } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/holdings/query", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ filter: { type: "account", accountId: "acc-2" } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/allocations/query", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ filter: { type: "accounts", accountIds: ["acc-1", "acc-2"] } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/allocations/holdings/query", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          filter: { type: "portfolio", portfolioId: "pf-1" },
+          taxonomyId: "tax-2",
+          categoryId: "cat-2",
+        }),
+      }),
     );
     await handler(
       new Request(
@@ -2749,6 +2792,10 @@ describe("TS backend HTTP skeleton", () => {
       ["latest-valuations", undefined],
       ["allocations", "acc-1"],
       ["allocation-holdings", { accountId: "acc-1", taxonomyId: "tax-1", categoryId: "cat-1" }],
+      ["holdings", "TOTAL"],
+      ["holdings", "acc-2"],
+      ["allocations", "TOTAL"],
+      ["allocation-holdings", { accountId: "TOTAL", taxonomyId: "tax-2", categoryId: "cat-2" }],
       ["snapshots", { accountId: "acc-1", dateFrom: "2026-05-01", dateTo: "2026-05-14" }],
       ["snapshot-holdings", { accountId: "acc-1", date: "2026-05-14" }],
       ["delete-snapshot", { accountId: "acc-1", date: "2026-05-14" }],

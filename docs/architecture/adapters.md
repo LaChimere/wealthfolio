@@ -61,9 +61,11 @@ and renderer code does not gain raw Node.js access.
    it through `apps/electron/src/main/commands.ts`.
 3. Add or reuse the backend route under `apps/backend/src/http.ts` and the
    relevant domain service under `apps/backend/src/domains/`.
-4. Keep business logic in the TypeScript backend domain layer or a shared
+4. Keep higher-level frontend payloads, such as account-scope filters, aligned
+   across the web adapter, Electron command proxy, and backend parser.
+5. Keep business logic in the TypeScript backend domain layer or a shared
    TypeScript package.
-5. Add/update adapter parity tests so Electron IPC, web mappings, and frontend
+6. Add/update adapter parity tests so Electron IPC, web mappings, and frontend
    invocations stay aligned.
 
 ## Trust boundary

@@ -141,6 +141,54 @@ describe("Electron sidecar command proxy", () => {
     );
   });
 
+  test("proxies portfolio CRUD commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "portfolio 1" }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "get_portfolios",
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_portfolio",
+      payload: { portfolio: { name: "Core", accountIds: ["account-1"] } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_portfolio_entry",
+      payload: { portfolio: { id: "portfolio 1", name: "Updated", accountIds: ["account-1"] } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_portfolio_entry",
+      payload: { portfolioId: "portfolio/1" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/portfolios", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/portfolios",
+        "POST",
+        JSON.stringify({ name: "Core", accountIds: ["account-1"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/portfolios/portfolio%201",
+        "PUT",
+        JSON.stringify({ id: "portfolio 1", name: "Updated", accountIds: ["account-1"] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/portfolios/portfolio%2F1", "DELETE", undefined],
+    ]);
+  });
+
   test("proxies settings reads and auto-update setting reads", async () => {
     const urls: string[] = [];
     const fetchImpl: FetchLike = (url) => {
@@ -1503,6 +1551,109 @@ describe("Electron sidecar command proxy", () => {
       "http://127.0.0.1:18444/api/v1/allocations?accountId=account-1",
       "http://127.0.0.1:18444/api/v1/allocations/holdings?accountId=account-1&taxonomyId=taxonomy-1&categoryId=category%2F1",
     ]);
+  });
+
+  test("routes scope-based holdings, allocations, and income queries", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse([]));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { filter: { type: "all" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { filter: { type: "account", accountId: "account-1" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_portfolio_allocations",
+      payload: { filter: { type: "portfolio", portfolioId: "portfolio-1" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings_by_allocation",
+      payload: {
+        filter: { type: "accounts", accountIds: ["account-1", "account 2"] },
+        taxonomyId: "taxonomy-1",
+        categoryId: "category/1",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      payload: { filter: { type: "all" } },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/holdings/query",
+        "POST",
+        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/holdings?accountId=account-1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/allocations/query",
+        "POST",
+        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/allocations/holdings/query",
+        "POST",
+        JSON.stringify({
+          filter: { type: "Accounts", accountIds: ["account-1", "account 2"] },
+          taxonomyId: "taxonomy-1",
+          categoryId: "category/1",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/income/summary/query",
+        "POST",
+        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed scope filters before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_holdings",
+        payload: { filter: "all" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Electron command "get_holdings" requires object payload field "filter".');
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_holdings_by_allocation",
+        payload: {
+          filter: { type: "accounts", accountIds: ["account-1", 2] },
+          taxonomyId: "taxonomy-1",
+          categoryId: "category-1",
+        },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "get_holdings_by_allocation" requires string array payload field "filter.accountIds".',
+    );
   });
 
   test("proxies performance commands with JSON request bodies", async () => {
