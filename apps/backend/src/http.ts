@@ -38,6 +38,7 @@ import type {
   UpdateAlternativeAssetValuationRequest,
 } from "./domains/alternative-assets";
 import type { AppUtilityService } from "./domains/app-utilities";
+import { isValidBackupFilename } from "./domains/app-utilities";
 import type { AssetService, NewAsset, UpdateAssetProfile } from "./domains/assets";
 import type {
   ConnectDeviceSyncReconcileReadyRequest,
@@ -146,6 +147,7 @@ export interface BackendRequestHandlerOptions {
   aiChatService?: AiChatService;
   aiProviderService?: AiProviderService;
   alternativeAssetService?: AlternativeAssetService;
+  appDataDir?: string;
   appUtilityService?: AppUtilityService;
   assetService?: AssetService;
   connectDeviceSyncService?: ConnectDeviceSyncService;
@@ -308,7 +310,13 @@ async function routeRequest(
     (url.pathname.startsWith("/api/v1/app") ||
       url.pathname.startsWith("/api/v1/utilities/database"))
   ) {
-    return routeAppUtilityRequest(request, url, config, options.appUtilityService);
+    return routeAppUtilityRequest(
+      request,
+      url,
+      config,
+      options.appUtilityService,
+      options.appDataDir,
+    );
   }
 
   if (options.assetService && url.pathname.startsWith("/api/v1/assets")) {
@@ -1408,6 +1416,46 @@ function routeAlternativeAssetRequest(
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
+async function routeBackupDownloadRequest(
+  filename: string,
+  appUtilityService: AppUtilityService,
+  appDataDir: string,
+): Promise<Response> {
+  if (!isValidBackupFilename(filename)) {
+    return jsonResponse({ code: 400, message: "Invalid backup filename" }, 400);
+  }
+
+  try {
+    const backups = await appUtilityService.listDatabaseBackups();
+    const backup = backups.find((b) => b.filename === filename);
+    if (!backup) {
+      return jsonResponse({ code: 404, message: "Backup not found" }, 404);
+    }
+
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+
+    const backupPath = resolve(appDataDir, "backups", filename);
+    const fileContent = readFileSync(backupPath);
+
+    return new Response(fileContent as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (error) {
+    return jsonResponse(
+      {
+        code: 500,
+        message: error instanceof Error ? error.message : "Failed to download backup",
+      },
+      500,
+    );
+  }
+}
+
 function routeAssetRequest(
   request: Request,
   url: URL,
@@ -1529,6 +1577,7 @@ function routeAppUtilityRequest(
   url: URL,
   config: BackendRuntimeConfig,
   appUtilityService: AppUtilityService,
+  appDataDir?: string,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -1562,6 +1611,33 @@ function routeAppUtilityRequest(
     return handleJsonMutationNoContent(request, parseRestoreDatabaseRequest, async (input) => {
       await appUtilityService.restoreDatabase(input.backupFilePath);
     });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/utilities/database/backups") {
+    return Promise.resolve(appUtilityService.listDatabaseBackups())
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
+  }
+
+  const backupFilenameMatch = url.pathname.match(
+    /^\/api\/v1\/utilities\/database\/backups\/([^/]+)$/,
+  );
+  if (backupFilenameMatch && request.method === "DELETE") {
+    const filename = decodeURIComponent(backupFilenameMatch[1]);
+    return Promise.resolve(appUtilityService.deleteDatabaseBackup(filename))
+      .then(() => new Response(null, { status: 204 }))
+      .catch(domainErrorResponse);
+  }
+
+  const backupDownloadMatch = url.pathname.match(
+    /^\/api\/v1\/utilities\/database\/backups\/([^/]+)\/download$/,
+  );
+  if (backupDownloadMatch && request.method === "GET") {
+    const filename = decodeURIComponent(backupDownloadMatch[1]);
+    if (!appDataDir) {
+      return jsonResponse({ code: 500, message: "App data directory not configured" }, 500);
+    }
+    return routeBackupDownloadRequest(filename, appUtilityService, appDataDir);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);

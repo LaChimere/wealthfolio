@@ -28,12 +28,20 @@ export interface BackupToPathResponse {
   path: string;
 }
 
+export interface BackupFileInfo {
+  filename: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
 export interface AppUtilityService {
   getAppInfo(): Promise<AppInfoResponse> | AppInfoResponse;
   checkUpdate(force: boolean): Promise<UpdateCheckResponse> | UpdateCheckResponse;
   backupDatabase(): Promise<BackupDatabaseResponse> | BackupDatabaseResponse;
   backupDatabaseToPath(backupDir: string): Promise<BackupToPathResponse> | BackupToPathResponse;
   restoreDatabase(backupFilePath: string): Promise<void> | void;
+  listDatabaseBackups(): Promise<BackupFileInfo[]> | BackupFileInfo[];
+  deleteDatabaseBackup(filename: string): Promise<void> | void;
 }
 
 export interface AppUtilityServiceOptions {
@@ -76,6 +84,55 @@ const DEFAULT_RESTORE_SETTLE_DELAY_MS = 150;
 const DEFAULT_UPDATE_CACHE_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_UPDATE_ENDPOINT_BASE = "https://wealthfolio.app/releases";
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
+const BACKUP_FILENAME_PREFIX = "wealthfolio_backup_";
+const BACKUP_FILENAME_SUFFIX = ".db";
+const BACKUP_FILENAME_TIMESTAMP_FORMAT_PATTERN = /^\d{8}_\d{6}$/;
+
+export function isValidBackupFilename(filename: string): boolean {
+  const expectedLen =
+    BACKUP_FILENAME_PREFIX.length + "YYYYMMDD_HHMMSS".length + BACKUP_FILENAME_SUFFIX.length;
+
+  if (
+    filename.length !== expectedLen ||
+    !filename.startsWith(BACKUP_FILENAME_PREFIX) ||
+    !filename.endsWith(BACKUP_FILENAME_SUFFIX)
+  ) {
+    return false;
+  }
+
+  const timestamp = filename.slice(
+    BACKUP_FILENAME_PREFIX.length,
+    filename.length - BACKUP_FILENAME_SUFFIX.length,
+  );
+
+  if (!BACKUP_FILENAME_TIMESTAMP_FORMAT_PATTERN.test(timestamp)) {
+    return false;
+  }
+
+  const year = parseInt(timestamp.slice(0, 4), 10);
+  const month = parseInt(timestamp.slice(4, 6), 10);
+  const day = parseInt(timestamp.slice(6, 8), 10);
+  const hour = parseInt(timestamp.slice(9, 11), 10);
+  const minute = parseInt(timestamp.slice(11, 13), 10);
+  const second = parseInt(timestamp.slice(13, 15), 10);
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  if (hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day &&
+    date.getHours() === hour &&
+    date.getMinutes() === minute &&
+    date.getSeconds() === second
+  );
+}
 
 export function createAppUtilityService(options: AppUtilityServiceOptions): AppUtilityService {
   const now = options.now ?? (() => new Date());
@@ -139,6 +196,66 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
       await options.prepareDatabaseRestore?.();
       await sleep(options.restoreSettleDelayMs ?? DEFAULT_RESTORE_SETTLE_DELAY_MS);
       restoreSqliteDatabase(options.appDataDir, normalizedBackupPath, options.env);
+    },
+    async listDatabaseBackups() {
+      const { readdirSync, statSync } = await import("node:fs");
+      const backupDir = path.resolve(options.appDataDir, "backups");
+
+      let entries: string[];
+      try {
+        entries = readdirSync(backupDir);
+      } catch (error: any) {
+        if (error.code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+
+      const backups: BackupFileInfo[] = [];
+      for (const filename of entries) {
+        if (!isValidBackupFilename(filename)) {
+          continue;
+        }
+
+        const filePath = path.resolve(backupDir, filename);
+        let stats;
+        try {
+          stats = statSync(filePath);
+        } catch {
+          continue;
+        }
+
+        if (!stats.isFile()) {
+          continue;
+        }
+
+        backups.push({
+          filename,
+          sizeBytes: stats.size,
+          modifiedAt: stats.mtime.toISOString(),
+        });
+      }
+
+      backups.sort((a, b) => b.filename.localeCompare(a.filename));
+      return backups;
+    },
+    async deleteDatabaseBackup(filename) {
+      if (!isValidBackupFilename(filename)) {
+        throw new Error("Invalid backup filename");
+      }
+
+      const { unlinkSync, realpathSync } = await import("node:fs");
+      const backupDir = path.resolve(options.appDataDir, "backups");
+      const filePath = path.resolve(backupDir, filename);
+
+      const canonicalDir = realpathSync(backupDir);
+      const canonicalFile = realpathSync(filePath);
+
+      if (!canonicalFile.startsWith(canonicalDir + path.sep)) {
+        throw new Error("Invalid backup filename");
+      }
+
+      unlinkSync(canonicalFile);
     },
   };
 }
