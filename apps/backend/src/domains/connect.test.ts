@@ -3172,9 +3172,95 @@ describe("TS Connect device sync local service", () => {
       );
       await expect(
         service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
-      ).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: Failed to parse device response",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reconciles READY local state when bootstrap is already complete", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toEqual({
+        status: "ok",
+        message: "Device sync reconcile completed",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "skipped",
+        bootstrapMessage: "Snapshot bootstrap already completed",
+        bootstrapSnapshotId: null,
+        cycleStatus: null,
+        cycleNeedsBootstrap: false,
+        retryAttempted: false,
+        retryCycleStatus: null,
+        backgroundStatus: "skipped",
       });
     } finally {
       db.close();

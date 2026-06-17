@@ -2235,19 +2235,42 @@ export function createLocalConnectDeviceSyncService({
         throw deviceSyncDisabled();
       }
       try {
-        await restoreDeviceSyncSession();
-        await getLocalDeviceSyncFreshStateOrThrow(secretService);
+        const session = await restoreDeviceSyncSession();
+        const state = await getLocalDeviceSyncState(
+          secretService,
+          env,
+          fetchImpl,
+          session.accessToken,
+        );
+        if (state.state !== "READY") {
+          return {
+            ...localReadyReconcileBase(),
+            status: "skipped_not_ready",
+            message: "Device is not in READY state",
+          };
+        }
+        const bootstrap = await bootstrapSnapshotIfNotReady(
+          db,
+          secretService,
+          env,
+          fetchImpl,
+          restoreDeviceSyncSession,
+        );
+        const bootstrapStatus = optionalString(bootstrap.status) ?? "not_attempted";
+        const bootstrapSnapshotId = optionalString(bootstrap.snapshotId);
+        return {
+          ...localReadyReconcileBase(),
+          bootstrapStatus,
+          bootstrapMessage: optionalString(bootstrap.message),
+          bootstrapSnapshotId,
+          bootstrapAction: localReadyReconcileBootstrapAction(bootstrapStatus, bootstrapSnapshotId),
+        };
       } catch (error) {
         if (error instanceof ConnectNotImplementedError) {
-          throw error;
+          return localReadyReconcileError(`Snapshot bootstrap failed: ${error.message}`);
         }
         return localReadyReconcileError(`Failed to read sync state: ${errorMessage(error)}`);
       }
-      return {
-        ...localReadyReconcileBase(),
-        status: "skipped_not_ready",
-        message: "Device is not in READY state",
-      };
     },
     async getDeviceSyncEngineStatus() {
       return getLocalDeviceSyncEngineStatus(db, secretService);
@@ -3763,6 +3786,22 @@ function localReadyReconcileBase(): Record<string, unknown> {
     retryCycleStatus: null,
     backgroundStatus: "skipped",
   };
+}
+
+function localReadyReconcileBootstrapAction(
+  bootstrapStatus: string,
+  bootstrapSnapshotId: string | null,
+): string {
+  if (bootstrapStatus === "applied") {
+    return "PULL_REMOTE_OVERWRITE";
+  }
+  if (bootstrapStatus === "requested") {
+    return "WAIT_REMOTE_SNAPSHOT";
+  }
+  if (bootstrapSnapshotId?.trim()) {
+    return "PULL_REMOTE_OVERWRITE";
+  }
+  return "NO_BOOTSTRAP";
 }
 
 function localReadyReconcileError(message: string): Record<string, unknown> {
