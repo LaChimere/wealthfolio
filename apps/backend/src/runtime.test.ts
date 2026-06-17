@@ -52,6 +52,7 @@ describe("TS backend runtime composition", () => {
     expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db/app.db" })).toBe(
       "/tmp/custom-db",
     );
+    expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db" })).toBe("/tmp/custom-db");
     expect(resolveBackendMigrationsDir({}, { repositoryRoot })).toBe(
       path.join(repositoryRoot, "crates/storage-sqlite/migrations"),
     );

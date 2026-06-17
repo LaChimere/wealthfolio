@@ -68,6 +68,7 @@ import { createEventBus, type BackendEventBus } from "./events";
 import type { BackendRequestHandlerOptions, GoalValuationProvider } from "./http";
 import {
   initializeSqliteDatabase,
+  isSqliteDbDirectoryPath,
   resolveMigrationsDir,
   type InitializedSqliteDatabase,
 } from "./storage/sqlite";
@@ -145,7 +146,7 @@ export function resolveBackendAppDataDir(
 
   const envDbPath = env.WF_DB_PATH?.trim();
   if (envDbPath) {
-    return path.dirname(envDbPath);
+    return isSqliteDbDirectoryPath(envDbPath) ? envDbPath : path.dirname(envDbPath);
   }
 
   return path.resolve(process.cwd(), "db");

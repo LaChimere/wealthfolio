@@ -25,10 +25,18 @@ interface MigrationRow {
 export function getSqliteDbPath(appDataDir: string, env: NodeJS.ProcessEnv = process.env): string {
   const wfDbPath = env.WF_DB_PATH?.trim();
   if (wfDbPath) {
-    return wfDbPath;
+    return isSqliteDbDirectoryPath(wfDbPath) ? path.join(wfDbPath, "app.db") : wfDbPath;
   }
 
   return path.join(appDataDir, "app.db");
+}
+
+export function isSqliteDbDirectoryPath(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.endsWith("/") || trimmed.endsWith("\\")) {
+    return true;
+  }
+  return path.extname(path.basename(trimmed)) === "";
 }
 
 export function resolveMigrationsDir(repositoryRoot: string): string {
