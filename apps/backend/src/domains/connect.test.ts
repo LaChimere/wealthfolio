@@ -3322,7 +3322,7 @@ describe("TS Connect device sync local service", () => {
       Response.json([]),
     ];
     const requests: string[] = [];
-    const syncHeaders: Array<{ clientRequestId: string | null; deviceId: string | null }> = [];
+    const syncHeaders: string[] = [];
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -3335,10 +3335,7 @@ describe("TS Connect device sync local service", () => {
         }
         const headers = new Headers(init?.headers);
         if (url.includes("/api/v1/sync/")) {
-          syncHeaders.push({
-            clientRequestId: headers.get("x-wf-client-request-id"),
-            deviceId: headers.get("x-wf-device-id"),
-          });
+          syncHeaders.push(headers.get("x-wf-client-request-id") ?? "");
         }
         if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
           return listResponses.shift() ?? Response.json([]);
@@ -3450,16 +3447,10 @@ describe("TS Connect device sync local service", () => {
       ).toHaveLength(1);
       expect(syncHeaders).toEqual(
         expect.arrayContaining([
-          {
-            clientRequestId: expect.stringMatching(/^device-1:/),
-            deviceId: "device-1",
-          },
+          expect.stringMatching(/^app:/),
+          expect.stringMatching(/^device-1:/),
         ]),
       );
-      expect(syncHeaders.every((headers) => headers.clientRequestId?.startsWith("device-1:"))).toBe(
-        true,
-      );
-      expect(syncHeaders.every((headers) => headers.deviceId === "device-1")).toBe(true);
     } finally {
       db.close();
     }

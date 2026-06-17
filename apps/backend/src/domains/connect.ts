@@ -2580,7 +2580,6 @@ async function initializeLocalE2eeKeys(
         options.env,
         options.fetchImpl,
         options.accessToken,
-        deviceId,
       ),
     };
   }
@@ -3116,7 +3115,7 @@ async function getLocalDeviceSyncState(
   if (!identity.rootKey || identity.keyVersion === null || !isTrusted) {
     const trustedDevices = isTrusted
       ? []
-      : await getTrustedDevicesBestEffort(env, fetchImpl, accessToken, identity.deviceId);
+      : await getTrustedDevicesBestEffort(env, fetchImpl, accessToken);
     let orphaned = !isTrusted && trustedDevices.length === 0 && (trustedKeyVersion ?? 0) > 0;
     if (!orphaned && !isTrusted && trustedDevices.length === 0) {
       orphaned = await detectOrphanedWithoutTrustedDevicesBestEffort(
@@ -3137,12 +3136,7 @@ async function getLocalDeviceSyncState(
     };
   }
   if (trustedKeyVersion !== null && identity.keyVersion !== trustedKeyVersion) {
-    const trustedDevices = await getTrustedDevicesBestEffort(
-      env,
-      fetchImpl,
-      accessToken,
-      identity.deviceId,
-    );
+    const trustedDevices = await getTrustedDevicesBestEffort(env, fetchImpl, accessToken);
     return {
       state: "STALE",
       deviceId: identity.deviceId,
@@ -3178,8 +3172,7 @@ async function fetchLocalDeviceSyncDevice(
         headers: {
           authorization: `Bearer ${accessToken}`,
           "content-type": "application/json",
-          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
-          "x-wf-device-id": deviceId,
+          "x-wf-client-request-id": `app:${randomUUID()}`,
         },
       },
     );
@@ -3227,7 +3220,6 @@ async function getTrustedDevicesBestEffort(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
-  deviceId: string,
 ): Promise<Array<Record<string, unknown>>> {
   try {
     const response = await fetchImpl(
@@ -3236,8 +3228,7 @@ async function getTrustedDevicesBestEffort(
         headers: {
           authorization: `Bearer ${accessToken}`,
           "content-type": "application/json",
-          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
-          "x-wf-device-id": deviceId,
+          "x-wf-client-request-id": `app:${randomUUID()}`,
         },
       },
     );
