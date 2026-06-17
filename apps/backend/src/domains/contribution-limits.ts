@@ -259,7 +259,7 @@ export function createContributionLimitService(
         return zeroDepositsCalculation(baseCurrency);
       }
       if (!options.calculateDeposits) {
-        throw new Error("Contribution deposit calculation is not available in the TS backend yet");
+        throw new Error("Contribution deposit calculation is not configured");
       }
       return await options.calculateDeposits(limit, accountIds, baseCurrency);
     },

@@ -182,6 +182,22 @@ describe("TS contribution limits domain", () => {
     }
   });
 
+  test("reports missing contribution deposit calculator as configuration error", async () => {
+    const db = createContributionLimitsDb();
+    const service = createContributionLimitService(createContributionLimitRepository(db), {
+      baseCurrency: "CAD",
+    });
+
+    try {
+      const created = await service.createContributionLimit(newLimit({ accountIds: "account-1" }));
+      await expect(service.calculateDepositsForContributionLimit(created.id)).rejects.toThrow(
+        "Contribution deposit calculation is not configured",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("delegates non-empty deposit calculations with trimmed account IDs", async () => {
     const db = createContributionLimitsDb();
     const seen: { accountIds: string[]; baseCurrency: string }[] = [];
