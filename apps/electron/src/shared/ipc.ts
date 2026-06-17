@@ -114,6 +114,10 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/utilities/database/backup-to-path",
   },
+  export_data_file: {
+    method: "GET",
+    path: "/api/v1/utilities/export",
+  },
   restore_database: {
     method: "POST",
     path: "/api/v1/utilities/database/restore",

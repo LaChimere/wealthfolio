@@ -152,31 +152,31 @@ commands proxy through the sidecar Connect device endpoints. Device-sync device
 management, team reset, pairing, composite pairing transfer/bootstrap, and
 pairing-flow coordinator commands proxy through the sidecar sync endpoints with
 path identifiers encoded in Electron main. Snapshot management, holdings CSV
-import, activity CSV parsing, and database backup/restore also proxy through the
-sidecar so manual/imported holdings updates and utility operations stay in the
-backend. Add-on zip payloads are validated as byte arrays in Electron main and
-forwarded to the sidecar as base64 JSON fields. AI chat NDJSON streaming uses
-dedicated start/cancel IPC channels because it cannot safely use the
-request/response JSON command proxy; Electron main owns the sidecar fetch,
-streams parsed events only to the originating `webContents`, and aborts streams
-when the owner closes or navigates. Electron update checks and installation are
-handled in Electron main through `electron-updater`, not the backend sidecar,
-because Electron updater metadata is incompatible with the legacy Tauri update
-endpoint. The renderer still calls the typed preload IPC bridge, Electron main
-validates each command against an explicit allowlist, waits for sidecar
-readiness when a command needs backend services, and proxies those requests to
-the loopback sidecar with the per-run bearer token. Account-scope dashboard
-commands must keep the frontend scope shape, Electron proxy, and backend parser
-compatible: single-account scopes can use legacy query routes, while all,
-portfolio, and multi-account scopes use the POST query routes for holdings,
-allocations, allocation drill-down, and income summaries. All-account scopes use
-the canonical `TOTAL` snapshot, while portfolio and multi-account scopes resolve
-to their selected account IDs and use account-list aggregation in the backend
-holdings and portfolio-metrics services. Sidecar base URLs and tokens must stay
-confined to Electron main; public runtime status and command errors must redact
-loopback URLs and token-shaped values before crossing IPC. Electron app info
-must use sanitized runtime metadata and must not expose desktop DB or log paths
-to the renderer. JSON request bodies must be sent with
+import, activity CSV parsing, data file exports, and database backup/restore
+also proxy through the sidecar so manual/imported holdings updates and utility
+operations stay in the backend. Add-on zip payloads are validated as byte arrays
+in Electron main and forwarded to the sidecar as base64 JSON fields. AI chat
+NDJSON streaming uses dedicated start/cancel IPC channels because it cannot
+safely use the request/response JSON command proxy; Electron main owns the
+sidecar fetch, streams parsed events only to the originating `webContents`, and
+aborts streams when the owner closes or navigates. Electron update checks and
+installation are handled in Electron main through `electron-updater`, not the
+backend sidecar, because Electron updater metadata is incompatible with the
+legacy Tauri update endpoint. The renderer still calls the typed preload IPC
+bridge, Electron main validates each command against an explicit allowlist,
+waits for sidecar readiness when a command needs backend services, and proxies
+those requests to the loopback sidecar with the per-run bearer token.
+Account-scope dashboard commands must keep the frontend scope shape, Electron
+proxy, and backend parser compatible: single-account scopes can use legacy query
+routes, while all, portfolio, and multi-account scopes use the POST query routes
+for holdings, allocations, allocation drill-down, and income summaries.
+All-account scopes use the canonical `TOTAL` snapshot, while portfolio and
+multi-account scopes resolve to their selected account IDs and use account-list
+aggregation in the backend holdings and portfolio-metrics services. Sidecar base
+URLs and tokens must stay confined to Electron main; public runtime status and
+command errors must redact loopback URLs and token-shaped values before crossing
+IPC. Electron app info must use sanitized runtime metadata and must not expose
+desktop DB or log paths to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

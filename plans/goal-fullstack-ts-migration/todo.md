@@ -4126,6 +4126,15 @@ contract:
   `AddonService.getRatings`, accepting array or `{ ratings }` responses,
   surfacing malformed ratings payloads, and preserving Electron/web command
   query routing.
+- `pr5-electron-data-file-export`: verification passed:
+  `bun test apps/electron/src/main/commands.test.ts`,
+  `bun run --cwd apps/frontend test --run src/adapters/electron/exports.test.ts src/adapters/electron/files.test.ts`,
+  `bun run --cwd apps/electron test`, full `bun run type-check`,
+  `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
+  includes Electron main fetching non-JSON export bytes from
+  `/utilities/export/{data}/{format}`, preserving filename/empty-export
+  semantics, renderer-side native save dialog integration, and cancellation
+  returning a non-saved result.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

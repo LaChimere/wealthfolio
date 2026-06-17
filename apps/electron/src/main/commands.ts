@@ -62,6 +62,8 @@ export async function invokeSidecarCommand<T>({
       return await invokeBackupDatabase<T>({ sidecar, fetchImpl });
     case "backup_database_to_path":
       return await invokeBackupDatabaseToPath<T>({ payload, sidecar, fetchImpl });
+    case "export_data_file":
+      return await invokeExportDataFile<T>({ payload, sidecar, fetchImpl });
     case "restore_database":
       return await invokeVoidJson<T>({
         command,
@@ -1597,6 +1599,35 @@ async function invokeBackupDatabaseToPath<T>({
   return requireString(response.path, "path", "backup_database_to_path") as T;
 }
 
+async function invokeExportDataFile<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const data = requireString(payload?.data, "data", "export_data_file");
+  const format = requireString(payload?.format, "format", "export_data_file").toLowerCase();
+  const response = await fetchSidecarBytes({
+    command: "export_data_file",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.export_data_file.path}/${encodeURIComponent(data)}/${encodeURIComponent(
+        format,
+      )}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.export_data_file.method },
+  });
+  if (response.status === "empty") {
+    return response as T;
+  }
+  return {
+    status: "content",
+    filename: response.filename ?? fallbackExportFileName(data, format),
+    data: Array.from(response.data),
+  } as T;
+}
+
 async function invokeParseCsv<T>({
   payload,
   sidecar,
@@ -2705,6 +2736,54 @@ async function fetchSidecarJson<T>({
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+async function fetchSidecarBytes({
+  command,
+  fetchImpl,
+  sidecar,
+  url,
+  init,
+}: {
+  command: ElectronCommand;
+  fetchImpl: FetchLike;
+  sidecar: Pick<SidecarHandle, "token">;
+  url: URL;
+  init: RequestInit;
+}): Promise<
+  { status: "content"; filename: string | null; data: Uint8Array } | { status: "empty" }
+> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      ...init,
+      headers: {
+        Accept: "*/*",
+        Authorization: `Bearer ${sidecar.token}`,
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `Electron sidecar command "${command}" failed: ${sanitizeCommandError(formatError(error), sidecar)}`,
+    );
+  }
+
+  if (response.status === 204) {
+    return { status: "empty" };
+  }
+  if (!response.ok) {
+    const message = sanitizeCommandError(await readErrorMessage(response), sidecar);
+    throw new Error(
+      `Electron sidecar command "${command}" failed with HTTP ${response.status}: ${message}`,
+    );
+  }
+
+  return {
+    status: "content",
+    filename: filenameFromContentDisposition(response.headers.get("content-disposition")),
+    data: new Uint8Array(await response.arrayBuffer()),
+  };
+}
+
 async function fetchSidecarMultipartJson<T>({
   command,
   fetchImpl,
@@ -2752,6 +2831,27 @@ function sanitizeCommandError(error: string, sidecar: Pick<SidecarHandle, "token
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+  const bareMatch = /filename=([^;]+)/i.exec(value);
+  return bareMatch?.[1]?.trim() ?? null;
+}
+
+function fallbackExportFileName(data: string, format: string): string {
+  const currentDate = new Date().toISOString().split("T")[0];
+  return `${data}_${currentDate}.${format}`;
 }
 
 function requireRecord(

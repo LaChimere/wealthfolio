@@ -288,6 +288,15 @@ describe("Electron sidecar command proxy", () => {
       if (path.endsWith("/backup-to-path")) {
         return Promise.resolve(jsonResponse({ path: "/tmp/wealthfolio_backup.db" }));
       }
+      if (path.endsWith("/export/accounts/csv")) {
+        return Promise.resolve(
+          new Response(new Uint8Array([97, 44, 98]), {
+            headers: {
+              "content-disposition": 'attachment; filename="accounts_2026-06-17.csv"',
+            },
+          }),
+        );
+      }
       return Promise.resolve(new Response(null, { status: 204 }));
     };
     const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
@@ -309,6 +318,18 @@ describe("Electron sidecar command proxy", () => {
     ).resolves.toBe("/tmp/wealthfolio_backup.db");
     await expect(
       invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "accounts", format: "CSV" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      status: "content",
+      filename: "accounts_2026-06-17.csv",
+      data: [97, 44, 98],
+    });
+    await expect(
+      invokeSidecarCommand({
         command: "restore_database",
         payload: { backupFilePath: "/tmp/wealthfolio_backup.db" },
         sidecar,
@@ -323,6 +344,7 @@ describe("Electron sidecar command proxy", () => {
         "POST",
         JSON.stringify({ backupDir: "/tmp" }),
       ],
+      ["http://127.0.0.1:18444/api/v1/utilities/export/accounts/csv", "GET", undefined],
       [
         "http://127.0.0.1:18444/api/v1/utilities/database/restore",
         "POST",
