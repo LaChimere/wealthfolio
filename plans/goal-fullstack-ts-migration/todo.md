@@ -4213,6 +4213,12 @@ contract:
   `bun run lint`, `git diff --check`, and full `bun run check`. Coverage
   includes TS backend runtime and SQLite storage ignoring Rust-era
   `DATABASE_URL` and using `WF_DB_PATH` or app-data defaults only.
+- `pr5-wf-db-path-directory-support`: verification passed:
+  `bun test apps/backend/src/storage/sqlite.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "database path|runtime data"`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes `WF_DB_PATH`
+  accepting directory-style values and resolving them to `<dir>/app.db`,
+  matching README and `.env.web.example` configuration semantics.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
