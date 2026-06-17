@@ -1769,6 +1769,16 @@ function routeHoldingsRequest(
       .catch(domainErrorResponse);
   }
 
+  if (request.method === "GET" && url.pathname === "/api/v1/holdings/lots") {
+    const assetId = parseRequiredQueryString(url, "assetId");
+    if (assetId instanceof Response) {
+      return assetId;
+    }
+    // Bounded slice: return empty array until full lot-tracking implementation
+    // Full implementation requires AssetLotView type + lots repository integration
+    return jsonResponse([]);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/v1/holdings/by-asset") {
     const assetId = parseRequiredQueryString(url, "assetId");
     if (assetId instanceof Response) {
