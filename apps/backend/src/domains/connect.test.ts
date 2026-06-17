@@ -3322,19 +3322,28 @@ describe("TS Connect device sync local service", () => {
       Response.json([]),
     ];
     const requests: string[] = [];
+    const syncHeaders: Array<{ clientRequestId: string | null; deviceId: string | null }> = [];
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test" },
-      fetch: async (input) => {
-        requests.push(String(input));
-        if (String(input).includes("/auth/v1/token")) {
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        if (String(input).endsWith("/api/v1/sync/team/devices?scope=my")) {
+        const headers = new Headers(init?.headers);
+        if (url.includes("/api/v1/sync/")) {
+          syncHeaders.push({
+            clientRequestId: headers.get("x-wf-client-request-id"),
+            deviceId: headers.get("x-wf-device-id"),
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
           return listResponses.shift() ?? Response.json([]);
         }
-        if (String(input).endsWith("/api/v1/sync/team/keys/initialize")) {
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
           return Response.json({
             mode: "PAIRING_REQUIRED",
             e2ee_key_version: 3,
@@ -3439,6 +3448,18 @@ describe("TS Connect device sync local service", () => {
       expect(
         requests.filter((request) => request.endsWith("/api/v1/sync/team/keys/initialize")),
       ).toHaveLength(1);
+      expect(syncHeaders).toEqual(
+        expect.arrayContaining([
+          {
+            clientRequestId: expect.stringMatching(/^device-1:/),
+            deviceId: "device-1",
+          },
+        ]),
+      );
+      expect(syncHeaders.every((headers) => headers.clientRequestId?.startsWith("device-1:"))).toBe(
+        true,
+      );
+      expect(syncHeaders.every((headers) => headers.deviceId === "device-1")).toBe(true);
     } finally {
       db.close();
     }
