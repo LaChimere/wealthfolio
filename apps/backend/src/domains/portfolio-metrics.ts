@@ -617,6 +617,9 @@ function calculateIncomeSummary(
   accountId: string | string[] | undefined,
   options: PortfolioMetricsServiceOptions,
 ): IncomeSummary[] {
+  if (Array.isArray(accountId) && accountId.length === 0) {
+    return [];
+  }
   const activities = readIncomeActivitiesData(db, accountId).map((row) => ({
     date: row.date,
     incomeType: row.income_type,
@@ -1195,6 +1198,9 @@ function readIncomeActivitiesData(
   accountId: string | string[] | undefined,
 ): IncomeDataRow[] {
   const accountIds = Array.isArray(accountId) ? accountId : accountId ? [accountId] : [];
+  if (Array.isArray(accountId) && accountIds.length === 0) {
+    return [];
+  }
   const accountFilter =
     accountIds.length > 0 ? `AND a.account_id IN (${accountIds.map(() => "?").join(", ")})` : "";
   const query = `

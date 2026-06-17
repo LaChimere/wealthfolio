@@ -2394,7 +2394,7 @@ describe("TS backend HTTP skeleton", () => {
           name: "Core",
           description: null,
           sortOrder: 0,
-          accountIds: ["acc-3", "acc-4"],
+          accountIds: id === "empty" ? [] : ["acc-3", "acc-4"],
           createdAt: "2026-06-17T00:00:00.000Z",
           updatedAt: "2026-06-17T00:00:00.000Z",
         };
@@ -2526,6 +2526,34 @@ describe("TS backend HTTP skeleton", () => {
         body: JSON.stringify({ filter: { type: "portfolio", portfolioId: "pf-1" } }),
       }),
     );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/income/summary/query", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer sidecar-token",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ filter: { type: "accounts", accountIds: [] } }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/income/summary/query", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer sidecar-token",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ filter: { type: "portfolio", portfolioId: "empty" } }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
 
     const invalidDateResponse = await handler(
       new Request("http://127.0.0.1/api/v1/net-worth?date=2026-02-31", {
@@ -2554,6 +2582,7 @@ describe("TS backend HTTP skeleton", () => {
       ["income-summary-accounts", ["acc-1", "acc-2"]],
       ["portfolio", "pf-1"],
       ["income-summary-accounts", ["acc-3", "acc-4"]],
+      ["portfolio", "empty"],
     ]);
   });
 
@@ -2635,7 +2664,7 @@ describe("TS backend HTTP skeleton", () => {
           name: "Core",
           description: null,
           sortOrder: 0,
-          accountIds: ["acc-3", "acc-4"],
+          accountIds: id === "empty" ? [] : ["acc-3", "acc-4"],
           createdAt: "2026-06-17T00:00:00.000Z",
           updatedAt: "2026-06-17T00:00:00.000Z",
         };
@@ -2758,6 +2787,28 @@ describe("TS backend HTTP skeleton", () => {
         }),
       }),
     );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/holdings/query", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ filter: { type: "accounts", accountIds: [] } }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/allocations/query", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ filter: { type: "portfolio", portfolioId: "empty" } }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
     await handler(
       new Request(
         "http://127.0.0.1/api/v1/snapshots?accountId=acc-1&dateFrom=2026-05-01&dateTo=2026-05-14",
@@ -2894,6 +2945,7 @@ describe("TS backend HTTP skeleton", () => {
         "allocation-holdings-accounts",
         { accountIds: ["acc-3", "acc-4"], taxonomyId: "tax-2", categoryId: "cat-2" },
       ],
+      ["portfolio", "empty"],
       ["snapshots", { accountId: "acc-1", dateFrom: "2026-05-01", dateTo: "2026-05-14" }],
       ["snapshot-holdings", { accountId: "acc-1", date: "2026-05-14" }],
       ["delete-snapshot", { accountId: "acc-1", date: "2026-05-14" }],

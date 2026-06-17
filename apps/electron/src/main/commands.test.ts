@@ -1501,11 +1501,18 @@ describe("Electron sidecar command proxy", () => {
       sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
       fetchImpl,
     });
+    await invokeSidecarCommand({
+      command: "get_asset_lots",
+      payload: { assetId: "asset/2", includeSnapshotPositions: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
 
     expect(urls).toEqual([
       "http://127.0.0.1:18444/api/v1/holdings?accountId=account+1",
       "http://127.0.0.1:18444/api/v1/holdings/item?accountId=account+1&assetId=asset%2F2",
       "http://127.0.0.1:18444/api/v1/holdings/by-asset?assetId=asset%2F2",
+      "http://127.0.0.1:18444/api/v1/holdings/lots?assetId=asset%2F2&includeSnapshotPositions=true",
     ]);
   });
 

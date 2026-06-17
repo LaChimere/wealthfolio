@@ -780,6 +780,7 @@ describe("TS portfolio metrics domain", () => {
         },
       });
       expect(scopedSummaries[1]).toMatchObject({ period: "YTD", totalIncome: 20 });
+      expect(service.getIncomeSummaryForAccounts([])).toEqual([]);
       expect(service.getIncomeSummary("missing")).toEqual([]);
       expect(warnings).toEqual([
         expect.stringContaining("No exchange rate found for GBP/USD"),

@@ -419,6 +419,24 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         params: [["assetId", optionalString(payload?.assetId)]],
       });
+    case "get_asset_lots":
+      return await invokeGetWithQuery<T>({
+        command,
+        payload,
+        sidecar,
+        fetchImpl,
+        params: [
+          ["assetId", optionalString(payload?.assetId)],
+          [
+            "includeSnapshotPositions",
+            optionalBooleanQuery(
+              payload?.includeSnapshotPositions,
+              "includeSnapshotPositions",
+              command,
+            ),
+          ],
+        ],
+      });
     case "get_historical_valuations":
       return await invokeGetWithQuery<T>({
         command,
@@ -2972,6 +2990,15 @@ function optionalBoolean(
     throw new Error(`Electron command "${command}" requires boolean payload field "${field}".`);
   }
   return value;
+}
+
+function optionalBooleanQuery(
+  value: unknown,
+  field: string,
+  command: ElectronCommand,
+): string | undefined {
+  const parsed = optionalBoolean(value, field, command);
+  return parsed === undefined ? undefined : String(parsed);
 }
 
 function optionalQueryNumber(

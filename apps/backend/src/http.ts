@@ -4273,6 +4273,9 @@ function normalizeAccountScope(filter: Record<string, unknown>): AccountScope | 
       }
       accountIds.push(id);
     }
+    if (accountIds.length === 0) {
+      return jsonResponse({ code: 400, message: "Account scope resolved to no accounts" }, 400);
+    }
     return { type: "Accounts", accountIds };
   }
 
@@ -4289,7 +4292,11 @@ function resolveAccountScopeIds(
   if (!portfolioService) {
     throw new Error("Portfolio service not available for portfolio account scope");
   }
-  return portfolioService.getPortfolio(filter.portfolioId).accountIds;
+  const accountIds = portfolioService.getPortfolio(filter.portfolioId).accountIds;
+  if (accountIds.length === 0) {
+    throw new Error("Account scope resolved to no accounts");
+  }
+  return accountIds;
 }
 
 interface IncomeSummaryQuery {

@@ -422,6 +422,10 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/holdings/by-asset",
   },
+  get_asset_lots: {
+    method: "GET",
+    path: "/api/v1/holdings/lots",
+  },
   get_historical_valuations: {
     method: "GET",
     path: "/api/v1/valuations/history",

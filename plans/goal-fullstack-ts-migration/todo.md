@@ -4093,7 +4093,8 @@ contract:
   holding weight recalculation across selected accounts, and Electron preserving
   portfolio scope payloads through the sidecar bridge. Dual GPT/Claude xhigh
   review found and verified fixes for Electron/backend Portfolio discriminant
-  casing and merged account-list holdings.
+  casing, merged account-list holdings, and empty account-scope guards that
+  prevent portfolio or multi-account filters from broadening to all accounts.
 - `pr5-addon-exact-main-resolution`: verification passed:
   `bun test apps/backend/src/domains/addons.test.ts`,
   `bun run --cwd apps/backend test`, full `bun run type-check`,
@@ -4112,9 +4113,10 @@ contract:
   transaction lot rows from `lots`, option contract multiplier parity, nonzero
   ratio fallbacks for split ratios and snapshot-position contract multipliers,
   optional latest HOLDINGS-mode `snapshot_positions` rows, and JSON fallback for
-  snapshots that predate relational positions. Dual GPT/Claude xhigh review
-  found and verified fixes for option multiplier metadata and nonzero ratio
-  parity.
+  snapshots that predate relational positions. Electron command parity now
+  proxies `get_asset_lots` through the sidecar. Dual GPT/Claude xhigh review
+  found and verified fixes for option multiplier metadata, nonzero ratio parity,
+  bytewise sort parity, and missing Electron command registration.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
