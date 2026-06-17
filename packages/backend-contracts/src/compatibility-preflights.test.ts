@@ -49,9 +49,10 @@ describe("full-stack TS compatibility preflights", () => {
     const report = createCommandCompatibilityReport(surface);
 
     expect(report.electronNative).toEqual([...EXPECTED_ELECTRON_NATIVE_COMMANDS].sort());
+    expect(report.electronOnlyBackend).toContain("export_data_file");
     expect(report.electronOnlyBackend).toContain("parse_csv");
     expect(report.electronOnlyBackend).toContain("sync_encrypt");
-    expect(report.webOnlyBackend).toContain("register_device");
+    expect(report.webOnlyBackend).toContain("list_database_backups");
     expect(() => assertExpectedCompatibilityPreflights(surface)).not.toThrow();
   });
 

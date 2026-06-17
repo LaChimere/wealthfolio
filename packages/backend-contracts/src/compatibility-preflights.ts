@@ -10,7 +10,10 @@ export const EXPECTED_ELECTRON_NATIVE_COMMANDS = [
 ] as const;
 
 export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
+  "backup_database_to_path",
+  "export_data_file",
   "parse_csv",
+  "restore_database",
   "sync_compute_sas",
   "sync_compute_shared_secret",
   "sync_decrypt",
@@ -27,12 +30,8 @@ export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
 
 export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = [
   "check_update",
-  "commit_initialize_team_keys",
-  "commit_rotate_team_keys",
-  "get_app_info",
-  "initialize_team_keys",
-  "register_device",
-  "rotate_team_keys",
+  "delete_database_backup",
+  "list_database_backups",
 ] as const;
 
 export const MIXED_VERSION_SYNC_PREFLIGHT_COMMANDS = [

@@ -4150,7 +4150,9 @@ contract:
   for `register_device`, `initialize_team_keys`, `commit_initialize_team_keys`,
   `rotate_team_keys`, and `commit_rotate_team_keys`, matching existing TS
   sidecar routes while keeping deeper cloud/runtime behavior gated in the
-  backend service.
+  backend service. Recent review also verified backend-contracts command-surface
+  guardrails were refreshed for the newly shared commands and Electron-only
+  `export_data_file`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
