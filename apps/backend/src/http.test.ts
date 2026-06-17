@@ -2381,8 +2381,29 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["income-summary", accountId]);
         return [{ accountId, amount: "12.34" }];
       },
+      getIncomeSummaryForAccounts(accountIds) {
+        calls.push(["income-summary-accounts", accountIds]);
+        return [{ accountIds, amount: "23.45" }];
+      },
     };
-    const handler = createBackendRequestHandler(config, { portfolioMetricsService });
+    const portfolioService: Pick<PortfolioService, "getPortfolio"> = {
+      getPortfolio(id) {
+        calls.push(["portfolio", id]);
+        return {
+          id,
+          name: "Core",
+          description: null,
+          sortOrder: 0,
+          accountIds: ["acc-3", "acc-4"],
+          createdAt: "2026-06-17T00:00:00.000Z",
+          updatedAt: "2026-06-17T00:00:00.000Z",
+        };
+      },
+    };
+    const handler = createBackendRequestHandler(config, {
+      portfolioMetricsService,
+      portfolioService: portfolioService as PortfolioService,
+    });
 
     expect((await handler(new Request("http://127.0.0.1/api/v1/net-worth"))).status).toBe(401);
     expect(
@@ -2485,6 +2506,26 @@ describe("TS backend HTTP skeleton", () => {
         body: JSON.stringify({ filter: { type: "all" } }),
       }),
     );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/income/summary/query", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ filter: { type: "accounts", accountIds: ["acc-1", "acc-2"] } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/income/summary/query", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ filter: { type: "portfolio", portfolioId: "pf-1" } }),
+      }),
+    );
 
     const invalidDateResponse = await handler(
       new Request("http://127.0.0.1/api/v1/net-worth?date=2026-02-31", {
@@ -2510,6 +2551,9 @@ describe("TS backend HTTP skeleton", () => {
       ["performance-summary", { itemType: "account", itemId: "acc-1" }],
       ["income-summary", "acc-1"],
       ["income-summary", undefined],
+      ["income-summary-accounts", ["acc-1", "acc-2"]],
+      ["portfolio", "pf-1"],
+      ["income-summary-accounts", ["acc-3", "acc-4"]],
     ]);
   });
 
@@ -2519,6 +2563,10 @@ describe("TS backend HTTP skeleton", () => {
       getHoldings(accountId) {
         calls.push(["holdings", accountId]);
         return [{ accountId }];
+      },
+      getHoldingsForAccounts(accountIds) {
+        calls.push(["holdings-accounts", accountIds]);
+        return accountIds.map((accountId) => ({ accountId }));
       },
       getHolding(accountId, assetId) {
         calls.push(["holding", { accountId, assetId }]);
@@ -2540,8 +2588,16 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["allocations", accountId]);
         return { accountId, byAssetClass: [] };
       },
+      getPortfolioAllocationsForAccounts(accountIds) {
+        calls.push(["allocations-accounts", accountIds]);
+        return { accountIds, byAssetClass: [] };
+      },
       getHoldingsByAllocation(accountId, taxonomyId, categoryId) {
         calls.push(["allocation-holdings", { accountId, taxonomyId, categoryId }]);
+        return { categoryId, holdings: [] };
+      },
+      getHoldingsByAllocationForAccounts(accountIds, taxonomyId, categoryId) {
+        calls.push(["allocation-holdings-accounts", { accountIds, taxonomyId, categoryId }]);
         return { categoryId, holdings: [] };
       },
       getSnapshots(accountId, dateFrom, dateTo) {
@@ -2567,7 +2623,24 @@ describe("TS backend HTTP skeleton", () => {
         return { snapshotsImported: request.snapshots.length, snapshotsFailed: 0, errors: [] };
       },
     };
-    const handler = createBackendRequestHandler(config, { holdingsService });
+    const portfolioService: Pick<PortfolioService, "getPortfolio"> = {
+      getPortfolio(id) {
+        calls.push(["portfolio", id]);
+        return {
+          id,
+          name: "Core",
+          description: null,
+          sortOrder: 0,
+          accountIds: ["acc-3", "acc-4"],
+          createdAt: "2026-06-17T00:00:00.000Z",
+          updatedAt: "2026-06-17T00:00:00.000Z",
+        };
+      },
+    };
+    const handler = createBackendRequestHandler(config, {
+      holdingsService,
+      portfolioService: portfolioService as PortfolioService,
+    });
     const authHeaders = { authorization: "Bearer sidecar-token" };
     const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
 
@@ -2646,6 +2719,13 @@ describe("TS backend HTTP skeleton", () => {
         method: "POST",
         headers: jsonHeaders,
         body: JSON.stringify({ filter: { type: "account", accountId: "acc-2" } }),
+      }),
+    );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/holdings/query", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ filter: { type: "accounts", accountIds: ["acc-1", "acc-2"] } }),
       }),
     );
     await handler(
@@ -2794,8 +2874,13 @@ describe("TS backend HTTP skeleton", () => {
       ["allocation-holdings", { accountId: "acc-1", taxonomyId: "tax-1", categoryId: "cat-1" }],
       ["holdings", "TOTAL"],
       ["holdings", "acc-2"],
-      ["allocations", "TOTAL"],
-      ["allocation-holdings", { accountId: "TOTAL", taxonomyId: "tax-2", categoryId: "cat-2" }],
+      ["holdings-accounts", ["acc-1", "acc-2"]],
+      ["allocations-accounts", ["acc-1", "acc-2"]],
+      ["portfolio", "pf-1"],
+      [
+        "allocation-holdings-accounts",
+        { accountIds: ["acc-3", "acc-4"], taxonomyId: "tax-2", categoryId: "cat-2" },
+      ],
       ["snapshots", { accountId: "acc-1", dateFrom: "2026-05-01", dateTo: "2026-05-14" }],
       ["snapshot-holdings", { accountId: "acc-1", date: "2026-05-14" }],
       ["delete-snapshot", { accountId: "acc-1", date: "2026-05-14" }],

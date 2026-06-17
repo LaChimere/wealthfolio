@@ -19,7 +19,8 @@ interface ResolvedSidecarCommandOptions {
 type BackendAccountScope =
   | { type: "TotalSnapshot" }
   | { type: "Account"; accountId: string }
-  | { type: "Accounts"; accountIds: string[] };
+  | { type: "Accounts"; accountIds: string[] }
+  | { type: "Portfolio"; portfolioId: string };
 
 export async function invokeSidecarCommand<T>({
   command,
@@ -2764,8 +2765,15 @@ function normalizeBackendAccountScope(
   filter: Record<string, unknown>,
   command: ElectronCommand,
 ): BackendAccountScope {
-  if (filter.type === "TotalSnapshot" || filter.type === "all" || filter.type === "portfolio") {
+  if (filter.type === "TotalSnapshot" || filter.type === "all") {
     return { type: "TotalSnapshot" };
+  }
+
+  if (filter.type === "Portfolio" || filter.type === "portfolio") {
+    return {
+      type: "Portfolio",
+      portfolioId: requireString(filter.portfolioId, "filter.portfolioId", command),
+    };
   }
 
   if (filter.type === "Account" || filter.type === "account") {

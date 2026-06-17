@@ -1606,7 +1606,7 @@ describe("Electron sidecar command proxy", () => {
       [
         "http://127.0.0.1:18444/api/v1/allocations/query",
         "POST",
-        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+        JSON.stringify({ filter: { type: "Portfolio", portfolioId: "portfolio-1" } }),
       ],
       [
         "http://127.0.0.1:18444/api/v1/allocations/holdings/query",

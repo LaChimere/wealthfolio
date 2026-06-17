@@ -169,13 +169,14 @@ the loopback sidecar with the per-run bearer token. Account-scope dashboard
 commands must keep the frontend scope shape, Electron proxy, and backend parser
 compatible: single-account scopes can use legacy query routes, while all,
 portfolio, and multi-account scopes use the POST query routes for holdings,
-allocations, allocation drill-down, and income summaries. Non-single-account
-dashboard scopes currently resolve through the canonical `TOTAL` snapshot until
-the backend services expose true account-list aggregation methods. Sidecar base
-URLs and tokens must stay confined to Electron main; public runtime status and
-command errors must redact loopback URLs and token-shaped values before crossing
-IPC. Electron app info must use sanitized runtime metadata and must not expose
-desktop DB or log paths to the renderer. JSON request bodies must be sent with
+allocations, allocation drill-down, and income summaries. All-account scopes use
+the canonical `TOTAL` snapshot, while portfolio and multi-account scopes resolve
+to their selected account IDs and use account-list aggregation in the backend
+holdings and portfolio-metrics services. Sidecar base URLs and tokens must stay
+confined to Electron main; public runtime status and command errors must redact
+loopback URLs and token-shaped values before crossing IPC. Electron app info
+must use sanitized runtime metadata and must not expose desktop DB or log paths
+to the renderer. JSON request bodies must be sent with
 `Content-Type: application/json`, and accepted/no-content sidecar responses must
 cross IPC as `undefined`.
 

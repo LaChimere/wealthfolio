@@ -78,6 +78,7 @@ export interface ImportHoldingsCsvResult {
 
 export interface HoldingsService {
   getHoldings(accountId: string): Promise<Holding[]> | Holding[];
+  getHoldingsForAccounts(accountIds: string[]): Promise<Holding[]> | Holding[];
   getHolding(accountId: string, assetId: string): Promise<unknown | null> | unknown | null;
   getAssetHoldings(assetId: string): Promise<unknown[]> | unknown[];
   getHistoricalValuations(
@@ -87,8 +88,14 @@ export interface HoldingsService {
   ): Promise<unknown[]> | unknown[];
   getLatestValuations(accountIds?: string[]): Promise<unknown[]> | unknown[];
   getPortfolioAllocations(accountId: string): Promise<unknown> | unknown;
+  getPortfolioAllocationsForAccounts(accountIds: string[]): Promise<unknown> | unknown;
   getHoldingsByAllocation(
     accountId: string,
+    taxonomyId: string,
+    categoryId: string,
+  ): Promise<unknown> | unknown;
+  getHoldingsByAllocationForAccounts(
+    accountIds: string[],
     taxonomyId: string,
     categoryId: string,
   ): Promise<unknown> | unknown;
@@ -218,6 +225,7 @@ export interface Holding {
   prevCloseValue: MonetaryValue | null;
   weight: number;
   asOfDate: string;
+  sourceAccountIds?: string[];
   metadata: unknown | null;
 }
 
@@ -483,6 +491,13 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
+    getHoldingsForAccounts(accountIds) {
+      try {
+        return readLiveHoldingsForAccounts(db, accountIds, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     getHolding(accountId, assetId) {
       try {
         return readLiveHolding(db, accountId, assetId, options);
@@ -511,9 +526,23 @@ export function createHoldingsService(
         return Promise.reject(error);
       }
     },
+    getPortfolioAllocationsForAccounts(accountIds) {
+      try {
+        return readPortfolioAllocationsForAccounts(db, accountIds, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     getHoldingsByAllocation(accountId, taxonomyId, categoryId) {
       try {
         return readHoldingsByAllocation(db, accountId, taxonomyId, categoryId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    getHoldingsByAllocationForAccounts(accountIds, taxonomyId, categoryId) {
+      try {
+        return readHoldingsByAllocationForAccounts(db, accountIds, taxonomyId, categoryId, options);
       } catch (error) {
         return Promise.reject(error);
       }
@@ -1206,6 +1235,81 @@ function readLiveHoldings(
   return readLiveHoldingsFromSnapshot(db, snapshot, options);
 }
 
+function readLiveHoldingsForAccounts(
+  db: Database,
+  accountIds: string[],
+  options: HoldingsServiceOptions,
+): Holding[] {
+  const merged = new Map<string, Holding>();
+  for (const holding of accountIds.flatMap((accountId) =>
+    readLiveHoldings(db, accountId, options),
+  )) {
+    const key =
+      holding.holdingType === "cash"
+        ? `CASH-${holding.localCurrency}`
+        : (holding.instrument?.id ?? holding.id);
+    const existing = merged.get(key);
+    if (existing) {
+      if (!existing.sourceAccountIds?.includes(holding.accountId)) {
+        existing.sourceAccountIds = [...(existing.sourceAccountIds ?? []), holding.accountId];
+      }
+      existing.quantity = decimalToNumber(
+        decimalOrFallback(existing.quantity, new Decimal(0)).add(
+          decimalOrFallback(holding.quantity, new Decimal(0)),
+        ),
+        new Decimal(0),
+      );
+      addMonetaryValue(existing.marketValue, holding.marketValue);
+      existing.costBasis = addOptionalMonetaryValue(existing.costBasis, holding.costBasis);
+      existing.unrealizedGain = addOptionalMonetaryValue(
+        existing.unrealizedGain,
+        holding.unrealizedGain,
+      );
+      existing.realizedGain = addOptionalMonetaryValue(existing.realizedGain, holding.realizedGain);
+      existing.totalGain = addOptionalMonetaryValue(existing.totalGain, holding.totalGain);
+      existing.dayChange = addOptionalMonetaryValue(existing.dayChange, holding.dayChange);
+      existing.prevCloseValue = addOptionalMonetaryValue(
+        existing.prevCloseValue,
+        holding.prevCloseValue,
+      );
+      if (holding.openDate) {
+        existing.openDate =
+          existing.openDate && existing.openDate < holding.openDate
+            ? existing.openDate
+            : holding.openDate;
+      }
+      recomputeMergedHoldingPercentages(existing);
+      continue;
+    }
+
+    const sourceAccountId = holding.accountId;
+    merged.set(key, {
+      ...holding,
+      id: `AGG-${key}`,
+      accountId: "",
+      marketValue: cloneMonetaryValue(holding.marketValue) ?? zeroMonetaryValue(),
+      costBasis: cloneMonetaryValue(holding.costBasis),
+      unrealizedGain: cloneMonetaryValue(holding.unrealizedGain),
+      realizedGain: cloneMonetaryValue(holding.realizedGain),
+      totalGain: cloneMonetaryValue(holding.totalGain),
+      dayChange: cloneMonetaryValue(holding.dayChange),
+      prevCloseValue: cloneMonetaryValue(holding.prevCloseValue),
+      sourceAccountIds: [sourceAccountId],
+    });
+  }
+
+  const holdings = [...merged.values()].sort((left, right) => {
+    const leftCash = left.holdingType === "cash" ? 1 : 0;
+    const rightCash = right.holdingType === "cash" ? 1 : 0;
+    return leftCash - rightCash || left.id.localeCompare(right.id);
+  });
+  for (const holding of holdings) {
+    recomputeMergedHoldingPercentages(holding);
+  }
+  applyPortfolioWeights(holdings);
+  return holdings;
+}
+
 function readLiveHolding(
   db: Database,
   accountId: string,
@@ -1262,7 +1366,18 @@ function readPortfolioAllocations(
   accountId: string,
   options: HoldingsServiceOptions,
 ): PortfolioAllocations {
-  const holdings = readLiveHoldings(db, accountId, options);
+  return buildPortfolioAllocations(db, readLiveHoldings(db, accountId, options));
+}
+
+function readPortfolioAllocationsForAccounts(
+  db: Database,
+  accountIds: string[],
+  options: HoldingsServiceOptions,
+): PortfolioAllocations {
+  return buildPortfolioAllocations(db, readLiveHoldingsForAccounts(db, accountIds, options));
+}
+
+function buildPortfolioAllocations(db: Database, holdings: Holding[]): PortfolioAllocations {
   if (holdings.length === 0) {
     return defaultPortfolioAllocations();
   }
@@ -1370,6 +1485,38 @@ function readHoldingsByAllocation(
   categoryId: string,
   options: HoldingsServiceOptions,
 ): AllocationHoldings {
+  return buildHoldingsByAllocation(
+    db,
+    readLiveHoldings(db, accountId, options),
+    taxonomyId,
+    categoryId,
+    resolveBaseCurrency(options) ?? "",
+  );
+}
+
+function readHoldingsByAllocationForAccounts(
+  db: Database,
+  accountIds: string[],
+  taxonomyId: string,
+  categoryId: string,
+  options: HoldingsServiceOptions,
+): AllocationHoldings {
+  return buildHoldingsByAllocation(
+    db,
+    readLiveHoldingsForAccounts(db, accountIds, options),
+    taxonomyId,
+    categoryId,
+    resolveBaseCurrency(options) ?? "",
+  );
+}
+
+function buildHoldingsByAllocation(
+  db: Database,
+  holdings: Holding[],
+  taxonomyId: string,
+  categoryId: string,
+  emptyCurrency: string,
+): AllocationHoldings {
   const taxonomyWithCategories = readTaxonomyWithCategories(db, taxonomyId);
   const taxonomy = taxonomyWithCategories?.taxonomy ?? {
     id: taxonomyId,
@@ -1385,8 +1532,7 @@ function readHoldingsByAllocation(
     categoryId === UNKNOWN_CATEGORY_ID
       ? UNKNOWN_CATEGORY_COLOR
       : (category?.color ?? taxonomy.color);
-  const holdings = readLiveHoldings(db, accountId, options);
-  const currency = holdings[0]?.baseCurrency ?? resolveBaseCurrency(options) ?? "";
+  const currency = holdings[0]?.baseCurrency ?? emptyCurrency;
 
   if (holdings.length === 0) {
     return {
@@ -1653,6 +1799,71 @@ function sumHoldingValues(holdings: Holding[]): Decimal {
     (sum, holding) => sum.add(decimalOrFallback(holding.marketValue.base, new Decimal(0))),
     new Decimal(0),
   );
+}
+
+function addMonetaryValue(target: MonetaryValue, value: MonetaryValue): void {
+  target.local = decimalToNumber(
+    decimalOrFallback(target.local, new Decimal(0)).add(
+      decimalOrFallback(value.local, new Decimal(0)),
+    ),
+    new Decimal(0),
+  );
+  target.base = decimalToNumber(
+    decimalOrFallback(target.base, new Decimal(0)).add(
+      decimalOrFallback(value.base, new Decimal(0)),
+    ),
+    new Decimal(0),
+  );
+}
+
+function addOptionalMonetaryValue(
+  target: MonetaryValue | null,
+  value: MonetaryValue | null,
+): MonetaryValue | null {
+  if (!target) {
+    return cloneMonetaryValue(value);
+  }
+  if (!value) {
+    return target;
+  }
+  addMonetaryValue(target, value);
+  return target;
+}
+
+function recomputeMergedHoldingPercentages(holding: Holding): void {
+  const costBase = decimalOrFallback(holding.costBasis?.base, new Decimal(0));
+  if (costBase.gt(0)) {
+    holding.unrealizedGainPct = holding.unrealizedGain
+      ? decimalToNumber(
+          decimalOrFallback(holding.unrealizedGain.base, new Decimal(0))
+            .div(costBase)
+            .toDecimalPlaces(4),
+          new Decimal(0),
+        )
+      : null;
+    holding.totalGainPct = holding.totalGain
+      ? decimalToNumber(
+          decimalOrFallback(holding.totalGain.base, new Decimal(0))
+            .div(costBase)
+            .toDecimalPlaces(4),
+          new Decimal(0),
+        )
+      : null;
+  } else {
+    holding.unrealizedGainPct = null;
+    holding.totalGainPct = null;
+  }
+
+  const prevCloseBase = decimalOrFallback(holding.prevCloseValue?.base, new Decimal(0));
+  holding.dayChangePct =
+    prevCloseBase.gt(0) && holding.dayChange
+      ? decimalToNumber(
+          decimalOrFallback(holding.dayChange.base, new Decimal(0))
+            .div(prevCloseBase)
+            .toDecimalPlaces(4),
+          new Decimal(0),
+        )
+      : null;
 }
 
 function weightedHoldingValue(holding: Holding, weight: Decimal): Decimal {

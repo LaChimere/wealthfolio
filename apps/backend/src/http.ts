@@ -421,7 +421,13 @@ async function routeRequest(
       url.pathname.startsWith("/api/v1/allocations") ||
       url.pathname.startsWith("/api/v1/snapshots"))
   ) {
-    return routeHoldingsRequest(request, url, config, options.holdingsService);
+    return routeHoldingsRequest(
+      request,
+      url,
+      config,
+      options.holdingsService,
+      options.portfolioService,
+    );
   }
 
   if (options.eventBus && url.pathname === "/api/v1/events/stream") {
@@ -462,7 +468,13 @@ async function routeRequest(
       url.pathname.startsWith("/api/v1/performance") ||
       url.pathname.startsWith("/api/v1/income/summary"))
   ) {
-    return routePortfolioMetricsRequest(request, url, config, options.portfolioMetricsService);
+    return routePortfolioMetricsRequest(
+      request,
+      url,
+      config,
+      options.portfolioMetricsService,
+      options.portfolioService,
+    );
   }
 
   if (options.secretService && url.pathname === "/api/v1/secrets") {
@@ -1648,6 +1660,7 @@ function routePortfolioMetricsRequest(
   url: URL,
   config: BackendRuntimeConfig,
   portfolioMetricsService: PortfolioMetricsService,
+  portfolioService?: PortfolioService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -1708,13 +1721,16 @@ function routePortfolioMetricsRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/income/summary/query") {
-    return handleJsonMutation(request, parseIncomeSummaryQuery, (query) =>
-      Promise.resolve(
-        portfolioMetricsService.getIncomeSummary(
-          query.filter?.type === "Account" ? query.filter.accountId : undefined,
-        ),
-      ),
-    );
+    return handleJsonMutation(request, parseIncomeSummaryQuery, (query) => {
+      if (!query.filter || query.filter.type === "TotalSnapshot") {
+        return Promise.resolve(portfolioMetricsService.getIncomeSummary());
+      }
+      if (query.filter.type === "Account") {
+        return Promise.resolve(portfolioMetricsService.getIncomeSummary(query.filter.accountId));
+      }
+      const accountIds = resolveAccountScopeIds(query.filter, portfolioService);
+      return Promise.resolve(portfolioMetricsService.getIncomeSummaryForAccounts(accountIds));
+    });
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -1725,6 +1741,7 @@ function routeHoldingsRequest(
   url: URL,
   config: BackendRuntimeConfig,
   holdingsService: HoldingsService,
+  portfolioService?: PortfolioService,
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -1742,16 +1759,14 @@ function routeHoldingsRequest(
 
   if (request.method === "POST" && url.pathname === "/api/v1/holdings/query") {
     return handleJsonMutation(request, parseHoldingsQuery, (query) => {
-      let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
-      } else if (query.filter.type === "Account") {
-        accountId = query.filter.accountId;
-      } else {
-        // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
+        return Promise.resolve(holdingsService.getHoldings(PORTFOLIO_TOTAL_ACCOUNT_ID));
       }
-      return Promise.resolve(holdingsService.getHoldings(accountId));
+      if (query.filter.type === "Account") {
+        return Promise.resolve(holdingsService.getHoldings(query.filter.accountId));
+      }
+      const accountIds = resolveAccountScopeIds(query.filter, portfolioService);
+      return Promise.resolve(holdingsService.getHoldingsForAccounts(accountIds));
     });
   }
 
@@ -1829,16 +1844,14 @@ function routeHoldingsRequest(
 
   if (request.method === "POST" && url.pathname === "/api/v1/allocations/query") {
     return handleJsonMutation(request, parseHoldingsQuery, (query) => {
-      let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
-      } else if (query.filter.type === "Account") {
-        accountId = query.filter.accountId;
-      } else {
-        // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
+        return Promise.resolve(holdingsService.getPortfolioAllocations(PORTFOLIO_TOTAL_ACCOUNT_ID));
       }
-      return Promise.resolve(holdingsService.getPortfolioAllocations(accountId));
+      if (query.filter.type === "Account") {
+        return Promise.resolve(holdingsService.getPortfolioAllocations(query.filter.accountId));
+      }
+      const accountIds = resolveAccountScopeIds(query.filter, portfolioService);
+      return Promise.resolve(holdingsService.getPortfolioAllocationsForAccounts(accountIds));
     });
   }
 
@@ -1864,17 +1877,31 @@ function routeHoldingsRequest(
 
   if (request.method === "POST" && url.pathname === "/api/v1/allocations/holdings/query") {
     return handleJsonMutation(request, parseAllocationHoldingsQuery, (query) => {
-      let accountId: string;
       if (query.filter.type === "TotalSnapshot") {
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
-      } else if (query.filter.type === "Account") {
-        accountId = query.filter.accountId;
-      } else {
-        // Accounts scope: fallback to TOTAL for multi-account (limitation)
-        accountId = PORTFOLIO_TOTAL_ACCOUNT_ID;
+        return Promise.resolve(
+          holdingsService.getHoldingsByAllocation(
+            PORTFOLIO_TOTAL_ACCOUNT_ID,
+            query.taxonomyId,
+            query.categoryId,
+          ),
+        );
       }
+      if (query.filter.type === "Account") {
+        return Promise.resolve(
+          holdingsService.getHoldingsByAllocation(
+            query.filter.accountId,
+            query.taxonomyId,
+            query.categoryId,
+          ),
+        );
+      }
+      const accountIds = resolveAccountScopeIds(query.filter, portfolioService);
       return Promise.resolve(
-        holdingsService.getHoldingsByAllocation(accountId, query.taxonomyId, query.categoryId),
+        holdingsService.getHoldingsByAllocationForAccounts(
+          accountIds,
+          query.taxonomyId,
+          query.categoryId,
+        ),
       );
     });
   }
@@ -4202,15 +4229,24 @@ function parseRestoreDatabaseRequest(
 type AccountScope =
   | { type: "TotalSnapshot" }
   | { type: "Account"; accountId: string }
-  | { type: "Accounts"; accountIds: string[] };
+  | { type: "Accounts"; accountIds: string[] }
+  | { type: "Portfolio"; portfolioId: string };
 
 const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 
 function normalizeAccountScope(filter: Record<string, unknown>): AccountScope | Response {
   const filterType = filter.type;
 
-  if (filterType === "TotalSnapshot" || filterType === "all" || filterType === "portfolio") {
+  if (filterType === "TotalSnapshot" || filterType === "all") {
     return { type: "TotalSnapshot" };
+  }
+
+  if (filterType === "Portfolio" || filterType === "portfolio") {
+    const portfolioId = parseRequiredString(filter.portfolioId, "portfolioId for Portfolio scope");
+    if (portfolioId instanceof Response) {
+      return portfolioId;
+    }
+    return { type: "Portfolio", portfolioId };
   }
 
   if (filterType === "Account" || filterType === "account") {
@@ -4239,6 +4275,19 @@ function normalizeAccountScope(filter: Record<string, unknown>): AccountScope | 
   }
 
   return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
+}
+
+function resolveAccountScopeIds(
+  filter: Extract<AccountScope, { type: "Accounts" | "Portfolio" }>,
+  portfolioService?: PortfolioService,
+): string[] {
+  if (filter.type === "Accounts") {
+    return filter.accountIds;
+  }
+  if (!portfolioService) {
+    throw new Error("Portfolio service not available for portfolio account scope");
+  }
+  return portfolioService.getPortfolio(filter.portfolioId).accountIds;
 }
 
 interface IncomeSummaryQuery {

@@ -1420,6 +1420,7 @@ describe("TS holdings domain", () => {
 
     try {
       insertAccount(db, { id: "a1", name: "Alpha" });
+      insertAccount(db, { id: "a2", name: "Beta" });
       insertAsset(db, {
         id: "stock",
         kind: "INVESTMENT",
@@ -1459,6 +1460,15 @@ describe("TS holdings domain", () => {
           unknown: snapshotPosition("unknown", "1", "0", "USD", "1"),
         },
         cashBalances: { USD: "50" },
+      });
+      insertSnapshot(db, {
+        id: "a2-2026-01-05",
+        accountId: "a2",
+        date: "2026-01-05",
+        positions: {
+          stock: snapshotPosition("stock", "2", "0", "USD", "1"),
+        },
+        cashBalances: { USD: "100" },
       });
       insertQuote(db, {
         id: "stock-2026-01-05",
@@ -1597,6 +1607,39 @@ describe("TS holdings domain", () => {
         },
       ]);
 
+      const scopedHoldings = (await service.getHoldingsForAccounts(["a1", "a2"])) as Holding[];
+      expect(scopedHoldings.map((holding) => holding.id)).toEqual([
+        "AGG-bond",
+        "AGG-partial",
+        "AGG-stock",
+        "AGG-unknown",
+        "AGG-CASH-USD",
+      ]);
+      expect(scopedHoldings.reduce((sum, holding) => sum + holding.weight, 0)).toBeCloseTo(1, 8);
+      expect(scopedHoldings.every((holding) => holding.accountId === "")).toBe(true);
+      expect(holdingById(scopedHoldings, "AGG-stock")).toMatchObject({
+        quantity: 3,
+        marketValue: { local: 300, base: 300 },
+        sourceAccountIds: ["a1", "a2"],
+      });
+      expect(holdingById(scopedHoldings, "AGG-CASH-USD")).toMatchObject({
+        quantity: 150,
+        marketValue: { local: 150, base: 150 },
+        sourceAccountIds: ["a1", "a2"],
+      });
+
+      const scopedAllocations = (await service.getPortfolioAllocationsForAccounts([
+        "a1",
+        "a2",
+      ])) as PortfolioAllocations;
+      expect(scopedAllocations.totalValue).toBe(700);
+      expect(scopedAllocations.assetClasses.categories).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ categoryId: "EQUITY", value: 350, percentage: 50 }),
+          expect.objectContaining({ categoryId: "CASH", value: 150, percentage: 21.43 }),
+        ]),
+      );
+
       const equityHoldings = (await service.getHoldingsByAllocation(
         "a1",
         "asset_classes",
@@ -1624,6 +1667,17 @@ describe("TS holdings domain", () => {
           marketValue: 50,
           weightInCategory: 33.33,
         }),
+      ]);
+
+      const scopedEquityHoldings = (await service.getHoldingsByAllocationForAccounts(
+        ["a1", "a2"],
+        "asset_classes",
+        "EQUITY",
+      )) as AllocationHoldings;
+      expect(scopedEquityHoldings.totalValue).toBe(350);
+      expect(scopedEquityHoldings.holdings.map((holding) => holding.id)).toEqual([
+        "stock",
+        "partial",
       ]);
 
       const cashHoldings = (await service.getHoldingsByAllocation(

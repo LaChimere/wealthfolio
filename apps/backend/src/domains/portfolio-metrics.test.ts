@@ -639,6 +639,7 @@ describe("TS portfolio metrics domain", () => {
 
     try {
       insertAccount(db, { id: "taxable", accountType: "SECURITIES", name: "Taxable" });
+      insertAccount(db, { id: "retirement", accountType: "SECURITIES", name: "Retirement" });
       insertAccount(db, {
         id: "archived",
         accountType: "SECURITIES",
@@ -702,6 +703,15 @@ describe("TS portfolio metrics domain", () => {
         amount: "1000",
         currency: "USD",
       });
+      insertActivity(db, {
+        id: "retirement-dividend",
+        accountId: "retirement",
+        assetId: "stock",
+        activityType: "DIVIDEND",
+        activityDate: "2026-05-01T00:00:00+00:00",
+        amount: "5",
+        currency: "USD",
+      });
 
       const summaries = service.getIncomeSummary("taxable");
       expect(summaries).toHaveLength(4);
@@ -760,8 +770,21 @@ describe("TS portfolio metrics domain", () => {
         monthlyAverage: 2,
         yoyGrowth: null,
       });
+      const scopedSummaries = service.getIncomeSummaryForAccounts(["taxable", "retirement"]);
+      expect(scopedSummaries[0]).toMatchObject({
+        period: "TOTAL",
+        totalIncome: 52,
+        byAccount: {
+          taxable: expect.objectContaining({ total: 47 }),
+          retirement: expect.objectContaining({ total: 5 }),
+        },
+      });
+      expect(scopedSummaries[1]).toMatchObject({ period: "YTD", totalIncome: 20 });
       expect(service.getIncomeSummary("missing")).toEqual([]);
-      expect(warnings).toEqual([expect.stringContaining("No exchange rate found for GBP/USD")]);
+      expect(warnings).toEqual([
+        expect.stringContaining("No exchange rate found for GBP/USD"),
+        expect.stringContaining("No exchange rate found for GBP/USD"),
+      ]);
     } finally {
       db.close();
     }

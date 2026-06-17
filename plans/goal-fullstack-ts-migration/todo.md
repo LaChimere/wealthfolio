@@ -4081,9 +4081,19 @@ contract:
   `bun run dev:electron` startup with renderer and sidecar ready. Dual
   GPT/Claude xhigh review found and verified fixes for the unreachable income
   summary query route and canonical `TOTAL` account routing for dashboard query
-  routes and portfolio-history export. Multi-account scopes remain bounded to
-  the current TOTAL fallback until the holdings/allocations/metrics services
-  grow true account-list aggregation methods.
+  routes and portfolio-history export.
+- `pr5-dashboard-account-list-scope`: verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/domains/portfolio-metrics.test.ts apps/backend/src/http.test.ts apps/electron/src/main/commands.test.ts`
+  plus `bun run --cwd apps/backend test`, `bun run --cwd apps/electron test`,
+  full `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes portfolio and multi-account dashboard
+  scopes resolving to account IDs, account-list aggregation for holdings,
+  allocations, allocation drill-down, and income summaries, Rust-compatible
+  merged holding rows by asset/cash key with source account IDs, aggregate
+  holding weight recalculation across selected accounts, and Electron preserving
+  portfolio scope payloads through the sidecar bridge. Dual GPT/Claude xhigh
+  review found and verified fixes for Electron/backend Portfolio discriminant
+  casing and merged account-list holdings.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

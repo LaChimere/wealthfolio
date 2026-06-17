@@ -21,6 +21,7 @@ export interface PortfolioMetricsService {
   calculatePerformanceHistory(request: PerformanceRequest): PerformanceMetrics;
   calculatePerformanceSummary(request: PerformanceRequest): PerformanceMetrics;
   getIncomeSummary(accountId?: string): Promise<unknown[]> | unknown[];
+  getIncomeSummaryForAccounts(accountIds: string[]): Promise<unknown[]> | unknown[];
 }
 
 export interface NetWorthHistoryPoint {
@@ -318,6 +319,9 @@ export function createPortfolioMetricsService(
     getIncomeSummary(accountId) {
       return calculateIncomeSummary(db, accountId, options);
     },
+    getIncomeSummaryForAccounts(accountIds) {
+      return calculateIncomeSummary(db, accountIds, options);
+    },
   };
 }
 
@@ -610,7 +614,7 @@ function calculateNetWorthHistory(
 
 function calculateIncomeSummary(
   db: Database,
-  accountId: string | undefined,
+  accountId: string | string[] | undefined,
   options: PortfolioMetricsServiceOptions,
 ): IncomeSummary[] {
   const activities = readIncomeActivitiesData(db, accountId).map((row) => ({
@@ -629,9 +633,11 @@ function calculateIncomeSummary(
     return [];
   }
 
-  const oldestDate = accountId
-    ? readFirstActivityDate(db, [accountId])
-    : readFirstActivityDateOverall(db);
+  const oldestDate = Array.isArray(accountId)
+    ? readFirstActivityDate(db, accountId)
+    : accountId
+      ? readFirstActivityDate(db, [accountId])
+      : readFirstActivityDateOverall(db);
   if (!oldestDate) {
     return [];
   }
@@ -1184,8 +1190,13 @@ function readAccountPerformanceHistory(
     .map(accountPerformanceValuationFromRow);
 }
 
-function readIncomeActivitiesData(db: Database, accountId: string | undefined): IncomeDataRow[] {
-  const accountFilter = accountId ? "AND a.account_id = ?" : "";
+function readIncomeActivitiesData(
+  db: Database,
+  accountId: string | string[] | undefined,
+): IncomeDataRow[] {
+  const accountIds = Array.isArray(accountId) ? accountId : accountId ? [accountId] : [];
+  const accountFilter =
+    accountIds.length > 0 ? `AND a.account_id IN (${accountIds.map(() => "?").join(", ")})` : "";
   const query = `
     SELECT strftime('%Y-%m', a.activity_date) AS date,
       a.activity_type AS income_type,
@@ -1221,8 +1232,8 @@ function readIncomeActivitiesData(db: Database, accountId: string | undefined): 
       ${accountFilter}
     ORDER BY a.activity_date
   `;
-  return accountId
-    ? db.query<IncomeDataRow, [string]>(query).all(accountId)
+  return accountIds.length > 0
+    ? db.query<IncomeDataRow, string[]>(query).all(...accountIds)
     : db.query<IncomeDataRow, []>(query).all();
 }
 
