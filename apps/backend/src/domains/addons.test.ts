@@ -644,6 +644,21 @@ describe("TS addon domain", () => {
         fetchStore: async () => new Response(new Uint8Array([1, 2, 3])),
       }).downloadAddonToStaging("bad-zip"),
     ).rejects.toThrow("Invalid ZIP data: missing ZIP signature");
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () =>
+          new Response(
+            addonZip({
+              "main.js": "export default {};",
+            }),
+          ),
+      }).downloadAddonToStaging("missing-manifest"),
+    ).rejects.toThrow("ZIP addon must contain a manifest.json file with addon metadata");
+    expect(existsSync(path.join(appDataDir, "addons", "staging", "missing-manifest.zip"))).toBe(
+      false,
+    );
   });
 
   test("rejects empty required manifest fields before runtime loading", async () => {

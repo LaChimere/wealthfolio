@@ -271,8 +271,10 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
 
     async downloadAddonToStaging(addonId) {
       const zipData = await downloadAddonFromStore(storeContext, addonId);
+      validateAddonZipDataForStaging(zipData);
+      const extracted = extractAddonZip(zipData);
       saveAddonToStaging(appDataDir, addonId, zipData);
-      return extractAddonZip(zipData);
+      return extracted;
     },
 
     async installAddonFromStaging(request) {
