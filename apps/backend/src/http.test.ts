@@ -39,6 +39,7 @@ import {
 } from "./domains/market-data-providers";
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import type { PortfolioMetricsService } from "./domains/portfolio-metrics";
+import type { PortfolioService } from "./domains/portfolios";
 import type { SecretService } from "./domains/secrets";
 import { createSettingsService } from "./domains/settings";
 import type { SyncCryptoService } from "./domains/sync-crypto";
@@ -6892,6 +6893,137 @@ function seedHttpGoalPlan(
     "2026-01-01T00:00:00Z",
   );
 }
+
+describe("TS backend HTTP portfolios routes", () => {
+  test("routes CRUD portfolio operations through service when provided", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const portfolioService: PortfolioService = {
+      listPortfolios() {
+        calls.push(["list", undefined]);
+        return [
+          {
+            id: "p1",
+            name: "Core",
+            sortOrder: 0,
+            accountIds: ["a1"],
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            description: null,
+          },
+        ];
+      },
+      getPortfolio(id) {
+        calls.push(["get", id]);
+        return {
+          id,
+          name: "Core",
+          sortOrder: 0,
+          accountIds: ["a1"],
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          description: null,
+        };
+      },
+      async createPortfolio(portfolio) {
+        calls.push(["create", portfolio]);
+        return {
+          id: "created",
+          name: portfolio.name,
+          sortOrder: portfolio.sortOrder ?? 0,
+          accountIds: portfolio.accountIds,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          description: portfolio.description ?? null,
+        };
+      },
+      async updatePortfolio(portfolio) {
+        calls.push(["update", portfolio]);
+        return {
+          ...portfolio,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-02T00:00:00Z",
+          description: portfolio.description ?? null,
+        };
+      },
+      async deletePortfolio(id) {
+        calls.push(["delete", id]);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { portfolioService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+    const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
+
+    expect((await handler(new Request("http://127.0.0.1/api/v1/portfolios"))).status).toBe(401);
+    expect(
+      (
+        await createBackendRequestHandler(config)(
+          new Request("http://127.0.0.1/api/v1/portfolios", { headers: authHeaders }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const listResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios", { headers: authHeaders }),
+    );
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual([
+      {
+        id: "p1",
+        name: "Core",
+        sortOrder: 0,
+        accountIds: ["a1"],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        description: null,
+      },
+    ]);
+
+    const getResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios/p1", { headers: authHeaders }),
+    );
+    expect(getResponse.status).toBe(200);
+    expect(await getResponse.json()).toMatchObject({ id: "p1", name: "Core" });
+
+    const createResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ name: "New", accountIds: ["a1", "a2"], sortOrder: 1 }),
+      }),
+    );
+    expect(createResponse.status).toBe(200);
+    expect(await createResponse.json()).toMatchObject({ id: "created", name: "New", sortOrder: 1 });
+
+    const updateResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios/p1", {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify({ name: "Updated", accountIds: ["a1"], sortOrder: 2 }),
+      }),
+    );
+    expect(updateResponse.status).toBe(200);
+    expect(await updateResponse.json()).toMatchObject({ id: "p1", name: "Updated", sortOrder: 2 });
+
+    const deleteResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios/p1", {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    expect(calls).toEqual([
+      ["list", undefined],
+      ["get", "p1"],
+      ["create", { name: "New", accountIds: ["a1", "a2"], sortOrder: 1, description: null }],
+      [
+        "update",
+        { id: "p1", name: "Updated", accountIds: ["a1"], sortOrder: 2, description: null },
+      ],
+      ["delete", "p1"],
+    ]);
+  });
+});
 
 function validHttpRetirementPlan(
   overrides: {

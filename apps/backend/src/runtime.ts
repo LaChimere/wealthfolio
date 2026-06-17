@@ -48,6 +48,7 @@ import {
   enqueueIncrementalPortfolioRecalculation,
 } from "./domains/portfolio-jobs";
 import { createPortfolioMetricsService } from "./domains/portfolio-metrics";
+import { createPortfolioService } from "./domains/portfolios";
 import {
   createFileSecretService,
   createKeyringSecretService,
@@ -275,6 +276,17 @@ function createServicesFromDatabase(
       });
     },
   );
+  const portfolioService = createPortfolioService(db, {
+    accountService,
+    queueSyncEvent: (event) => {
+      syncOutboxQueue.queueSyncEvent({
+        entity: event.entity,
+        entityId: event.entityId,
+        operation: event.operation,
+        payload: event.payload,
+      });
+    },
+  });
   const exchangeCatalogJson =
     runtimeOptions.exchangeCatalogJson ??
     readExchangeCatalogJson(runtimeOptions.env, runtimeOptions.repositoryRoot);
@@ -559,6 +571,7 @@ function createServicesFromDatabase(
     marketDataService,
     portfolioJobService,
     portfolioMetricsService,
+    portfolioService,
     restartRequired: () => restartRequired,
     secretService,
     settingsService,

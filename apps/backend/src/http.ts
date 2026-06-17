@@ -100,6 +100,7 @@ import {
   type PortfolioRequestBody,
 } from "./domains/portfolio-jobs";
 import type { PerformanceRequest, PortfolioMetricsService } from "./domains/portfolio-metrics";
+import type { NewPortfolio, PortfolioService, PortfolioUpdate } from "./domains/portfolios";
 import {
   projectRetirementWithMode,
   runMonteCarloWithModeAndSeed,
@@ -154,6 +155,7 @@ export interface BackendRequestHandlerOptions {
   marketDataService?: MarketDataService;
   marketDataProviderService?: MarketDataProviderService;
   portfolioMetricsService?: PortfolioMetricsService;
+  portfolioService?: PortfolioService;
   portfolioJobService?: PortfolioJobService;
   restartRequired?: () => boolean;
   secretService?: SecretService;
@@ -421,6 +423,10 @@ async function routeRequest(
       options.marketDataService,
       options.portfolioJobService,
     );
+  }
+
+  if (options.portfolioService && url.pathname.startsWith("/api/v1/portfolios")) {
+    return routePortfolioRequest(request, url, config, options.portfolioService);
   }
 
   if (options.portfolioJobService && url.pathname.startsWith("/api/v1/portfolio")) {
@@ -1847,6 +1853,49 @@ function routeEventStreamRequest(
       "content-type": "text/event-stream",
     },
   });
+}
+
+function routePortfolioRequest(
+  request: Request,
+  url: URL,
+  config: BackendRuntimeConfig,
+  portfolioService: PortfolioService,
+): Promise<Response> | Response {
+  if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+    return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/v1/portfolios") {
+    return handleServiceJsonResponse(() => portfolioService.listPortfolios());
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/v1/portfolios") {
+    return handleJsonMutation(request, parseNewPortfolio, (input) =>
+      portfolioService.createPortfolio(input),
+    );
+  }
+
+  const portfolioId = portfolioIdFromPath(url.pathname);
+  if (portfolioId !== undefined) {
+    if (portfolioId instanceof Response) {
+      return portfolioId;
+    }
+    if (request.method === "GET") {
+      return handleServiceJsonResponse(() => portfolioService.getPortfolio(portfolioId));
+    }
+    if (request.method === "PUT") {
+      return handleJsonMutation(request, parsePortfolioUpdate, (input) =>
+        portfolioService.updatePortfolio({ ...input, id: portfolioId }),
+      );
+    }
+    if (request.method === "DELETE") {
+      return Promise.resolve(portfolioService.deletePortfolio(portfolioId))
+        .then(() => new Response(null, { status: 204 }))
+        .catch(domainErrorResponse);
+    }
+  }
+
+  return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
 async function routePortfolioJobRequest(
@@ -4229,6 +4278,14 @@ function isReservedDeviceSyncDeviceId(value: string): boolean {
   return value === "register" || value === "current";
 }
 
+function portfolioIdFromPath(pathname: string): string | Response | undefined {
+  const match = /^\/api\/v1\/portfolios\/([^/]+)$/.exec(pathname);
+  if (!match) {
+    return undefined;
+  }
+  return decodePathSegment(match[1]);
+}
+
 function deviceSyncPairingIdFromPath(pathname: string): string | Response | undefined {
   const match = /^\/api\/v1\/sync\/pairing\/([^/]+)$/.exec(pathname);
   if (!match || isReservedDeviceSyncPairingId(match[1])) {
@@ -5374,6 +5431,51 @@ function parsePortfolioRequestBody(
     parsed.marketSyncMode = marketSyncMode;
   }
   return parsed;
+}
+
+function parseNewPortfolio(payload: Record<string, unknown>): NewPortfolio | Response {
+  const name = parseRequiredString(payload.name, "name");
+  if (name instanceof Response) {
+    return name;
+  }
+  const description = parseOptionalStringOrNull(payload.description, "description");
+  if (description instanceof Response) {
+    return description;
+  }
+  const sortOrder = parseOptionalPortfolioSortOrder(payload.sortOrder);
+  if (sortOrder instanceof Response) {
+    return sortOrder;
+  }
+  const accountIds = parseRequiredStringArray(payload.accountIds, "accountIds");
+  if (accountIds instanceof Response) {
+    return accountIds;
+  }
+  return {
+    name,
+    description: description ?? null,
+    sortOrder,
+    accountIds,
+  };
+}
+
+function parsePortfolioUpdate(
+  payload: Record<string, unknown>,
+): Omit<PortfolioUpdate, "id"> | Response {
+  const parsed = parseNewPortfolio(payload);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  return parsed;
+}
+
+function parseOptionalPortfolioSortOrder(value: unknown): number | Response {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return jsonResponse({ code: 400, message: "sortOrder must be an integer" }, 400);
+  }
+  return value;
 }
 
 function parseMarketSyncMode(
