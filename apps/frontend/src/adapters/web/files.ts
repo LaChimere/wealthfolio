@@ -52,17 +52,8 @@ async function pickFile(accept: string): Promise<File | null> {
   });
 }
 
-export const openCsvFileDialog = async (): Promise<null | string | string[]> => {
-  const file = await pickFile(".csv,text/csv");
-  if (!file) {
-    return null;
-  }
-  const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv";
-  if (!isCsv) {
-    throw new Error("Please select a .csv file.");
-  }
-  return await file.text();
-};
+export const openCsvFileDialog = (): Promise<null | string | string[]> =>
+  Promise.reject(new Error("CSV file path selection is only supported in the desktop app"));
 
 /**
  * Open a folder selection dialog.
@@ -104,33 +95,28 @@ export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogRe
  * Open a file save dialog and save content.
  * Web implementation using download.
  */
-export const openFileSaveDialog = (
+export const openFileSaveDialog = async (
   fileContent: string | Blob | Uint8Array,
   fileName: string,
 ): Promise<boolean> => {
-  // Web implementation using download
-  try {
-    let blob: Blob;
-    if (typeof fileContent === "string") {
-      blob = new Blob([fileContent], { type: "text/plain" });
-    } else if (fileContent instanceof Blob) {
-      blob = fileContent;
-    } else {
-      blob = new Blob([fileContent as BlobPart]);
-    }
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    return Promise.resolve(true);
-  } catch {
-    return Promise.resolve(false);
+  let blob: Blob;
+  if (typeof fileContent === "string") {
+    blob = new Blob([fileContent], { type: "text/plain" });
+  } else if (fileContent instanceof Blob) {
+    blob = fileContent;
+  } else {
+    blob = new Blob([fileContent as BlobPart]);
   }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return true;
 };
 
 export const saveAppDataFileViaPicker = (

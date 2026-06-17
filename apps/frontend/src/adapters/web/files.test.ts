@@ -1,34 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { openAddonPackageDialog, openCsvFileDialog } from "./files";
+import { openAddonPackageDialog, openCsvFileDialog, openFileSaveDialog } from "./files";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("web files adapter", () => {
-  it("reads selected CSV files and cleans up the hidden input", async () => {
-    const selection = openCsvFileDialog();
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
-    const file = new File(["date,amount\n2026-01-01,10"], "import.csv", { type: "text/csv" });
-
-    expect(input?.accept).toBe(".csv,text/csv");
-    Object.defineProperty(input, "files", { value: [file], configurable: true });
-    input?.dispatchEvent(new Event("change"));
-
-    await expect(selection).resolves.toBe("date,amount\n2026-01-01,10");
-    expect(document.querySelector('input[type="file"]')).toBeNull();
-  });
-
-  it("rejects non-CSV file selections", async () => {
-    const selection = openCsvFileDialog();
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
-
-    Object.defineProperty(input, "files", { value: [file], configurable: true });
-    input?.dispatchEvent(new Event("change"));
-
-    await expect(selection).rejects.toThrow("Please select a .csv file.");
+  it("does not return fake CSV paths in web mode", async () => {
+    await expect(openCsvFileDialog()).rejects.toThrow(
+      "CSV file path selection is only supported in the desktop app",
+    );
     expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 
@@ -52,5 +36,36 @@ describe("web files adapter", () => {
 
     await expect(selection).resolves.toBeNull();
     expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it("downloads files through a temporary anchor", async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const createObjectUrl = vi.fn().mockReturnValue("blob:export");
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+
+    await expect(openFileSaveDialog("hello", "export.txt")).resolves.toBe(true);
+
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:export");
+    expect(document.querySelector("a")).toBeNull();
+  });
+
+  it("surfaces browser download failures", async () => {
+    const error = new Error("object URL unavailable");
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => {
+        throw error;
+      }),
+      revokeObjectURL: vi.fn(),
+    });
+
+    await expect(openFileSaveDialog("hello", "export.txt")).rejects.toBe(error);
   });
 });

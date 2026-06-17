@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getAppInfo } from "@/adapters";
+import { getAppInfo, logger } from "@/adapters";
 import { ExternalLink } from "@/components/external-link";
 import { usePlatform } from "@/hooks/use-platform";
 import { useCheckForUpdates } from "@/hooks/use-updater";
@@ -27,17 +27,25 @@ export default function AboutSettingsPage() {
   useEffect(() => {
     // Use unified command for both desktop and web
     if (!isMobile) {
-      getAppInfo().then((info) => {
-        setVersion(info.version);
-        setDbPath(info.dbPath || "");
-        setLogsDir(info.logsDir);
-      });
+      getAppInfo()
+        .then((info) => {
+          setVersion(info.version);
+          setDbPath(info.dbPath || "");
+          setLogsDir(info.logsDir);
+        })
+        .catch((error) => {
+          logger.error(`Error fetching app info: ${String(error)}`);
+        });
     } else {
       // On mobile, only get version
-      getAppInfo().then((info) => {
-        setVersion(info.version);
-        setDbPath(info.dbPath || "");
-      });
+      getAppInfo()
+        .then((info) => {
+          setVersion(info.version);
+          setDbPath(info.dbPath || "");
+        })
+        .catch((error) => {
+          logger.error(`Error fetching app info: ${String(error)}`);
+        });
     }
   }, [isMobile]);
 
