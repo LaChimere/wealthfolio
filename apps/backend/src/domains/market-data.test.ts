@@ -4652,6 +4652,17 @@ describe("TS market data domain", () => {
               },
             ],
           },
+          "REALTIME_OPTIONS:MSFT:MSFT260117P00200000": {
+            data: [
+              {
+                contractID: "MSFT260117P00200000",
+                last: "0",
+                mark: "2.45",
+                volume: "5",
+                date: "2026-01-05",
+              },
+            ],
+          },
         },
       }),
       secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
@@ -4670,7 +4681,22 @@ describe("TS market data domain", () => {
         price: 12.34,
         resolvedProviderId: "ALPHA_VANTAGE",
       });
-      expect(calls).toEqual(["REALTIME_OPTIONS:AAPL:AAPL260117C00100000"]);
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "MSFT260117P00200000",
+          instrumentType: "OPTION",
+          quoteCcy: "USD",
+          providerId: "ALPHA_VANTAGE",
+        }),
+      ).resolves.toEqual({
+        currency: "USD",
+        price: 2.45,
+        resolvedProviderId: "ALPHA_VANTAGE",
+      });
+      expect(calls).toEqual([
+        "REALTIME_OPTIONS:AAPL:AAPL260117C00100000",
+        "REALTIME_OPTIONS:MSFT:MSFT260117P00200000",
+      ]);
     } finally {
       db.close();
     }

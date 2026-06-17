@@ -4828,7 +4828,7 @@ function parseAlphaVantageOptionQuote(
   if (!isRecord(contract)) {
     throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse options response`);
   }
-  const close = decimalString(contract.last) ?? decimalString(contract.mark);
+  const close = optionalDecimal(contract.last) ?? optionalDecimal(contract.mark);
   if (close === null) {
     throw new Error(`${ALPHA_VANTAGE_PROVIDER}: No price data for contract: ${occSymbol}`);
   }
