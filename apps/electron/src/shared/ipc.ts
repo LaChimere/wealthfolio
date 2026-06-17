@@ -98,6 +98,10 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/settings/auto-update-enabled",
   },
+  get_app_info: {
+    method: "GET",
+    path: "/api/v1/app/info",
+  },
   check_for_updates: {
     method: "GET",
     path: "/api/v1/app/check-update",

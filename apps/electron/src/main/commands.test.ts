@@ -189,10 +189,13 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
-  test("proxies settings reads and auto-update setting reads", async () => {
+  test("proxies settings reads, app info, and auto-update setting reads", async () => {
     const urls: string[] = [];
     const fetchImpl: FetchLike = (url) => {
       urls.push(url.toString());
+      if (url.toString().endsWith("/app/info")) {
+        return Promise.resolve(jsonResponse({ version: "3.4.0" }));
+      }
       return Promise.resolve(
         jsonResponse(url.toString().endsWith("auto-update-enabled") ? true : {}),
       );
@@ -207,6 +210,13 @@ describe("Electron sidecar command proxy", () => {
     ).resolves.toEqual({});
     await expect(
       invokeSidecarCommand({
+        command: "get_app_info",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ version: "3.4.0" });
+    await expect(
+      invokeSidecarCommand({
         command: "is_auto_update_check_enabled",
         sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
         fetchImpl,
@@ -215,6 +225,7 @@ describe("Electron sidecar command proxy", () => {
 
     expect(urls).toEqual([
       "http://127.0.0.1:18444/api/v1/settings",
+      "http://127.0.0.1:18444/api/v1/app/info",
       "http://127.0.0.1:18444/api/v1/settings/auto-update-enabled",
     ]);
   });

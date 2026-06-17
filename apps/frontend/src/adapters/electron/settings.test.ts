@@ -16,8 +16,12 @@ afterEach(() => {
 });
 
 describe("electron settings adapter", () => {
-  it("uses sanitized runtime info for app info paths", async () => {
-    const bridgeInvoke = vi.fn();
+  it("loads app info through the sidecar bridge", async () => {
+    const bridgeInvoke = vi.fn().mockResolvedValue({
+      version: "3.4.0",
+      dbPath: "/safe/app.db",
+      logsDir: "/safe/logs",
+    });
     installElectronApi({
       getRuntimeInfo: vi.fn().mockResolvedValue({
         platform: "darwin",
@@ -30,9 +34,9 @@ describe("electron settings adapter", () => {
 
     await expect(getAppInfo()).resolves.toEqual({
       version: "3.4.0",
-      dbPath: "",
-      logsDir: "",
+      dbPath: "/safe/app.db",
+      logsDir: "/safe/logs",
     });
-    expect(bridgeInvoke).not.toHaveBeenCalled();
+    expect(bridgeInvoke).toHaveBeenCalledWith("get_app_info", undefined);
   });
 });

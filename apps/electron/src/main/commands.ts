@@ -52,6 +52,7 @@ export async function invokeSidecarCommand<T>({
       return await invokeDeletePortfolioEntry<T>({ payload, sidecar, fetchImpl });
     case "get_settings":
     case "is_auto_update_check_enabled":
+    case "get_app_info":
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
@@ -2334,6 +2335,7 @@ async function invokeSimpleGet<T>({
     ElectronCommand,
     | "get_settings"
     | "is_auto_update_check_enabled"
+    | "get_app_info"
     | "get_portfolios"
     | "get_goals"
     | "list_import_templates"
