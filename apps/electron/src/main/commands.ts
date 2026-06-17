@@ -211,6 +211,8 @@ export async function invokeSidecarCommand<T>({
     case "device_sync_stop_background_engine":
     case "device_sync_generate_snapshot_now":
     case "device_sync_cancel_snapshot_upload":
+    case "initialize_team_keys":
+    case "rotate_team_keys":
       return await invokeRequestWithoutBody<T>({ command, sidecar, fetchImpl });
     case "clear_device_sync_data":
       return await invokeVoidJson<T>({ command, sidecar, fetchImpl });
@@ -234,6 +236,20 @@ export async function invokeSidecarCommand<T>({
         fetchImpl,
         params: [["scope", optionalStringField(payload?.scope, "scope", command)]],
       });
+    case "register_device":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          displayName: requireString(payload?.displayName, "displayName", command),
+          platform:
+            optionalStringField(payload?.platform, "platform", command) ?? electronDevicePlatform(),
+          instanceId: requireString(payload?.instanceId, "instanceId", command),
+          osVersion: optionalStringField(payload?.osVersion, "osVersion", command),
+          appVersion: optionalStringField(payload?.appVersion, "appVersion", command),
+        },
+        sidecar,
+        fetchImpl,
+      });
     case "update_device":
       return await invokeUpdateDevice<T>({ payload, sidecar, fetchImpl });
     case "delete_device":
@@ -243,6 +259,47 @@ export async function invokeSidecarCommand<T>({
       return await invokePostJson<T>({
         command,
         body: { reason: optionalStringField(payload?.reason, "reason", command) },
+        sidecar,
+        fetchImpl,
+      });
+    case "commit_initialize_team_keys":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          keyVersion: requireUnsignedInteger(payload?.keyVersion, "keyVersion", command),
+          deviceKeyEnvelope: requireString(
+            payload?.deviceKeyEnvelope,
+            "deviceKeyEnvelope",
+            command,
+          ),
+          signature: requireString(payload?.signature, "signature", command),
+          challengeResponse: optionalStringField(
+            payload?.challengeResponse,
+            "challengeResponse",
+            command,
+          ),
+          recoveryEnvelope: optionalStringField(
+            payload?.recoveryEnvelope,
+            "recoveryEnvelope",
+            command,
+          ),
+        },
+        sidecar,
+        fetchImpl,
+      });
+    case "commit_rotate_team_keys":
+      return await invokePostJson<T>({
+        command,
+        body: {
+          newKeyVersion: requireUnsignedInteger(payload?.newKeyVersion, "newKeyVersion", command),
+          envelopes: requireRotateTeamKeyEnvelopes(payload?.envelopes, command),
+          signature: requireString(payload?.signature, "signature", command),
+          challengeResponse: optionalStringField(
+            payload?.challengeResponse,
+            "challengeResponse",
+            command,
+          ),
+        },
         sidecar,
         fetchImpl,
       });
@@ -2404,6 +2461,8 @@ async function invokeRequestWithoutBody<T>({
     | "device_sync_stop_background_engine"
     | "device_sync_generate_snapshot_now"
     | "device_sync_cancel_snapshot_upload"
+    | "initialize_team_keys"
+    | "rotate_team_keys"
   >;
   sidecar: Pick<SidecarHandle, "baseUrl" | "token">;
   fetchImpl: FetchLike;
@@ -2933,6 +2992,36 @@ function accountScopeAccountId(
   return filter.type === "Account" || filter.type === "account"
     ? requireString(filter.accountId, "filter.accountId", command)
     : undefined;
+}
+
+function requireRotateTeamKeyEnvelopes(value: unknown, command: ElectronCommand): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Electron command "${command}" requires array payload field "envelopes".`);
+  }
+  return value.map((item, index) => {
+    const envelope = requireRecord(item, `envelopes[${index}]`, command);
+    return {
+      deviceId: requireString(envelope.deviceId, `envelopes[${index}].deviceId`, command),
+      deviceKeyEnvelope: requireString(
+        envelope.deviceKeyEnvelope,
+        `envelopes[${index}].deviceKeyEnvelope`,
+        command,
+      ),
+    };
+  });
+}
+
+function electronDevicePlatform(platform: NodeJS.Platform = process.platform): string {
+  switch (platform) {
+    case "darwin":
+      return "macos";
+    case "win32":
+      return "windows";
+    case "linux":
+      return "linux";
+    default:
+      return "desktop";
+  }
 }
 
 function requireStringRecord(

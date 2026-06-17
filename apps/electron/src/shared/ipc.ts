@@ -330,6 +330,10 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/connect/device/cancel-snapshot",
   },
+  register_device: {
+    method: "POST",
+    path: "/api/v1/sync/device/register",
+  },
   get_device: {
     method: "GET",
     path: "/api/v1/sync/device",
@@ -349,6 +353,22 @@ export const ELECTRON_COMMANDS = {
   revoke_device: {
     method: "POST",
     path: "/api/v1/sync/device",
+  },
+  initialize_team_keys: {
+    method: "POST",
+    path: "/api/v1/sync/keys/initialize",
+  },
+  commit_initialize_team_keys: {
+    method: "POST",
+    path: "/api/v1/sync/keys/initialize/commit",
+  },
+  rotate_team_keys: {
+    method: "POST",
+    path: "/api/v1/sync/keys/rotate",
+  },
+  commit_rotate_team_keys: {
+    method: "POST",
+    path: "/api/v1/sync/keys/rotate/commit",
   },
   reset_team_sync: {
     method: "POST",

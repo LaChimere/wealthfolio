@@ -4135,13 +4135,22 @@ contract:
   `/utilities/export/{data}/{format}`, preserving filename/empty-export
   semantics, renderer-side native save dialog integration, and cancellation
   returning a non-saved result.
-- `pr5-electron-app-info-sidecar`: verification in progress:
+- `pr5-electron-app-info-sidecar`: verification passed:
   `bun test apps/electron/src/main/commands.test.ts` and
   `bun run --cwd apps/frontend test --run src/adapters/electron/settings.test.ts`,
-  plus Electron/frontend type-check. Coverage includes Electron IPC registration
-  for `get_app_info`, Electron main proxying `/api/v1/app/info`, and the
-  Electron settings adapter returning TS sidecar app-info paths instead of
-  placeholder empty paths.
+  plus full `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes Electron IPC registration for
+  `get_app_info`, Electron main proxying `/api/v1/app/info`, and the Electron
+  settings adapter returning TS sidecar app-info paths instead of placeholder
+  empty paths.
+- `pr5-electron-device-sync-command-map`: verification passed:
+  `bun test apps/electron/src/main/commands.test.ts` and full
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes Electron IPC and command proxy mappings
+  for `register_device`, `initialize_team_keys`, `commit_initialize_team_keys`,
+  `rotate_team_keys`, and `commit_rotate_team_keys`, matching existing TS
+  sidecar routes while keeping deeper cloud/runtime behavior gated in the
+  backend service.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

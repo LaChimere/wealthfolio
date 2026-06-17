@@ -1124,6 +1124,18 @@ describe("Electron sidecar command proxy", () => {
     };
     const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
 
+    await invokeSidecarCommand({
+      command: "register_device",
+      payload: {
+        displayName: "Desktop",
+        platform: "macos",
+        instanceId: "instance-1",
+        osVersion: "14.0",
+        appVersion: "1.2.3",
+      },
+      sidecar,
+      fetchImpl,
+    });
     await invokeSidecarCommand({ command: "get_device", sidecar, fetchImpl });
     await invokeSidecarCommand({
       command: "get_device",
@@ -1167,6 +1179,30 @@ describe("Electron sidecar command proxy", () => {
       sidecar,
       fetchImpl,
     });
+    await invokeSidecarCommand({ command: "initialize_team_keys", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "commit_initialize_team_keys",
+      payload: {
+        keyVersion: 2,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+        challengeResponse: "challenge",
+        recoveryEnvelope: "recovery",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({ command: "rotate_team_keys", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "commit_rotate_team_keys",
+      payload: {
+        newKeyVersion: 3,
+        envelopes: [{ deviceId: "device/1", deviceKeyEnvelope: "envelope-1" }],
+        signature: "signature",
+      },
+      sidecar,
+      fetchImpl,
+    });
     await invokeSidecarCommand({
       command: "reset_team_sync",
       payload: { reason: "rotate keys" },
@@ -1175,6 +1211,17 @@ describe("Electron sidecar command proxy", () => {
     });
 
     expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/sync/device/register",
+        "POST",
+        JSON.stringify({
+          displayName: "Desktop",
+          platform: "macos",
+          instanceId: "instance-1",
+          osVersion: "14.0",
+          appVersion: "1.2.3",
+        }),
+      ],
       ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
       ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "GET", undefined],
       ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
@@ -1187,23 +1234,45 @@ describe("Electron sidecar command proxy", () => {
       ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "PATCH", JSON.stringify({})],
       ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "DELETE", undefined],
       ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1/revoke", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/keys/initialize", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/keys/initialize/commit",
+        "POST",
+        JSON.stringify({
+          keyVersion: 2,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+          challengeResponse: "challenge",
+          recoveryEnvelope: "recovery",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/keys/rotate", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/keys/rotate/commit",
+        "POST",
+        JSON.stringify({
+          newKeyVersion: 3,
+          envelopes: [{ deviceId: "device/1", deviceKeyEnvelope: "envelope-1" }],
+          signature: "signature",
+        }),
+      ],
       [
         "http://127.0.0.1:18444/api/v1/sync/team/reset",
         "POST",
         JSON.stringify({ reason: "rotate keys" }),
       ],
     ]);
-    expect(calls[4]?.[1]?.headers).toEqual({
-      Accept: "application/json",
-      Authorization: "Bearer sidecar-token",
-      "Content-Type": "application/json",
-    });
     expect(calls[5]?.[1]?.headers).toEqual({
       Accept: "application/json",
       Authorization: "Bearer sidecar-token",
       "Content-Type": "application/json",
     });
     expect(calls[6]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(calls[7]?.[1]?.headers).toEqual({
       Accept: "application/json",
       Authorization: "Bearer sidecar-token",
     });
