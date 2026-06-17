@@ -47,6 +47,13 @@ import type {
   ConnectSyncBrokerDataResult,
 } from "./domains/connect";
 import type { ContributionLimitService, NewContributionLimit } from "./domains/contribution-limits";
+import type { DataExportService, ExportDataType, ExportFileFormat } from "./domains/data-exports";
+import {
+  contentType as exportContentType,
+  exportFileName,
+  parseExportDataType,
+  parseExportFileFormat,
+} from "./domains/data-exports";
 import type {
   CustomProviderService,
   NewCustomProvider,
@@ -143,6 +150,7 @@ export interface BackendRequestHandlerOptions {
   assetService?: AssetService;
   connectDeviceSyncService?: ConnectDeviceSyncService;
   connectService?: ConnectService;
+  dataExportService?: DataExportService;
   deviceSyncService?: DeviceSyncService;
   eventBus?: BackendEventBus;
   contributionLimitService?: ContributionLimitService;
@@ -286,6 +294,13 @@ async function routeRequest(
       options.alternativeAssetService,
       options.portfolioJobService,
     );
+  }
+
+  if (options.dataExportService && url.pathname.startsWith("/api/v1/utilities/export")) {
+    if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
+      return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
+    }
+    return routeDataExportRequest(request, url, options.dataExportService);
   }
 
   if (
@@ -1452,6 +1467,61 @@ function routeAssetRequest(
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
+}
+
+function routeDataExportRequest(
+  request: Request,
+  url: URL,
+  dataExportService: DataExportService,
+): Promise<Response> {
+  const match = url.pathname.match(/^\/api\/v1\/utilities\/export\/([^/]+)\/([^/]+)$/);
+  if (!match || request.method !== "GET") {
+    return Promise.resolve(jsonResponse({ code: 404, message: "Not Found" }, 404));
+  }
+
+  const [, dataTypeParam, formatParam] = match;
+  let dataType: ExportDataType;
+  let format: ExportFileFormat;
+
+  try {
+    dataType = parseExportDataType(dataTypeParam);
+    format = parseExportFileFormat(formatParam);
+  } catch (error) {
+    return Promise.resolve(
+      jsonResponse(
+        {
+          code: 400,
+          message: error instanceof Error ? error.message : "Invalid export parameters",
+        },
+        400,
+      ),
+    );
+  }
+
+  return dataExportService
+    .exportData(dataType, format)
+    .then((content) => {
+      if (!content) {
+        return new Response(null, { status: 204 });
+      }
+      const filename = exportFileName(dataType, format);
+      return new Response(content as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": exportContentType(format),
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+      });
+    })
+    .catch((error) => {
+      return jsonResponse(
+        {
+          code: 500,
+          message: error instanceof Error ? error.message : "Export failed",
+        },
+        500,
+      );
+    });
 }
 
 function routeAppUtilityRequest(

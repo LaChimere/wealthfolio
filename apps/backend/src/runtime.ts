@@ -21,6 +21,7 @@ import {
   createContributionLimitService,
 } from "./domains/contribution-limits";
 import { createActivityService } from "./domains/activities";
+import { createDataExportService } from "./domains/data-exports";
 import {
   createCustomProviderRepository,
   createCustomProviderService,
@@ -395,6 +396,20 @@ function createServicesFromDatabase(
     exchangeRateService,
     timezone: () => settingsService.getSettings().timezone,
   });
+  const dataExportService = createDataExportService({
+    db,
+    accountService,
+    activityService,
+    goalService,
+    getHistoricalValuations: async (accountId, startDate, endDate) => {
+      const result = await holdingsService.getHistoricalValuations(
+        accountId,
+        startDate ?? undefined,
+        endDate ?? undefined,
+      );
+      return result;
+    },
+  });
   const healthService = createHealthService(createHealthRepository(db), undefined, {
     accountProvider: accountService,
     classificationMigrationProvider: taxonomyService,
@@ -553,6 +568,7 @@ function createServicesFromDatabase(
       },
     ),
     customProviderService,
+    dataExportService,
     eventBus,
     deviceSyncService: createLocalDeviceSyncService({
       connectService,
