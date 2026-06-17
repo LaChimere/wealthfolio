@@ -24,9 +24,9 @@ export const updateSettings = async (settingsUpdate: Partial<Settings>): Promise
 export const isAutoUpdateCheckEnabled = async (): Promise<boolean> => {
   try {
     return await invoke<boolean>("is_auto_update_check_enabled");
-  } catch (_error) {
+  } catch (error) {
     logger.error("Error checking auto-update setting.");
-    return true;
+    throw error;
   }
 };
 

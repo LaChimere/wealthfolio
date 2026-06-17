@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Settings } from "@/lib/types";
-import { getAppInfo, getSettings } from "./settings";
+import { getAppInfo, getSettings, isAutoUpdateCheckEnabled } from "./settings";
 import { invoke } from "./core";
 
 vi.mock("./core", () => ({
@@ -13,6 +13,10 @@ vi.mock("./core", () => ({
 }));
 
 const invokeMock = vi.mocked(invoke);
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("web settings adapter", () => {
   it("loads settings through the backend", async () => {
@@ -47,5 +51,19 @@ describe("web settings adapter", () => {
     invokeMock.mockRejectedValueOnce(error);
 
     await expect(getAppInfo()).rejects.toBe(error);
+  });
+
+  it("loads the auto-update preference through the backend", async () => {
+    invokeMock.mockResolvedValueOnce(false);
+
+    await expect(isAutoUpdateCheckEnabled()).resolves.toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("is_auto_update_check_enabled");
+  });
+
+  it("surfaces auto-update preference failures", async () => {
+    const error = new Error("backend unavailable");
+    invokeMock.mockRejectedValueOnce(error);
+
+    await expect(isAutoUpdateCheckEnabled()).rejects.toBe(error);
   });
 });
