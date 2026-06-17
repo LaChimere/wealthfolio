@@ -1707,6 +1707,16 @@ function routePortfolioMetricsRequest(
       .catch(domainErrorResponse);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v1/income/summary/query") {
+    return handleJsonMutation(request, parseIncomeSummaryQuery, (query) =>
+      Promise.resolve(
+        portfolioMetricsService.getIncomeSummary(
+          query.filter?.type === "Account" ? query.filter.accountId : undefined,
+        ),
+      ),
+    );
+  }
+
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
@@ -4130,6 +4140,61 @@ function parseRestoreDatabaseRequest(
     return backupFilePath;
   }
   return { backupFilePath };
+}
+
+type AccountScope =
+  | { type: "TotalSnapshot" }
+  | { type: "Account"; accountId: string }
+  | { type: "Accounts"; accountIds: string[] };
+
+interface IncomeSummaryQuery {
+  filter?: AccountScope;
+}
+
+function parseIncomeSummaryQuery(
+  payload: Record<string, unknown>,
+): IncomeSummaryQuery | Response {
+  if (payload.filter === undefined || payload.filter === null) {
+    return {};
+  }
+
+  if (typeof payload.filter !== "object" || Array.isArray(payload.filter)) {
+    return jsonResponse({ code: 400, message: "Invalid 'filter' field" }, 400);
+  }
+
+  const filter = payload.filter as Record<string, unknown>;
+  const filterType = filter.type;
+
+  if (filterType === "TotalSnapshot") {
+    return { filter: { type: "TotalSnapshot" } };
+  }
+
+  if (filterType === "Account") {
+    const accountId = parseRequiredString(filter.accountId, "accountId for Account scope");
+    if (accountId instanceof Response) {
+      return accountId;
+    }
+    return { filter: { type: "Account", accountId } };
+  }
+
+  if (filterType === "Accounts") {
+    if (!Array.isArray(filter.accountIds)) {
+      return jsonResponse(
+        { code: 400, message: "Missing or invalid 'accountIds' for Accounts scope" },
+        400,
+      );
+    }
+    const accountIds: string[] = [];
+    for (const id of filter.accountIds) {
+      if (typeof id !== "string") {
+        return jsonResponse({ code: 400, message: "All 'accountIds' must be strings" }, 400);
+      }
+      accountIds.push(id);
+    }
+    return { filter: { type: "Accounts", accountIds } };
+  }
+
+  return jsonResponse({ code: 400, message: `Unknown filter type: ${String(filterType)}` }, 400);
 }
 
 function parseActivitySearchRequest(
