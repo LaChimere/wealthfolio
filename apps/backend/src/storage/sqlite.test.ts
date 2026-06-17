@@ -21,13 +21,10 @@ import {
 const repositoryRoot = path.resolve(import.meta.dir, "../../../..");
 
 describe("TS SQLite storage foundation", () => {
-  test("resolves database path with DATABASE_URL compatibility", () => {
+  test("resolves database path with WF_DB_PATH precedence", () => {
     expect(getSqliteDbPath("/data/root", {})).toBe(path.join("/data/root", "app.db"));
-    expect(getSqliteDbPath("/data/root", { DATABASE_URL: "  " })).toBe(
-      path.join("/data/root", "app.db"),
-    );
     expect(getSqliteDbPath("/data/root", { DATABASE_URL: "/tmp/custom.db" })).toBe(
-      "/tmp/custom.db",
+      path.join("/data/root", "app.db"),
     );
     expect(
       getSqliteDbPath("/data/root", {

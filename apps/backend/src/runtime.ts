@@ -143,7 +143,7 @@ export function resolveBackendAppDataDir(
     return envAppDataDir;
   }
 
-  const envDbPath = env.WF_DB_PATH?.trim() || env.DATABASE_URL?.trim();
+  const envDbPath = env.WF_DB_PATH?.trim();
   if (envDbPath) {
     return path.dirname(envDbPath);
   }

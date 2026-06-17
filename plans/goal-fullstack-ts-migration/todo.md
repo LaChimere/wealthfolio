@@ -765,11 +765,11 @@ contract:
   `bun run check`.
 - `pr5-runtime-composition`: targeted checks passed:
   `bun run --cwd apps/backend type-check` and `bun run --cwd apps/backend test`.
-  Coverage includes `WF_DB_PATH` precedence over `DATABASE_URL`, explicit/env
-  app-data and migration-dir resolution, migration replay into a temporary DB,
-  standalone TS server startup with SQLite-backed settings/accounts routes,
-  settings persistence through the runtime handler, and idempotent runtime
-  close.
+  Coverage includes `WF_DB_PATH` database path resolution, explicit/env app-data
+  and migration-dir resolution, migration replay into a temporary DB, standalone
+  TS server startup with SQLite-backed settings/accounts routes, settings
+  persistence through the runtime handler, and idempotent runtime close. Later
+  cutover cleanup removed the remaining TS `DATABASE_URL` fallback.
 - `pr5-runtime-composition-review`: code review found no actionable issues after
   confirming env-path precedence, migration strategy, resource cleanup, service
   wiring boundaries, Electron/Rust default isolation, type-safety, and test
@@ -4156,9 +4156,70 @@ contract:
 - `pr5-web-csv-file-picker`: verification passed:
   `bun run --cwd apps/frontend test --run src/adapters/web/files.test.ts` and
   `bun run --cwd apps/frontend type-check`, plus `bun run format:check`,
-  `bun run lint`, and `git diff --check`. Coverage includes web CSV selection
-  via hidden file input, CSV extension/MIME validation, text content loading,
-  cancel/focus cleanup, and keeping the existing add-on ZIP picker behavior.
+  `bun run lint`, and `git diff --check`. Coverage initially added web CSV
+  selection via hidden file input, CSV extension/MIME validation, text content
+  loading, cancel/focus cleanup, and existing add-on ZIP picker behavior. Later
+  review found this violated the add-on file-path contract, so the shared web
+  `openCsvFileDialog` path API now rejects instead of returning fake path
+  strings; browser CSV import continues to use its own file-input flow.
+- `pr5-web-settings-failure-surfacing`: verification passed:
+  `bun run --cwd apps/frontend test --run src/adapters/web/settings.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes web `getSettings` and `getAppInfo`
+  surfacing backend failures instead of returning empty placeholder data.
+- `pr5-web-settings-review-fixes`: dual GPT/Claude xhigh review found
+  retry/contract issues; verification passed:
+  `bun run --cwd apps/frontend test --run src/pages/layouts/app-layout.test.tsx src/adapters/web/files.test.ts src/adapters/web/settings.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes retryable settings-load error UI,
+  About-page app-info rejection handling, web CSV dialog path-contract
+  enforcement, and web file-save error surfacing.
+- `pr5-settings-auto-update-failure-surfacing`: verification passed:
+  `bun run --cwd apps/frontend test --run src/adapters/web/settings.test.ts src/adapters/electron/settings.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes web/Electron auto-update preference
+  reads surfacing backend/sidecar failures instead of defaulting to enabled.
+- `pr5-alpha-vantage-option-resolve`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage"`,
+  full `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes preferred-provider OPTION quote
+  resolution through Alpha Vantage `REALTIME_OPTIONS`, underlying/OCC contract
+  routing, latest quote parsing, and keeping historical option sync
+  intentionally unsupported like Rust.
+- `pr5-quote-resolve-error-surfacing`: verification passed:
+  `bun run --cwd apps/frontend test --run src/adapters/shared/market-data.test.ts src/pages/activity/components/forms/fields/__tests__/symbol-search.test.tsx`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes shared `resolveSymbolQuote` surfacing
+  backend failures and the activity import grid catching unavailable quote
+  confirmation explicitly.
+- `pr5-connect-ready-reconcile-local-bootstrap`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "reconciles"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes `/connect/device/reconcile-ready-state`
+  reading full local/cloud sync state, returning Rust-shaped error and
+  skipped-not-ready responses, and reporting skipped bootstrap action/status
+  when local bootstrap is already complete.
+- `pr5-device-sync-request-id-scope`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "READY, REGISTERED"`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes preserving Rust app-scoped request IDs
+  for device get/list reads while retaining device-scoped request IDs on
+  team-key/event/cursor/snapshot paths that pass a device ID.
+- `pr5-ts-database-url-fallback-removal`: verification passed:
+  `bun test apps/backend/src/storage/sqlite.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "database path|runtime data"`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, `git diff --check`, and full `bun run check`. Coverage
+  includes TS backend runtime and SQLite storage ignoring Rust-era
+  `DATABASE_URL` and using `WF_DB_PATH` or app-data defaults only.
+- `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
+  regression; verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
+  full `bun test apps/backend/src/domains/market-data.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes Alpha Vantage option quotes treating
+  zero `last` prices as missing and falling back to nonzero `mark`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

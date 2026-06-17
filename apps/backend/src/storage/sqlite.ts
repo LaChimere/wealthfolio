@@ -28,8 +28,7 @@ export function getSqliteDbPath(appDataDir: string, env: NodeJS.ProcessEnv = pro
     return wfDbPath;
   }
 
-  const databaseUrl = env.DATABASE_URL?.trim();
-  return databaseUrl ? databaseUrl : path.join(appDataDir, "app.db");
+  return path.join(appDataDir, "app.db");
 }
 
 export function resolveMigrationsDir(repositoryRoot: string): string {

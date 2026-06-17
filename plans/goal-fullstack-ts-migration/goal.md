@@ -240,7 +240,7 @@ updated_at: "2026-06-16T23:36:37+08:00"
   wires settings, accounts, contribution limits, taxonomies, custom providers,
   goals, exchange-rate CRUD, local health dismissal/config, market-data provider
   settings, and event-stream services into the TS request handler; `WF_DB_PATH`
-  now takes precedence over `DATABASE_URL`, with explicit app-data and
+  controls explicit database path selection, with explicit app-data and
   migration-dir resolution tests.
 - Turn 34: Added safe app utility runtime parity for the standalone TS backend:
   app info, update-check mapping/cache with injectable fetch, base64 backup, and
