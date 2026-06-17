@@ -5,40 +5,13 @@ export interface OpenAddonPackageDialogResult {
   fileName: string;
 }
 
-/**
- * Open a file dialog for CSV files.
- * Web implementation - not fully supported, returns null.
- */
-export const openCsvFileDialog = (): Promise<null | string | string[]> => {
-  // Web implementation would use file input - return null to indicate not supported
-  return Promise.resolve(null);
-};
-
-/**
- * Open a folder selection dialog.
- * Not supported in web.
- */
-export const openFolderDialog = (): Promise<string | null> => {
-  // Not supported in web
-  return Promise.resolve(null);
-};
-
-/**
- * Open a file dialog for database files.
- * Not supported in web.
- */
-export const openDatabaseFileDialog = (): Promise<string | null> => {
-  // Not supported in web
-  return Promise.resolve(null);
-};
-
-export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogResult | null> => {
+async function pickFile(accept: string): Promise<File | null> {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".zip,application/zip";
+  input.accept = accept;
   input.style.display = "none";
 
-  const file = await new Promise<File | null>((resolve) => {
+  return await new Promise<File | null>((resolve) => {
     let settled = false;
     let focusFallbackId: number | undefined;
 
@@ -77,6 +50,40 @@ export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogRe
     document.body.appendChild(input);
     input.click();
   });
+}
+
+export const openCsvFileDialog = async (): Promise<null | string | string[]> => {
+  const file = await pickFile(".csv,text/csv");
+  if (!file) {
+    return null;
+  }
+  const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv";
+  if (!isCsv) {
+    throw new Error("Please select a .csv file.");
+  }
+  return await file.text();
+};
+
+/**
+ * Open a folder selection dialog.
+ * Not supported in web.
+ */
+export const openFolderDialog = (): Promise<string | null> => {
+  // Not supported in web
+  return Promise.resolve(null);
+};
+
+/**
+ * Open a file dialog for database files.
+ * Not supported in web.
+ */
+export const openDatabaseFileDialog = (): Promise<string | null> => {
+  // Not supported in web
+  return Promise.resolve(null);
+};
+
+export const openAddonPackageDialog = async (): Promise<OpenAddonPackageDialogResult | null> => {
+  const file = await pickFile(".zip,application/zip");
 
   if (!file) {
     return null;

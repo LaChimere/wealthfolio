@@ -4153,6 +4153,12 @@ contract:
   backend service. Recent review also verified backend-contracts command-surface
   guardrails were refreshed for the newly shared commands and Electron-only
   `export_data_file`.
+- `pr5-web-csv-file-picker`: verification passed:
+  `bun run --cwd apps/frontend test --run src/adapters/web/files.test.ts` and
+  `bun run --cwd apps/frontend type-check`, plus `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes web CSV selection
+  via hidden file input, CSV extension/MIME validation, text content loading,
+  cancel/focus cleanup, and keeping the existing add-on ZIP picker behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
