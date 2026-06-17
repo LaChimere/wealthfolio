@@ -11,9 +11,9 @@ import type { AppInfo, PlatformInfo } from "../types";
 export const getSettings = async (): Promise<Settings> => {
   try {
     return await invoke<Settings>("get_settings");
-  } catch (_error) {
+  } catch (error) {
     logger.error("Error fetching settings.");
-    return {} as Settings;
+    throw error;
   }
 };
 
@@ -94,14 +94,9 @@ export const restoreDatabase = (_backupFilePath: string): Promise<void> =>
 export const getAppInfo = async (): Promise<AppInfo> => {
   try {
     return await invoke<AppInfo>("get_app_info");
-  } catch (err) {
-    logger.error("Error fetching app info");
-    console.error(err);
-    return {
-      version: "",
-      dbPath: "",
-      logsDir: "",
-    };
+  } catch (error) {
+    logger.error("Error fetching app info.");
+    throw error;
   }
 };
 
