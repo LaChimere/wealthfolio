@@ -238,50 +238,54 @@ export function ActivityDataGrid({
           result.quoteType,
           result.providerId,
           result.currency,
-        ).then((resolved) => {
-          if (requestId !== latestResolveRequestId.current) return;
-          if (!resolved) return;
+        )
+          .then((resolved) => {
+            if (requestId !== latestResolveRequestId.current) return;
+            if (!resolved) return;
 
-          let didUpdate = false;
-          let updatedRowId: string | undefined;
+            let didUpdate = false;
+            let updatedRowId: string | undefined;
 
-          setLocalTransactions((prev) => {
-            const updated = [...prev];
-            if (!updated[rowIndex]) return prev;
-            const row = updated[rowIndex];
+            setLocalTransactions((prev) => {
+              const updated = [...prev];
+              if (!updated[rowIndex]) return prev;
+              const row = updated[rowIndex];
 
-            const changes: Partial<LocalTransaction> = {};
+              const changes: Partial<LocalTransaction> = {};
 
-            // Update currency from resolved quote only if the user has not edited it since selection.
-            if (resolved.currency && shouldUseResolvedCurrency) {
-              const confirmedCurrency = resolved.currency.trim();
-              if (
-                confirmedCurrency &&
-                row.currency !== confirmedCurrency &&
-                row.currency === (provisionalCurrency ?? row.accountCurrency ?? fallbackCurrency)
-              ) {
-                changes.currency = confirmedCurrency;
+              // Update currency from resolved quote only if the user has not edited it since selection.
+              if (resolved.currency && shouldUseResolvedCurrency) {
+                const confirmedCurrency = resolved.currency.trim();
+                if (
+                  confirmedCurrency &&
+                  row.currency !== confirmedCurrency &&
+                  row.currency === (provisionalCurrency ?? row.accountCurrency ?? fallbackCurrency)
+                ) {
+                  changes.currency = confirmedCurrency;
+                }
+                changes.pendingQuoteCcy = resolved.currency;
               }
-              changes.pendingQuoteCcy = resolved.currency;
+
+              // Set unit price from resolved quote
+              if (resolved.price != null) {
+                changes.unitPrice = String(resolved.price);
+              }
+
+              if (Object.keys(changes).length === 0) return prev;
+
+              didUpdate = true;
+              updatedRowId = row.id;
+              updated[rowIndex] = { ...row, ...changes };
+              return updated;
+            });
+
+            if (didUpdate && updatedRowId) {
+              markDirtyBatch([updatedRowId]);
             }
-
-            // Set unit price from resolved quote
-            if (resolved.price != null) {
-              changes.unitPrice = String(resolved.price);
-            }
-
-            if (Object.keys(changes).length === 0) return prev;
-
-            didUpdate = true;
-            updatedRowId = row.id;
-            updated[rowIndex] = { ...row, ...changes };
-            return updated;
+          })
+          .catch(() => {
+            // Leave the staged row unchanged when quote confirmation is unavailable.
           });
-
-          if (didUpdate && updatedRowId) {
-            markDirtyBatch([updatedRowId]);
-          }
-        });
       }
     },
     [setLocalTransactions, fallbackCurrency, markDirtyBatch],
