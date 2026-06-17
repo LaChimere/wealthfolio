@@ -4094,6 +4094,15 @@ contract:
   portfolio scope payloads through the sidecar bridge. Dual GPT/Claude xhigh
   review found and verified fixes for Electron/backend Portfolio discriminant
   casing and merged account-list holdings.
+- `pr5-addon-exact-main-resolution`: verification in progress:
+  `bun test apps/backend/src/domains/addons.test.ts` and
+  `bun run --cwd apps/backend type-check`. Coverage includes ZIP packages using
+  the manifest directory as the package root, exact `manifest.main` entry
+  matching instead of suffix matching, and local runtime loading no longer
+  marking nested files with the same basename as additional main files. Dual
+  GPT/Claude xhigh review found no blocking issues and prompted a compatibility
+  refinement for already-installed legacy package-prefixed add-ons when the
+  package root is unambiguous.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

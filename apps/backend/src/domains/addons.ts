@@ -319,10 +319,7 @@ function loadAddonForRuntime(appDataDir: string, addonId: string): ExtractedAddo
   readAddonFilesRecursive(addonDir, addonDir, files);
 
   const normalizedMain = normalizeAddonFilePath(main);
-  for (const file of files) {
-    const normalizedName = normalizeAddonFilePath(file.name);
-    file.isMain = normalizedName === normalizedMain || normalizedName.endsWith(normalizedMain);
-  }
+  markRuntimeMainFile(files, normalizedMain);
   if (!files.some((file) => file.isMain)) {
     throw new Error("Main addon file not found");
   }
@@ -362,8 +359,7 @@ function extractAddonZip(zipData: Uint8Array): ExtractedAddonRecord {
   }
 
   let totalBytes = 0;
-  let manifestContent: string | null = null;
-  const files: AddonFileRecord[] = [];
+  const rawFiles: Array<{ name: string; content: string }> = [];
 
   for (const [fileName, contentBytes] of entryList) {
     if (fileName.endsWith("/")) {
@@ -376,20 +372,37 @@ function extractAddonZip(zipData: Uint8Array): ExtractedAddonRecord {
     }
 
     const content = decodeAddonArchiveText(fileName, contentBytes);
-    if (fileName === "manifest.json" || fileName.endsWith("/manifest.json")) {
-      manifestContent = content;
-    }
-    files.push({ name: fileName, content, isMain: false });
+    rawFiles.push({ name: fileName, content });
   }
 
-  if (manifestContent === null) {
+  const manifestFiles = rawFiles.filter(
+    (file) => path.posix.basename(file.name) === "manifest.json",
+  );
+  if (manifestFiles.length === 0) {
     throw new Error("ZIP addon must contain a manifest.json file with addon metadata");
   }
+  if (manifestFiles.length > 1) {
+    throw new Error("ZIP addon must contain exactly one manifest.json file");
+  }
 
+  const manifestFile = manifestFiles[0];
+  const manifestDir = path.posix.dirname(manifestFile.name);
+  const packageRoot = manifestDir === "." ? "" : `${manifestDir}/`;
+  const manifestContent = manifestFile.content;
   const metadata = parseAddonManifest(JSON.parse(manifestContent));
-  const main = manifestMain(metadata);
+  const main = normalizeAddonFilePath(manifestMain(metadata));
+  validateAddonArchivePath(main);
+  const files = rawFiles
+    .flatMap((file): AddonFileRecord[] => {
+      if (packageRoot && !file.name.startsWith(packageRoot)) {
+        return [];
+      }
+      const relativeName = packageRoot ? file.name.slice(packageRoot.length) : file.name;
+      return [{ name: relativeName, content: file.content, isMain: false }];
+    })
+    .filter((file) => file.name.length > 0);
   for (const file of files) {
-    file.isMain = file.name === main || file.name.endsWith(main);
+    file.isMain = normalizeAddonFilePath(file.name) === main;
   }
   if (!files.some((file) => file.isMain)) {
     throw new Error(
@@ -1066,6 +1079,30 @@ function readAddonFilesRecursive(
       content: readFileSync(entryPath, "utf8"),
       isMain: false,
     });
+  }
+}
+
+function markRuntimeMainFile(files: AddonFileRecord[], normalizedMain: string): void {
+  for (const file of files) {
+    file.isMain = normalizeAddonFilePath(file.name) === normalizedMain;
+  }
+  if (files.some((file) => file.isMain)) {
+    return;
+  }
+
+  const topLevelDirs = new Set(
+    files
+      .map((file) => normalizeAddonFilePath(file.name).split("/"))
+      .filter((parts) => parts.length > 1)
+      .map((parts) => parts[0]),
+  );
+  if (topLevelDirs.size !== 1) {
+    return;
+  }
+  const [legacyPackageRoot] = [...topLevelDirs];
+  const legacyMain = `${legacyPackageRoot}/${normalizedMain}`;
+  for (const file of files) {
+    file.isMain = normalizeAddonFilePath(file.name) === legacyMain;
   }
 }
 

@@ -87,7 +87,7 @@ describe("TS addon domain", () => {
     expect(loaded.metadata.id).toBe("demo-addon");
     expect(loaded.files).toEqual([
       { name: "main.js", content: "export const root = true;", isMain: true },
-      { name: "nested/main.js", content: "export const nested = true;", isMain: true },
+      { name: "nested/main.js", content: "export const nested = true;", isMain: false },
     ]);
     expect(loaded.files.some((file) => file.name === "manifest.json")).toBe(false);
     await expect(service.getEnabledAddonsOnStartup()).resolves.toHaveLength(1);
@@ -186,7 +186,7 @@ describe("TS addon domain", () => {
         id: "zip-addon",
         name: "Zip Addon",
         version: "1.0.0",
-        main: "addon.js",
+        main: "dist/addon.js",
         permissions: [
           {
             category: "portfolio",
@@ -205,7 +205,7 @@ describe("TS addon domain", () => {
         id: "zip-addon",
         name: "Zip Addon",
         version: "1.0.0",
-        main: "addon.js",
+        main: "dist/addon.js",
         permissions: [
           {
             category: "portfolio",
@@ -235,9 +235,72 @@ describe("TS addon domain", () => {
       }),
     );
     expect(extracted.files).toEqual([
-      expect.objectContaining({ name: "pkg/manifest.json", isMain: false }),
-      expect.objectContaining({ name: "pkg/dist/addon.js", isMain: true }),
+      expect.objectContaining({ name: "manifest.json", isMain: false }),
+      expect.objectContaining({ name: "dist/addon.js", isMain: true }),
     ]);
+  });
+
+  test("marks only the exact manifest main entry as the addon main file", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+    const zipData = addonZip({
+      "manifest.json": JSON.stringify({
+        id: "exact-main",
+        name: "Exact Main",
+        version: "1.0.0",
+        main: "main.js",
+      }),
+      "main.js": "export const root = true;",
+      "nested/main.js": "export const nested = true;",
+    });
+
+    const extracted = (await service.extractAddonZip({ zipData })) as TestExtractedAddon;
+
+    expect(extracted.files).toEqual([
+      expect.objectContaining({ name: "manifest.json", isMain: false }),
+      expect.objectContaining({ name: "main.js", isMain: true }),
+      expect.objectContaining({ name: "nested/main.js", isMain: false }),
+    ]);
+  });
+
+  test("loads legacy package-prefixed installs only when the package root is unambiguous", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "legacy-prefixed", {
+      manifest: {
+        id: "legacy-prefixed",
+        name: "Legacy Prefixed",
+        version: "1.0.0",
+        main: "dist/addon.js",
+        enabled: true,
+      },
+      files: {
+        "pkg/dist/addon.js": "export default {};",
+        "pkg/dist/other.js": "export const other = true;",
+      },
+    });
+    writeAddon(appDataDir, "ambiguous-prefixed", {
+      manifest: {
+        id: "ambiguous-prefixed",
+        name: "Ambiguous Prefixed",
+        version: "1.0.0",
+        main: "dist/addon.js",
+        enabled: true,
+      },
+      files: {
+        "pkg/dist/addon.js": "export default {};",
+        "other/dist/addon.js": "export default {};",
+      },
+    });
+    const service = createLocalAddonService({ appDataDir });
+
+    const loaded = (await service.loadAddonForRuntime("legacy-prefixed")) as TestExtractedAddon;
+    expect(loaded.files).toEqual([
+      expect.objectContaining({ name: "pkg/dist/addon.js", isMain: true }),
+      expect.objectContaining({ name: "pkg/dist/other.js", isMain: false }),
+    ]);
+    await expect(service.loadAddonForRuntime("ambiguous-prefixed")).rejects.toThrow(
+      "Main addon file not found",
+    );
   });
 
   test("installs addon ZIPs and staged addon ZIP files locally", async () => {
