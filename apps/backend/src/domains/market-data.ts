@@ -356,6 +356,7 @@ interface BoerseInstrumentIdentity {
 
 type AlphaVantageInstrument =
   | { kind: "equity"; symbol: string; currency: string }
+  | { kind: "option"; symbol: string; underlying: string; currency: string }
   | { kind: "fx"; from: string; to: string; currency: string }
   | { kind: "crypto"; symbol: string; market: string; currency: string };
 
@@ -2479,7 +2480,7 @@ async function resolveSymbolQuote(
   }
   if (preferredProvider === ALPHA_VANTAGE_PROVIDER) {
     const apiKey = await marketDataProviderApiKey(secretService, ALPHA_VANTAGE_PROVIDER);
-    if (apiKey === null || instrumentType === "OPTION") {
+    if (apiKey === null) {
       return defaultResolvedQuote();
     }
     const instrument = alphaVantageInstrumentForResolve(
@@ -4700,6 +4701,18 @@ async function fetchAlphaVantageQuotes(
     );
     return parseAlphaVantageEquityQuotes(payload, assetId, instrument.symbol, instrument.currency);
   }
+  if (instrument.kind === "option") {
+    const payload = await fetchAlphaVantageJson(
+      [
+        ["function", "REALTIME_OPTIONS"],
+        ["symbol", instrument.underlying],
+        ["contract", instrument.symbol],
+      ],
+      fetchImpl,
+      apiKey,
+    );
+    return [parseAlphaVantageOptionQuote(payload, assetId, instrument.symbol, instrument.currency)];
+  }
   if (instrument.kind === "fx") {
     const payload = await fetchAlphaVantageJson(
       [
@@ -4795,6 +4808,42 @@ function parseAlphaVantageEquityQuotes(
     );
   }
   return alphaVantageSortedQuotes(quotes);
+}
+
+function parseAlphaVantageOptionQuote(
+  payload: unknown,
+  assetId: string,
+  occSymbol: string,
+  currency: string,
+): YahooHistoricalQuote {
+  if (!isRecord(payload)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse options response`);
+  }
+  checkAlphaVantageApiError(payload);
+  const contracts = payload.data;
+  if (!Array.isArray(contracts) || contracts.length === 0) {
+    throw new Error(`No options data for: ${occSymbol}`);
+  }
+  const contract = contracts[0];
+  if (!isRecord(contract)) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: Failed to parse options response`);
+  }
+  const close = decimalString(contract.last) ?? decimalString(contract.mark);
+  if (close === null) {
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: No price data for contract: ${occSymbol}`);
+  }
+  const timestamp =
+    alphaVantageDateTimestamp(optionalString(contract.date) ?? "") ?? new Date().toISOString();
+  return alphaVantageQuoteFromDecimals(
+    assetId,
+    timestamp,
+    null,
+    null,
+    null,
+    close,
+    decimalString(contract.volume),
+    currency,
+  );
 }
 
 function parseAlphaVantageFxQuotes(
@@ -5029,6 +5078,13 @@ function alphaVantageInstrumentForResolve(
         }
       : null;
   }
+  if (instrumentType === "OPTION") {
+    const occSymbol = instrumentSymbol?.toUpperCase() ?? "";
+    const underlying = alphaVantageUnderlyingFromOccSymbol(occSymbol);
+    return occSymbol && underlying
+      ? { kind: "option", symbol: occSymbol, underlying, currency: "USD" }
+      : null;
+  }
   if (instrumentType === "FX") {
     const from = instrumentSymbol?.toUpperCase() ?? "";
     const to = optionalString(canonical.quoteCcy)?.toUpperCase() ?? "";
@@ -5042,6 +5098,15 @@ function alphaVantageInstrumentForResolve(
       : null;
   }
   return null;
+}
+
+function alphaVantageUnderlyingFromOccSymbol(occSymbol: string): string | null {
+  const trimmed = occSymbol.trim();
+  if (trimmed.length <= 15) {
+    return null;
+  }
+  const underlying = trimmed.slice(0, -15).trim();
+  return underlying || null;
 }
 
 function alphaVantageEquitySymbol(

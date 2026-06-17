@@ -4633,6 +4633,49 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("resolves Alpha Vantage option quote summaries through realtime options", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: alphaVantageTestFetch({
+        calls,
+        responses: {
+          "REALTIME_OPTIONS:AAPL:AAPL260117C00100000": {
+            data: [
+              {
+                contractID: "AAPL260117C00100000",
+                last: "12.34",
+                mark: "12.30",
+                volume: "42",
+                date: "2026-01-05",
+              },
+            ],
+          },
+        },
+      }),
+      secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
+    });
+
+    try {
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "AAPL260117C00100000",
+          instrumentType: "OPTION",
+          quoteCcy: "USD",
+          providerId: "ALPHA_VANTAGE",
+        }),
+      ).resolves.toEqual({
+        currency: "USD",
+        price: 12.34,
+        resolvedProviderId: "ALPHA_VANTAGE",
+      });
+      expect(calls).toEqual(["REALTIME_OPTIONS:AAPL:AAPL260117C00100000"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves Metal Price API quote summaries through latest endpoint", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
@@ -5332,6 +5375,12 @@ function alphaVantageTestFetch(options: {
       expect(parsed.searchParams.has("outputsize")).toBe(false);
       key = `${fn}:${parsed.searchParams.get("symbol") ?? ""}:${
         parsed.searchParams.get("market") ?? ""
+      }`;
+      options.calls?.push(key);
+    } else if (fn === "REALTIME_OPTIONS") {
+      expect(parsed.searchParams.has("outputsize")).toBe(false);
+      key = `${fn}:${parsed.searchParams.get("symbol") ?? ""}:${
+        parsed.searchParams.get("contract") ?? ""
       }`;
       options.calls?.push(key);
     }
