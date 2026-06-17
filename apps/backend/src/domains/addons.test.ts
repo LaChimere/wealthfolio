@@ -428,11 +428,15 @@ describe("TS addon domain", () => {
         if (url === "https://store.test/api/addons") {
           return Response.json({ addons: [{ id: "store-addon" }] });
         }
+        if (url === "https://store.test/api/addons/addon%2Fid/ratings" && init?.method !== "POST") {
+          return Response.json({ ratings: [{ rating: 5, review: "Great" }] });
+        }
         return Response.json({ ok: true });
       },
     });
 
     await expect(service.fetchStoreListings()).resolves.toEqual([{ id: "store-addon" }]);
+    await expect(service.getRatings("addon/id")).resolves.toEqual([{ rating: 5, review: "Great" }]);
     await expect(
       service.submitRating({ addonId: "addon/id", rating: 5, review: "Great" }),
     ).resolves.toEqual({ ok: true });
@@ -440,6 +444,10 @@ describe("TS addon domain", () => {
     expect(calls).toEqual([
       expect.objectContaining({
         url: "https://store.test/api/addons",
+        headers: expect.any(Headers),
+      }),
+      expect.objectContaining({
+        url: "https://store.test/api/addons/addon%2Fid/ratings",
         headers: expect.any(Headers),
       }),
       expect.objectContaining({
@@ -456,7 +464,15 @@ describe("TS addon domain", () => {
     await expect(service.submitRating({ addonId: "addon/id", rating: 0 })).rejects.toThrow(
       "Rating must be between 1 and 5",
     );
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
+
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => Response.json({ ratings: {} }),
+      }).getRatings("addon/id"),
+    ).rejects.toThrow("'ratings' field is not an array in API response");
 
     await expect(
       createLocalAddonService({

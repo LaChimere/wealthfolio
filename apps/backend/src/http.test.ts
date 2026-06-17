@@ -474,6 +474,10 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["store-listings", undefined]);
         return [{ id: "store-addon" }];
       },
+      getRatings(addonId) {
+        calls.push(["get-ratings", addonId]);
+        return [{ addonId, rating: 5 }];
+      },
       submitRating(request) {
         calls.push(["submit-rating", request]);
         return { ok: true };
@@ -605,7 +609,7 @@ describe("TS backend HTTP skeleton", () => {
           }),
         )
       ).json(),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([{ addonId: "addon-1", rating: 5 }]);
     await handler(
       new Request("http://127.0.0.1/api/v1/addons/store/ratings", {
         method: "POST",
@@ -682,6 +686,7 @@ describe("TS backend HTTP skeleton", () => {
       ["enabled-on-startup", undefined],
       ["extract", [4, 5]],
       ["store-listings", undefined],
+      ["get-ratings", "addon-1"],
       ["submit-rating", { addonId: "addon-1", rating: 255 }],
       ["check-update", "addon-1"],
       ["check-all", undefined],

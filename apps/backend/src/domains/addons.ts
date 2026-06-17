@@ -32,6 +32,7 @@ export interface AddonService {
   getEnabledAddonsOnStartup(): Promise<unknown[]> | unknown[];
   extractAddonZip(request: AddonZipExtractRequest): Promise<unknown> | unknown;
   fetchStoreListings(): Promise<unknown[]> | unknown[];
+  getRatings(addonId: string): Promise<unknown[]> | unknown[];
   submitRating(request: AddonRatingRequest): Promise<unknown> | unknown;
   checkAddonUpdate(addonId: string): Promise<unknown> | unknown;
   checkAllAddonUpdates(): Promise<unknown[]> | unknown[];
@@ -248,6 +249,10 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
       return fetchAddonStoreListings(storeContext);
     },
 
+    async getRatings(addonId) {
+      return fetchAddonRatings(storeContext, addonId);
+    },
+
     async submitRating(request) {
       return submitAddonRating(storeContext, request);
     },
@@ -458,6 +463,29 @@ async function submitAddonRating(
       requireInstanceId: true,
     },
   );
+}
+
+async function fetchAddonRatings(context: AddonStoreContext, addonId: string): Promise<unknown[]> {
+  const responseJson = await fetchAddonStoreJson<unknown>(
+    context,
+    `${context.storeBaseUrl}/${encodeURIComponent(addonId)}/ratings`,
+    "Rating list",
+    { requireInstanceId: true },
+  );
+  if (Array.isArray(responseJson)) {
+    return responseJson;
+  }
+  if (!isRecord(responseJson)) {
+    throw new Error("Invalid API response structure");
+  }
+  const ratings = responseJson.ratings;
+  if (Array.isArray(ratings)) {
+    return ratings;
+  }
+  if (ratings !== undefined) {
+    throw new Error("'ratings' field is not an array in API response");
+  }
+  throw new Error("Invalid API response structure");
 }
 
 async function checkAddonUpdate(

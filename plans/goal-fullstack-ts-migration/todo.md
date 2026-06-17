@@ -4117,6 +4117,15 @@ contract:
   proxies `get_asset_lots` through the sidecar. Dual GPT/Claude xhigh review
   found and verified fixes for option multiplier metadata, nonzero ratio parity,
   bytewise sort parity, and missing Electron command registration.
+- `pr5-addon-store-ratings-read`: verification passed:
+  `bun test apps/backend/src/domains/addons.test.ts apps/backend/src/http.test.ts apps/electron/src/main/commands.test.ts`,
+  `bun run --cwd apps/backend test`, `bun run --cwd apps/electron test`, full
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes `GET /addons/store/ratings` validating
+  `addonId`, calling the store ratings endpoint through
+  `AddonService.getRatings`, accepting array or `{ ratings }` responses,
+  surfacing malformed ratings payloads, and preserving Electron/web command
+  query routing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

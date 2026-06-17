@@ -1176,7 +1176,13 @@ function routeAddonRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/addons/store/ratings") {
-    return jsonResponse([]);
+    const addonId = parseRequiredQueryString(url, "addonId");
+    if (addonId instanceof Response) {
+      return addonId;
+    }
+    return Promise.resolve(addonService.getRatings(addonId))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/addons/store/check-update") {
