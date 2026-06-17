@@ -4104,6 +4104,17 @@ contract:
   main files. Dual GPT/Claude xhigh review found no blocking issues and prompted
   a compatibility refinement for already-installed legacy package-prefixed
   add-ons when the package root is unambiguous.
+- `pr5-holdings-lots-read-model`: verification passed:
+  `bun test apps/backend/src/domains/holdings.test.ts apps/backend/src/http.test.ts`
+  plus `bun run --cwd apps/backend test`, full `bun run type-check`,
+  `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
+  includes `/api/v1/holdings/lots` delegating through the holdings service,
+  transaction lot rows from `lots`, option contract multiplier parity, nonzero
+  ratio fallbacks for split ratios and snapshot-position contract multipliers,
+  optional latest HOLDINGS-mode `snapshot_positions` rows, and JSON fallback for
+  snapshots that predate relational positions. Dual GPT/Claude xhigh review
+  found and verified fixes for option multiplier metadata and nonzero ratio
+  parity.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

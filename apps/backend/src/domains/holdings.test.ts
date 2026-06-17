@@ -1705,6 +1705,109 @@ describe("TS holdings domain", () => {
     }
   });
 
+  test("reads asset lot view rows from transaction lots and latest holdings snapshots", async () => {
+    const db = createHoldingsDb();
+    const service = createHoldingsService(db);
+
+    try {
+      insertAccount(db, { id: "a1", name: "Alpha", trackingMode: "TRANSACTIONS" });
+      insertAccount(db, { id: "a2", name: "Beta", trackingMode: "HOLDINGS" });
+      insertAsset(db, {
+        id: "stock",
+        kind: "INVESTMENT",
+        name: "Stock Co",
+        displayCode: "STK",
+        quoteMode: "MARKET",
+        metadata: { option: { multiplier: "100" } },
+        instrumentType: "OPTION",
+      });
+      insertLot(db, {
+        id: "lot-1",
+        accountId: "a1",
+        assetId: "stock",
+        openDate: "2026-01-01",
+        originalQuantity: "10",
+        remainingQuantity: "4",
+        costPerUnit: "5",
+        remainingCostBasis: "20",
+        feeAllocated: "1.25",
+        splitRatio: "0",
+      });
+      insertSnapshot(db, {
+        id: "a2-old",
+        accountId: "a2",
+        date: "2026-01-03",
+        source: "MANUAL_ENTRY",
+        positions: {
+          stock: snapshotPosition("stock", "1", "8", "USD", "1"),
+        },
+      });
+      insertSnapshot(db, {
+        id: "a2-latest",
+        accountId: "a2",
+        date: "2026-01-05",
+        source: "MANUAL_ENTRY",
+        positions: {
+          stock: snapshotPosition("stock", "3", "36", "USD", "3"),
+        },
+      });
+      insertSnapshotPosition(db, {
+        snapshotId: "a2-latest",
+        assetId: "stock",
+        quantity: "2",
+        averageCost: "7",
+        totalCostBasis: "14",
+        contractMultiplier: "0",
+      });
+
+      expect(await Promise.resolve(service.getAssetLots("stock", false))).toEqual([
+        {
+          id: "lot-1",
+          accountId: "a1",
+          accountName: "Alpha",
+          assetId: "stock",
+          source: "TRANSACTION_LOT",
+          quantity: 4,
+          originalQuantity: 10,
+          remainingQuantity: 4,
+          costBasis: 20,
+          unitCost: 5,
+          fees: 1.25,
+          splitRatio: 1,
+          contractMultiplier: 100,
+          acquisitionDate: "2026-01-01",
+          snapshotDate: null,
+          isClosed: false,
+          closeDate: null,
+        },
+      ]);
+      expect(await Promise.resolve(service.getAssetLots("stock", true))).toEqual([
+        expect.objectContaining({ id: "lot-1", source: "TRANSACTION_LOT" }),
+        {
+          id: "SNAPSHOT-a2-latest-a2-stock",
+          accountId: "a2",
+          accountName: "Beta",
+          assetId: "stock",
+          source: "SNAPSHOT_POSITION",
+          quantity: 2,
+          originalQuantity: 2,
+          remainingQuantity: 2,
+          costBasis: 14,
+          unitCost: 7,
+          fees: 0,
+          splitRatio: 1,
+          contractMultiplier: 1,
+          acquisitionDate: null,
+          snapshotDate: "2026-01-05",
+          isClosed: false,
+          closeDate: null,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns empty default allocations when no live holdings exist", async () => {
     const db = createHoldingsDb();
     const service = createHoldingsService(db);
@@ -1758,7 +1861,8 @@ function createHoldingsDb(): Database {
       name TEXT NOT NULL DEFAULT '',
       currency TEXT NOT NULL DEFAULT 'USD',
       is_active INTEGER NOT NULL DEFAULT 1,
-      is_archived INTEGER NOT NULL DEFAULT 0
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      tracking_mode TEXT NOT NULL DEFAULT 'HOLDINGS'
     );
     CREATE TABLE assets (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1826,6 +1930,40 @@ function createHoldingsDb(): Database {
       calculated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
       source TEXT NOT NULL DEFAULT 'CALCULATED'
     );
+    CREATE TABLE lots (
+      id TEXT PRIMARY KEY NOT NULL,
+      account_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      open_date TEXT NOT NULL,
+      open_activity_id TEXT,
+      original_quantity TEXT NOT NULL,
+      cost_per_unit TEXT NOT NULL,
+      original_cost_basis TEXT NOT NULL,
+      remaining_cost_basis TEXT NOT NULL,
+      fee_allocated TEXT NOT NULL DEFAULT '0',
+      remaining_quantity TEXT NOT NULL,
+      split_ratio TEXT NOT NULL DEFAULT '1',
+      is_closed INTEGER NOT NULL DEFAULT 0,
+      close_date TEXT,
+      close_activity_id TEXT,
+      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+      updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'
+    );
+    CREATE TABLE snapshot_positions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      quantity TEXT NOT NULL,
+      average_cost TEXT NOT NULL,
+      total_cost_basis TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      contract_multiplier TEXT NOT NULL DEFAULT '1',
+      inception_date TEXT NOT NULL,
+      is_alternative INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_updated TEXT NOT NULL,
+      UNIQUE (snapshot_id, asset_id)
+    );
     CREATE TABLE taxonomies (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
@@ -1876,16 +2014,24 @@ function recordingEventBus(events: BackendEvent[]): BackendEventBus {
 
 function insertAccount(
   db: Database,
-  account: { id: string; name: string; currency?: string; isActive?: number; isArchived?: number },
+  account: {
+    id: string;
+    name: string;
+    currency?: string;
+    isActive?: number;
+    isArchived?: number;
+    trackingMode?: string;
+  },
 ): void {
   db.prepare(
-    "INSERT INTO accounts (id, name, currency, is_active, is_archived) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO accounts (id, name, currency, is_active, is_archived, tracking_mode) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(
     account.id,
     account.name,
     account.currency ?? "USD",
     account.isActive ?? 1,
     account.isArchived ?? 0,
+    account.trackingMode ?? "HOLDINGS",
   );
 }
 
@@ -1951,7 +2097,7 @@ function insertSnapshot(
     date: string;
     source?: string;
     positions: Record<string, unknown>;
-    cashBalances: Record<string, unknown>;
+    cashBalances?: Record<string, unknown>;
   },
 ): void {
   db.prepare(
@@ -1967,7 +2113,74 @@ function insertSnapshot(
     snapshot.date,
     snapshot.source ?? "CALCULATED",
     JSON.stringify(snapshot.positions),
-    JSON.stringify(snapshot.cashBalances),
+    JSON.stringify(snapshot.cashBalances ?? {}),
+  );
+}
+
+function insertLot(
+  db: Database,
+  lot: {
+    id: string;
+    accountId: string;
+    assetId: string;
+    openDate: string;
+    originalQuantity: string;
+    remainingQuantity: string;
+    costPerUnit: string;
+    remainingCostBasis: string;
+    feeAllocated: string;
+    splitRatio: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO lots (
+        id, account_id, asset_id, open_date, original_quantity, cost_per_unit,
+        original_cost_basis, remaining_cost_basis, fee_allocated, remaining_quantity, split_ratio
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    lot.id,
+    lot.accountId,
+    lot.assetId,
+    lot.openDate,
+    lot.originalQuantity,
+    lot.costPerUnit,
+    lot.remainingCostBasis,
+    lot.remainingCostBasis,
+    lot.feeAllocated,
+    lot.remainingQuantity,
+    lot.splitRatio,
+  );
+}
+
+function insertSnapshotPosition(
+  db: Database,
+  position: {
+    snapshotId: string;
+    assetId: string;
+    quantity: string;
+    averageCost: string;
+    totalCostBasis: string;
+    contractMultiplier: string;
+  },
+): void {
+  db.prepare(
+    `
+      INSERT INTO snapshot_positions (
+        snapshot_id, asset_id, quantity, average_cost, total_cost_basis, currency,
+        contract_multiplier, inception_date, created_at, last_updated
+      )
+      VALUES (?, ?, ?, ?, ?, 'USD', ?, '2026-01-01', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+    `,
+  ).run(
+    position.snapshotId,
+    position.assetId,
+    position.quantity,
+    position.averageCost,
+    position.totalCostBasis,
+    position.contractMultiplier,
   );
 }
 

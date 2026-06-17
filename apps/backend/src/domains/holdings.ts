@@ -81,6 +81,7 @@ export interface HoldingsService {
   getHoldingsForAccounts(accountIds: string[]): Promise<Holding[]> | Holding[];
   getHolding(accountId: string, assetId: string): Promise<unknown | null> | unknown | null;
   getAssetHoldings(assetId: string): Promise<unknown[]> | unknown[];
+  getAssetLots(assetId: string, includeSnapshotPositions?: boolean): Promise<unknown[]> | unknown[];
   getHistoricalValuations(
     accountId: string,
     startDate?: string,
@@ -229,6 +230,28 @@ export interface Holding {
   metadata: unknown | null;
 }
 
+export type AssetLotSource = "TRANSACTION_LOT" | "SNAPSHOT_POSITION";
+
+export interface AssetLotView {
+  id: string;
+  accountId: string;
+  accountName: string;
+  assetId: string;
+  source: AssetLotSource;
+  quantity: number;
+  originalQuantity: number;
+  remainingQuantity: number;
+  costBasis: number;
+  unitCost: number;
+  fees: number;
+  splitRatio: number;
+  contractMultiplier: number;
+  acquisitionDate: string | null;
+  snapshotDate: string | null;
+  isClosed: boolean;
+  closeDate: string | null;
+}
+
 export interface HoldingSummary {
   id: string;
   symbol: string;
@@ -328,6 +351,8 @@ interface SyntheticSnapshotSourceRow extends SnapshotRow {
 interface SnapshotPosition {
   assetId: string;
   quantity: unknown;
+  averageCost?: unknown;
+  avgCost?: unknown;
   totalCostBasis: unknown;
   currency: string;
   inceptionDate: string;
@@ -399,6 +424,38 @@ interface AssetTaxonomyAssignment {
   taxonomyId: string;
   categoryId: string;
   weight: number;
+}
+
+interface LotRow {
+  id: string;
+  account_id: string;
+  account_name: string;
+  asset_id: string;
+  open_date: string;
+  original_quantity: string;
+  remaining_quantity: string;
+  cost_per_unit: string;
+  remaining_cost_basis: string;
+  fee_allocated: string;
+  split_ratio: string;
+  is_closed: number;
+  close_date: string | null;
+}
+
+interface LatestSnapshotPositionRow {
+  snapshot_id: string;
+  account_id: string;
+  account_name: string;
+  snapshot_date: string;
+  positions: string;
+}
+
+interface RelationalSnapshotPositionRow {
+  snapshot_id: string;
+  quantity: string;
+  average_cost: string;
+  total_cost_basis: string;
+  contract_multiplier: string;
 }
 
 interface AccountExistsRow {
@@ -508,6 +565,13 @@ export function createHoldingsService(
     getAssetHoldings(assetId) {
       try {
         return readAssetHoldings(db, assetId, options);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    getAssetLots(assetId, includeSnapshotPositions = false) {
+      try {
+        return readAssetLots(db, assetId, includeSnapshotPositions);
       } catch (error) {
         return Promise.reject(error);
       }
@@ -1359,6 +1423,208 @@ function readAssetHoldings(
     }
   }
   return holdings;
+}
+
+function readAssetLots(
+  db: Database,
+  assetId: string,
+  includeSnapshotPositions: boolean,
+): AssetLotView[] {
+  const contractMultiplier = readAssetContractMultiplier(db, assetId);
+  const lots = db
+    .query<LotRow, [string]>(
+      `
+        SELECT
+          l.id, l.account_id, a.name AS account_name, l.asset_id, l.open_date,
+          l.original_quantity, l.remaining_quantity, l.cost_per_unit,
+          l.remaining_cost_basis, l.fee_allocated, l.split_ratio, l.is_closed, l.close_date
+        FROM lots l
+        INNER JOIN accounts a ON a.id = l.account_id
+        WHERE l.asset_id = ? AND a.is_active = 1
+        ORDER BY l.open_date ASC, l.account_id ASC, l.id ASC
+      `,
+    )
+    .all(assetId)
+    .map((row) => transactionLotViewRow(row, contractMultiplier));
+
+  const snapshotLots = includeSnapshotPositions ? readSnapshotLotViewRows(db, assetId) : [];
+  return [...lots, ...snapshotLots].sort((left, right) => {
+    const leftDate = left.acquisitionDate ?? left.snapshotDate ?? "";
+    const rightDate = right.acquisitionDate ?? right.snapshotDate ?? "";
+    return (
+      compareStrings(leftDate, rightDate) ||
+      compareStrings(left.accountId, right.accountId) ||
+      compareStrings(left.id, right.id)
+    );
+  });
+}
+
+function transactionLotViewRow(row: LotRow, contractMultiplier: Decimal): AssetLotView {
+  const splitRatio = decimalNonzeroOrFallback(row.split_ratio, new Decimal(1));
+  const remainingQuantity = decimalOrFallback(row.remaining_quantity, new Decimal(0));
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    accountName: row.account_name || row.account_id,
+    assetId: row.asset_id,
+    source: "TRANSACTION_LOT",
+    quantity: decimalToNumber(remainingQuantity.mul(splitRatio), new Decimal(0)),
+    originalQuantity: decimalToNumber(row.original_quantity, new Decimal(0)),
+    remainingQuantity: decimalToNumber(remainingQuantity, new Decimal(0)),
+    costBasis: decimalToNumber(row.remaining_cost_basis, new Decimal(0)),
+    unitCost: decimalToNumber(row.cost_per_unit, new Decimal(0)),
+    fees: decimalToNumber(row.fee_allocated, new Decimal(0)),
+    splitRatio: decimalToNumber(splitRatio, new Decimal(1)),
+    contractMultiplier: decimalToNumber(contractMultiplier, new Decimal(1)),
+    acquisitionDate: row.open_date,
+    snapshotDate: null,
+    isClosed: row.is_closed !== 0,
+    closeDate: row.close_date,
+  };
+}
+
+function readSnapshotLotViewRows(db: Database, assetId: string): AssetLotView[] {
+  const latestSnapshots = db
+    .query<LatestSnapshotPositionRow, []>(
+      `
+        SELECT
+          hs.id AS snapshot_id,
+          hs.account_id AS account_id,
+          a.name AS account_name,
+          CAST(hs.snapshot_date AS TEXT) AS snapshot_date,
+          hs.positions AS positions
+        FROM holdings_snapshots hs
+        JOIN accounts a ON a.id = hs.account_id
+        JOIN (
+          SELECT hs2.account_id, MAX(hs2.snapshot_date) AS max_snapshot_date
+          FROM holdings_snapshots hs2
+          JOIN accounts a2 ON a2.id = hs2.account_id
+          WHERE hs2.source <> 'CALCULATED'
+            AND a2.tracking_mode = 'HOLDINGS'
+            AND a2.is_active = 1
+          GROUP BY hs2.account_id
+        ) latest
+          ON latest.account_id = hs.account_id
+         AND latest.max_snapshot_date = hs.snapshot_date
+        WHERE hs.source <> 'CALCULATED'
+          AND a.tracking_mode = 'HOLDINGS'
+          AND a.is_active = 1
+        ORDER BY hs.account_id ASC, hs.id ASC
+      `,
+    )
+    .all();
+  if (latestSnapshots.length === 0) {
+    return [];
+  }
+
+  const snapshotIds = latestSnapshots.map((snapshot) => snapshot.snapshot_id);
+  const placeholders = snapshotIds.map(() => "?").join(", ");
+  const populatedSnapshotIds = new Set(
+    db
+      .query<{ snapshot_id: string }, string[]>(
+        `SELECT DISTINCT snapshot_id FROM snapshot_positions WHERE snapshot_id IN (${placeholders})`,
+      )
+      .all(...snapshotIds)
+      .map((row) => row.snapshot_id),
+  );
+  const relationalPositions = new Map(
+    db
+      .query<RelationalSnapshotPositionRow, string[]>(
+        `
+          SELECT snapshot_id, quantity, average_cost, total_cost_basis, contract_multiplier
+          FROM snapshot_positions
+          WHERE snapshot_id IN (${placeholders}) AND asset_id = ?
+        `,
+      )
+      .all(...snapshotIds, assetId)
+      .map((row) => [
+        row.snapshot_id,
+        {
+          quantity: decimalOrFallback(row.quantity, new Decimal(0)),
+          averageCost: decimalOrFallback(row.average_cost, new Decimal(0)),
+          totalCostBasis: decimalOrFallback(row.total_cost_basis, new Decimal(0)),
+          contractMultiplier: decimalNonzeroOrFallback(row.contract_multiplier, new Decimal(1)),
+        },
+      ]),
+  );
+
+  const rows: AssetLotView[] = [];
+  for (const snapshot of latestSnapshots) {
+    const relationalPosition = relationalPositions.get(snapshot.snapshot_id);
+    if (relationalPosition) {
+      rows.push(snapshotPositionLotViewRow(snapshot, assetId, relationalPosition));
+      continue;
+    }
+    if (populatedSnapshotIds.has(snapshot.snapshot_id)) {
+      continue;
+    }
+    const position = snapshotPositionsFromJson(snapshot.positions).find(
+      (candidate) => candidate.assetId === assetId,
+    );
+    if (!position) {
+      continue;
+    }
+    rows.push(
+      snapshotPositionLotViewRow(snapshot, assetId, {
+        quantity: decimalOrFallback(position.quantity, new Decimal(0)),
+        averageCost: decimalOrFallback(position.averageCost ?? position.avgCost, new Decimal(0)),
+        totalCostBasis: decimalOrFallback(position.totalCostBasis, new Decimal(0)),
+        contractMultiplier: decimalNonzeroOrFallback(position.contractMultiplier, new Decimal(1)),
+      }),
+    );
+  }
+  return rows;
+}
+
+function snapshotPositionLotViewRow(
+  snapshot: LatestSnapshotPositionRow,
+  assetId: string,
+  position: {
+    quantity: Decimal;
+    averageCost: Decimal;
+    totalCostBasis: Decimal;
+    contractMultiplier: Decimal;
+  },
+): AssetLotView {
+  return {
+    id: `SNAPSHOT-${snapshot.snapshot_id}-${snapshot.account_id}-${assetId}`,
+    accountId: snapshot.account_id,
+    accountName: snapshot.account_name,
+    assetId,
+    source: "SNAPSHOT_POSITION",
+    quantity: decimalToNumber(position.quantity, new Decimal(0)),
+    originalQuantity: decimalToNumber(position.quantity, new Decimal(0)),
+    remainingQuantity: decimalToNumber(position.quantity, new Decimal(0)),
+    costBasis: decimalToNumber(position.totalCostBasis, new Decimal(0)),
+    unitCost: decimalToNumber(position.averageCost, new Decimal(0)),
+    fees: 0,
+    splitRatio: 1,
+    contractMultiplier: decimalToNumber(position.contractMultiplier, new Decimal(1)),
+    acquisitionDate: null,
+    snapshotDate: snapshot.snapshot_date,
+    isClosed: false,
+    closeDate: null,
+  };
+}
+
+function readAssetContractMultiplier(db: Database, assetId: string): Decimal {
+  const row = db
+    .query<
+      { instrument_type: string | null; metadata: string | null },
+      [string]
+    >("SELECT instrument_type, metadata FROM assets WHERE id = ?")
+    .get(assetId);
+  if (row?.instrument_type !== "OPTION") {
+    return new Decimal(1);
+  }
+  const metadata = row?.metadata ? parseJsonObjectOrEmpty(row.metadata) : {};
+  const option = isObjectRecord(metadata.option) ? metadata.option : null;
+  const value = option?.multiplier;
+  return decimalOrFallback(value, new Decimal(100));
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readPortfolioAllocations(
@@ -3224,6 +3490,15 @@ function decimalOrFallback(value: unknown, fallback: Decimal): Decimal {
   } catch {
     return fallback;
   }
+}
+
+function decimalNonzeroOrFallback(value: unknown, fallback: Decimal): Decimal {
+  const decimal = decimalOrFallback(value, fallback);
+  return decimal.isZero() ? fallback : decimal;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function decimalOrThrow(value: unknown, message: string): Decimal {

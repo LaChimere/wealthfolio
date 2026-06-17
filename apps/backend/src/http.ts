@@ -1789,9 +1789,11 @@ function routeHoldingsRequest(
     if (assetId instanceof Response) {
       return assetId;
     }
-    // Bounded slice: return empty array until full lot-tracking implementation
-    // Full implementation requires AssetLotView type + lots repository integration
-    return jsonResponse([]);
+    const includeSnapshotPositions =
+      url.searchParams.get("includeSnapshotPositions")?.toLowerCase() === "true";
+    return Promise.resolve(holdingsService.getAssetLots(assetId, includeSnapshotPositions))
+      .then(jsonResponse)
+      .catch(domainErrorResponse);
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/holdings/by-asset") {

@@ -2576,6 +2576,10 @@ describe("TS backend HTTP skeleton", () => {
         calls.push(["asset-holdings", assetId]);
         return [{ assetId }];
       },
+      getAssetLots(assetId, includeSnapshotPositions) {
+        calls.push(["asset-lots", { assetId, includeSnapshotPositions }]);
+        return [{ assetId, includeSnapshotPositions }];
+      },
       getHistoricalValuations(accountId, startDate, endDate) {
         calls.push(["historical-valuations", { accountId, startDate, endDate }]);
         return [{ accountId, date: startDate }];
@@ -2676,6 +2680,14 @@ describe("TS backend HTTP skeleton", () => {
       new Request("http://127.0.0.1/api/v1/holdings/by-asset?assetId=asset-1", {
         headers: authHeaders,
       }),
+    );
+    await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/holdings/lots?assetId=asset-1&includeSnapshotPositions=true",
+        {
+          headers: authHeaders,
+        },
+      ),
     );
     await handler(
       new Request(
@@ -2863,6 +2875,7 @@ describe("TS backend HTTP skeleton", () => {
       ["holdings", ""],
       ["holding", { accountId: "acc-1", assetId: "missing" }],
       ["asset-holdings", "asset-1"],
+      ["asset-lots", { assetId: "asset-1", includeSnapshotPositions: true }],
       [
         "historical-valuations",
         { accountId: "acc-1", startDate: "2026-05-01", endDate: "2026-05-14" },
