@@ -4380,6 +4380,14 @@ contract:
   MICs to choose the matching local listed asset, keeping suffixed broker
   symbols gated when only another exchange is local, and parsing crypto pairs
   from the last hyphen so symbols like `X-AI-USD` map to `X-AI`.
+- `pr5-connect-broker-security-transfer-existing-asset`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "security transfer|asset-backed broker|pure cash"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes
+  `TRANSFER_IN`/`TRANSFER_OUT` broker activities with symbols mapping to
+  existing local assets while symbol-less transfers continue through the cash
+  path.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

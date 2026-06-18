@@ -1675,6 +1675,8 @@ const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
   "UNKNOWN",
 ]);
 
+const BROKER_SECURITY_TRANSFER_ACTIVITY_TYPES = new Set(["TRANSFER_IN", "TRANSFER_OUT"]);
+
 function brokerCashActivityCreateInput(
   activity: unknown,
   accountId: string,
@@ -1785,7 +1787,10 @@ function brokerExistingAssetActivityCreateInput(
   }
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
-  if (BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType)) {
+  if (
+    BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    !BROKER_SECURITY_TRANSFER_ACTIVITY_TYPES.has(activityType)
+  ) {
     return null;
   }
   const assetId = findExistingBrokerActivityAssetId(db, assetSymbol);
