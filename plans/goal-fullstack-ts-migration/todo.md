@@ -4295,6 +4295,13 @@ contract:
   `git diff --check`. Coverage includes treating duplicate broker cash bulk
   errors as benign when duplicate prefiltering is unavailable, while preserving
   account failure for non-duplicate import errors.
+- `pr5-connect-broker-existing-asset-activities`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "asset-backed broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes asset-backed broker activities mapping
+  to existing local assets by broker symbol, preserving idempotency/source
+  metadata, and keeping missing/new asset broker resolution gated.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
