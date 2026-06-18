@@ -4427,6 +4427,13 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes broker `INTEREST`
   activities with blank `raw_symbol` and populated crypto pair symbols retaining
   asset-backed mapping.
+- `pr5-connect-broker-adjustment-optional-asset`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "adjustment broker|symbol-less dividend|asset-backed interest"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker `ADJUSTMENT`
+  activities importing as cash when symbol-less and mapping to existing local
+  assets when a symbol is present.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
