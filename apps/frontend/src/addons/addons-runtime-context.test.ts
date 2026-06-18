@@ -30,6 +30,8 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore();
   triggerAllDisableCallbacks();
+  delete (window as unknown as { __wealthfolio_query_client__?: unknown })
+    .__wealthfolio_query_client__;
 });
 
 describe("addon runtime context permissions", () => {
@@ -71,5 +73,31 @@ describe("addon runtime context permissions", () => {
       }),
     ).not.toThrow();
     expect(getDynamicNavItems()).toHaveLength(1);
+  });
+
+  it("exposes only a limited query client facade to add-ons", () => {
+    const invalidateQueries = vi.fn();
+    const refetchQueries = vi.fn();
+    const clear = vi.fn();
+    (window as unknown as { __wealthfolio_query_client__?: unknown }).__wealthfolio_query_client__ =
+      {
+        invalidateQueries,
+        refetchQueries,
+        clear,
+      };
+    const context = createAddonContext("query-addon");
+
+    const queryClient = context.api.query.getClient() as {
+      invalidateQueries(queryKey: string | string[]): unknown;
+      refetchQueries(queryKey: string | string[]): unknown;
+      clear?: unknown;
+    };
+    queryClient.invalidateQueries("accounts");
+    queryClient.refetchQueries(["holdings"]);
+
+    expect(queryClient.clear).toBeUndefined();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["accounts"], exact: false });
+    expect(refetchQueries).toHaveBeenCalledWith({ queryKey: ["holdings"], exact: false });
+    expect(clear).not.toHaveBeenCalled();
   });
 });

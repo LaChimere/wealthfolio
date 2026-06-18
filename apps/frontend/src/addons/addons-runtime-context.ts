@@ -104,6 +104,32 @@ const dynamicRoutes = new Map<string, React.LazyExoticComponent<React.ComponentT
 // Navigation update listeners
 const navigationUpdateListeners = new Set<() => void>();
 
+interface AddonQueryClientLike {
+  invalidateQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
+  refetchQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
+}
+
+function hostQueryClient(): AddonQueryClientLike | undefined {
+  return (window as unknown as { __wealthfolio_query_client__?: AddonQueryClientLike })
+    .__wealthfolio_query_client__;
+}
+
+function normalizeQueryKey(queryKey: string | string[]): string[] {
+  return Array.isArray(queryKey) ? queryKey : [queryKey];
+}
+
+function addonQueryClientFacade(queryClient: AddonQueryClientLike | undefined) {
+  if (!queryClient) {
+    return undefined;
+  }
+  return {
+    invalidateQueries: (queryKey: string | string[]) =>
+      queryClient.invalidateQueries({ queryKey: normalizeQueryKey(queryKey), exact: false }),
+    refetchQueries: (queryKey: string | string[]) =>
+      queryClient.refetchQueries({ queryKey: normalizeQueryKey(queryKey), exact: false }),
+  };
+}
+
 // Function to notify navigation update listeners
 function notifyNavigationUpdate() {
   navigationUpdateListeners.forEach((listener) => listener());
@@ -351,38 +377,21 @@ export function createAddonContext(
           },
 
           // Query functions
-          getQueryClient: () => {
-            interface QueryClientLike {
-              invalidateQueries: (opts: { queryKey: string[] }) => unknown;
-              refetchQueries: (opts: { queryKey: string[] }) => unknown;
-            }
-            return (window as unknown as { __wealthfolio_query_client__?: QueryClientLike })
-              .__wealthfolio_query_client__;
-          },
+          getQueryClient: () => addonQueryClientFacade(hostQueryClient()),
           invalidateQueries: (queryKey: string | string[]) => {
-            interface QueryClientLike {
-              invalidateQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
-            }
-            const queryClient = (
-              window as unknown as { __wealthfolio_query_client__?: QueryClientLike }
-            ).__wealthfolio_query_client__;
+            const queryClient = hostQueryClient();
             if (queryClient) {
               queryClient.invalidateQueries({
-                queryKey: Array.isArray(queryKey) ? queryKey : [queryKey],
+                queryKey: normalizeQueryKey(queryKey),
                 exact: false,
               });
             }
           },
           refetchQueries: (queryKey: string | string[]) => {
-            interface QueryClientLike {
-              refetchQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
-            }
-            const queryClient = (
-              window as unknown as { __wealthfolio_query_client__?: QueryClientLike }
-            ).__wealthfolio_query_client__;
+            const queryClient = hostQueryClient();
             if (queryClient) {
               queryClient.refetchQueries({
-                queryKey: Array.isArray(queryKey) ? queryKey : [queryKey],
+                queryKey: normalizeQueryKey(queryKey),
                 exact: false,
               });
             }
