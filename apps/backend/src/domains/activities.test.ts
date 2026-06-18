@@ -465,8 +465,8 @@ describe("TS activities import domain", () => {
           assetId: "BASF",
           draft: expect.objectContaining({
             id: "BASF",
-            displayCode: "BASF",
-            instrumentSymbol: "DE000BASF111",
+            displayCode: "de000basf111.de",
+            instrumentSymbol: "de000basf111.de",
             instrumentExchangeMic: "XETR",
             quoteCcy: "EUR",
           }),
@@ -561,6 +561,109 @@ describe("TS activities import domain", () => {
         },
       ]);
       expect(calls).toEqual(["SHOP", "SHOP.TO"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves exchange-qualified preview symbols after provider resolution", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XETR", "EUR"]]),
+        yahooSuffixToMic: new Map([["DE", "XETR"]]),
+      },
+      symbolSearch(query) {
+        if (query === "APC.DE") {
+          return [
+            {
+              symbol: "APC.DE",
+              shortName: "Apple Inc.",
+              longName: "Apple Inc.",
+              exchange: "GER",
+              exchangeMic: "XETR",
+              exchangeName: "XETRA",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "EUR",
+              dataSource: "YAHOO",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-eur", name: "Euro", currency: "EUR" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "apc-de",
+            accountId: "account-eur",
+            symbol: "APC.DE",
+            instrumentType: "EQUITY",
+            quoteCcy: "EUR",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "apc-de",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            name: "Apple Inc.",
+            displayCode: "APC.DE",
+            instrumentSymbol: "APC.DE",
+            instrumentExchangeMic: "XETR",
+            instrumentType: "EQUITY",
+            quoteCcy: "EUR",
+          }),
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("previews crypto pair imports with canonical base display symbols", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      symbolSearch() {
+        throw new Error("crypto pair normalization should not call providers");
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-usd", name: "USD", currency: "USD" });
+
+      expect(
+        await service.previewImportAssets?.([
+          {
+            key: "btc",
+            accountId: "account-usd",
+            symbol: "BTC-USD",
+            instrumentType: "CRYPTO",
+            quoteCcy: "USD",
+          },
+        ]),
+      ).toEqual([
+        {
+          key: "btc",
+          status: "AUTO_RESOLVED_NEW_ASSET",
+          resolutionSource: "provider_resolution",
+          draft: expect.objectContaining({
+            displayCode: "BTC",
+            instrumentSymbol: "BTC",
+            instrumentType: "CRYPTO",
+            quoteCcy: "USD",
+          }),
+        },
+      ]);
     } finally {
       db.close();
     }

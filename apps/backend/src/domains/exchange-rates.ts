@@ -651,28 +651,42 @@ function createFxAsset(
     const id = crypto.randomUUID();
     const now = timestampNow();
     const providerConfig = providerConfigJson(source, from, to);
-    db.prepare(
-      `
-        INSERT INTO assets (
-          id, kind, name, display_code, notes, metadata, is_active, quote_mode,
-          quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
-          provider_config, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, NULL, NULL, 1, ?, ?, ?, ?, NULL, ?, ?, ?)
-      `,
-    ).run(
-      id,
-      ASSET_KIND_FX,
-      `${from}/${to} Exchange Rate`,
-      `${from}/${to}`,
-      "MARKET",
-      to,
-      "FX",
-      from,
-      providerConfig,
-      now,
-      now,
-    );
+    try {
+      db.prepare(
+        `
+          INSERT INTO assets (
+            id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+            quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+            provider_config, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, NULL, NULL, 1, ?, ?, ?, ?, NULL, ?, ?, ?)
+        `,
+      ).run(
+        id,
+        ASSET_KIND_FX,
+        `${from}/${to} Exchange Rate`,
+        `${from}/${to}`,
+        "MARKET",
+        to,
+        "FX",
+        from,
+        providerConfig,
+        now,
+        now,
+      );
+    } catch (error) {
+      if (!String(error).includes("UNIQUE constraint failed: assets.instrument_key")) {
+        throw error;
+      }
+      const existingAfterConflict = db
+        .query<{ id: string }, [string]>("SELECT id FROM assets WHERE instrument_key = ?")
+        .get(instrumentKey);
+      if (!existingAfterConflict) {
+        throw error;
+      }
+      assetId = existingAfterConflict.id;
+      return;
+    }
     const inserted = readAssetById(db, id);
     options.queueAssetSyncEvent?.({
       assetId: id,

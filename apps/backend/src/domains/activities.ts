@@ -1903,9 +1903,15 @@ async function previewImportAsset(
       ? findExistingAssetByIsin(db, isin)
       : findExistingAssetBySymbol(db, previewAssetInput);
     if (existingAsset) {
+      const draft = newAssetDraftFromAssetRow(existingAsset);
+      const shouldPreserveImportSymbol =
+        previewAssetInput.symbol !== undefined &&
+        previewAssetInput.symbol.toUpperCase() !== symbol.toUpperCase();
       return importAssetPreviewItem(key, "EXISTING_ASSET", "existing_asset", {
         assetId: existingAsset.id,
-        draft: newAssetDraftFromAssetRow(existingAsset),
+        draft: shouldPreserveImportSymbol
+          ? { ...draft, displayCode: symbol, instrumentSymbol: symbol }
+          : draft,
       });
     }
   } catch (error) {
@@ -1921,7 +1927,8 @@ async function previewImportAsset(
     !isManualPreviewQuoteMode &&
     (!resolvedInstrumentType ||
       !resolvedQuoteCcy ||
-      (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic));
+      (resolvedInstrumentType === "EQUITY" && !resolvedExchangeMic) ||
+      (resolvedInstrumentType === "EQUITY" && resolvedName === undefined));
   if (shouldResolveWithProvider) {
     const resolution = await resolveImportAssetSymbol(
       previewSymbol,
@@ -1951,7 +1958,10 @@ async function previewImportAsset(
   }
 
   const draft = newAssetDraftFromImport({
-    symbol: previewSymbol,
+    symbol:
+      resolvedInstrumentType === "CRYPTO" || resolvedInstrumentType === "FX"
+        ? previewSymbol
+        : symbol,
     quoteCcy: resolvedQuoteCcy,
     instrumentType: resolvedInstrumentType,
     exchangeMic: resolvedExchangeMic,
@@ -2959,9 +2969,11 @@ async function importActivityRows(
   }
 
   linkImportedTransferPairs(insertable);
+  reuseExistingAssetsForPendingImports(db, assetContext, insertable);
   const fxPairs = collectImportFxPairs(db, insertable, assetContext);
   if (fxPairs.length > 0 && options.ensureFxPairs) {
     await options.ensureFxPairs(fxPairs);
+    reuseExistingAssetsForPendingImports(db, assetContext, insertable);
   }
 
   const summary: ImportActivitiesSummary = {
@@ -2976,7 +2988,7 @@ async function importActivityRows(
   const pendingAssetIds = pendingActivityAssetIdsForCreates(assetContext, insertable);
 
   const result = db.transaction(() => {
-    ensurePendingActivityAssets(db, assetContext, pendingAssetIds);
+    ensurePendingActivityAssets(db, assetContext, pendingAssetIds, insertable);
     const createdAssetIds = [...assetContext.createdAssetIds];
     const importRun = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
     const syncInputs: ActivitySyncInput[] = [];
@@ -3951,6 +3963,18 @@ function normalizeActivityAssetInputForLookup(
     asset.instrumentType === undefined && instrumentType === "CRYPTO"
       ? { ...asset, instrumentType }
       : asset;
+  if (instrumentType === "CRYPTO") {
+    const parsed = parseActivityCryptoPairSymbol(asset.symbol);
+    return parsed
+      ? { ...typedAsset, symbol: parsed.base, quoteCcy: typedAsset.quoteCcy ?? parsed.quote }
+      : typedAsset;
+  }
+  if (instrumentType === "FX") {
+    const parsed = parseActivityFxSymbol(asset.symbol);
+    return parsed
+      ? { ...typedAsset, symbol: parsed.base, quoteCcy: typedAsset.quoteCcy ?? parsed.quote }
+      : typedAsset;
+  }
   if (!exchangeMetadata || !isMicBackedActivityInstrument(instrumentType)) {
     return typedAsset;
   }
@@ -4776,12 +4800,34 @@ function ensurePendingActivityAssets(
   db: Database,
   assetContext: ActivityAssetResolutionContext,
   onlyAssetIds?: Set<string>,
+  importRows?: PreparedImportActivity[],
 ): void {
   for (const asset of assetContext.pendingAssetsById.values()) {
     if (onlyAssetIds && !onlyAssetIds.has(asset.id)) {
       continue;
     }
-    insertPendingActivityAssetRow(db, asset);
+    try {
+      insertPendingActivityAssetRow(db, asset);
+    } catch (error) {
+      if (
+        !importRows ||
+        !String(error).includes("UNIQUE constraint failed: assets.instrument_key")
+      ) {
+        throw error;
+      }
+      const existing = db
+        .query<{ id: string }, [string]>("SELECT id FROM assets WHERE instrument_key = ? LIMIT 1")
+        .get(generatedActivityInstrumentKey(asset));
+      if (!existing) {
+        throw error;
+      }
+      for (const row of importRows) {
+        if (row.create.assetId === asset.id) {
+          row.create.assetId = existing.id;
+        }
+      }
+      continue;
+    }
     assetContext.createdAssetIds.add(asset.id);
   }
 }
@@ -4864,6 +4910,54 @@ function pendingActivityAssetIdsForCreates(
     }
   }
   return assetIds;
+}
+
+function reuseExistingAssetsForPendingImports(
+  db: Database,
+  assetContext: ActivityAssetResolutionContext,
+  rows: PreparedImportActivity[],
+): void {
+  if (!assetTableColumns(db).has("instrument_key")) {
+    return;
+  }
+  for (const asset of [...assetContext.pendingAssetsById.values()]) {
+    const instrumentKey = generatedActivityInstrumentKey(asset);
+    const existing = db
+      .query<{ id: string }, [string, string, string, string | null, string | null, string]>(
+        `
+          SELECT id
+          FROM assets
+          WHERE instrument_key = ?
+             OR (
+               (upper(display_code) = ? OR upper(instrument_symbol) = ?)
+               AND (
+                 (? IS NULL AND instrument_exchange_mic IS NULL)
+                 OR upper(instrument_exchange_mic) = ?
+               )
+             )
+          ORDER BY CASE WHEN instrument_key = ? THEN 0 ELSE 1 END, id
+          LIMIT 1
+        `,
+      )
+      .get(
+        instrumentKey,
+        asset.instrumentSymbol.toUpperCase(),
+        asset.instrumentSymbol.toUpperCase(),
+        asset.instrumentExchangeMic?.toUpperCase() ?? null,
+        asset.instrumentExchangeMic?.toUpperCase() ?? null,
+        instrumentKey,
+      );
+    if (!existing) {
+      continue;
+    }
+    for (const row of rows) {
+      if (row.create.assetId === asset.id) {
+        row.create.assetId = existing.id;
+      }
+    }
+    assetContext.pendingAssetsById.delete(asset.id);
+    assetContext.pendingAssetIdByKey.delete(instrumentKey);
+  }
 }
 
 function readAccountRow(db: Database, accountId: string): AccountRow {
