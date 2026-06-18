@@ -206,7 +206,7 @@ export interface Holding {
   assetKind: string | null;
   quantity: number;
   openDate: string | null;
-  lots: null;
+  lots: HoldingLot[] | null;
   contractMultiplier: number;
   localCurrency: string;
   baseCurrency: string;
@@ -228,6 +228,16 @@ export interface Holding {
   asOfDate: string;
   sourceAccountIds?: string[];
   metadata: unknown | null;
+}
+
+export interface HoldingLot {
+  id: string;
+  positionId: string;
+  acquisitionDate: string;
+  quantity: number;
+  costBasis: number;
+  acquisitionPrice: number;
+  acquisitionFees: number;
 }
 
 export type AssetLotSource = "TRANSACTION_LOT" | "SNAPSHOT_POSITION";
@@ -357,6 +367,7 @@ interface SnapshotPosition {
   currency: string;
   inceptionDate: string;
   contractMultiplier?: unknown;
+  lots?: unknown;
 }
 
 interface AssetRow {
@@ -2946,7 +2957,7 @@ function holdingFromPosition(
     assetKind: asset.kind,
     quantity,
     openDate: position.inceptionDate,
-    lots: null,
+    lots: holdingLotsFromSnapshotPosition(position),
     contractMultiplier: decimalToNumber(position.contractMultiplier ?? 1, new Decimal(1)),
     localCurrency: position.currency,
     baseCurrency,
@@ -2971,6 +2982,38 @@ function holdingFromPosition(
     asOfDate,
     metadata: parseNullableJson(asset.metadata),
   };
+}
+
+function holdingLotsFromSnapshotPosition(position: SnapshotPosition): HoldingLot[] | null {
+  if (!Array.isArray(position.lots)) {
+    return null;
+  }
+  const lots = position.lots.flatMap((rawLot): HoldingLot[] => {
+    if (!isObjectRecord(rawLot)) {
+      return [];
+    }
+    const id = typeof rawLot.id === "string" ? rawLot.id : `${position.assetId}:lot`;
+    const quantity = decimalToNumber(rawLot.quantity, new Decimal(0));
+    const costBasis = decimalToNumber(rawLot.costBasis, new Decimal(0));
+    const acquisitionPrice = decimalToNumber(rawLot.acquisitionPrice, new Decimal(0));
+    const acquisitionFees = decimalToNumber(rawLot.acquisitionFees, new Decimal(0));
+    const acquisitionDate =
+      typeof rawLot.acquisitionDate === "string" && rawLot.acquisitionDate
+        ? rawLot.acquisitionDate
+        : position.inceptionDate;
+    return [
+      {
+        id,
+        positionId: position.assetId,
+        acquisitionDate,
+        quantity,
+        costBasis,
+        acquisitionPrice,
+        acquisitionFees,
+      },
+    ];
+  });
+  return lots.length > 0 ? lots : null;
 }
 
 function cashHoldingFromSnapshot(

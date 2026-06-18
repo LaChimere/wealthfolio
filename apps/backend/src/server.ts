@@ -12,6 +12,7 @@ export function startBackendServer(
 ): BackendServerHandle {
   const server = Bun.serve({
     hostname: config.listen.host,
+    idleTimeout: backendIdleTimeoutSeconds(config.requestTimeoutMs),
     port: config.listen.port,
     fetch: createBackendRequestHandler(config, options),
   });
@@ -22,4 +23,8 @@ export function startBackendServer(
       server.stop(true);
     },
   };
+}
+
+export function backendIdleTimeoutSeconds(requestTimeoutMs: number): number {
+  return Math.max(1, Math.min(255, Math.ceil(requestTimeoutMs / 1000)));
 }

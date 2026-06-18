@@ -776,7 +776,12 @@ describe("TS backend HTTP skeleton", () => {
         return { [idempotencyKeys[0] ?? ""]: "activity-1" };
       },
     };
-    const handler = createBackendRequestHandler(config, { activityService });
+    const handler = createBackendRequestHandler(config, {
+      activityService,
+      flushDomainEvents: () => {
+        calls.push(["flush-domain-events", undefined]);
+      },
+    });
     const authHeaders = { authorization: "Bearer sidecar-token" };
     const jsonHeaders = { ...authHeaders, "content-type": "application/json" };
 
@@ -1056,6 +1061,7 @@ describe("TS backend HTTP skeleton", () => {
       ["check-import", [{ id: "activity-3" }]],
       ["preview-assets", [{ symbol: "AAPL" }]],
       ["import", [{ id: "activity-4" }]],
+      ["flush-domain-events", undefined],
       ["parse-csv", { content: [65, 66], config: { delimiter: "," } }],
       ["get-mapping", { accountId: "account-1", contextKind: "" }],
       ["get-mapping", { accountId: "account-2", contextKind: "ACTIVITY" }],

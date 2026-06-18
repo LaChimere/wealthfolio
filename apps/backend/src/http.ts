@@ -155,6 +155,7 @@ export interface BackendRequestHandlerOptions {
   dataExportService?: DataExportService;
   deviceSyncService?: DeviceSyncService;
   eventBus?: BackendEventBus;
+  flushDomainEvents?: () => Promise<void> | void;
   contributionLimitService?: ContributionLimitService;
   customProviderService?: CustomProviderService;
   exchangeRateService?: ExchangeRateService;
@@ -269,7 +270,7 @@ async function routeRequest(
   }
 
   if (options.activityService && url.pathname.startsWith("/api/v1/activities")) {
-    return routeActivityRequest(request, url, config, options.activityService);
+    return routeActivityRequest(request, url, config, options.activityService, options);
   }
 
   if (options.addonService && url.pathname.startsWith("/api/v1/addons")) {
@@ -527,6 +528,7 @@ function routeActivityRequest(
   url: URL,
   config: BackendRuntimeConfig,
   activityService: ActivityService,
+  options: Pick<BackendRequestHandlerOptions, "flushDomainEvents"> = {},
 ): Promise<Response> | Response {
   if (config.sidecarToken && !sidecarTokenAuthorized(request.headers, config.sidecarToken)) {
     return jsonResponse({ code: 401, message: "Unauthorized" }, 401);
@@ -583,9 +585,11 @@ function routeActivityRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import") {
-    return handleJsonMutation(request, parseActivitiesArrayRequest, (input) =>
-      Promise.resolve(activityService.importActivities(input.activities)),
-    );
+    return handleJsonMutation(request, parseActivitiesArrayRequest, async (input) => {
+      const result = await Promise.resolve(activityService.importActivities(input.activities));
+      await flushDomainEventsAfterMutation(options, "activity import");
+      return result;
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/api/v1/activities/import/parse") {
@@ -4604,6 +4608,20 @@ async function formDataValueBytes(value: FormDataEntryValue): Promise<Uint8Array
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function flushDomainEventsAfterMutation(
+  options: Pick<BackendRequestHandlerOptions, "flushDomainEvents">,
+  context: string,
+): Promise<void> {
+  if (!options.flushDomainEvents) {
+    return;
+  }
+  try {
+    await options.flushDomainEvents();
+  } catch (error) {
+    console.warn(`Failed to flush domain events after ${context}: ${errorMessage(error)}`);
+  }
 }
 
 function parseActivityImportMappingQuery(

@@ -1273,7 +1273,19 @@ describe("TS holdings domain", () => {
         accountId: "a1",
         date: "2026-01-05",
         positions: {
-          "lse-share": snapshotPosition("lse-share", "2", "600", "GBp", "1"),
+          "lse-share": {
+            ...snapshotPosition("lse-share", "2", "600", "GBp", "1"),
+            lots: [
+              {
+                id: "income-1",
+                quantity: "2",
+                costBasis: "600",
+                acquisitionPrice: "300",
+                acquisitionFees: "0",
+                acquisitionDate: "2026-01-05",
+              },
+            ],
+          },
           "no-quote": snapshotPosition("no-quote", "1", "20", "USD", "1"),
           property: snapshotPosition("property", "0.5", "40000", "USD", "1"),
           "option-live": snapshotPosition("option-live", "1", "50", "USD", "100"),
@@ -1356,6 +1368,17 @@ describe("TS holdings domain", () => {
       expect(lse.price).toBe(5);
       expect(lse.marketValue).toEqual({ local: 10, base: 12.5 });
       expect(lse.costBasis).toEqual({ local: 6, base: 7.5 });
+      expect(lse.lots).toEqual([
+        {
+          id: "income-1",
+          positionId: "lse-share",
+          acquisitionDate: "2026-01-05",
+          quantity: 2,
+          costBasis: 600,
+          acquisitionPrice: 300,
+          acquisitionFees: 0,
+        },
+      ]);
       expect(lse.prevCloseValue).toEqual({ local: 20, base: 25 });
       expect(lse.dayChange).toEqual({ local: -10, base: -12.5 });
       expect(lse.dayChangePct).toBe(-0.5);

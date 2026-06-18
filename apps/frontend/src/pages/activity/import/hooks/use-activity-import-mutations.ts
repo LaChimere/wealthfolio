@@ -4,6 +4,30 @@ import { logger, importActivities } from "@/adapters";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import type { ImportActivitiesResult, ActivityImport } from "@/lib/types";
 
+const IMPORT_SUCCESS_INVALIDATION_KEYS = [
+  [QueryKeys.ACTIVITY_DATA],
+  [QueryKeys.ACTIVITIES],
+  [QueryKeys.IMPORT_RUNS],
+  [QueryKeys.HOLDINGS],
+  [QueryKeys.HOLDING],
+  [QueryKeys.ASSET_HOLDINGS],
+  [QueryKeys.ASSET_LOTS],
+  [QueryKeys.ASSETS],
+  [QueryKeys.ASSET_DATA],
+  [QueryKeys.LATEST_QUOTES],
+  [QueryKeys.PORTFOLIO_ALLOCATIONS],
+  [QueryKeys.HOLDINGS_BY_ALLOCATION],
+  [QueryKeys.PORTFOLIO_SUMMARY],
+  [QueryKeys.INCOME_SUMMARY],
+  [QueryKeys.PERFORMANCE_SUMMARY],
+  [QueryKeys.PERFORMANCE_HISTORY],
+  [QueryKeys.ACCOUNTS_SUMMARY],
+  [QueryKeys.SNAPSHOTS],
+  [QueryKeys.SNAPSHOT_HOLDINGS],
+  [QueryKeys.HISTORY_VALUATION],
+  [QueryKeys.NET_WORTH],
+] as const;
+
 export function useActivityImportMutations({
   onSuccess,
   onError,
@@ -16,11 +40,11 @@ export function useActivityImportMutations({
   const confirmImportMutation = useMutation({
     mutationFn: importActivities,
     onSuccess: async (result: ImportActivitiesResult) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] }),
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] }),
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.IMPORT_RUNS] }),
-      ]);
+      await Promise.all(
+        IMPORT_SUCCESS_INVALIDATION_KEYS.map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }),
+        ),
+      );
 
       // Call the provided onSuccess callback if it exists
       // Note: We don't show a toast here since the result step displays the success state

@@ -572,6 +572,7 @@ function createServicesFromDatabase(
     customProviderService,
     dataExportService,
     eventBus,
+    flushDomainEvents: () => domainEventWorker?.flush(),
     deviceSyncService: createLocalDeviceSyncService({
       connectService,
       secretService,
