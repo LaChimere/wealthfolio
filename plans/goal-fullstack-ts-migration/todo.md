@@ -4250,6 +4250,13 @@ contract:
   binding, preserving extensionless `WF_DB_PATH` file paths unless the path is
   an explicit/existing directory, and endpoint-specific Connect request-id scope
   assertions.
+- `pr5-connect-broker-cash-activity-sync`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "pure cash"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes pure cash broker activity pages mapping
+  to activity bulk creates, broker sync state success, imported-activity counts,
+  and preserving the feature gate for asset-backed broker activity mapping.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
