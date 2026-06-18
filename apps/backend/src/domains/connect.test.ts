@@ -2591,7 +2591,7 @@ describe("TS Connect local session service", () => {
               amount: 150,
               currency: { code: "CAD" },
               provider_type: "SNAPTRADE",
-              symbol: { symbol: "SHOP.TO" },
+              symbol: { symbol: "SHOP.TO", raw_symbol: "   " },
             },
           ],
         });
@@ -2702,7 +2702,7 @@ describe("TS Connect local session service", () => {
               amount: 10000,
               currency: { code: "USD" },
               provider_type: "SNAPTRADE",
-              symbol: { symbol: "BTC-USD", type: { code: "CRYPTOCURRENCY" } },
+              symbol: { symbol: "BTC-USD", raw_symbol: "", type: { code: "CRYPTOCURRENCY" } },
             },
           ],
         });

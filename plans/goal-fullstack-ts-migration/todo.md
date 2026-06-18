@@ -4363,6 +4363,14 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes broker
   cryptocurrency symbols such as `BTC-USD` matching existing local crypto assets
   by base symbol before bulk activity mutation.
+- `pr5-connect-broker-blank-symbol-fallback`: Claude xhigh review found blank
+  broker `raw_symbol` values could block crypto fallback; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "crypto broker|Yahoo suffix|asset-backed broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes blank/whitespace
+  broker `raw_symbol` values falling through to symbol-pair or Yahoo-suffix
+  normalization instead of failing the account sync.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

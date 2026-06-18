@@ -1848,7 +1848,7 @@ function brokerActivitySymbol(
 ): string | null {
   const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
   if (isRecord(optionSymbol)) {
-    const ticker = optionalString(optionSymbol.ticker);
+    const ticker = optionalNonEmptyString(optionSymbol.ticker);
     if (ticker) {
       return ticker.replace(/\s+/g, "").toUpperCase();
     }
@@ -1863,19 +1863,24 @@ function brokerActivitySymbol(
     : null;
   if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
     const cryptoSymbol =
-      optionalString(symbol.raw_symbol ?? symbol.rawSymbol) ??
-      optionalString(symbol.symbol)?.split("-")[0] ??
+      optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol) ??
+      optionalNonEmptyString(symbol.symbol)?.split("-")[0] ??
       null;
     return cryptoSymbol?.toUpperCase() ?? null;
   }
-  const rawSymbol = optionalString(symbol.raw_symbol ?? symbol.rawSymbol);
+  const rawSymbol = optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol);
   if (rawSymbol) {
     return rawSymbol.toUpperCase();
   }
-  const displaySymbol = optionalString(symbol.symbol);
+  const displaySymbol = optionalNonEmptyString(symbol.symbol);
   return displaySymbol
     ? stripKnownYahooSuffix(displaySymbol, exchangeMetadata).toUpperCase()
     : null;
+}
+
+function optionalNonEmptyString(value: unknown): string | null {
+  const text = optionalString(value)?.trim();
+  return text ? text : null;
 }
 
 function stripKnownYahooSuffix(
