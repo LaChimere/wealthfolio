@@ -4257,6 +4257,13 @@ contract:
   `git diff --check`. Coverage includes pure cash broker activity pages mapping
   to activity bulk creates, broker sync state success, imported-activity counts,
   and preserving the feature gate for asset-backed broker activity mapping.
+- `pr5-connect-broker-cash-duplicate-overlap`: Claude xhigh review found an
+  overlap-window duplicate failure; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "already imported pure cash"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes explicit broker idempotency keys and
+  prefiltering already-imported broker cash activities before bulk mutation.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
