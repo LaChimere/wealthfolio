@@ -1660,6 +1660,7 @@ const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
   "INTEREST",
   "TRANSFER_IN",
   "TRANSFER_OUT",
+  "UNKNOWN",
 ]);
 
 function brokerCashActivityCreateInput(
@@ -1675,9 +1676,11 @@ function brokerCashActivityCreateInput(
   if (!sourceRecordId) {
     return null;
   }
-  const activityType = (
-    optionalString(activity.activity_type ?? activity.activityType) ?? "UNKNOWN"
-  ).toUpperCase();
+  const rawActivityType = optionalString(activity.activity_type ?? activity.activityType);
+  if (!rawActivityType) {
+    return null;
+  }
+  const activityType = rawActivityType.toUpperCase();
   const isNeverAsset = BROKER_NEVER_ASSET_ACTIVITY_TYPES.has(activityType);
   if (
     !isNeverAsset &&
