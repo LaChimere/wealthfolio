@@ -1760,12 +1760,12 @@ function brokerCashActivityCreateInput(
 function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
   const symbol = activity.symbol;
   if (isRecord(symbol)) {
-    if (optionalString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)) {
+    if (optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)) {
       return true;
     }
   }
   const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
-  return isRecord(optionSymbol) && optionalString(optionSymbol.ticker) !== null;
+  return isRecord(optionSymbol) && optionalNonEmptyString(optionSymbol.ticker) !== null;
 }
 
 function brokerExistingAssetActivityCreateInput(
@@ -1871,23 +1871,35 @@ function brokerActivitySymbol(
   const symbolTypeCode = isRecord(symbolType)
     ? optionalString(symbolType.code)?.toUpperCase()
     : null;
+  const exchangeMic = brokerActivitySymbolExchangeMic(symbol);
   if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
     const cryptoSymbol =
-      optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol) ??
+      parseCryptoBrokerPair(optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol))?.base ??
       parseCryptoBrokerPair(optionalNonEmptyString(symbol.symbol))?.base ??
       null;
     return cryptoSymbol ? { symbol: cryptoSymbol.toUpperCase(), exchangeMic: null } : null;
   }
   const rawSymbol = optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol);
   if (rawSymbol) {
-    return { symbol: rawSymbol.toUpperCase(), exchangeMic: null };
+    return { symbol: rawSymbol.toUpperCase(), exchangeMic };
   }
   const displaySymbol = optionalNonEmptyString(symbol.symbol);
   if (!displaySymbol) {
     return null;
   }
   const parsed = parseKnownYahooSuffix(displaySymbol, exchangeMetadata);
-  return { symbol: parsed.symbol.toUpperCase(), exchangeMic: parsed.exchangeMic };
+  return { symbol: parsed.symbol.toUpperCase(), exchangeMic: parsed.exchangeMic ?? exchangeMic };
+}
+
+function brokerActivitySymbolExchangeMic(symbol: Record<string, unknown>): string | null {
+  const exchange = symbol.exchange;
+  if (!isRecord(exchange)) {
+    return null;
+  }
+  return (
+    optionalNonEmptyString(exchange.mic_code ?? exchange.micCode ?? exchange.code)?.toUpperCase() ??
+    null
+  );
 }
 
 function optionalNonEmptyString(value: unknown): string | null {
