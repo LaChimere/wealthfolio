@@ -4455,6 +4455,16 @@ contract:
   `bun run type-check`, `bun run format:check`, `bun run lint`, and
   `git diff --check`. Coverage includes Alpha Vantage option quotes treating
   zero `last` prices as missing and falling back to nonzero `mark`.
+- `pr5-e2e-fixture-import-holdings-parity`: verification passed: targeted
+  backend activity/market-data/holdings/http tests, the frontend import-mutation
+  hook test, targeted multi-exchange E2E, full `bun run test:e2e` (88/88), full
+  `bun run test:all`, and full `bun run check`. Coverage includes E2E
+  fixture-backed Yahoo search, resolve, and history with exact-symbol precedence
+  over aliases, exchange-qualified import preview preservation, pending-asset
+  reuse during import apply, FX asset conflict recovery, activity import
+  flushing domain events before returning success, live holdings lot projection
+  from snapshot positions, and frontend query invalidation for import-driven
+  holdings/portfolio refreshes.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
