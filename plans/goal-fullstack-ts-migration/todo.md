@@ -4356,6 +4356,13 @@ contract:
   metadata into Connect broker sync and stripping known Yahoo exchange suffixes
   before existing-asset lookup, while preserving option OCC and crypto
   normalization paths.
+- `pr5-connect-broker-crypto-symbol-coverage`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "crypto broker|Yahoo suffix|asset-backed broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker
+  cryptocurrency symbols such as `BTC-USD` matching existing local crypto assets
+  by base symbol before bulk activity mutation.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

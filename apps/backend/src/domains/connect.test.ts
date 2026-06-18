@@ -2658,6 +2658,117 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("matches existing crypto broker assets by base symbol", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-btc', 'BTC', 'BTC');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "crypto-buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 0.1,
+              price: 100000,
+              amount: 10000,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "BTC-USD", type: { code: "CRYPTOCURRENCY" } },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          asset: { id: "asset-btc", symbol: "BTC" },
+          quantity: "0.1",
+          unitPrice: "100000",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps asset-backed broker activities feature-gated when the symbol is not local", async () => {
     const db = new Database(":memory:");
     db.exec(`
