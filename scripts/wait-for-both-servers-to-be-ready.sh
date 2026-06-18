@@ -5,7 +5,7 @@ LOG_FILE="/tmp/wealthfolio-dev2.log"
 MAX_ATTEMPTS=60
 INTERVAL=2
 TAIL_LINES=25
-PORT=8088
+PORT=8080
 
 # Function to show usage
 show_help() {
@@ -18,7 +18,7 @@ show_help() {
     echo "  -m, --max-attempts NUM     Maximum number of attempts (default: 60)"
     echo "  -i, --interval SEC         Interval between checks in seconds (default: 2)"
     echo "  -t, --tail-lines NUM       Number of lines to show at the end (default: 25)"
-    echo "  -p, --port PORT            Port number to check for (default: 8088)"
+    echo "  -p, --port PORT            Port number to check for (default: 8080)"
     echo "  -h, --help                 Show this help message"
     echo ""
     echo "The script checks for 'ready in' (Vite) and 'listening|:$PORT' (Bun backend) in the log file."

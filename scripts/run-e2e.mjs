@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { prepE2eEnv } from "./prep-e2e.mjs";
 
 const DEV_SERVER_URL = process.env.WF_E2E_BASE_URL || "http://localhost:1420";
-const BACKEND_URL = process.env.WF_E2E_BACKEND_URL || "http://localhost:8088";
+const BACKEND_URL = process.env.WF_E2E_BACKEND_URL || "http://localhost:8080";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const QUOTE_FIXTURE_DIR = join(REPO_ROOT, "e2e", "fixtures", "quotes");
 const cliArgs = process.argv.slice(2);
