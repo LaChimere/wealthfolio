@@ -26,6 +26,7 @@ interface DismissedUpdate {
 }
 
 const SNOOZE_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+const isE2E = import.meta.env.VITE_WEALTHFOLIO_E2E === "1";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -56,6 +57,12 @@ function formatReleaseDate(pubDate?: string) {
 }
 
 export function UpdateDialog() {
+  if (isE2E) return null;
+
+  return <UpdateDialogContent />;
+}
+
+function UpdateDialogContent() {
   const { data: updateInfo } = useCheckUpdateOnStartup();
   const clearUpdate = useClearUpdate();
   const [isOpen, setIsOpen] = useState(false);

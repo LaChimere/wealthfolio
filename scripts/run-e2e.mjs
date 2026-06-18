@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { prepE2eEnv } from "./prep-e2e.mjs";
 
 const DEV_SERVER_URL = process.env.WF_E2E_BASE_URL || "http://localhost:1420";
-const BACKEND_URL = process.env.WF_E2E_BACKEND_URL || "http://localhost:8080";
+const BACKEND_URL = process.env.WF_E2E_BACKEND_URL || "http://127.0.0.1:8080";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const QUOTE_FIXTURE_DIR = join(REPO_ROOT, "e2e", "fixtures", "quotes");
 const cliArgs = process.argv.slice(2);
@@ -15,9 +15,13 @@ const shouldUseUi = cliArgs.includes("--ui");
 const buildHealthUrl = (base, path = "/") =>
   new URL(path, `${base.replace(/\/$/, "")}/`).toString();
 
-const waitForServer = async (url, serverProcess, { timeout = 60_000, interval = 500 } = {}) => {
+const waitForServer = async (
+  url,
+  serverProcess,
+  { timeout = 60_000, interval = 500, path = "/" } = {},
+) => {
   const deadline = Date.now() + timeout;
-  const healthUrl = buildHealthUrl(url);
+  const healthUrl = buildHealthUrl(url, path);
 
   while (Date.now() < deadline) {
     if (serverProcess.exitCode !== null) {
@@ -62,6 +66,7 @@ const run = async () => {
   await prepE2eEnv();
 
   const devServer = spawnCommand("bun", ["run", "dev:web"], {
+    VITE_WEALTHFOLIO_E2E: "1",
     WEALTHFOLIO_E2E: "1",
     WEALTHFOLIO_FIXTURE_DIR: QUOTE_FIXTURE_DIR,
     WEALTHFOLIO_FIXTURE_AS_OF: process.env.WEALTHFOLIO_FIXTURE_AS_OF || "2026-05-12",
@@ -87,7 +92,11 @@ const run = async () => {
     console.log("Waiting for frontend server...");
     await waitForServer(DEV_SERVER_URL, devServer);
     console.log("Frontend ready. Waiting for backend server...");
-    await waitForServer(BACKEND_URL, devServer, { timeout: 120_000, interval: 1000 });
+    await waitForServer(BACKEND_URL, devServer, {
+      timeout: 120_000,
+      interval: 1000,
+      path: "/api/v1/healthz",
+    });
     console.log("Backend ready. Starting tests...");
     await runPlaywrightTests(cliArgs);
   } finally {

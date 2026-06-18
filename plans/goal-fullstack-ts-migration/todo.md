@@ -4439,6 +4439,15 @@ contract:
   `cargo test`. Coverage includes updating the Rust server income-summary API
   test fixture for the current `Config` shape with explicit `sidecar: None`, so
   Rust oracle tests compile during migration validation.
+- `pr5-e2e-runner-ts-backend-readiness`: verification passed:
+  `node --check scripts/run-e2e.mjs`, `bun run --cwd apps/frontend type-check`,
+  `bun run --cwd apps/frontend lint -- src/components/update-dialog.tsx`,
+  `bun run check`, `cargo test`, and `bun run test:e2e` progressing into the
+  Playwright suite. Coverage includes probing the TS backend via
+  `http://127.0.0.1:8080/api/v1/healthz` and suppressing the update dialog only
+  under the E2E Vite flag so it cannot intercept Playwright clicks. Remaining
+  E2E failures are functional migration gaps, not startup/update-dialog
+  blockers.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
