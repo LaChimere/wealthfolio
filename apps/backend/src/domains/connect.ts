@@ -1554,8 +1554,9 @@ async function syncEmptyTransactionActivityPages(
           deleteIds: [],
         });
         const errors = bulkMutationErrors(result);
-        if (errors.length > 0) {
-          const message = errors[0]?.message ?? "Broker activity import failed";
+        const nonDuplicateErrors = errors.filter((error) => !bulkMutationDuplicateError(error));
+        if (nonDuplicateErrors.length > 0) {
+          const message = nonDuplicateErrors[0]?.message ?? "Broker activity import failed";
           upsertBrokerSyncFailure(db, account.id, message);
           summary.accountsFailed += 1;
           accountFailed = true;
@@ -1850,6 +1851,10 @@ function bulkMutationErrors(result: unknown): Array<{ message: string }> {
           isRecord(error) && typeof error.message === "string",
       )
     : [];
+}
+
+function bulkMutationDuplicateError(error: { message: string }): boolean {
+  return error.message.toLowerCase().includes("duplicate activity");
 }
 
 function bulkMutationCreatedCount(result: unknown): number {
