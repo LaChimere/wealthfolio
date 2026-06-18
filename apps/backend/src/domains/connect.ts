@@ -1779,8 +1779,8 @@ function brokerExistingAssetActivityCreateInput(
   }
   const activityId = optionalString(activity.id);
   const rawActivityType = brokerActivityType(activity);
-  const symbol = brokerActivitySymbol(activity, exchangeMetadata);
-  if (!activityId || !rawActivityType || !symbol) {
+  const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
+  if (!activityId || !rawActivityType || !assetSymbol) {
     return null;
   }
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
@@ -1788,7 +1788,7 @@ function brokerExistingAssetActivityCreateInput(
   if (BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType)) {
     return null;
   }
-  const assetId = findExistingBrokerActivityAssetId(db, symbol);
+  const assetId = findExistingBrokerActivityAssetId(db, assetSymbol);
   if (assetId === null) {
     return null;
   }
@@ -1827,7 +1827,7 @@ function brokerExistingAssetActivityCreateInput(
     amount: brokerActivityAbsoluteNumberString(activity.amount),
     fee: brokerActivityAbsoluteNumberString(activity.fee),
     currency,
-    asset: { id: assetId, symbol },
+    asset: { id: assetId, symbol: assetSymbol.symbol },
     comment: optionalString(
       activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
     ),
@@ -1842,15 +1842,20 @@ function brokerExistingAssetActivityCreateInput(
   };
 }
 
+interface BrokerActivityAssetSymbol {
+  symbol: string;
+  exchangeMic: string | null;
+}
+
 function brokerActivitySymbol(
   activity: Record<string, unknown>,
   exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
-): string | null {
+): BrokerActivityAssetSymbol | null {
   const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
   if (isRecord(optionSymbol)) {
     const ticker = optionalNonEmptyString(optionSymbol.ticker);
     if (ticker) {
-      return ticker.replace(/\s+/g, "").toUpperCase();
+      return { symbol: ticker.replace(/\s+/g, "").toUpperCase(), exchangeMic: null };
     }
   }
   const symbol = activity.symbol;
@@ -1864,18 +1869,20 @@ function brokerActivitySymbol(
   if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
     const cryptoSymbol =
       optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol) ??
-      optionalNonEmptyString(symbol.symbol)?.split("-")[0] ??
+      parseCryptoBrokerPair(optionalNonEmptyString(symbol.symbol))?.base ??
       null;
-    return cryptoSymbol?.toUpperCase() ?? null;
+    return cryptoSymbol ? { symbol: cryptoSymbol.toUpperCase(), exchangeMic: null } : null;
   }
   const rawSymbol = optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol);
   if (rawSymbol) {
-    return rawSymbol.toUpperCase();
+    return { symbol: rawSymbol.toUpperCase(), exchangeMic: null };
   }
   const displaySymbol = optionalNonEmptyString(symbol.symbol);
-  return displaySymbol
-    ? stripKnownYahooSuffix(displaySymbol, exchangeMetadata).toUpperCase()
-    : null;
+  if (!displaySymbol) {
+    return null;
+  }
+  const parsed = parseKnownYahooSuffix(displaySymbol, exchangeMetadata);
+  return { symbol: parsed.symbol.toUpperCase(), exchangeMic: parsed.exchangeMic };
 }
 
 function optionalNonEmptyString(value: unknown): string | null {
@@ -1883,31 +1890,72 @@ function optionalNonEmptyString(value: unknown): string | null {
   return text ? text : null;
 }
 
-function stripKnownYahooSuffix(
+function parseCryptoBrokerPair(symbol: string | null): { base: string; quote: string } | null {
+  if (!symbol) {
+    return null;
+  }
+  const separator = symbol.lastIndexOf("-");
+  if (separator <= 0 || separator === symbol.length - 1) {
+    return { base: symbol, quote: "" };
+  }
+  const base = symbol.slice(0, separator).trim();
+  const quote = symbol
+    .slice(separator + 1)
+    .trim()
+    .toUpperCase();
+  if (!base || quote.length < 3 || quote.length > 5 || !/^[A-Z]+$/.test(quote)) {
+    return { base: symbol, quote: "" };
+  }
+  return { base, quote };
+}
+
+function parseKnownYahooSuffix(
   symbol: string,
   exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
-): string {
+): BrokerActivityAssetSymbol {
   const trimmed = symbol.trim();
   if (!exchangeMetadata) {
-    return trimmed;
+    return { symbol: trimmed, exchangeMic: null };
   }
-  const suffixes = [...exchangeMetadata.yahooSuffixToMic.keys()].sort(
-    (left, right) => right.length - left.length,
+  const suffixes = [...exchangeMetadata.yahooSuffixToMic.entries()].sort(
+    ([left], [right]) => right.length - left.length,
   );
-  for (const suffix of suffixes) {
+  for (const [suffix, exchangeMic] of suffixes) {
     const dottedSuffix = `.${suffix}`;
     if (
       trimmed.length >= dottedSuffix.length &&
       trimmed.slice(trimmed.length - dottedSuffix.length).toUpperCase() === dottedSuffix
     ) {
-      return trimmed.slice(0, -dottedSuffix.length);
+      return { symbol: trimmed.slice(0, -dottedSuffix.length), exchangeMic };
     }
   }
-  return trimmed;
+  return { symbol: trimmed, exchangeMic: null };
 }
 
-function findExistingBrokerActivityAssetId(db: Database, symbol: string): string | null {
+function findExistingBrokerActivityAssetId(
+  db: Database,
+  assetSymbol: BrokerActivityAssetSymbol,
+): string | null {
   if (!sqliteTableExists(db, "assets")) {
+    return null;
+  }
+  const symbol = assetSymbol.symbol;
+  if (assetSymbol.exchangeMic && sqliteColumnExists(db, "assets", "instrument_exchange_mic")) {
+    const exchangeRow = db
+      .query<{ id: string }, [string, string, string]>(
+        `
+          SELECT id
+          FROM assets
+          WHERE (upper(display_code) = ? OR upper(instrument_symbol) = ?)
+            AND upper(instrument_exchange_mic) = ?
+          ORDER BY id
+          LIMIT 1
+        `,
+      )
+      .get(symbol, symbol, assetSymbol.exchangeMic.toUpperCase());
+    if (exchangeRow) {
+      return exchangeRow.id;
+    }
     return null;
   }
   const row = db

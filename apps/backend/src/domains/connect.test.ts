@@ -2565,9 +2565,12 @@ describe("TS Connect local session service", () => {
       CREATE TABLE assets (
         id TEXT PRIMARY KEY NOT NULL,
         display_code TEXT,
-        instrument_symbol TEXT
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
       );
-      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-shop', 'SHOP', 'SHOP');
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic) VALUES
+        ('asset-shop-us', 'SHOP', 'SHOP', 'XNYS'),
+        ('asset-shop', 'SHOP', 'SHOP', 'XTSE');
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -2658,6 +2661,103 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("keeps suffixed broker symbols gated when only another exchange is local", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic)
+      VALUES ('asset-shop-us', 'SHOP', 'SHOP', 'XNYS');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 75,
+              amount: 150,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "SHOP.TO" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: () => {
+          throw new Error("should not attach broker activity to a different exchange");
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing crypto broker assets by base symbol", async () => {
     const db = new Database(":memory:");
     db.exec(`
@@ -2679,7 +2779,9 @@ describe("TS Connect local session service", () => {
         display_code TEXT,
         instrument_symbol TEXT
       );
-      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-btc', 'BTC', 'BTC');
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES
+        ('asset-x', 'X', 'X'),
+        ('asset-x-ai', 'X-AI', 'X-AI');
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -2702,7 +2804,7 @@ describe("TS Connect local session service", () => {
               amount: 10000,
               currency: { code: "USD" },
               provider_type: "SNAPTRADE",
-              symbol: { symbol: "BTC-USD", raw_symbol: "", type: { code: "CRYPTOCURRENCY" } },
+              symbol: { symbol: "X-AI-USD", raw_symbol: "", type: { code: "CRYPTOCURRENCY" } },
             },
           ],
         });
@@ -2759,7 +2861,7 @@ describe("TS Connect local session service", () => {
       expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
         expect.objectContaining({
           activityType: "BUY",
-          asset: { id: "asset-btc", symbol: "BTC" },
+          asset: { id: "asset-x-ai", symbol: "X-AI" },
           quantity: "0.1",
           unitPrice: "100000",
         }),

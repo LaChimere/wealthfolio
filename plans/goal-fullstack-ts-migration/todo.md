@@ -4371,6 +4371,15 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes blank/whitespace
   broker `raw_symbol` values falling through to symbol-pair or Yahoo-suffix
   normalization instead of failing the account sync.
+- `pr5-connect-broker-symbol-review-fixes`: GPT xhigh review found exchange and
+  hyphenated-crypto symbol gaps; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "crypto broker|Yahoo suffix|suffixed broker|asset-backed broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes using Yahoo suffix
+  MICs to choose the matching local listed asset, keeping suffixed broker
+  symbols gated when only another exchange is local, and parsing crypto pairs
+  from the last hyphen so symbols like `X-AI-USD` map to `X-AI`.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
