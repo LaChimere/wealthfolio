@@ -4226,6 +4226,14 @@ contract:
   includes store-downloaded ZIPs being signature-checked and fully
   extracted/validated before writing to staging, so invalid packages do not
   leave staged files behind.
+- `pr5-addon-query-cache-facade`: verification passed:
+  `bun run --cwd apps/frontend test --run src/addons/addons-runtime-context.test.ts src/addons/type-bridge.test.ts`,
+  `bun run --cwd apps/frontend type-check`,
+  `bun run --cwd packages/addon-sdk type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes add-on `getClient()`
+  returning a limited invalidate/refetch facade instead of the raw app
+  QueryClient, plus SDK source comments matching the restricted runtime
+  contract.
 - `pr5-e2e-bun-backend-port-alignment`: verification passed:
   `node --check scripts/run-e2e.mjs`,
   `bash -n scripts/wait-for-both-servers-to-be-ready.sh`,
