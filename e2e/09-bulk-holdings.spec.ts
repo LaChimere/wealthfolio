@@ -163,7 +163,8 @@ test.describe("Bulk Holdings (Add Existing Holdings)", () => {
     await page.waitForTimeout(1000);
 
     // Filter by account
-    const accountFilter = page.getByRole("button", { name: /Account/i });
+    const accountFilter = page.getByRole("combobox").filter({ hasText: /All Accounts|Account/i });
+    await expect(accountFilter).toBeVisible({ timeout: 10000 });
     await accountFilter.click();
     await page.waitForTimeout(300);
     const filterOption = page.getByRole("option", { name: ACCOUNT_NAME }).first();
