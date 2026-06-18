@@ -692,10 +692,10 @@ export interface ToastAPI {
  */
 export interface QueryAPI {
   /**
-   * Get the shared QueryClient instance from the main application
-   * @returns The shared QueryClient instance
+   * Get a limited query cache facade from the main application
+   * @returns Cache helper facade with invalidate/refetch methods
    */
-  getClient(): unknown; // QueryClient from @tanstack/react-query
+  getClient(): unknown;
 
   /**
    * Invalidate queries by key
