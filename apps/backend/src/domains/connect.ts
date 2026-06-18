@@ -1504,12 +1504,15 @@ async function syncEmptyTransactionActivityPages(
         if (!hasBrokerActivityMappableId(activity)) {
           continue;
         }
-        const createInput = brokerCashActivityCreateInput(
-          activity,
-          account.id,
-          account.currency,
-          baseCurrency,
-        );
+        const createInput =
+          brokerCashActivityCreateInput(activity, account.id, account.currency, baseCurrency) ??
+          brokerExistingAssetActivityCreateInput(
+            db,
+            activity,
+            account.id,
+            account.currency,
+            baseCurrency,
+          );
         if (createInput === null) {
           hasUnsupportedMappableActivity = true;
         } else {
@@ -1755,6 +1758,115 @@ function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
   }
   const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
   return isRecord(optionSymbol) && optionalString(optionSymbol.ticker) !== null;
+}
+
+function brokerExistingAssetActivityCreateInput(
+  db: Database,
+  activity: unknown,
+  accountId: string,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+): Record<string, unknown> | null {
+  if (!isRecord(activity)) {
+    return null;
+  }
+  const sourceRecordId = optionalString(activity.id);
+  const rawActivityType = optionalString(activity.activity_type ?? activity.activityType);
+  const symbol = brokerActivitySymbol(activity);
+  if (!sourceRecordId || !rawActivityType || !symbol) {
+    return null;
+  }
+  const activityType = rawActivityType.toUpperCase();
+  if (BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType)) {
+    return null;
+  }
+  const assetId = findExistingBrokerActivityAssetId(db, symbol);
+  if (assetId === null) {
+    return null;
+  }
+  const currency =
+    brokerActivityCurrency(activity) ??
+    optionalString(accountCurrency) ??
+    optionalString(baseCurrency) ??
+    "USD";
+  const sourceSystem =
+    optionalString(
+      activity.source_system ??
+        activity.sourceSystem ??
+        activity.provider_type ??
+        activity.providerType,
+    ) ?? "SNAPTRADE";
+  const needsReview = brokerActivityNeedsReview(activity);
+  return {
+    accountId,
+    activityType,
+    subtype: optionalString(
+      activity.subtype ??
+        activity.option_type ??
+        activity.optionType ??
+        activity.raw_type ??
+        activity.rawType,
+    ),
+    activityDate:
+      optionalString(
+        activity.trade_date ??
+          activity.tradeDate ??
+          activity.settlement_date ??
+          activity.settlementDate,
+      ) ?? new Date().toISOString(),
+    quantity: brokerActivityAbsoluteNumberString(activity.units),
+    unitPrice: brokerActivityAbsoluteNumberString(activity.price),
+    amount: brokerActivityAbsoluteNumberString(activity.amount),
+    fee: brokerActivityAbsoluteNumberString(activity.fee),
+    currency,
+    asset: { id: assetId, symbol },
+    comment: optionalString(
+      activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
+    ),
+    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    sourceSystem,
+    sourceRecordId,
+    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
+    status: needsReview ? "DRAFT" : "POSTED",
+    needsReview,
+    metadata: brokerActivityMetadata(activity),
+  };
+}
+
+function brokerActivitySymbol(activity: Record<string, unknown>): string | null {
+  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  if (isRecord(optionSymbol)) {
+    const ticker = optionalString(optionSymbol.ticker);
+    if (ticker) {
+      return ticker.replace(/\s+/g, "").toUpperCase();
+    }
+  }
+  const symbol = activity.symbol;
+  if (!isRecord(symbol)) {
+    return null;
+  }
+  return (
+    optionalString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)?.toUpperCase() ?? null
+  );
+}
+
+function findExistingBrokerActivityAssetId(db: Database, symbol: string): string | null {
+  if (!sqliteTableExists(db, "assets")) {
+    return null;
+  }
+  const row = db
+    .query<{ id: string }, [string, string, string, string]>(
+      `
+        SELECT id
+        FROM assets
+        WHERE upper(id) = ? OR upper(display_code) = ? OR upper(instrument_symbol) = ?
+        ORDER BY CASE WHEN upper(id) = ? THEN 0 ELSE 1 END
+        LIMIT 1
+      `,
+    )
+    .get(symbol, symbol, symbol, symbol);
+  return row?.id ?? null;
 }
 
 function brokerActivityCurrency(activity: Record<string, unknown>): string | null {
