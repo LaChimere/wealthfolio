@@ -4331,6 +4331,14 @@ contract:
   payloads, explicit broker review flags, Rust-compatible review
   confidence/reason thresholds, source-record fallbacks, and skipping Rust-era
   broker activities matched by source identity before bulk mutation.
+- `pr5-connect-broker-missing-type-unknown`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "feature-gated|aliases|mapper gate|missing broker activity types"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker activities
+  without a `type` importing as `UNKNOWN` review drafts when no symbol is
+  present, matching Rust's default activity type, while unsupported
+  symbol-bearing broker activities remain mapper-gated.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

@@ -1680,10 +1680,7 @@ function brokerCashActivityCreateInput(
   if (!activityId) {
     return null;
   }
-  const rawActivityType = brokerActivityType(activity);
-  if (!rawActivityType) {
-    return null;
-  }
+  const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
   const isNeverAsset = BROKER_NEVER_ASSET_ACTIVITY_TYPES.has(activityType);
