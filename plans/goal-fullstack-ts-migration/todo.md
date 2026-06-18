@@ -4411,6 +4411,14 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes broker `DIVIDEND`
   activities mapping to existing local assets through the same bounded
   existing-asset broker path.
+- `pr5-connect-broker-income-review-fixes`: GPT xhigh review found income mapper
+  edge cases; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "symbol-less dividend|asset-backed interest|dividend broker|pure cash|blank broker symbols"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes blank raw symbols
+  falling through to later broker symbol candidates and symbol-less broker
+  `DIVIDEND` activities importing as cash income instead of failing sync.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

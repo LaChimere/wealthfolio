@@ -1669,6 +1669,7 @@ const BROKER_NEVER_ASSET_ACTIVITY_TYPES = new Set([
 
 const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
   ...BROKER_NEVER_ASSET_ACTIVITY_TYPES,
+  "DIVIDEND",
   "INTEREST",
   "TRANSFER_IN",
   "TRANSFER_OUT",
@@ -1676,6 +1677,7 @@ const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
 ]);
 
 const BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES = new Set([
+  "DIVIDEND",
   "INTEREST",
   "TRANSFER_IN",
   "TRANSFER_OUT",
@@ -1764,7 +1766,11 @@ function brokerCashActivityCreateInput(
 function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
   const symbol = activity.symbol;
   if (isRecord(symbol)) {
-    if (optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)) {
+    if (
+      optionalNonEmptyString(symbol.raw_symbol) ||
+      optionalNonEmptyString(symbol.rawSymbol) ||
+      optionalNonEmptyString(symbol.symbol)
+    ) {
       return true;
     }
   }
