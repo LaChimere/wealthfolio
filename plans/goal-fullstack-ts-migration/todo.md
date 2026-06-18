@@ -4234,12 +4234,29 @@ contract:
   returning a limited invalidate/refetch facade instead of the raw app
   QueryClient, plus SDK source comments matching the restricted runtime
   contract.
+- `pr5-addon-query-cache-facade-types`: verification passed:
+  `bun run --cwd packages/addon-sdk type-check`,
+  `bun run --cwd apps/frontend type-check`,
+  `bun run --cwd apps/frontend test --run src/addons/addons-runtime-context.test.ts src/addons/type-bridge.test.ts`,
+  `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
+  includes the SDK exporting a typed `QueryCacheFacade` and the frontend
+  type-bridge matching the limited query cache runtime contract.
 - `pr5-e2e-bun-backend-port-alignment`: verification passed:
   `node --check scripts/run-e2e.mjs`,
   `bash -n scripts/wait-for-both-servers-to-be-ready.sh`,
   `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
   includes E2E waiting for the Bun web backend default port `8080`, matching
   `dev:web`.
+- `pr5-asset-provider-hints-refresh`: verification passed:
+  `bun run --cwd apps/frontend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes replacing stale
+  CoinGecko/TwelveData asset override placeholders with examples for the current
+  built-in providers exposed by the TS backend.
+- `pr5-backend-timeout-default-guard`: verification passed:
+  `bun test apps/backend/src/config.test.ts --test-name-pattern "timeout"`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes pinning the TS
+  backend's default request timeout to the Rust-compatible 300 seconds.
 - `pr5-review-addon-dbpath-requestid-fixes`: GPT xhigh review found guard gaps;
   verification passed:
   `bun test apps/backend/src/domains/addons.test.ts --test-name-pattern "staging|manifest id"`,
