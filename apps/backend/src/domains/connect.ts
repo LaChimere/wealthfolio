@@ -20,7 +20,8 @@ export interface ConnectDeviceSyncReconcileReadyRequest {
 
 export interface LocalConnectServiceDependencies {
   db: Database;
-  activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules">;
+  activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules"> &
+    Partial<Pick<ActivityService, "bulkMutateActivities">>;
   accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">;
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
@@ -306,6 +307,7 @@ export function createLocalConnectService({
     async syncBrokerActivities() {
       return syncBrokerActivitiesForHoldingsOnly(
         accountService,
+        activityService,
         db,
         restoreSession,
         env,
@@ -1376,7 +1378,8 @@ async function syncBrokerAccountsToLocal(
 }
 
 function syncBrokerActivitiesForHoldingsOnly(
-  accountService: Pick<AccountService, "getAllAccounts">,
+  accountService: Pick<AccountService, "getAllAccounts" | "getBaseCurrency">,
+  activityService: LocalConnectServiceDependencies["activityService"],
   db?: Database,
   restoreSession?: () => Promise<{ accessToken: string; refreshToken: string }>,
   env?: NodeJS.ProcessEnv,
@@ -1409,10 +1412,12 @@ function syncBrokerActivitiesForHoldingsOnly(
   if (transactionAccounts.length > 0) {
     return syncEmptyTransactionActivityPages(
       db!,
+      activityService,
       restoreSession!,
       env!,
       fetchImpl!,
       transactionAccounts,
+      accountService.getBaseCurrency() ?? "USD",
     );
   }
   return {
@@ -1427,10 +1432,12 @@ function syncBrokerActivitiesForHoldingsOnly(
 
 async function syncEmptyTransactionActivityPages(
   db: Database,
+  activityService: LocalConnectServiceDependencies["activityService"],
   restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accounts: ReturnType<AccountService["getAllAccounts"]>,
+  baseCurrency: string,
 ): Promise<{
   accountsSynced: number;
   activitiesUpserted: number;
@@ -1491,10 +1498,47 @@ async function syncEmptyTransactionActivityPages(
       if (received === 0) {
         break;
       }
-      if (data.some(hasBrokerActivityMappableId)) {
+      const cashActivityCreates: Record<string, unknown>[] = [];
+      let hasUnsupportedMappableActivity = false;
+      for (const activity of data) {
+        if (!hasBrokerActivityMappableId(activity)) {
+          continue;
+        }
+        const createInput = brokerCashActivityCreateInput(
+          activity,
+          account.id,
+          account.currency,
+          baseCurrency,
+        );
+        if (createInput === null) {
+          hasUnsupportedMappableActivity = true;
+        } else {
+          cashActivityCreates.push(createInput);
+        }
+      }
+      if (hasUnsupportedMappableActivity) {
         const message = "Broker activity mapping is not yet available in the TS backend runtime";
         upsertBrokerSyncFailure(db, account.id, message);
         throw new ConnectNotImplementedError(message);
+      }
+      if (cashActivityCreates.length > 0) {
+        if (!activityService.bulkMutateActivities) {
+          throw connectSyncDisabled();
+        }
+        const result = await activityService.bulkMutateActivities({
+          creates: cashActivityCreates,
+          updates: [],
+          deleteIds: [],
+        });
+        const errors = bulkMutationErrors(result);
+        if (errors.length > 0) {
+          const message = errors[0]?.message ?? "Broker activity import failed";
+          upsertBrokerSyncFailure(db, account.id, message);
+          summary.accountsFailed += 1;
+          accountFailed = true;
+          break;
+        }
+        summary.activitiesUpserted += bulkMutationCreatedCount(result);
       }
       const firstId = brokerActivityFirstId(data);
       if (firstId !== null) {
@@ -1578,6 +1622,171 @@ function brokerActivityFirstId(data: unknown[]): string | null {
     return null;
   }
   return first.id;
+}
+
+const BROKER_NEVER_ASSET_ACTIVITY_TYPES = new Set([
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "FEE",
+  "TAX",
+  "CREDIT",
+]);
+
+const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
+  ...BROKER_NEVER_ASSET_ACTIVITY_TYPES,
+  "INTEREST",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+]);
+
+function brokerCashActivityCreateInput(
+  activity: unknown,
+  accountId: string,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+): Record<string, unknown> | null {
+  if (!isRecord(activity)) {
+    return null;
+  }
+  const sourceRecordId = optionalString(activity.id);
+  if (!sourceRecordId) {
+    return null;
+  }
+  const activityType = (
+    optionalString(activity.activity_type ?? activity.activityType) ?? "UNKNOWN"
+  ).toUpperCase();
+  const isNeverAsset = BROKER_NEVER_ASSET_ACTIVITY_TYPES.has(activityType);
+  if (
+    !isNeverAsset &&
+    (!BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) || brokerActivityHasSymbol(activity))
+  ) {
+    return null;
+  }
+
+  const currency =
+    brokerActivityCurrency(activity) ??
+    optionalString(accountCurrency) ??
+    optionalString(baseCurrency) ??
+    "USD";
+  const needsReview = brokerActivityNeedsReview(activity);
+  return {
+    accountId,
+    activityType,
+    subtype: optionalString(
+      activity.subtype ??
+        activity.option_type ??
+        activity.optionType ??
+        activity.raw_type ??
+        activity.rawType,
+    ),
+    activityDate:
+      optionalString(
+        activity.trade_date ??
+          activity.tradeDate ??
+          activity.settlement_date ??
+          activity.settlementDate,
+      ) ?? new Date().toISOString(),
+    amount: brokerActivityAbsoluteNumberString(activity.amount),
+    fee: brokerActivityAbsoluteNumberString(activity.fee),
+    currency,
+    comment: optionalString(
+      activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
+    ),
+    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    sourceSystem:
+      optionalString(
+        activity.source_system ??
+          activity.sourceSystem ??
+          activity.provider_type ??
+          activity.providerType,
+      ) ?? "SNAPTRADE",
+    sourceRecordId,
+    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    status: needsReview ? "DRAFT" : "POSTED",
+    needsReview,
+    metadata: brokerActivityMetadata(activity),
+    allowMissingAsset: true,
+  };
+}
+
+function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
+  const symbol = activity.symbol;
+  if (isRecord(symbol)) {
+    if (optionalString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)) {
+      return true;
+    }
+  }
+  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  return isRecord(optionSymbol) && optionalString(optionSymbol.ticker) !== null;
+}
+
+function brokerActivityCurrency(activity: Record<string, unknown>): string | null {
+  const currency = activity.currency;
+  if (isRecord(currency)) {
+    return optionalString(currency.code);
+  }
+  return optionalString(currency);
+}
+
+function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
+  const activityType = optionalString(
+    activity.activity_type ?? activity.activityType,
+  )?.toUpperCase();
+  if (!activityType || activityType === "UNKNOWN") {
+    return true;
+  }
+  const metadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  if (!isRecord(metadata)) {
+    return false;
+  }
+  const confidence = optionalNumber(metadata.confidence);
+  if (confidence !== null && confidence < 0.8) {
+    return true;
+  }
+  const reasons = metadata.reasons;
+  return Array.isArray(reasons) && reasons.some((reason) => brokerActivityWarningReason(reason));
+}
+
+function brokerActivityWarningReason(reason: unknown): boolean {
+  const normalized = optionalString(reason)?.toLowerCase() ?? "";
+  return normalized.includes("unknown") || normalized.includes("ambiguous");
+}
+
+function brokerActivityAbsoluteNumberString(value: unknown): string | null {
+  const number = optionalNumber(value);
+  return number === null ? null : String(Math.abs(number));
+}
+
+function brokerActivityNumberString(value: unknown): string | null {
+  const number = optionalNumber(value);
+  return number === null ? null : String(number);
+}
+
+function brokerActivityMetadata(activity: Record<string, unknown>): Record<string, unknown> {
+  return {
+    source: "broker",
+    provider_type: optionalString(activity.provider_type ?? activity.providerType),
+    external_reference_id: optionalString(
+      activity.external_reference_id ?? activity.externalReferenceId,
+    ),
+    raw_type: optionalString(activity.raw_type ?? activity.rawType),
+    mapping_metadata: isRecord(activity.mapping_metadata ?? activity.mappingMetadata)
+      ? (activity.mapping_metadata ?? activity.mappingMetadata)
+      : undefined,
+  };
+}
+
+function bulkMutationErrors(result: unknown): Array<{ message: string }> {
+  return isRecord(result) && Array.isArray(result.errors)
+    ? result.errors.filter(
+        (error): error is { message: string } =>
+          isRecord(error) && typeof error.message === "string",
+      )
+    : [];
+}
+
+function bulkMutationCreatedCount(result: unknown): number {
+  return isRecord(result) && Array.isArray(result.created) ? result.created.length : 0;
 }
 
 function brokerActivitiesPath(
