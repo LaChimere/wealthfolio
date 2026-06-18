@@ -1,4 +1,7 @@
 import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import type {
@@ -4237,6 +4240,182 @@ describe("TS market data domain", () => {
         ),
       ).toHaveLength(2);
     } finally {
+      db.close();
+    }
+  });
+
+  test("uses E2E fixture catalog for Yahoo search, resolve, and sync without network", async () => {
+    const db = createMarketDataDb();
+    const fixtureDir = mkdtempSync(join(tmpdir(), "wealthfolio-e2e-fixture-"));
+    const previousE2E = process.env.WEALTHFOLIO_E2E;
+    const previousFixtureDir = process.env.WEALTHFOLIO_FIXTURE_DIR;
+    const previousAsOf = process.env.WEALTHFOLIO_FIXTURE_AS_OF;
+    process.env.WEALTHFOLIO_E2E = "1";
+    process.env.WEALTHFOLIO_FIXTURE_DIR = fixtureDir;
+    process.env.WEALTHFOLIO_FIXTURE_AS_OF = "2026-05-12";
+    writeFileSync(
+      join(fixtureDir, "instruments.json"),
+      JSON.stringify({
+        defaultAsOf: "2026-05-12",
+        instruments: [
+          {
+            symbol: "APC.DE",
+            aliases: ["APC"],
+            name: "Apple XETRA",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "EUR",
+            exchange: "GER",
+            exchangeMic: "XETR",
+            exchangeName: "XETRA",
+            basePrice: 180,
+            seed: 303,
+          },
+          {
+            symbol: "APC",
+            aliases: [],
+            name: "APC US",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "USD",
+            exchange: "NMS",
+            exchangeMic: "XNAS",
+            exchangeName: "NASDAQ",
+            basePrice: 30,
+            seed: 304,
+          },
+          {
+            symbol: "WSLV.MI",
+            aliases: ["WSLV"],
+            name: "WisdomTree Physical Silver",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "EUR",
+            exchange: "MIL",
+            exchangeMic: "XMIL",
+            exchangeName: "Borsa Italiana",
+            basePrice: 28,
+            seed: 301,
+          },
+          {
+            symbol: "PHYS",
+            aliases: [],
+            name: "Sprott Physical Gold",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "USD",
+            exchange: "ASE",
+            exchangeMic: "XASE",
+            exchangeName: "NYSE American",
+            basePrice: 18,
+            seed: 302,
+          },
+          {
+            symbol: "USDCAD=X",
+            aliases: ["USD/CAD", "USDCAD"],
+            name: "USD/CAD",
+            provider: "YAHOO",
+            assetType: "FX",
+            currency: "CAD",
+            basePrice: 1.36,
+            seed: 201,
+          },
+        ],
+      }),
+    );
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (async () => {
+        throw new Error("fixture mode should not call network");
+      }) as typeof fetch,
+    });
+
+    try {
+      await expect(service.searchSymbol?.("USDCAD")).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "USDCAD=X",
+          shortName: "USD/CAD",
+          currency: "CAD",
+          dataSource: "YAHOO",
+        }),
+      ]);
+      await expect(service.searchSymbol?.("PHYS")).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "PHYS",
+          exchangeMic: "XASE",
+        }),
+        expect.objectContaining({
+          symbol: "WSLV.MI",
+          exchangeMic: "XMIL",
+        }),
+      ]);
+      await expect(service.searchSymbol?.("APC")).resolves.toEqual([
+        expect.objectContaining({ symbol: "APC", exchangeMic: "XNAS" }),
+        expect.objectContaining({ symbol: "APC.DE", exchangeMic: "XETR" }),
+      ]);
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "APC",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+        }),
+      ).resolves.toMatchObject({
+        currency: "USD",
+        resolvedProviderId: "YAHOO",
+      });
+      insertAsset(db, {
+        id: "apc-us",
+        display_code: "APC",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "APC",
+        instrument_exchange_mic: "XNAS",
+        instrument_key: "EQUITY:APC@XNAS",
+      });
+      insertAsset(db, {
+        id: "fx-usd-cad",
+        display_code: "USD/CAD",
+        quote_ccy: "CAD",
+        instrument_type: "FX",
+        instrument_symbol: "USD",
+        instrument_key: "FX:USD/CAD",
+      });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "USD",
+          instrumentType: "FX",
+          quoteCcy: "CAD",
+        }),
+      ).resolves.toMatchObject({
+        currency: "CAD",
+        resolvedProviderId: "YAHOO",
+      });
+      await service.syncMarketData?.({ type: "incremental", asset_ids: ["fx-usd-cad"] });
+      await service.syncMarketData?.({ type: "incremental", asset_ids: ["apc-us"] });
+      expect(readQuoteByDay(db, "apc-us", "2026-05-12")).toMatchObject({
+        close: "30.15",
+        currency: "USD",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()?.count,
+      ).toBeGreaterThan(0);
+    } finally {
+      if (previousE2E === undefined) {
+        delete process.env.WEALTHFOLIO_E2E;
+      } else {
+        process.env.WEALTHFOLIO_E2E = previousE2E;
+      }
+      if (previousFixtureDir === undefined) {
+        delete process.env.WEALTHFOLIO_FIXTURE_DIR;
+      } else {
+        process.env.WEALTHFOLIO_FIXTURE_DIR = previousFixtureDir;
+      }
+      if (previousAsOf === undefined) {
+        delete process.env.WEALTHFOLIO_FIXTURE_AS_OF;
+      } else {
+        process.env.WEALTHFOLIO_FIXTURE_AS_OF = previousAsOf;
+      }
+      rmSync(fixtureDir, { recursive: true, force: true });
       db.close();
     }
   });
