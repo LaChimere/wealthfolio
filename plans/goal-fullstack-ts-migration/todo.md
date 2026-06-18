@@ -4419,6 +4419,14 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes blank raw symbols
   falling through to later broker symbol candidates and symbol-less broker
   `DIVIDEND` activities importing as cash income instead of failing sync.
+- `pr5-connect-broker-blank-raw-interest-coverage`: Claude xhigh review called
+  out the blank-raw/populated-symbol income case; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "blank raw|symbol-less dividend|asset-backed interest"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker `INTEREST`
+  activities with blank `raw_symbol` and populated crypto pair symbols retaining
+  asset-backed mapping.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
