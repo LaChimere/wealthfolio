@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
+import type { ExchangeMetadata } from "./assets";
 import { localOverwriteRiskSummary } from "./device-sync-overwrite-risk";
 import { normalizeSyncDatetime } from "./device-sync-time";
 import type { SecretService } from "./secrets";
@@ -23,6 +24,7 @@ export interface LocalConnectServiceDependencies {
   activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules"> &
     Partial<Pick<ActivityService, "bulkMutateActivities" | "checkExistingDuplicates">>;
   accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">;
+  exchangeMetadata?: Pick<ExchangeMetadata, "yahooSuffixToMic">;
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
@@ -185,6 +187,7 @@ export function createLocalConnectService({
   db,
   activityService,
   accountService,
+  exchangeMetadata,
   secretService,
   env = process.env,
   fetch: fetchImpl = fetch,
@@ -312,6 +315,7 @@ export function createLocalConnectService({
         restoreSession,
         env,
         fetchImpl,
+        exchangeMetadata,
       );
     },
     getSyncedAccounts() {
@@ -1384,6 +1388,7 @@ function syncBrokerActivitiesForHoldingsOnly(
   restoreSession?: () => Promise<{ accessToken: string; refreshToken: string }>,
   env?: NodeJS.ProcessEnv,
   fetchImpl?: typeof fetch,
+  exchangeMetadata?: Pick<ExchangeMetadata, "yahooSuffixToMic">,
 ):
   | Promise<{
       accountsSynced: number;
@@ -1418,6 +1423,7 @@ function syncBrokerActivitiesForHoldingsOnly(
       fetchImpl!,
       transactionAccounts,
       accountService.getBaseCurrency() ?? "USD",
+      exchangeMetadata,
     );
   }
   return {
@@ -1438,6 +1444,7 @@ async function syncEmptyTransactionActivityPages(
   fetchImpl: typeof fetch,
   accounts: ReturnType<AccountService["getAllAccounts"]>,
   baseCurrency: string,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
 ): Promise<{
   accountsSynced: number;
   activitiesUpserted: number;
@@ -1512,6 +1519,7 @@ async function syncEmptyTransactionActivityPages(
             account.id,
             account.currency,
             baseCurrency,
+            exchangeMetadata,
           );
         if (createInput === null) {
           hasUnsupportedMappableActivity = true;
@@ -1764,13 +1772,14 @@ function brokerExistingAssetActivityCreateInput(
   accountId: string,
   accountCurrency: string | null,
   baseCurrency: string | null,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
 ): Record<string, unknown> | null {
   if (!isRecord(activity)) {
     return null;
   }
   const activityId = optionalString(activity.id);
   const rawActivityType = brokerActivityType(activity);
-  const symbol = brokerActivitySymbol(activity);
+  const symbol = brokerActivitySymbol(activity, exchangeMetadata);
   if (!activityId || !rawActivityType || !symbol) {
     return null;
   }
@@ -1833,7 +1842,10 @@ function brokerExistingAssetActivityCreateInput(
   };
 }
 
-function brokerActivitySymbol(activity: Record<string, unknown>): string | null {
+function brokerActivitySymbol(
+  activity: Record<string, unknown>,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+): string | null {
   const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
   if (isRecord(optionSymbol)) {
     const ticker = optionalString(optionSymbol.ticker);
@@ -1845,9 +1857,48 @@ function brokerActivitySymbol(activity: Record<string, unknown>): string | null 
   if (!isRecord(symbol)) {
     return null;
   }
-  return (
-    optionalString(symbol.raw_symbol ?? symbol.rawSymbol ?? symbol.symbol)?.toUpperCase() ?? null
+  const symbolType = symbol.type ?? symbol.symbol_type ?? symbol.symbolType;
+  const symbolTypeCode = isRecord(symbolType)
+    ? optionalString(symbolType.code)?.toUpperCase()
+    : null;
+  if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
+    const cryptoSymbol =
+      optionalString(symbol.raw_symbol ?? symbol.rawSymbol) ??
+      optionalString(symbol.symbol)?.split("-")[0] ??
+      null;
+    return cryptoSymbol?.toUpperCase() ?? null;
+  }
+  const rawSymbol = optionalString(symbol.raw_symbol ?? symbol.rawSymbol);
+  if (rawSymbol) {
+    return rawSymbol.toUpperCase();
+  }
+  const displaySymbol = optionalString(symbol.symbol);
+  return displaySymbol
+    ? stripKnownYahooSuffix(displaySymbol, exchangeMetadata).toUpperCase()
+    : null;
+}
+
+function stripKnownYahooSuffix(
+  symbol: string,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+): string {
+  const trimmed = symbol.trim();
+  if (!exchangeMetadata) {
+    return trimmed;
+  }
+  const suffixes = [...exchangeMetadata.yahooSuffixToMic.keys()].sort(
+    (left, right) => right.length - left.length,
   );
+  for (const suffix of suffixes) {
+    const dottedSuffix = `.${suffix}`;
+    if (
+      trimmed.length >= dottedSuffix.length &&
+      trimmed.slice(trimmed.length - dottedSuffix.length).toUpperCase() === dottedSuffix
+    ) {
+      return trimmed.slice(0, -dottedSuffix.length);
+    }
+  }
+  return trimmed;
 }
 
 function findExistingBrokerActivityAssetId(db: Database, symbol: string): string | null {

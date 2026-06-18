@@ -454,6 +454,7 @@ function createServicesFromDatabase(
     db,
     activityService,
     accountService,
+    exchangeMetadata,
     secretService,
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,

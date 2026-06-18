@@ -4348,6 +4348,14 @@ contract:
   source group/external references, institution, symbol identity, and option
   leg/ticker/underlying metadata while preserving the existing broker source
   marker.
+- `pr5-connect-broker-yahoo-suffix-symbols`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "Yahoo suffix|asset-backed broker|option broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes threading exchange
+  metadata into Connect broker sync and stripping known Yahoo exchange suffixes
+  before existing-asset lookup, while preserving option OCC and crypto
+  normalization paths.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
