@@ -273,14 +273,17 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
       const zipData = await downloadAddonFromStore(storeContext, addonId);
       validateAddonZipDataForStaging(zipData);
       const extracted = extractAddonZip(zipData);
+      ensureAddonManifestMatchesRequest(extracted.metadata, addonId);
       saveAddonToStaging(appDataDir, addonId, zipData);
       return extracted;
     },
 
     async installAddonFromStaging(request) {
       const zipPath = getStagingZipPath(appDataDir, request.addonId);
+      const zipData = readFileSync(zipPath);
+      ensureAddonManifestMatchesRequest(extractAddonZip(zipData).metadata, request.addonId);
       const manifest = installAddonZip(appDataDir, {
-        zipData: readFileSync(zipPath),
+        zipData,
         enableAfterInstall: request.enableAfterInstall,
       });
       rmSync(zipPath, { force: true });
@@ -554,6 +557,7 @@ async function updateAddonFromStore(
   const wasEnabled = readManifestIfExists(addonDir)?.enabled ?? false;
   const zipData = await downloadAddonFromStore(context, addonId);
   const extracted = extractAddonZip(zipData);
+  ensureAddonManifestMatchesRequest(extracted.metadata, addonId);
 
   if (existsSync(addonDir)) {
     rmSync(addonDir, { recursive: true, force: false });
@@ -601,6 +605,14 @@ async function downloadAddonFromStore(
   }
 
   return new Uint8Array(await response.arrayBuffer());
+}
+
+function ensureAddonManifestMatchesRequest(manifest: AddonManifestRecord, addonId: string): void {
+  if (manifest.id !== addonId) {
+    throw new Error(
+      `Downloaded addon id '${manifest.id}' does not match requested addon '${addonId}'`,
+    );
+  }
 }
 
 async function downloadAddonPackage(

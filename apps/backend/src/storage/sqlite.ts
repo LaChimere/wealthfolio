@@ -1,5 +1,13 @@
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 
 export const DIESEL_SCHEMA_MIGRATIONS_TABLE = "__diesel_schema_migrations";
@@ -36,7 +44,11 @@ export function isSqliteDbDirectoryPath(value: string): boolean {
   if (trimmed.endsWith("/") || trimmed.endsWith("\\")) {
     return true;
   }
-  return path.extname(path.basename(trimmed)) === "";
+  try {
+    return statSync(trimmed).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export function resolveMigrationsDir(repositoryRoot: string): string {

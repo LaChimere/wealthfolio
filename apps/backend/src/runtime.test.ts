@@ -47,12 +47,14 @@ function connectSubscriptionPlan(id: string): Record<string, unknown> {
 
 describe("TS backend runtime composition", () => {
   test("resolves runtime data and migration roots from explicit options and env", () => {
+    const existingDbDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-db-dir-"));
     expect(resolveBackendAppDataDir({}, "/tmp/app-data")).toBe("/tmp/app-data");
     expect(resolveBackendAppDataDir({ WF_APP_DATA_DIR: "/tmp/env-data" })).toBe("/tmp/env-data");
     expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db/app.db" })).toBe(
       "/tmp/custom-db",
     );
-    expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db" })).toBe("/tmp/custom-db");
+    expect(resolveBackendAppDataDir({ WF_DB_PATH: "/tmp/custom-db" })).toBe("/tmp");
+    expect(resolveBackendAppDataDir({ WF_DB_PATH: existingDbDir })).toBe(existingDbDir);
     expect(resolveBackendMigrationsDir({}, { repositoryRoot })).toBe(
       path.join(repositoryRoot, "crates/storage-sqlite/migrations"),
     );

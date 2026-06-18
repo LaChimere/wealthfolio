@@ -613,6 +613,72 @@ describe("TS addon domain", () => {
     );
   });
 
+  test("rejects staged installs whose manifest id does not match the staged id", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const stagingDir = path.join(appDataDir, "addons", "staging");
+    mkdirSync(stagingDir, { recursive: true });
+    writeFileSync(
+      path.join(stagingDir, "requested-addon.zip"),
+      addonZip({
+        "manifest.json": JSON.stringify({
+          id: "other-addon",
+          name: "Other Addon",
+          version: "1.0.0",
+          main: "main.js",
+        }),
+        "main.js": "export default {};",
+      }),
+    );
+    const service = createLocalAddonService({ appDataDir });
+
+    await expect(
+      service.installAddonFromStaging({ addonId: "requested-addon", enableAfterInstall: true }),
+    ).rejects.toThrow(
+      "Downloaded addon id 'other-addon' does not match requested addon 'requested-addon'",
+    );
+    expect(existsSync(path.join(appDataDir, "addons", "other-addon"))).toBe(false);
+  });
+
+  test("rejects store updates whose manifest id does not match the requested add-on", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "requested-addon", {
+      manifest: {
+        id: "requested-addon",
+        name: "Requested Addon",
+        version: "1.0.0",
+        main: "main.js",
+        enabled: true,
+      },
+      files: {
+        "main.js": "export const current = true;",
+      },
+    });
+    const service = createLocalAddonService({
+      appDataDir,
+      storeBaseUrl: "https://store.test/api/addons",
+      fetchStore: async () =>
+        new Response(
+          addonZip({
+            "manifest.json": JSON.stringify({
+              id: "other-addon",
+              name: "Other Addon",
+              version: "2.0.0",
+              main: "main.js",
+            }),
+            "main.js": "export const other = true;",
+          }),
+        ),
+    });
+
+    await expect(service.updateAddonFromStore("requested-addon")).rejects.toThrow(
+      "Downloaded addon id 'other-addon' does not match requested addon 'requested-addon'",
+    );
+    expect(
+      readFileSync(path.join(appDataDir, "addons", "requested-addon", "main.js"), "utf8"),
+    ).toBe("export const current = true;");
+    expect(existsSync(path.join(appDataDir, "addons", "other-addon"))).toBe(false);
+  });
+
   test("maps store download and staging validation failures", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
     const expectedErrors = new Map([
@@ -657,6 +723,29 @@ describe("TS addon domain", () => {
       }).downloadAddonToStaging("missing-manifest"),
     ).rejects.toThrow("ZIP addon must contain a manifest.json file with addon metadata");
     expect(existsSync(path.join(appDataDir, "addons", "staging", "missing-manifest.zip"))).toBe(
+      false,
+    );
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () =>
+          new Response(
+            addonZip({
+              "manifest.json": JSON.stringify({
+                id: "other-addon",
+                name: "Other Addon",
+                version: "1.0.0",
+                main: "main.js",
+              }),
+              "main.js": "export default {};",
+            }),
+          ),
+      }).downloadAddonToStaging("requested-addon"),
+    ).rejects.toThrow(
+      "Downloaded addon id 'other-addon' does not match requested addon 'requested-addon'",
+    );
+    expect(existsSync(path.join(appDataDir, "addons", "staging", "requested-addon.zip"))).toBe(
       false,
     );
   });

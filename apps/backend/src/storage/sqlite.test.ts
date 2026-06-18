@@ -32,8 +32,12 @@ describe("TS SQLite storage foundation", () => {
         WF_DB_PATH: "/tmp/wf-db-path.db",
       }),
     ).toBe("/tmp/wf-db-path.db");
-    expect(getSqliteDbPath("/data/root", { WF_DB_PATH: "/tmp/wf-db-dir" })).toBe(
-      path.join("/tmp/wf-db-dir", "app.db"),
+    const existingDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-wf-db-path-"));
+    expect(getSqliteDbPath("/data/root", { WF_DB_PATH: "/tmp/extensionless-db-file" })).toBe(
+      "/tmp/extensionless-db-file",
+    );
+    expect(getSqliteDbPath("/data/root", { WF_DB_PATH: existingDir })).toBe(
+      path.join(existingDir, "app.db"),
     );
     expect(getSqliteDbPath("/data/root", { WF_DB_PATH: "/tmp/wf-db-dir/" })).toBe(
       path.join("/tmp/wf-db-dir", "app.db"),
