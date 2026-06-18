@@ -4241,6 +4241,14 @@ contract:
   `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
   includes the SDK exporting a typed `QueryCacheFacade` and the frontend
   type-bridge matching the limited query cache runtime contract.
+- `pr5-addon-query-cache-global-hardening`: GPT xhigh review found the full
+  React Query client was still globally reachable; verification passed:
+  `bun run --cwd apps/frontend test -- addons-runtime-context.test.ts --run`,
+  direct `bun test apps/frontend/src/addons/addons-runtime-context.test.ts`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. The host QueryClient is now registered in module scope for
+  the add-on runtime facade instead of exposed on `window`; the broader
+  `docs/addons/shared-query-client-design.md` refresh remains approval-gated.
 - `pr5-e2e-bun-backend-port-alignment`: verification passed:
   `node --check scripts/run-e2e.mjs`,
   `bash -n scripts/wait-for-both-servers-to-be-ready.sh`,

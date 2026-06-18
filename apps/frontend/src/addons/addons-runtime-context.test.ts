@@ -5,6 +5,7 @@ import {
   createAddonContext,
   getDynamicNavItems,
   getDynamicRoutes,
+  setAddonHostQueryClient,
   triggerAllDisableCallbacks,
 } from "./addons-runtime-context";
 import type { RuntimeAddonPermission } from "./type-bridge";
@@ -30,8 +31,11 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore();
   triggerAllDisableCallbacks();
-  delete (window as unknown as { __wealthfolio_query_client__?: unknown })
-    .__wealthfolio_query_client__;
+  setAddonHostQueryClient(undefined);
+  if (typeof window !== "undefined") {
+    delete (window as unknown as { __wealthfolio_query_client__?: unknown })
+      .__wealthfolio_query_client__;
+  }
 });
 
 describe("addon runtime context permissions", () => {
@@ -79,12 +83,10 @@ describe("addon runtime context permissions", () => {
     const invalidateQueries = vi.fn();
     const refetchQueries = vi.fn();
     const clear = vi.fn();
-    (window as unknown as { __wealthfolio_query_client__?: unknown }).__wealthfolio_query_client__ =
-      {
-        invalidateQueries,
-        refetchQueries,
-        clear,
-      };
+    setAddonHostQueryClient({
+      invalidateQueries,
+      refetchQueries,
+    });
     const context = createAddonContext("query-addon");
 
     const queryClient = context.api.query.getClient() as {
@@ -96,6 +98,12 @@ describe("addon runtime context permissions", () => {
     queryClient.refetchQueries(["holdings"]);
 
     expect(queryClient.clear).toBeUndefined();
+    expect(
+      typeof window === "undefined"
+        ? undefined
+        : (window as unknown as { __wealthfolio_query_client__?: unknown })
+            .__wealthfolio_query_client__,
+    ).toBeUndefined();
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["accounts"], exact: false });
     expect(refetchQueries).toHaveBeenCalledWith({ queryKey: ["holdings"], exact: false });
     expect(clear).not.toHaveBeenCalled();

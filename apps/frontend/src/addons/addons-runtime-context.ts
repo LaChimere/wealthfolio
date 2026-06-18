@@ -109,9 +109,14 @@ interface AddonQueryClientLike {
   refetchQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
 }
 
+let hostAddonQueryClient: AddonQueryClientLike | undefined;
+
+export function setAddonHostQueryClient(queryClient: AddonQueryClientLike | undefined) {
+  hostAddonQueryClient = queryClient;
+}
+
 function hostQueryClient(): AddonQueryClientLike | undefined {
-  return (window as unknown as { __wealthfolio_query_client__?: AddonQueryClientLike })
-    .__wealthfolio_query_client__;
+  return hostAddonQueryClient;
 }
 
 function normalizeQueryKey(queryKey: string | string[]): string[] {
