@@ -1515,7 +1515,7 @@ async function syncEmptyTransactionActivityPages(
           );
         if (createInput === null) {
           hasUnsupportedMappableActivity = true;
-        } else {
+        } else if (!brokerActivityAlreadyImported(db, activity, createInput)) {
           cashActivityCreates.push(createInput);
         }
       }
@@ -1676,14 +1676,15 @@ function brokerCashActivityCreateInput(
   if (!isRecord(activity)) {
     return null;
   }
-  const sourceRecordId = optionalString(activity.id);
-  if (!sourceRecordId) {
+  const activityId = optionalString(activity.id);
+  if (!activityId) {
     return null;
   }
-  const rawActivityType = optionalString(activity.activity_type ?? activity.activityType);
+  const rawActivityType = brokerActivityType(activity);
   if (!rawActivityType) {
     return null;
   }
+  const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
   const isNeverAsset = BROKER_NEVER_ASSET_ACTIVITY_TYPES.has(activityType);
   if (
@@ -1770,12 +1771,13 @@ function brokerExistingAssetActivityCreateInput(
   if (!isRecord(activity)) {
     return null;
   }
-  const sourceRecordId = optionalString(activity.id);
-  const rawActivityType = optionalString(activity.activity_type ?? activity.activityType);
+  const activityId = optionalString(activity.id);
+  const rawActivityType = brokerActivityType(activity);
   const symbol = brokerActivitySymbol(activity);
-  if (!sourceRecordId || !rawActivityType || !symbol) {
+  if (!activityId || !rawActivityType || !symbol) {
     return null;
   }
+  const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
   if (BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType)) {
     return null;
@@ -1878,9 +1880,10 @@ function brokerActivityCurrency(activity: Record<string, unknown>): string | nul
 }
 
 function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
-  const activityType = optionalString(
-    activity.activity_type ?? activity.activityType,
-  )?.toUpperCase();
+  if (optionalBoolean(activity.needs_review ?? activity.needsReview) === true) {
+    return true;
+  }
+  const activityType = brokerActivityType(activity)?.toUpperCase();
   if (!activityType || activityType === "UNKNOWN") {
     return true;
   }
@@ -1889,7 +1892,7 @@ function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
     return false;
   }
   const confidence = optionalNumber(metadata.confidence);
-  if (confidence !== null && confidence < 0.8) {
+  if (confidence !== null && confidence < 0.7) {
     return true;
   }
   const reasons = metadata.reasons;
@@ -1898,7 +1901,30 @@ function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
 
 function brokerActivityWarningReason(reason: unknown): boolean {
   const normalized = optionalString(reason)?.toLowerCase() ?? "";
-  return normalized.includes("unknown") || normalized.includes("ambiguous");
+  return [
+    "unknown",
+    "unrecognized",
+    "ambiguous",
+    "multiple",
+    "conflict",
+    "manual",
+    "review",
+    "unsupported",
+  ].some((pattern) => normalized.includes(pattern));
+}
+
+function brokerActivityType(activity: Record<string, unknown>): string | null {
+  return optionalString(activity.activity_type ?? activity.activityType ?? activity.type);
+}
+
+function brokerActivitySourceRecordId(activity: Record<string, unknown>): string | null {
+  return optionalString(
+    activity.source_record_id ??
+      activity.sourceRecordId ??
+      activity.external_reference_id ??
+      activity.externalReferenceId ??
+      activity.id,
+  );
 }
 
 function brokerActivityAbsoluteNumberString(value: unknown): string | null {
@@ -1954,6 +1980,63 @@ async function filterExistingBrokerCashActivities(
     const key = optionalString(create.idempotencyKey);
     return key === null || duplicates[key] === undefined;
   });
+}
+
+function brokerActivityAlreadyImported(
+  db: Database,
+  activity: unknown,
+  createInput: Record<string, unknown>,
+): boolean {
+  if (
+    !isRecord(activity) ||
+    !sqliteTableExists(db, "activities") ||
+    !sqliteColumnExists(db, "activities", "account_id")
+  ) {
+    return false;
+  }
+
+  const accountId = optionalString(createInput.accountId);
+  if (!accountId) {
+    return false;
+  }
+
+  const activityId = optionalString(activity.id);
+  if (activityId && sqliteColumnExists(db, "activities", "id")) {
+    const row = db
+      .query<
+        { id: string },
+        [string, string]
+      >("SELECT id FROM activities WHERE account_id = ? AND id = ? LIMIT 1")
+      .get(accountId, activityId);
+    if (row) {
+      return true;
+    }
+  }
+
+  const sourceSystem = optionalString(createInput.sourceSystem);
+  const sourceRecordId = optionalString(createInput.sourceRecordId);
+  if (
+    sourceSystem &&
+    sourceRecordId &&
+    sqliteColumnExists(db, "activities", "source_system") &&
+    sqliteColumnExists(db, "activities", "source_record_id")
+  ) {
+    const row = db
+      .query<{ id: string }, [string, string, string]>(
+        `
+          SELECT id
+          FROM activities
+          WHERE account_id = ?
+            AND source_system = ?
+            AND source_record_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(accountId, sourceSystem, sourceRecordId);
+    return row !== null;
+  }
+
+  return false;
 }
 
 function bulkMutationErrors(result: unknown): Array<{ message: string }> {

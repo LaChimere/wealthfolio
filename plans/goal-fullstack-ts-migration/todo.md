@@ -4314,6 +4314,15 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes keeping asset-backed
   broker activities feature-gated when their symbol does not match an existing
   local asset.
+- `pr5-connect-broker-real-payload-parity`: GPT xhigh review found real Connect
+  broker payload and duplicate gaps; verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "broker activities|broker cash|asset-backed broker|option broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes real `type`
+  payloads, explicit broker review flags, Rust-compatible review
+  confidence/reason thresholds, source-record fallbacks, and skipping Rust-era
+  broker activities matched by source identity before bulk mutation.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

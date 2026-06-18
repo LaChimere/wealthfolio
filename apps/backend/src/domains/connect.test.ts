@@ -1759,13 +1759,14 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "cash-activity-1",
-              activity_type: "DEPOSIT",
+              type: "DEPOSIT",
               trade_date: "2026-01-05T10:00:00Z",
               amount: -125.5,
               currency: { code: "USD" },
               provider_type: "SNAPTRADE",
               external_reference_id: "external-1",
               description: "Cash deposit",
+              needs_review: true,
             },
           ],
         });
@@ -1831,8 +1832,9 @@ describe("TS Connect local session service", () => {
               amount: "125.5",
               currency: "USD",
               sourceSystem: "SNAPTRADE",
-              sourceRecordId: "cash-activity-1",
-              status: "POSTED",
+              sourceRecordId: "external-1",
+              status: "DRAFT",
+              needsReview: true,
               allowMissingAsset: true,
             }),
           ],
@@ -1840,6 +1842,112 @@ describe("TS Connect local session service", () => {
           deleteIds: [],
         },
       ]);
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({ sync_status: "IDLE", last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips Rust-era broker activities matched by source identity", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE activities (
+        id TEXT PRIMARY KEY NOT NULL,
+        account_id TEXT NOT NULL,
+        source_system TEXT,
+        source_record_id TEXT,
+        idempotency_key TEXT
+      );
+      INSERT INTO activities (
+        id, account_id, source_system, source_record_id, idempotency_key
+      ) VALUES (
+        'legacy-activity-row', 'transaction-account', 'SNAPTRADE',
+        'legacy-source-record', NULL
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              type: "DEPOSIT",
+              source_record_id: "legacy-source-record",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 125.5,
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: () => {
+          throw new Error("should not duplicate legacy broker activity");
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 0,
+      });
       expect(
         db
           .query<
