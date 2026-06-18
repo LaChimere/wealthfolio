@@ -4302,6 +4302,12 @@ contract:
   `git diff --check`. Coverage includes asset-backed broker activities mapping
   to existing local assets by broker symbol, preserving idempotency/source
   metadata, and keeping missing/new asset broker resolution gated.
+- `pr5-connect-broker-option-existing-asset-coverage`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "option broker|asset-backed broker"`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker option
+  activities compacting padded OCC tickers and mapping them to existing local
+  option assets.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
