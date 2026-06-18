@@ -4397,6 +4397,13 @@ contract:
   exchange MIC disambiguation, crypto raw-symbol pair normalization, and
   blank/whitespace broker symbols on cash-like transfers routing to the cash
   path instead of failing account sync.
+- `pr5-connect-broker-asset-backed-interest`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "asset-backed interest|security transfer|pure cash|unknown broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes symbol-bearing
+  broker `INTEREST` activities mapping to existing local assets while
+  symbol-less interest remains on the cash path.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,

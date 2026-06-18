@@ -1675,7 +1675,11 @@ const BROKER_CASH_LIKE_ACTIVITY_TYPES = new Set([
   "UNKNOWN",
 ]);
 
-const BROKER_SECURITY_TRANSFER_ACTIVITY_TYPES = new Set(["TRANSFER_IN", "TRANSFER_OUT"]);
+const BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES = new Set([
+  "INTEREST",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+]);
 
 function brokerCashActivityCreateInput(
   activity: unknown,
@@ -1789,7 +1793,7 @@ function brokerExistingAssetActivityCreateInput(
   const activityType = rawActivityType.toUpperCase();
   if (
     BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
-    !BROKER_SECURITY_TRANSFER_ACTIVITY_TYPES.has(activityType)
+    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType)
   ) {
     return null;
   }
