@@ -4219,6 +4219,13 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes `WF_DB_PATH`
   accepting directory-style values and resolving them to `<dir>/app.db`,
   matching README and `.env.web.example` configuration semantics.
+- `pr5-addon-store-staging-validation`: verification passed:
+  `bun test apps/backend/src/domains/addons.test.ts --test-name-pattern "staging"`,
+  full `bun test apps/backend/src/domains/addons.test.ts`, `bun run type-check`,
+  `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
+  includes store-downloaded ZIPs being signature-checked and fully
+  extracted/validated before writing to staging, so invalid packages do not
+  leave staged files behind.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
