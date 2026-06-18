@@ -1853,6 +1853,125 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("skips already imported pure cash broker activities during overlap sync", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      ) VALUES (
+        'transaction-account', 'SNAPTRADE', NULL, '2026-01-05T00:00:00.000Z',
+        '2026-01-05T00:00:00.000Z', NULL, NULL, 'IDLE',
+        '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:00.000Z'
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              activity_type: "DEPOSIT",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 125.5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+            {
+              id: "cash-activity-2",
+              activity_type: "FEE",
+              trade_date: "2026-01-05T11:00:00Z",
+              amount: -5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: (keys) => ({
+          [keys.find((key) => key.endsWith(":cash-activity-1")) ?? ""]: "existing-activity",
+        }),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests).toHaveLength(1);
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          sourceRecordId: "cash-activity-2",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:cash-activity-2",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("recognizes broker activity page data aliases before applying mapper gate", async () => {
     const db = new Database(":memory:");
     db.exec(`

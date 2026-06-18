@@ -21,7 +21,7 @@ export interface ConnectDeviceSyncReconcileReadyRequest {
 export interface LocalConnectServiceDependencies {
   db: Database;
   activityService: Pick<ActivityService, "getBrokerSyncProfile" | "saveBrokerSyncProfileRules"> &
-    Partial<Pick<ActivityService, "bulkMutateActivities">>;
+    Partial<Pick<ActivityService, "bulkMutateActivities" | "checkExistingDuplicates">>;
   accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">;
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
@@ -1525,8 +1525,31 @@ async function syncEmptyTransactionActivityPages(
         if (!activityService.bulkMutateActivities) {
           throw connectSyncDisabled();
         }
+        const newCashActivityCreates = await filterExistingBrokerCashActivities(
+          activityService,
+          cashActivityCreates,
+        );
+        if (newCashActivityCreates.length === 0) {
+          const firstId = brokerActivityFirstId(data);
+          if (firstId !== null) {
+            if (offset > 0 && lastPageFirstId === firstId) {
+              const message =
+                "Pagination appears stuck (same first activity id returned for multiple pages).";
+              upsertBrokerSyncFailure(db, account.id, message);
+              summary.accountsFailed += 1;
+              accountFailed = true;
+              break;
+            }
+            lastPageFirstId = firstId;
+          }
+          offset += received;
+          if (!brokerActivityPageHasMore(page, received, offset, pageLimit)) {
+            break;
+          }
+          continue;
+        }
         const result = await activityService.bulkMutateActivities({
-          creates: cashActivityCreates,
+          creates: newCashActivityCreates,
           updates: [],
           deleteIds: [],
         });
@@ -1702,6 +1725,16 @@ function brokerCashActivityCreateInput(
       ) ?? "SNAPTRADE",
     sourceRecordId,
     sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    idempotencyKey: brokerActivityIdempotencyKey(
+      accountId,
+      optionalString(
+        activity.source_system ??
+          activity.sourceSystem ??
+          activity.provider_type ??
+          activity.providerType,
+      ) ?? "SNAPTRADE",
+      sourceRecordId,
+    ),
     status: needsReview ? "DRAFT" : "POSTED",
     needsReview,
     metadata: brokerActivityMetadata(activity),
@@ -1774,6 +1807,37 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
       ? (activity.mapping_metadata ?? activity.mappingMetadata)
       : undefined,
   };
+}
+
+function brokerActivityIdempotencyKey(
+  accountId: string,
+  sourceSystem: string,
+  sourceRecordId: string,
+): string {
+  return `broker:${sourceSystem}:${accountId}:${sourceRecordId}`;
+}
+
+async function filterExistingBrokerCashActivities(
+  activityService: LocalConnectServiceDependencies["activityService"],
+  creates: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  if (!activityService.checkExistingDuplicates) {
+    return creates;
+  }
+  const keys = creates
+    .map((create) => optionalString(create.idempotencyKey))
+    .filter((key): key is string => key !== null);
+  if (keys.length === 0) {
+    return creates;
+  }
+  const duplicates = await activityService.checkExistingDuplicates(keys);
+  if (!isRecord(duplicates)) {
+    return creates;
+  }
+  return creates.filter((create) => {
+    const key = optionalString(create.idempotencyKey);
+    return key === null || duplicates[key] === undefined;
+  });
 }
 
 function bulkMutationErrors(result: unknown): Array<{ message: string }> {
