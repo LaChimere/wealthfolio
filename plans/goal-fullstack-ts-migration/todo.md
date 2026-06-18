@@ -4434,6 +4434,11 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes broker `ADJUSTMENT`
   activities importing as cash when symbol-less and mapping to existing local
   assets when a symbol is present.
+- `pr5-rust-server-config-test-fixture`: verification passed:
+  `cargo test -p wealthfolio-server --test income_summary_api` and full
+  `cargo test`. Coverage includes updating the Rust server income-summary API
+  test fixture for the current `Config` shape with explicit `sidecar: None`, so
+  Rust oracle tests compile during migration validation.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
