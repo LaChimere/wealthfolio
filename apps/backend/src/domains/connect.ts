@@ -1935,17 +1935,74 @@ function brokerActivityNumberString(value: unknown): string | null {
 }
 
 function brokerActivityMetadata(activity: Record<string, unknown>): Record<string, unknown> {
-  return {
+  const mappingMetadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  const metadata: Record<string, unknown> = {
     source: "broker",
+    raw_type: optionalString(activity.raw_type ?? activity.rawType),
+    source_system: optionalString(activity.source_system ?? activity.sourceSystem),
     provider_type: optionalString(activity.provider_type ?? activity.providerType),
+    source_record_id: optionalString(activity.source_record_id ?? activity.sourceRecordId),
+    source_group_id: optionalString(activity.source_group_id ?? activity.sourceGroupId),
     external_reference_id: optionalString(
       activity.external_reference_id ?? activity.externalReferenceId,
     ),
-    raw_type: optionalString(activity.raw_type ?? activity.rawType),
-    mapping_metadata: isRecord(activity.mapping_metadata ?? activity.mappingMetadata)
-      ? (activity.mapping_metadata ?? activity.mappingMetadata)
-      : undefined,
+    institution: optionalString(activity.institution),
   };
+  if (isRecord(mappingMetadata)) {
+    const flow = mappingMetadata.flow;
+    const mappingReasons = Array.isArray(mappingMetadata.reasons)
+      ? mappingMetadata.reasons.filter((reason): reason is string => typeof reason === "string")
+      : [];
+    metadata.mapping_metadata = mappingMetadata;
+    metadata.confidence = optionalNumber(mappingMetadata.confidence) ?? undefined;
+    metadata.mapping_reasons = mappingReasons.length > 0 ? mappingReasons : undefined;
+    metadata.flow = isRecord(flow)
+      ? { is_external: optionalBoolean(flow.is_external ?? flow.isExternal) === true }
+      : undefined;
+  }
+  const symbolMetadata = brokerActivitySymbolMetadata(activity.symbol);
+  if (symbolMetadata) {
+    metadata.symbol = symbolMetadata;
+  }
+  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  const optionLegType = optionalString(activity.option_type ?? activity.optionType);
+  if (optionLegType) {
+    metadata.option_leg_type = optionLegType;
+  }
+  if (isRecord(optionSymbol)) {
+    metadata.option_contract_type = optionalString(
+      optionSymbol.option_type ?? optionSymbol.optionType,
+    );
+    metadata.option_ticker = optionalString(optionSymbol.ticker);
+    const underlying = optionSymbol.underlying_symbol ?? optionSymbol.underlyingSymbol;
+    metadata.option_underlying_symbol = isRecord(underlying)
+      ? optionalString(underlying.symbol)
+      : undefined;
+  }
+  return metadata;
+}
+
+function brokerActivitySymbolMetadata(symbol: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(symbol)) {
+    return undefined;
+  }
+  const exchange = symbol.exchange;
+  const symbolType = symbol.type ?? symbol.symbol_type ?? symbol.symbolType;
+  const currency = symbol.currency;
+  const metadata: Record<string, unknown> = {
+    id: optionalString(symbol.id),
+    symbol: optionalString(symbol.symbol),
+    raw_symbol: optionalString(symbol.raw_symbol ?? symbol.rawSymbol),
+    figi_code: optionalString(symbol.figi_code ?? symbol.figiCode),
+    exchange_mic: isRecord(exchange)
+      ? optionalString(exchange.mic_code ?? exchange.micCode)
+      : undefined,
+    symbol_type_code: isRecord(symbolType) ? optionalString(symbolType.code) : undefined,
+    currency_code: isRecord(currency) ? optionalString(currency.code) : undefined,
+  };
+  return Object.values(metadata).some((value) => value !== undefined && value !== null)
+    ? metadata
+    : undefined;
 }
 
 function brokerActivityIdempotencyKey(

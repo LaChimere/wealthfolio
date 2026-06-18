@@ -4339,6 +4339,15 @@ contract:
   without a `type` importing as `UNKNOWN` review drafts when no symbol is
   present, matching Rust's default activity type, while unsupported
   symbol-bearing broker activities remain mapper-gated.
+- `pr5-connect-broker-metadata-parity`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "asset-backed broker|option broker"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes Rust-shaped broker
+  metadata fields for mapping confidence/reasons/flow, provider/source identity,
+  source group/external references, institution, symbol identity, and option
+  leg/ticker/underlying metadata while preserving the existing broker source
+  marker.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
