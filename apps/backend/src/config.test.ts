@@ -22,6 +22,16 @@ describe("TS backend config", () => {
     expect(config.cors.allowOrigins).toEqual(["http://localhost:1420", "http://127.0.0.1:1420"]);
   });
 
+  test("defaults request timeout to Rust-compatible 300 seconds", () => {
+    const config = loadBackendConfigFromEnv({
+      WF_AUTH_REQUIRED: "false",
+      WF_LISTEN_ADDR: "127.0.0.1:0",
+      WF_SECRET_KEY: secretKey,
+    });
+
+    expect(config.requestTimeoutMs).toBe(300_000);
+  });
+
   test("rejects empty sidecar token", () => {
     expect(() =>
       loadBackendConfigFromEnv({
