@@ -690,12 +690,17 @@ export interface ToastAPI {
 /**
  * Query management APIs for React Query integration
  */
+export interface QueryCacheFacade {
+  invalidateQueries(queryKey: string | string[]): unknown;
+  refetchQueries(queryKey: string | string[]): unknown;
+}
+
 export interface QueryAPI {
   /**
    * Get a limited query cache facade from the main application
    * @returns Cache helper facade with invalidate/refetch methods
    */
-  getClient(): unknown;
+  getClient(): QueryCacheFacade | undefined;
 
   /**
    * Invalidate queries by key

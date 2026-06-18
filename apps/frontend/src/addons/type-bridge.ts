@@ -46,6 +46,7 @@ import type {
   GoalAllocation as SDKGoalAllocation,
   HostAPI as SDKHostAPI,
   Permission,
+  QueryCacheFacade,
 } from "@wealthfolio/addon-sdk";
 
 /**
@@ -193,7 +194,7 @@ export interface InternalHostAPI {
   navigateToRoute(route: string): Promise<void>;
 
   // Query functions
-  getQueryClient(): unknown;
+  getQueryClient(): QueryCacheFacade | undefined;
   invalidateQueries(queryKey: string | string[]): void;
   refetchQueries(queryKey: string | string[]): void;
 

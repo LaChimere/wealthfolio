@@ -27,6 +27,7 @@ export type {
   ActivitySearchFilters,
   ActivitySort,
   HostAPI,
+  QueryCacheFacade,
   SnapshotsAPI,
   ToastAPI,
   YahooDividend,
