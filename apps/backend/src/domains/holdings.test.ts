@@ -1368,7 +1368,9 @@ describe("TS holdings domain", () => {
       expect(lse.price).toBe(5);
       expect(lse.marketValue).toEqual({ local: 10, base: 12.5 });
       expect(lse.costBasis).toEqual({ local: 6, base: 7.5 });
-      expect(lse.lots).toEqual([
+      expect(lse.lots).toBeNull();
+      const lseDetail = (await service.getHolding("a1", "lse-share")) as Holding;
+      expect(lseDetail.lots).toEqual([
         {
           id: "income-1",
           positionId: "lse-share",

@@ -1403,7 +1403,7 @@ function readLiveHolding(
     return null;
   }
 
-  const holdings = readLiveHoldingsFromSnapshot(db, snapshot, options);
+  const holdings = readLiveHoldingsFromSnapshot(db, snapshot, options, assetId);
   const holding = holdings.find((candidate) => candidate.instrument?.id === assetId);
   if (holding) {
     return holding;
@@ -2183,10 +2183,18 @@ function readLiveHoldingsFromSnapshot(
   db: Database,
   snapshot: SnapshotRow,
   options: HoldingsServiceOptions,
+  lotsAssetId?: string,
 ): Holding[] {
   const resolvedBaseCurrency = resolveBaseCurrency(options) ?? snapshot.currency;
   const today = resolveToday(options);
-  const holdings = buildHoldingsFromSnapshot(db, snapshot, resolvedBaseCurrency, today, true);
+  const holdings = buildHoldingsFromSnapshot(
+    db,
+    snapshot,
+    resolvedBaseCurrency,
+    today,
+    true,
+    lotsAssetId,
+  );
   valueHoldings(holdings, readLatestQuotePairs(db, holdings), options, today);
   applyPortfolioWeights(holdings);
   for (const holding of holdings) {
@@ -2400,6 +2408,7 @@ function buildHoldingsFromSnapshot(
   baseCurrency: string,
   asOfDate: string,
   skipExpiredOptions: boolean,
+  lotsAssetId?: string,
 ): Holding[] {
   const positions = snapshotPositionsFromJson(snapshot.positions);
   const assetIds = positions.map((position) => position.assetId);
@@ -2418,7 +2427,17 @@ function buildHoldingsFromSnapshot(
     if (skipExpiredOptions && isExpiredOptionAsset(asset, asOfDate)) {
       continue;
     }
-    holdings.push(holdingFromPosition(snapshot, position, asset, quantity, baseCurrency, asOfDate));
+    holdings.push(
+      holdingFromPosition(
+        snapshot,
+        position,
+        asset,
+        quantity,
+        baseCurrency,
+        asOfDate,
+        position.assetId === lotsAssetId,
+      ),
+    );
   }
 
   for (const [currency, amountValue] of Object.entries(
@@ -2937,6 +2956,7 @@ function holdingFromPosition(
   quantity: number,
   baseCurrency: string,
   asOfDate: string,
+  includeLots = false,
 ): Holding {
   const isAlternative = ALTERNATIVE_ASSET_KINDS.has(asset.kind);
   return {
@@ -2957,7 +2977,7 @@ function holdingFromPosition(
     assetKind: asset.kind,
     quantity,
     openDate: position.inceptionDate,
-    lots: holdingLotsFromSnapshotPosition(position),
+    lots: includeLots ? holdingLotsFromSnapshotPosition(position) : null,
     contractMultiplier: decimalToNumber(position.contractMultiplier ?? 1, new Decimal(1)),
     localCurrency: position.currency,
     baseCurrency,

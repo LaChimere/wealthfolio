@@ -4922,18 +4922,25 @@ function reuseExistingAssetsForPendingImports(
   }
   for (const asset of [...assetContext.pendingAssetsById.values()]) {
     const instrumentKey = generatedActivityInstrumentKey(asset);
+    const requiresQuoteCurrencyMatch =
+      asset.instrumentType === "FX" || asset.instrumentType === "CRYPTO";
     const existing = db
-      .query<{ id: string }, [string, string, string, string | null, string | null, string]>(
+      .query<
+        { id: string },
+        [string, string, string, string, string | null, string | null, number, string, string]
+      >(
         `
           SELECT id
           FROM assets
           WHERE instrument_key = ?
              OR (
                (upper(display_code) = ? OR upper(instrument_symbol) = ?)
+               AND upper(coalesce(instrument_type, '')) = ?
                AND (
                  (? IS NULL AND instrument_exchange_mic IS NULL)
                  OR upper(instrument_exchange_mic) = ?
                )
+               AND (? = 0 OR upper(quote_ccy) = ?)
              )
           ORDER BY CASE WHEN instrument_key = ? THEN 0 ELSE 1 END, id
           LIMIT 1
@@ -4943,8 +4950,11 @@ function reuseExistingAssetsForPendingImports(
         instrumentKey,
         asset.instrumentSymbol.toUpperCase(),
         asset.instrumentSymbol.toUpperCase(),
+        asset.instrumentType.toUpperCase(),
         asset.instrumentExchangeMic?.toUpperCase() ?? null,
         asset.instrumentExchangeMic?.toUpperCase() ?? null,
+        requiresQuoteCurrencyMatch ? 1 : 0,
+        asset.quoteCcy.toUpperCase(),
         instrumentKey,
       );
     if (!existing) {

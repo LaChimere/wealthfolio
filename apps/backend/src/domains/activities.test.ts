@@ -1308,6 +1308,62 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("does not reuse a different-quote crypto asset for pending import assets", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db);
+
+    try {
+      db.exec("ALTER TABLE assets ADD COLUMN instrument_key TEXT");
+      insertAccount(db, { id: "account-cad", name: "CAD", currency: "CAD" });
+      insertAsset(db, {
+        id: "btc-usd",
+        displayCode: "BTC",
+        name: "Bitcoin USD",
+        quoteCcy: "USD",
+        instrumentType: "CRYPTO",
+        instrumentSymbol: "BTC",
+      });
+      db.prepare("UPDATE assets SET instrument_key = ? WHERE id = ?").run(
+        "CRYPTO:BTC/USD",
+        "btc-usd",
+      );
+
+      const result = (await service.importActivities?.([
+        {
+          accountId: "account-cad",
+          activityType: "BUY",
+          date: "2025-01-15",
+          symbol: "BTC-CAD",
+          quantity: "1",
+          unitPrice: "90000",
+          amount: "90000",
+          currency: "CAD",
+          quoteCcy: "CAD",
+          instrumentType: "CRYPTO",
+          symbolName: "Bitcoin CAD",
+        },
+      ])) as {
+        activities: Array<Record<string, unknown>>;
+        summary: Record<string, unknown>;
+      };
+
+      expect(result.summary).toMatchObject({
+        imported: 1,
+        assetsCreated: 1,
+        success: true,
+      });
+      expect(result.activities[0]?.assetId).not.toBe("btc-usd");
+      expect(readAssetById(db, result.activities[0]?.assetId as string)).toMatchObject({
+        display_code: "BTC",
+        instrument_symbol: "BTC",
+        instrument_type: "CRYPTO",
+        quote_ccy: "CAD",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("checks import activities with existing ISIN-backed asset resolution", async () => {
     const db = createActivitiesDb();
     const calls: string[] = [];

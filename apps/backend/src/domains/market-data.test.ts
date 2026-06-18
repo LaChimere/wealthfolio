@@ -4323,9 +4323,11 @@ describe("TS market data domain", () => {
         ],
       }),
     );
+    let networkCalls = 0;
     const service = createMarketDataService(db, {
       exchangeCatalogJson: testExchangeCatalogJson(),
       fetch: (async () => {
+        networkCalls += 1;
         throw new Error("fixture mode should not call network");
       }) as typeof fetch,
     });
@@ -4339,6 +4341,7 @@ describe("TS market data domain", () => {
           dataSource: "YAHOO",
         }),
       ]);
+      expect(networkCalls).toBe(0);
       await expect(service.searchSymbol?.("PHYS")).resolves.toEqual([
         expect.objectContaining({
           symbol: "PHYS",
@@ -4396,6 +4399,7 @@ describe("TS market data domain", () => {
         close: "30.15",
         currency: "USD",
       });
+      expect(networkCalls).toBe(0);
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM quotes").get()?.count,
       ).toBeGreaterThan(0);

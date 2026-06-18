@@ -1770,15 +1770,23 @@ async function searchSymbols(
     assetToSearchResult(asset, exchangeCatalog),
   );
   const existingAssetIds = new Set(existingSummaries.map((summary) => summary.existingAssetId));
+  const fixtureResults = fixtureSearchResults(query, exchangeCatalog);
 
   let providerResults: SymbolSearchResult[] = [];
-  try {
-    providerResults = await searchYahooSymbols(query, exchangeCatalog, fetchImpl);
-  } catch {
-    providerResults = [];
+  if (fixtureResults !== null) {
+    providerResults = fixtureResults;
+  } else {
+    try {
+      providerResults = await searchYahooSymbols(query, exchangeCatalog, fetchImpl);
+    } catch {
+      providerResults = [];
+    }
   }
 
-  if (providerResults.length === 0 || !providerResults.some((result) => result.exchangeMic)) {
+  if (
+    fixtureResults === null &&
+    (providerResults.length === 0 || !providerResults.some((result) => result.exchangeMic))
+  ) {
     let fallbackResults = providerResults.length > 0 ? providerResults : null;
     for (const searchProvider of providerSearchFallbacks(
       secretService,
