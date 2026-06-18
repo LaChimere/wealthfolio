@@ -4226,6 +4226,22 @@ contract:
   includes store-downloaded ZIPs being signature-checked and fully
   extracted/validated before writing to staging, so invalid packages do not
   leave staged files behind.
+- `pr5-e2e-bun-backend-port-alignment`: verification passed:
+  `node --check scripts/run-e2e.mjs`,
+  `bash -n scripts/wait-for-both-servers-to-be-ready.sh`,
+  `bun run format:check`, `bun run lint`, and `git diff --check`. Coverage
+  includes E2E waiting for the Bun web backend default port `8080`, matching
+  `dev:web`.
+- `pr5-review-addon-dbpath-requestid-fixes`: GPT xhigh review found guard gaps;
+  verification passed:
+  `bun test apps/backend/src/domains/addons.test.ts --test-name-pattern "staging|manifest id"`,
+  `bun test apps/backend/src/storage/sqlite.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "database path|runtime data"`,
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "READY, REGISTERED"`,
+  `bun run type-check`, `bun run format:check`, `bun run lint`, and
+  `git diff --check`. Coverage includes add-on store/staging manifest-id
+  binding, preserving extensionless `WF_DB_PATH` file paths unless the path is
+  an explicit/existing directory, and endpoint-specific Connect request-id scope
+  assertions.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
