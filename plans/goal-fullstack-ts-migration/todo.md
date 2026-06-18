@@ -4404,6 +4404,13 @@ contract:
   `bun run lint`, and `git diff --check`. Coverage includes symbol-bearing
   broker `INTEREST` activities mapping to existing local assets while
   symbol-less interest remains on the cash path.
+- `pr5-connect-broker-dividend-existing-asset`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts --test-name-pattern "dividend broker|asset-backed broker|asset-backed interest|security transfer"`,
+  full `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun run format:check`,
+  `bun run lint`, and `git diff --check`. Coverage includes broker `DIVIDEND`
+  activities mapping to existing local assets through the same bounded
+  existing-asset broker path.
 - `pr5-alpha-vantage-option-mark-fallback`: GPT xhigh review found a zero-last
   regression; verification passed:
   `bun test apps/backend/src/domains/market-data.test.ts --test-name-pattern "Alpha Vantage option"`,
