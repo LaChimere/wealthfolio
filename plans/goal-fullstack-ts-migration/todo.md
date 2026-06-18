@@ -4465,6 +4465,12 @@ contract:
   flushing domain events before returning success, live holdings lot projection
   from snapshot positions, and frontend query invalidation for import-driven
   holdings/portfolio refreshes.
+- `pr5-e2e-fixture-import-review-fixes`: dual GPT/Claude xhigh review follow-up
+  verification passed: affected backend activity/market-data/holdings tests,
+  targeted asset-backed-income and multi-exchange E2E, full `bun run check`, and
+  dual GPT/Claude xhigh re-review. Coverage includes quote-currency/type-safe
+  pending-asset reuse fallback for FX/crypto imports, fixture-mode symbol search
+  avoiding live provider fallbacks, and Rust-like detailed-only holding lots.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

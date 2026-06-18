@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 454
+turns_used: 455
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -2936,6 +2936,13 @@ updated_at: "2026-06-18T22:45:49+08:00"
   with targeted backend activity/market-data/holdings/http tests, frontend
   import hook tests, targeted multi-exchange E2E, full `bun run test:e2e`
   (88/88), full `bun run test:all`, full `bun run check`, and pre-commit checks.
+- Turn 455: Addressed dual GPT/Claude xhigh review follow-ups for the E2E/import
+  stabilization slice. Pending import asset reuse now constrains fallback
+  matches by instrument type and FX/crypto quote currency, fixture-mode symbol
+  search no longer falls through to live provider fallbacks, and live holdings
+  list/detail lots now match Rust's detailed-only shape. Verified with affected
+  backend domain tests, targeted asset-backed-income and multi-exchange E2E,
+  full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh re-review.
 
 ## Deferred items
 
