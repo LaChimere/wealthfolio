@@ -2291,6 +2291,99 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("keeps asset-backed broker activities feature-gated when the symbol is not local", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              activity_type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: () => {
+          throw new Error("should not import unknown broker symbols yet");
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs option broker activities when the compact OCC symbol matches an existing asset", async () => {
     const db = new Database(":memory:");
     db.exec(`
