@@ -5331,6 +5331,18 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","provider_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","external_reference_id":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","amount":1e999}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5542,6 +5554,8 @@ describe("TS Connect local session service", () => {
                 sourceSystem: 123,
                 sourceRecordId: 123,
                 sourceGroupId: 123,
+                providerType: 123,
+                externalReferenceId: 123,
               },
               {
                 id: "   ",
