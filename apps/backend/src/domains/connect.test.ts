@@ -5521,7 +5521,7 @@ describe("TS Connect local session service", () => {
                 symbol: {
                   currency: { code: "USD", description: 123, is_supported: "true" },
                   exchange: { code: "XNAS", is_supported: "true" },
-                  type: { code: "EQUITY", name: 123, is_supported: true },
+                  type: { code: "EQUITY", name: 123, is_supported: true, isSupported: "true" },
                 },
                 mapping_metadata: { flow: { isExternal: "true" } },
                 needsReview: "true",

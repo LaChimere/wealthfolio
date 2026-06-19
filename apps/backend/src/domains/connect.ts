@@ -2178,7 +2178,7 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
           ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
           : nestedKey === "currency"
             ? [["id"], ["code"], ["name"]]
-            : [["id"], ["code"], ["description"], ["is_supported", "isSupported"]];
+            : [["id"], ["code"], ["description"], ["is_supported"]];
       if (!validBrokerActivityAliasGroups(nestedToken, aliases)) {
         return false;
       }
@@ -2279,7 +2279,7 @@ function validBrokerActivityNestedScalarRawShape(
   }
   return (
     kind !== "symbol-type" ||
-    brokerActivityOptionalRawTokenIsValid(rawJson, ["is_supported", "isSupported"], "bool")
+    brokerActivityOptionalRawTokenIsValid(rawJson, ["is_supported"], "bool")
   );
 }
 
