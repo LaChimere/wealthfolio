@@ -3993,6 +3993,14 @@ contract:
   preserving confirm-pairing response mapping while rejecting duplicate
   `success`/`key_version`/`remote_seed_present` fields or aliases and raw
   float/exponent integer tokens for Rust `ConfirmPairingResponse.key_version`.
+- `pr5-device-sync-pairing-messages-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "claimer pairing"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving pairing-messages response mapping while rejecting duplicate
+  top-level `session_status` and `messages` fields or aliases for Rust
+  `PairingMessagesResponse`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
