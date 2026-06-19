@@ -4316,6 +4316,13 @@ contract:
   broker activity parsing, review decisions, and metadata construction using
   only Rust's `mapping_metadata` field while treating camel `mappingMetadata` as
   an ignored unknown field.
+- `pr5-connect-broker-activity-fx-rate-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity validation and create-input mapping using only Rust's
+  `fx_rate` field while treating camel `fxRate` as an ignored unknown field.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
