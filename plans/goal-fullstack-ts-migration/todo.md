@@ -4001,6 +4001,14 @@ contract:
   preserving pairing-messages response mapping while rejecting duplicate
   top-level `session_status` and `messages` fields or aliases for Rust
   `PairingMessagesResponse`.
+- `pr5-device-sync-pairing-message-item-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "claimer pairing"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving pairing-message item mapping while rejecting duplicate `id`,
+  `payload_type`, `payload`, and `created_at` fields or aliases for Rust
+  `PairingMessage`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
