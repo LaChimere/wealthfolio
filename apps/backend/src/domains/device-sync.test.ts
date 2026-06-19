@@ -738,7 +738,7 @@ describe("TS local device sync service", () => {
       JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
     );
     secretService.entries.set("sync_device_id", "device-1");
-    let snapshotResponse: Record<string, unknown> = {
+    let snapshotResponse: Record<string, unknown> | string = {
       snapshot_id: "snapshot-1",
       schema_version: 2,
       created_at: "2026-01-01T00:05:00Z",
@@ -753,6 +753,11 @@ describe("TS local device sync service", () => {
       },
       fetch: async (input) => {
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (typeof snapshotResponse === "string") {
+            return new Response(snapshotResponse, {
+              headers: { "content-type": "application/json" },
+            });
+          }
           return Response.json(snapshotResponse);
         }
         return Response.json({ success: true, key_version: 2 });
@@ -789,6 +794,26 @@ describe("TS local device sync service", () => {
       ).rejects.toThrow(
         "Latest snapshot metadata had empty snapshot_id. No valid snapshot available.",
       );
+
+      snapshotResponse =
+        '{"snapshot_id":"snapshot-1","schema_version":1.0,"created_at":"2026-01-01T00:05:00Z","oplog_seq":1}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-3",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow("Failed to parse latest snapshot response");
+
+      snapshotResponse =
+        '{"snapshot_id":"snapshot-1","schema_version":1,"schemaVersion":1,"created_at":"2026-01-01T00:05:00Z","oplog_seq":1e0}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-4",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow("Failed to parse latest snapshot response");
     } finally {
       db.close();
     }

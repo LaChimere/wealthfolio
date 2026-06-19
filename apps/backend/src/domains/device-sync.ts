@@ -1046,7 +1046,7 @@ async function latestSnapshotBootstrapWaitState(
       500,
     );
   }
-  const latest = latestSnapshotBootstrapMetadata(parsed);
+  const latest = latestSnapshotBootstrapMetadata(parsed, bodyText);
   if (latest.schemaVersion > 1) {
     throw new DeviceSyncServiceError(
       "internal_error",
@@ -1082,42 +1082,30 @@ async function latestSnapshotBootstrapWaitState(
   return { waiting: true, message: WAITING_FOR_FRESH_SNAPSHOT_MESSAGE };
 }
 
-function latestSnapshotBootstrapMetadata(value: unknown): {
+function latestSnapshotBootstrapMetadata(
+  value: unknown,
+  rawJson: string,
+): {
   snapshotId: string;
   schemaVersion: number;
   createdAt: Date;
   oplogSeq: number;
 } {
+  assertLatestSnapshotRawShape(rawJson);
   if (!isRecord(value)) {
-    throw new DeviceSyncServiceError(
-      "internal_error",
-      "Failed to parse latest snapshot response",
-      500,
-    );
+    throw latestSnapshotParseError();
   }
   const rawSnapshotId = value.snapshotId ?? value.snapshot_id;
   if (typeof rawSnapshotId !== "string") {
-    throw new DeviceSyncServiceError(
-      "internal_error",
-      "Failed to parse latest snapshot response",
-      500,
-    );
+    throw latestSnapshotParseError();
   }
   const rawSchemaVersion = value.schemaVersion ?? value.schema_version;
   if (!isI32Integer(rawSchemaVersion)) {
-    throw new DeviceSyncServiceError(
-      "internal_error",
-      "Failed to parse latest snapshot response",
-      500,
-    );
+    throw latestSnapshotParseError();
   }
   const rawCreatedAt = value.createdAt ?? value.created_at;
   if (typeof rawCreatedAt !== "string") {
-    throw new DeviceSyncServiceError(
-      "internal_error",
-      "Failed to parse latest snapshot response",
-      500,
-    );
+    throw latestSnapshotParseError();
   }
   const normalizedCreatedAt = normalizeSyncDatetime(rawCreatedAt);
   if (normalizedCreatedAt === null) {
@@ -1129,11 +1117,7 @@ function latestSnapshotBootstrapMetadata(value: unknown): {
   }
   const rawOplogSeq = value.oplogSeq ?? value.oplog_seq;
   if (!isSafeInteger(rawOplogSeq)) {
-    throw new DeviceSyncServiceError(
-      "internal_error",
-      "Failed to parse latest snapshot response",
-      500,
-    );
+    throw latestSnapshotParseError();
   }
   return {
     snapshotId: rawSnapshotId,
@@ -1141,6 +1125,40 @@ function latestSnapshotBootstrapMetadata(value: unknown): {
     createdAt: new Date(normalizedCreatedAt),
     oplogSeq: rawOplogSeq,
   };
+}
+
+function assertLatestSnapshotRawShape(rawJson: string): void {
+  const entries = topLevelJsonEntries(rawJson);
+  for (const aliases of [
+    ["snapshotId", "snapshot_id"],
+    ["schemaVersion", "schema_version"],
+    ["createdAt", "created_at"],
+    ["oplogSeq", "oplog_seq"],
+  ]) {
+    if (entries.filter((entry) => aliases.includes(entry.key)).length > 1) {
+      throw latestSnapshotParseError();
+    }
+  }
+  assertRawIntegerToken(rawJson, "schemaVersion");
+  assertRawIntegerToken(rawJson, "schema_version");
+  assertRawIntegerToken(rawJson, "oplogSeq");
+  assertRawIntegerToken(rawJson, "oplog_seq");
+}
+
+function assertRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw latestSnapshotParseError();
+    }
+  }
+}
+
+function latestSnapshotParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse latest snapshot response",
+    500,
+  );
 }
 
 async function readRemoteCursorForFreshnessGate(
