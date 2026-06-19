@@ -4565,6 +4565,12 @@ contract:
   Coverage includes malformed non-null cursor tokens such as strings and raw
   JSON floats staying gated, while missing/null cursors keep Rust-compatible `0`
   defaults for idle `PULL_TAIL`.
+- `agent-runtime-guidance-refresh`: verification passed: formatting check, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes `AGENTS.md` and `.claude/CLAUDE.md` describing
+  `apps/backend` as the current Bun TypeScript backend runtime,
+  `apps/server`/`crates` as legacy Rust/Axum parity references, and shared Rust
+  migrations as the active schema source.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

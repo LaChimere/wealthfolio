@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 471
+turns_used: 472
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-19T16:36:06+08:00"
+updated_at: "2026-06-19T16:50:41+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3053,6 +3053,12 @@ updated_at: "2026-06-19T16:36:06+08:00"
   reject. Verified with focused Connect/device-sync tests, backend type-check,
   full `bun run check`, backend suite, pre-commit checks, and dual GPT/Claude
   xhigh review/refine.
+- Turn 472: Refreshed agent guidance for the current Bun/TypeScript backend
+  runtime. `AGENTS.md` and `.claude/CLAUDE.md` now describe Electron/web using
+  `apps/backend`, `apps/server`/`crates` as legacy Rust/Axum parity references,
+  and the shared Rust migrations as the active schema source for Bun SQLite.
+  Verified with formatting checks, full `bun run check`, pre-commit checks, and
+  dual GPT/Claude xhigh review/refine.
 
 ## Deferred items
 
