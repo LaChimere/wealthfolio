@@ -3911,6 +3911,14 @@ contract:
   preserving Rust-shaped register-device cloud requests and secret persistence
   while rejecting duplicate enrollment response aliases and raw float/exponent
   integer tokens before storing `sync_device_id`.
+- `pr5-device-sync-initialize-keys-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "initialize team key response|team key phase-one|device reads and mutations"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving BOOTSTRAP/PAIRING_REQUIRED/READY response mapping while rejecting
+  duplicate BOOTSTRAP fields, duplicate snake/camel aliases, and raw
+  float/exponent integer tokens for Rust `InitializeKeysResult` i32 fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
