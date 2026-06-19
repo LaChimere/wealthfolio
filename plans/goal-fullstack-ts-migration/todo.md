@@ -4554,6 +4554,11 @@ contract:
   cursor and no due pending outbox returning Rust-shaped `ok`, simulated
   cycle-lock acquisition, success error/failure clearing, and
   cursor-advanced/pending paths retaining the push/pull feature gate.
+- `pr5-connect-trigger-cycle-pull-tail-default-cursor`: verification passed:
+  focused Connect/device-sync tests, backend type-check, full `bun run check`,
+  backend suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
+  includes missing reconcile cursor defaulting to `0` like Rust before the idle
+  `PULL_TAIL` check, while cursor-advanced and pending paths remain gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
