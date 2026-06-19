@@ -3859,6 +3859,16 @@ contract:
   complete-pairing post-success background-start notification as a non-blocking
   best-effort hook. Dual GPT/Claude xhigh review found no actionable issues
   after the timestamp parser and fire-and-forget hook fixes.
+- `pr5-connect-ready-overwrite-approval`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "ready reconcile overwrite|best-effort|reconciles ready state locally|bootstrap requirement|overwrite risk"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  `reconcile-ready-state` retaining approved ready-state overwrite permissions
+  across Rust-shaped waiting/error outcomes, bootstrap-overwrite checks masking
+  local data while approval is active, approval clearing when bootstrap is no
+  longer required, and best-effort approval identity reads when the secret store
+  fails.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full

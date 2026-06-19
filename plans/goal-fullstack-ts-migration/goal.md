@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 478
+turns_used: 479
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-19T18:51:13+08:00"
+updated_at: "2026-06-19T19:13:39+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3100,6 +3100,14 @@ updated_at: "2026-06-19T18:51:13+08:00"
   Verified with focused device-sync tests, backend type-check, full
   `bun run check`, backend suite, pre-commit checks, and dual GPT/Claude xhigh
   review.
+- Turn 479: Ported safe Connect ready-state overwrite approval retention. When
+  `reconcile-ready-state` is called with `allowOverwrite`, TS now keeps the
+  in-memory device approval across Rust-shaped error/requested/waiting outcomes,
+  suppresses the local-data overwrite warning while the approved bootstrap is
+  still waiting for a snapshot, clears approval once bootstrap is no longer
+  required, and keeps approval identity reads best-effort like Rust. Verified
+  with focused/full Connect tests, backend type-check, backend suite, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine.
 
 ## Deferred items
 
