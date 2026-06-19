@@ -1278,9 +1278,9 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
         ["balance"],
         ["meta"],
         ["owner"],
-        ["brokerage_authorization", "brokerageAuthorization"],
-        ["institution_name", "institutionName"],
-        ["created_date", "createdDate"],
+        ["brokerage_authorization"],
+        ["institution_name"],
+        ["created_date"],
         ["sync_status", "syncStatus"],
         ["status"],
         ["raw_type"],
@@ -1354,11 +1354,8 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
     "type",
     "currency",
     "brokerage_authorization",
-    "brokerageAuthorization",
     "institution_name",
-    "institutionName",
     "created_date",
-    "createdDate",
     "status",
     "raw_type",
   ]) {
@@ -1570,9 +1567,7 @@ async function syncBrokerAccountsToLocal(
       providerAccountId,
       defaultName,
       currency: account.currency,
-      institutionName: optionalString(
-        brokerAccount.institution_name ?? brokerAccount.institutionName,
-      ),
+      institutionName: optionalString(brokerAccount.institution_name),
     });
     created += 1;
   }
@@ -3155,8 +3150,7 @@ function brokerAccountDisplayName(account: Record<string, unknown>): string {
   if (name) {
     return name;
   }
-  const institution =
-    optionalString(account.institution_name ?? account.institutionName) ?? "Unknown";
+  const institution = optionalString(account.institution_name) ?? "Unknown";
   const accountNumber = optionalString(account.account_number ?? account.number) ?? "Account";
   return `${institution} - ${accountNumber}`;
 }
@@ -3291,7 +3285,6 @@ function brokerAccountNameCandidates(account: Record<string, unknown>): string[]
   const meta = isRecord(account.meta) ? account.meta : {};
   const values = [
     account.institution_name,
-    account.institutionName,
     readPath(meta, ["institution_name"]),
     readPath(meta, ["institutionName"]),
     readPath(meta, ["brokerage_name"]),
@@ -3315,7 +3308,6 @@ function brokerAccountExternalIdCandidates(account: Record<string, unknown>): st
     readPath(meta, ["brokerage", "id"]),
     readPath(meta, ["brokerage", "uuid"]),
     account.brokerage_authorization,
-    account.brokerageAuthorization,
   ].flatMap((value) => {
     const parsed = optionalString(value);
     return parsed ? [parsed] : [];
@@ -3325,11 +3317,9 @@ function brokerAccountExternalIdCandidates(account: Record<string, unknown>): st
 
 function brokerAccountMeta(account: Record<string, unknown>): Record<string, unknown> {
   return {
-    institution_name: optionalString(account.institution_name ?? account.institutionName),
-    brokerage_authorization: optionalString(
-      account.brokerage_authorization ?? account.brokerageAuthorization,
-    ),
-    created_date: optionalString(account.created_date ?? account.createdDate),
+    institution_name: optionalString(account.institution_name),
+    brokerage_authorization: optionalString(account.brokerage_authorization),
+    created_date: optionalString(account.created_date),
     status: optionalString(account.status),
     raw_type: optionalString(account.raw_type),
     is_paper: optionalBoolean(account.is_paper ?? account.isPaper) ?? false,
