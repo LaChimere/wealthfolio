@@ -5820,6 +5820,53 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("rejects malformed Connect device response aliases during sync state reads", async () => {
+    async function expectRejectedDeviceResponse(deviceResponse: string): Promise<void> {
+      const db = createDeviceSyncStateDb();
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      const service = createLocalConnectDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response(deviceResponse, { headers: { "content-type": "application/json" } });
+        },
+      });
+
+      try {
+        await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse device response",
+          status: 500,
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","displayName":"Other","platform":"mac","trust_state":"trusted","trusted_key_version":2}',
+    );
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":2,"trustedKeyVersion":2}',
+    );
+  });
+
   test("serializes Connect token restoration during concurrent state and enable calls", async () => {
     const db = createDeviceSyncStateDb();
     const secretService = createMemorySecretService();

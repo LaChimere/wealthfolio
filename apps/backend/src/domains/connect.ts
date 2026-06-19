@@ -4244,6 +4244,7 @@ async function fetchLocalDeviceSyncDevice(
   if (!isRecord(parsed)) {
     throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
   }
+  assertDeviceResponseRawShape(bodyText);
   return {
     id: requiredStringValue(parsed.id, "device response"),
     displayName: requiredStringValue(parsed.displayName ?? parsed.display_name, "device response"),
@@ -4401,6 +4402,26 @@ function requiredDeviceTrustState(value: unknown): string {
     throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
   }
   return value;
+}
+
+function assertDeviceResponseRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["id"],
+    ["userId", "user_id"],
+    ["displayName", "display_name"],
+    ["platform"],
+    ["devicePublicKey", "device_public_key"],
+    ["trustState", "trust_state"],
+    ["trustedKeyVersion", "trusted_key_version"],
+    ["osVersion", "os_version"],
+    ["appVersion", "app_version"],
+    ["lastSeenAt", "last_seen_at"],
+    ["createdAt", "created_at"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
+    }
+  }
 }
 
 function optionalDeviceNumber(value: unknown, context: string): number | null {
