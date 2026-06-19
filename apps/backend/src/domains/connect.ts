@@ -2000,13 +2000,19 @@ function validBrokerActivityParsedShape(activity: unknown): boolean {
 }
 
 function validBrokerActivityCurrencyShape(value: unknown): boolean {
-  if (value === undefined || value === null || typeof value === "string") {
+  if (value === undefined || value === null) {
     return true;
   }
   if (!isRecord(value)) {
     return false;
   }
-  return value.code === undefined || value.code === null || typeof value.code === "string";
+  for (const key of ["id", "code", "name"]) {
+    const entry = value[key];
+    if (entry !== undefined && entry !== null && typeof entry !== "string") {
+      return false;
+    }
+  }
+  return true;
 }
 
 function validBrokerActivityRawShape(rawJson: string): boolean {
@@ -2077,8 +2083,16 @@ function validBrokerActivityScalarRawShape(rawJson: string): boolean {
 
 function validBrokerActivityNestedRawShape(rawJson: string): boolean {
   const currencyTokens = rawTokensForAliases(rawJson, ["currency"]);
-  if (currencyTokens.length === 1 && currencyTokens[0]?.trim().startsWith("{")) {
-    if (!validBrokerActivityAliasGroups(currencyTokens[0], [["id"], ["code"], ["name"]])) {
+  if (currencyTokens.length === 1) {
+    const currencyToken = currencyTokens[0];
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["currency"])) {
+      return false;
+    }
+    if (
+      currencyToken?.trim().startsWith("{") &&
+      (!validBrokerActivityAliasGroups(currencyToken, [["id"], ["code"], ["name"]]) ||
+        !validBrokerActivityNestedScalarRawShape(currencyToken, "currency"))
+    ) {
       return false;
     }
   }

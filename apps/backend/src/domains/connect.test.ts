@@ -5331,6 +5331,18 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":"USD"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":{"id":123,"code":"USD"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","currency":{"code":"USD","code":"CAD"}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5517,6 +5529,7 @@ describe("TS Connect local session service", () => {
               {
                 id: "   ",
                 description: "blank id",
+                currency: null,
                 symbol: null,
                 option_symbol: null,
                 mapping_metadata: null,
