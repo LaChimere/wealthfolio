@@ -5208,8 +5208,31 @@ describe("TS Connect local session service", () => {
         accountsSynced: 0,
         accountsFailed: 1,
       });
+      pageBody = '{"data":[{"id":"activity-1","symbol":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"symbol":"AAPL","exchange":"XNAS"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
       pageBody =
         '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","strike_price":"240"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":"AAPL  261218C00240000"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":"AAPL"}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5240,6 +5263,12 @@ describe("TS Connect local session service", () => {
       });
       pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":"external"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":123}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5457,7 +5486,13 @@ describe("TS Connect local session service", () => {
                 },
                 mapping_metadata: { flow: { isExternal: "true" } },
               },
-              { id: "   ", description: "blank id" },
+              {
+                id: "   ",
+                description: "blank id",
+                symbol: null,
+                option_symbol: null,
+                mapping_metadata: null,
+              },
             ],
             pagination: { has_more: true },
           });

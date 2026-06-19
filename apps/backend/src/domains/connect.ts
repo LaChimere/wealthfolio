@@ -2067,20 +2067,40 @@ function validBrokerActivityNestedRawShape(rawJson: string): boolean {
     }
   }
   const symbolTokens = rawTokensForAliases(rawJson, ["symbol"]);
-  if (symbolTokens.length === 1 && symbolTokens[0]?.trim().startsWith("{")) {
-    if (!validBrokerActivitySymbolRawShape(symbolTokens[0])) {
+  if (symbolTokens.length === 1) {
+    const symbolToken = symbolTokens[0];
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["symbol"])) {
+      return false;
+    }
+    if (symbolToken?.trim().startsWith("{") && !validBrokerActivitySymbolRawShape(symbolToken)) {
       return false;
     }
   }
   const optionSymbolTokens = rawTokensForAliases(rawJson, ["option_symbol", "optionSymbol"]);
-  if (optionSymbolTokens.length === 1 && optionSymbolTokens[0]?.trim().startsWith("{")) {
-    if (!validBrokerActivityOptionSymbolRawShape(optionSymbolTokens[0])) {
+  if (optionSymbolTokens.length === 1) {
+    const optionSymbolToken = optionSymbolTokens[0];
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["option_symbol", "optionSymbol"])) {
+      return false;
+    }
+    if (
+      optionSymbolToken?.trim().startsWith("{") &&
+      !validBrokerActivityOptionSymbolRawShape(optionSymbolToken)
+    ) {
       return false;
     }
   }
   const metadataTokens = rawTokensForAliases(rawJson, ["mapping_metadata", "mappingMetadata"]);
-  if (metadataTokens.length === 1 && metadataTokens[0]?.trim().startsWith("{")) {
-    if (!validBrokerActivityMappingMetadataRawShape(metadataTokens[0])) {
+  if (metadataTokens.length === 1) {
+    const metadataToken = metadataTokens[0];
+    if (
+      !brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["mapping_metadata", "mappingMetadata"])
+    ) {
+      return false;
+    }
+    if (
+      metadataToken?.trim().startsWith("{") &&
+      !validBrokerActivityMappingMetadataRawShape(metadataToken)
+    ) {
       return false;
     }
   }
@@ -2115,14 +2135,21 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
   }
   for (const nestedKey of ["exchange", "currency", "type", "symbol_type", "symbolType"]) {
     const nestedTokens = rawTokensForAliases(rawJson, [nestedKey]);
-    if (nestedTokens.length === 1 && nestedTokens[0]?.trim().startsWith("{")) {
+    if (nestedTokens.length === 1) {
+      const nestedToken = nestedTokens[0];
+      if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, [nestedKey])) {
+        return false;
+      }
+      if (!nestedToken?.trim().startsWith("{")) {
+        continue;
+      }
       const aliases =
         nestedKey === "exchange"
           ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
           : nestedKey === "currency"
             ? [["id"], ["code"], ["name"]]
             : [["id"], ["code"], ["description"], ["is_supported", "isSupported"]];
-      if (!validBrokerActivityAliasGroups(nestedTokens[0], aliases)) {
+      if (!validBrokerActivityAliasGroups(nestedToken, aliases)) {
         return false;
       }
       const nestedKind =
@@ -2131,7 +2158,7 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
           : nestedKey === "currency"
             ? "currency"
             : "symbol-type";
-      if (!validBrokerActivityNestedScalarRawShape(nestedTokens[0], nestedKind)) {
+      if (!validBrokerActivityNestedScalarRawShape(nestedToken, nestedKind)) {
         return false;
       }
     }
@@ -2170,10 +2197,30 @@ function validBrokerActivityOptionSymbolRawShape(rawJson: string): boolean {
     return false;
   }
   const underlyingTokens = rawTokensForAliases(rawJson, ["underlying_symbol", "underlyingSymbol"]);
-  if (underlyingTokens.length === 1 && underlyingTokens[0]?.trim().startsWith("{")) {
-    return validBrokerActivitySymbolRawShape(underlyingTokens[0]);
+  if (underlyingTokens.length === 1) {
+    const underlyingToken = underlyingTokens[0];
+    if (
+      !brokerActivityOptionalObjectRawTokenIsValid(rawJson, [
+        "underlying_symbol",
+        "underlyingSymbol",
+      ])
+    ) {
+      return false;
+    }
+    if (underlyingToken?.trim().startsWith("{")) {
+      return validBrokerActivitySymbolRawShape(underlyingToken);
+    }
   }
   return true;
+}
+
+function brokerActivityOptionalObjectRawTokenIsValid(rawJson: string, aliases: string[]): boolean {
+  const token = rawTokensForAliases(rawJson, aliases)[0];
+  if (token === undefined) {
+    return true;
+  }
+  const trimmed = token.trim();
+  return trimmed === "null" || trimmed.startsWith("{");
 }
 
 function validBrokerActivityNestedScalarRawShape(
