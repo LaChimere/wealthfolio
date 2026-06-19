@@ -618,6 +618,14 @@ export function createLocalDeviceSyncService({
         }
       }
       applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
+      if (!db) {
+        return {
+          status: "already_complete",
+          message: "No bootstrap needed",
+          localRows: null,
+          nonEmptyTables: null,
+        };
+      }
       if (db && !localBootstrapRequired(db, deviceId)) {
         return {
           status: "already_complete",

@@ -1492,26 +1492,52 @@ describe("TS local device sync service", () => {
     ]);
   });
 
-  test("keeps composite pairing bootstrap confirm feature-gated after sync identity and session restore", async () => {
+  test("returns already complete from bootstrap confirm when no local database exists", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
       "sync_identity",
       JSON.stringify({ version: 2, deviceId: "device-1" }),
     );
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
     const service = createLocalDeviceSyncService({
       secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
-      fetch: async () => Response.json({ success: true, key_version: 2 }),
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 2 });
+      },
     });
 
     await expect(
       service.confirmPairingWithBootstrap?.({
         pairingId: "pairing-1",
+        proof: "proof",
         allowOverwrite: false,
       }),
-    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+    ).resolves.toEqual({
+      status: "already_complete",
+      message: "No bootstrap needed",
+      localRows: null,
+      nonEmptyTables: null,
+    });
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+        method: "POST",
+        body: JSON.stringify({ proof: "proof" }),
+        deviceId: "device-1",
+      },
+    ]);
   });
 
   test("returns already complete from composite confirm when bootstrap is not required", async () => {
