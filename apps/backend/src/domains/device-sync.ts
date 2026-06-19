@@ -642,7 +642,7 @@ export function createLocalDeviceSyncService({
           secretService,
         );
       try {
-        await fetchDeviceSyncJson(
+        await fetchDeviceSyncJsonRaw(
           accessToken,
           env,
           fetchImpl,
@@ -652,7 +652,7 @@ export function createLocalDeviceSyncService({
             deviceId,
             body: request.proof === undefined ? {} : { proof: request.proof },
           },
-        ).then(confirmPairingResponseFromCloud);
+        ).then(({ value, bodyText }) => confirmPairingResponseFromCloud(value, bodyText));
       } catch (error) {
         if (!isPairingAlreadyConfirmedError(error)) {
           throw error;
@@ -717,7 +717,7 @@ export function createLocalDeviceSyncService({
           secretService,
         );
       try {
-        await fetchDeviceSyncJson(
+        await fetchDeviceSyncJsonRaw(
           accessToken,
           env,
           fetchImpl,
@@ -727,7 +727,7 @@ export function createLocalDeviceSyncService({
             deviceId,
             body: { proof: request.proof },
           },
-        ).then(confirmPairingResponseFromCloud);
+        ).then(({ value, bodyText }) => confirmPairingResponseFromCloud(value, bodyText));
       } catch (error) {
         if (!isPairingAlreadyConfirmedError(error)) {
           throw error;

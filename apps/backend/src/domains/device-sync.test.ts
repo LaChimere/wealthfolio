@@ -361,6 +361,24 @@ describe("TS local device sync service", () => {
       await expect(
         service.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
       ).resolves.toMatchObject({ phase: { phase: "success" } });
+      const malformedService = createLocalDeviceSyncService({
+        db,
+        secretService,
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () =>
+          new Response('{"success":true,"key_version":2.0}', {
+            headers: { "content-type": "application/json" },
+          }),
+      });
+      await expect(
+        malformedService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse confirm pairing response",
+        status: 500,
+      });
     } finally {
       db.close();
     }
@@ -2420,6 +2438,29 @@ describe("TS local device sync service", () => {
           deviceId: "device-1",
         },
       ]);
+      const malformedService = createLocalDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test/" },
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () =>
+          new Response('{"success":true,"key_version":2.0}', {
+            headers: { "content-type": "application/json" },
+          }),
+      });
+      await expect(
+        malformedService.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse confirm pairing response",
+        status: 500,
+      });
     } finally {
       db.close();
     }
