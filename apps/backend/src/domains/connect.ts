@@ -5378,12 +5378,18 @@ function getLocalSyncCursor(db: Database): number {
   );
 }
 
-async function fetchLocalReconcileReadyActionBestEffort(
+interface LocalReconcileReadyState {
+  action: string | null;
+  latestSnapshotId: string | null;
+  latestSnapshotSeq: number | null;
+}
+
+async function fetchLocalReconcileReadyStateBestEffort(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
   deviceId: string,
-): Promise<string | null> {
+): Promise<LocalReconcileReadyState> {
   try {
     const response = await fetchImpl(
       `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/reconcile-ready-state`,
@@ -5397,16 +5403,39 @@ async function fetchLocalReconcileReadyActionBestEffort(
       },
     );
     if (!response.ok) {
-      return null;
+      return emptyLocalReconcileReadyState();
     }
     const parsed = JSON.parse(await response.text()) as unknown;
     if (!isRecord(parsed)) {
-      return null;
+      return emptyLocalReconcileReadyState();
     }
-    return optionalString(parsed.action);
+    const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
+    return {
+      action: optionalString(parsed.action),
+      latestSnapshotId: isRecord(latestSnapshot)
+        ? optionalString(latestSnapshot.snapshotId ?? latestSnapshot.snapshot_id)
+        : null,
+      latestSnapshotSeq: isRecord(latestSnapshot)
+        ? optionalNumber(latestSnapshot.oplogSeq ?? latestSnapshot.oplog_seq)
+        : null,
+    };
   } catch {
-    return null;
+    return emptyLocalReconcileReadyState();
   }
+}
+
+async function fetchLocalReconcileReadyActionBestEffort(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+): Promise<string | null> {
+  return (await fetchLocalReconcileReadyStateBestEffort(env, fetchImpl, accessToken, deviceId))
+    .action;
+}
+
+function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
+  return { action: null, latestSnapshotId: null, latestSnapshotSeq: null };
 }
 
 function reconcileActionRequiresSnapshot(action: string | null): boolean {
@@ -5558,19 +5587,29 @@ async function triggerLocalDeviceSyncCycle(
     } catch (error) {
       console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
     }
-    const reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
+    const reconcile = await fetchLocalReconcileReadyStateBestEffort(
       env,
       fetchImpl,
       session.accessToken,
       deviceId,
     );
-    if (reconcileAction === "NOOP" && !localHasPendingSyncOutbox(db)) {
+    if (reconcile.action === "NOOP" && !localHasPendingSyncOutbox(db)) {
       markLocalSyncCycleOutcome(db, "ok");
       return localSyncCycleResult("ok", 0, cursor);
     }
-    if (reconcileAction === "WAIT_SNAPSHOT") {
+    if (reconcile.action === "WAIT_SNAPSHOT") {
       markLocalSyncCycleOutcome(db, "wait_snapshot", null, localWaitSnapshotRetryAt());
       return localSyncCycleResult("wait_snapshot", 0, cursor);
+    }
+    if (reconcile.action === "BOOTSTRAP_SNAPSHOT") {
+      markLocalSyncCycleOutcome(db, "stale_cursor");
+      return localSyncCycleResult(
+        "stale_cursor",
+        0,
+        cursor,
+        reconcile.latestSnapshotId,
+        reconcile.latestSnapshotSeq,
+      );
     }
     throw deviceSyncDisabled();
   } catch (error) {
@@ -5633,6 +5672,8 @@ function localSyncCycleResult(
   status: string,
   lockVersion: number,
   cursor: number,
+  bootstrapSnapshotId: string | null = null,
+  bootstrapSnapshotSeq: number | null = null,
 ): Record<string, unknown> {
   return {
     status,
@@ -5641,8 +5682,8 @@ function localSyncCycleResult(
     pulledCount: 0,
     cursor,
     needsBootstrap: status === "stale_cursor",
-    bootstrapSnapshotId: null,
-    bootstrapSnapshotSeq: null,
+    bootstrapSnapshotId,
+    bootstrapSnapshotSeq,
     deadLetterCount: 0,
   };
 }

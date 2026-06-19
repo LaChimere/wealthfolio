@@ -7215,6 +7215,112 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("returns stale_cursor for READY trigger cycle when reconcile requires bootstrap", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 12, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures, next_retry_at
+      ) VALUES (1, 4, 'state_error', 'stale error', 3, '2030-01-01T00:00:00Z');
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({
+            action: "BOOTSTRAP_SNAPSHOT",
+            latest_snapshot: {
+              snapshot_id: "snapshot-1",
+              oplog_seq: 99,
+            },
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "stale_cursor",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 12,
+        needsBootstrap: true,
+        bootstrapSnapshotId: "snapshot-1",
+        bootstrapSnapshotSeq: 99,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              last_cycle_status: string | null;
+              last_error: string | null;
+              consecutive_failures: number;
+              next_retry_at: string | null;
+            },
+            []
+          >(
+            "SELECT last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+          )
+          .get(),
+      ).toEqual({
+        last_cycle_status: "stale_cursor",
+        last_error: "stale error",
+        consecutive_failures: 3,
+        next_retry_at: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
