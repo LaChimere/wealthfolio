@@ -4584,6 +4584,13 @@ contract:
   includes requiring exactly one string `action` in reconcile responses and
   keeping duplicate/missing/malformed action payloads gated before trigger-cycle
   and bootstrap action-only decisions.
+- `pr5-connect-latest-snapshot-metadata-validation`: verification passed:
+  focused Connect/device-sync tests, backend type-check, full `bun run check`,
+  backend suite, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes `/sync/snapshots/latest` and cursor fallback
+  `latest_snapshot` metadata raw-token validation, duplicate snake/camel alias
+  field rejection, raw float/exponent numeric token rejection, and preserving
+  genuinely missing/null cursor latest snapshots.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
