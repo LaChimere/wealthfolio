@@ -763,15 +763,6 @@ async function fetchAuthenticatedConnectJsonRaw(
   return await fetchConnectJsonWithAccessTokenRaw(accessToken, env, fetchImpl, path);
 }
 
-async function fetchConnectJsonWithAccessToken(
-  accessToken: string,
-  env: NodeJS.ProcessEnv,
-  fetchImpl: typeof fetch,
-  path: string,
-): Promise<unknown> {
-  return (await fetchConnectJsonWithAccessTokenRaw(accessToken, env, fetchImpl, path)).value;
-}
-
 async function fetchConnectJsonWithAccessTokenRaw(
   accessToken: string,
   env: NodeJS.ProcessEnv,
@@ -1714,9 +1705,9 @@ async function syncEmptyTransactionActivityPages(
         offset,
         pageLimit,
       );
-      let page: unknown;
+      let pageResponse: { value: unknown; bodyText: string };
       try {
-        page = await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
+        pageResponse = await fetchConnectJsonWithAccessTokenRaw(accessToken, env, fetchImpl, path);
       } catch (error) {
         const message = errorMessage(error);
         upsertBrokerSyncFailure(db, account.id, message);
@@ -1724,6 +1715,14 @@ async function syncEmptyTransactionActivityPages(
         accountFailed = true;
         break;
       }
+      if (!validBrokerActivityPageRawShape(pageResponse.bodyText)) {
+        const message = "Failed to parse broker activity page response";
+        upsertBrokerSyncFailure(db, account.id, message);
+        summary.accountsFailed += 1;
+        accountFailed = true;
+        break;
+      }
+      const page = pageResponse.value;
       const data = brokerActivityPageData(page);
       pagesFetched += 1;
       const received = data.length;
@@ -1882,6 +1881,33 @@ function brokerActivityPagePagination(page: unknown): Record<string, unknown> | 
   }
   const pagination = page.pagination ?? page.paginationDetails ?? page.page;
   return isRecord(pagination) ? pagination : null;
+}
+
+function validBrokerActivityPageRawShape(rawJson: string): boolean {
+  if (
+    rawTokensForAliases(rawJson, [
+      "data",
+      "activities",
+      "universalActivities",
+      "universal_activities",
+    ]).length > 1 ||
+    rawTokensForAliases(rawJson, ["pagination", "paginationDetails", "page"]).length > 1
+  ) {
+    return false;
+  }
+  const paginationTokens = rawTokensForAliases(rawJson, [
+    "pagination",
+    "paginationDetails",
+    "page",
+  ]);
+  if (paginationTokens.length === 1 && paginationTokens[0]?.trim().startsWith("{")) {
+    return (
+      rawTokensForAliases(paginationTokens[0], ["has_more", "hasMore"]).length <= 1 &&
+      rawTokensForAliases(paginationTokens[0], ["total"]).length <= 1 &&
+      rawTokensForAliases(paginationTokens[0], ["limit"]).length <= 1
+    );
+  }
+  return true;
 }
 
 function hasBrokerActivityMappableId(activity: unknown): boolean {
