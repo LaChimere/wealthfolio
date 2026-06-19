@@ -1036,9 +1036,6 @@ async function latestSnapshotBootstrapWaitState(
       `(clientRequestId=${clientRequestId}, requestId=${requestId})`,
     );
   }
-  if (!freshnessGate) {
-    return { waiting: false, message: "" };
-  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText) as unknown;
@@ -1049,7 +1046,24 @@ async function latestSnapshotBootstrapWaitState(
       500,
     );
   }
-  const latest = latestSnapshotFreshnessMetadata(parsed);
+  const latest = latestSnapshotBootstrapMetadata(parsed);
+  if (latest.schemaVersion > 1) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      `Snapshot schema version ${latest.schemaVersion} is newer than local version 1. Please update the app.`,
+      500,
+    );
+  }
+  if (!latest.snapshotId.trim()) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Latest snapshot metadata had empty snapshot_id. No valid snapshot available.",
+      500,
+    );
+  }
+  if (!freshnessGate) {
+    return { waiting: false, message: "" };
+  }
   if (
     latest.createdAt.getTime() + SNAPSHOT_FRESHNESS_CLOCK_SKEW_LEEWAY_MS >
     freshnessGate.getTime()
@@ -1068,8 +1082,29 @@ async function latestSnapshotBootstrapWaitState(
   return { waiting: true, message: WAITING_FOR_FRESH_SNAPSHOT_MESSAGE };
 }
 
-function latestSnapshotFreshnessMetadata(value: unknown): { createdAt: Date; oplogSeq: number } {
+function latestSnapshotBootstrapMetadata(value: unknown): {
+  snapshotId: string;
+  schemaVersion: number;
+  createdAt: Date;
+  oplogSeq: number;
+} {
   if (!isRecord(value)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
+  const rawSnapshotId = value.snapshotId ?? value.snapshot_id;
+  if (typeof rawSnapshotId !== "string") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
+  const rawSchemaVersion = value.schemaVersion ?? value.schema_version;
+  if (!isI32Integer(rawSchemaVersion)) {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse latest snapshot response",
@@ -1100,7 +1135,12 @@ function latestSnapshotFreshnessMetadata(value: unknown): { createdAt: Date; opl
       500,
     );
   }
-  return { createdAt: new Date(normalizedCreatedAt), oplogSeq: rawOplogSeq };
+  return {
+    snapshotId: rawSnapshotId,
+    schemaVersion: rawSchemaVersion,
+    createdAt: new Date(normalizedCreatedAt),
+    oplogSeq: rawOplogSeq,
+  };
 }
 
 async function readRemoteCursorForFreshnessGate(

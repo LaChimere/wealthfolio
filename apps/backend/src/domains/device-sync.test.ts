@@ -593,7 +593,12 @@ describe("TS local device sync service", () => {
               { status: 404 },
             );
           }
-          return Response.json({ snapshot_id: "snapshot-1" });
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            schema_version: 1,
+            created_at: "2026-01-01T00:05:00Z",
+            oplog_seq: 1,
+          });
         }
         return Response.json({ success: true, key_version: 2 });
       },
@@ -671,6 +676,7 @@ describe("TS local device sync service", () => {
         if (url.includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
             snapshot_id: "snapshot-1",
+            schema_version: 1,
             created_at: "2026-01-01T00:00:00Z",
             oplog_seq: 1,
           });
@@ -706,6 +712,83 @@ describe("TS local device sync service", () => {
         localRows: null,
         nonEmptyTables: null,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports latest snapshot metadata preflight errors before pairing apply gate", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    let snapshotResponse: Record<string, unknown> = {
+      snapshot_id: "snapshot-1",
+      schema_version: 2,
+      created_at: "2026-01-01T00:05:00Z",
+      oplog_seq: 1,
+    };
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input) => {
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(snapshotResponse);
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const overwrite = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      });
+      const flowId = (overwrite as { flowId: string }).flowId;
+      await expect(service.approvePairingOverwrite?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: {
+          phase: "error",
+          message:
+            "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+        },
+      });
+
+      snapshotResponse = {
+        snapshot_id: "",
+        schema_version: 1,
+        created_at: "2026-01-01T00:05:00Z",
+        oplog_seq: 1,
+      };
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-2",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow(
+        "Latest snapshot metadata had empty snapshot_id. No valid snapshot available.",
+      );
     } finally {
       db.close();
     }
