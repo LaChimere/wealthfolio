@@ -4178,6 +4178,14 @@ contract:
   authenticated user-info reads rejecting duplicate user/team snake/camel
   aliases and broker-sync entitlement failing closed when subscription aliases
   conflict.
+- `pr5-connect-broker-connection-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate broker connection|syncs broker connections"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker connection reads and platform-sync persistence rejecting duplicate
+  connection and nested brokerage snake/camel aliases before mapping or writing
+  platform rows.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
