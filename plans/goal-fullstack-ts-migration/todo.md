@@ -4077,6 +4077,15 @@ contract:
   validating raw Connect CommitInitializeKeysResponse responses before storing
   trusted key material, preserving valid BOOTSTRAP behavior while requiring
   Rust-shaped `success` and `key_state` fields and rejecting duplicate aliases.
+- `pr5-connect-device-reset-team-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "reinitializes only after cloud reset succeeds|FRESH device sync|malformed Connect commit initialize|malformed Connect initialize|malformed Connect enrollment|legacy device nonce"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating raw Connect ResetTeamSyncResponse responses before clearing or
+  replacing local sync identity, requiring Rust-shaped `success` and
+  `key_version`, strict optional `reset_at`, duplicate-alias rejection, and raw
+  integer-token checks.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
