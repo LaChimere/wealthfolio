@@ -1664,6 +1664,12 @@ describe("TS local device sync service", () => {
           body: typeof init?.body === "string" ? init.body : null,
           deviceId: headers.get("x-wf-device-id") ?? "",
         });
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
         return Response.json({ success: true, key_version: 2 });
       },
     });
@@ -1691,6 +1697,34 @@ describe("TS local device sync service", () => {
           url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
           method: "POST",
           body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+      ]);
+
+      requests.length = 0;
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).resolves.toEqual({
+        status: "waiting_snapshot",
+        message: "Snapshot is not available yet. Waiting for upload from a trusted device.",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
           deviceId: "device-1",
         },
       ]);

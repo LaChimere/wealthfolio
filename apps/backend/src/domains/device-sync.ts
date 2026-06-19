@@ -645,6 +645,16 @@ export function createLocalDeviceSyncService({
           };
         }
       }
+      if (await latestSnapshotIsMissing(accessToken, env, fetchImpl, deviceId)) {
+        return {
+          status: "waiting_snapshot",
+          message: request.minSnapshotCreatedAt
+            ? "Waiting for a snapshot generated after pairing confirmation"
+            : "Snapshot is not available yet. Waiting for upload from a trusted device.",
+          localRows: null,
+          nonEmptyTables: null,
+        };
+      }
       throw deviceSyncDisabled();
     },
     async beginPairingConfirm(request) {
@@ -880,6 +890,49 @@ async function fetchDeviceSyncJson(
       500,
     );
   }
+}
+
+async function latestSnapshotIsMissing(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  deviceId: string,
+): Promise<boolean> {
+  const clientRequestId = deviceSyncClientRequestId(deviceId);
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeDeviceSyncApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/latest`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": clientRequestId,
+          "x-wf-device-id": deviceId,
+        },
+      },
+    );
+  } catch (error) {
+    throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
+  }
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
+  }
+  if (response.status === 404) {
+    return true;
+  }
+  if (!response.ok) {
+    const requestId = response.headers.get("x-request-id")?.trim() || "none";
+    throw deviceSyncApiError(
+      response.status,
+      bodyText,
+      `(clientRequestId=${clientRequestId}, requestId=${requestId})`,
+    );
+  }
+  return false;
 }
 
 function devicesFromCloud(value: unknown): unknown[] {
