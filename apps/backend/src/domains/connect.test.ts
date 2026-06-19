@@ -5202,6 +5202,18 @@ describe("TS Connect local session service", () => {
         accountsSynced: 0,
         accountsFailed: 1,
       });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":true,"isExternal":false}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"confidence":"0.9"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
     } finally {
       db.close();
     }

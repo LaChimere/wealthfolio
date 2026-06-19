@@ -2000,6 +2000,12 @@ function validBrokerActivityNestedRawShape(rawJson: string): boolean {
       return false;
     }
   }
+  const metadataTokens = rawTokensForAliases(rawJson, ["mapping_metadata", "mappingMetadata"]);
+  if (metadataTokens.length === 1 && metadataTokens[0]?.trim().startsWith("{")) {
+    if (!validBrokerActivityMappingMetadataRawShape(metadataTokens[0])) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -2060,10 +2066,24 @@ function validBrokerActivityAliasGroups(rawJson: string, aliasGroups: string[][]
   return aliasGroups.every((aliases) => rawTokensForAliases(rawJson, aliases).length <= 1);
 }
 
+function validBrokerActivityMappingMetadataRawShape(rawJson: string): boolean {
+  if (
+    !validBrokerActivityAliasGroups(rawJson, [["flow"], ["reasons"], ["confidence"]]) ||
+    !brokerActivityPaginationRawTokenIsValid(rawJson, ["confidence"], "number")
+  ) {
+    return false;
+  }
+  const flowTokens = rawTokensForAliases(rawJson, ["flow"]);
+  if (flowTokens.length === 1 && flowTokens[0]?.trim().startsWith("{")) {
+    return validBrokerActivityAliasGroups(flowTokens[0], [["is_external", "isExternal"]]);
+  }
+  return true;
+}
+
 function brokerActivityPaginationRawTokenIsValid(
   rawJson: string,
   aliases: string[],
-  kind: "bool" | "i64",
+  kind: "bool" | "i64" | "number",
 ): boolean {
   const token = rawTokensForAliases(rawJson, aliases)[0];
   if (token === undefined) {
@@ -2075,6 +2095,9 @@ function brokerActivityPaginationRawTokenIsValid(
   }
   if (kind === "bool") {
     return trimmed === "true" || trimmed === "false";
+  }
+  if (kind === "number") {
+    return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed);
   }
   return rawJsonI64TokenIsValid(trimmed);
 }
