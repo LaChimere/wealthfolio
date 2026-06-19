@@ -1895,6 +1895,19 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
   ) {
     return false;
   }
+  const dataTokens = rawTokensForAliases(rawJson, [
+    "data",
+    "activities",
+    "universalActivities",
+    "universal_activities",
+  ]);
+  if (dataTokens.length === 1 && dataTokens[0]?.trim().startsWith("[")) {
+    for (const activityToken of topLevelArrayValueTokens(dataTokens[0])) {
+      if (activityToken.startsWith("{") && !validBrokerActivityRawShape(activityToken)) {
+        return false;
+      }
+    }
+  }
   const paginationTokens = rawTokensForAliases(rawJson, [
     "pagination",
     "paginationDetails",
@@ -1935,6 +1948,40 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
       if (entry !== undefined && entry !== null && !isSafeI64Integer(entry)) {
         return false;
       }
+    }
+  }
+  return true;
+}
+
+function validBrokerActivityRawShape(rawJson: string): boolean {
+  for (const aliases of [
+    ["id"],
+    ["symbol"],
+    ["option_symbol", "optionSymbol"],
+    ["price"],
+    ["units"],
+    ["amount"],
+    ["currency"],
+    ["type", "activity_type", "activityType"],
+    ["subtype"],
+    ["raw_type", "rawType"],
+    ["option_type", "optionType"],
+    ["description"],
+    ["trade_date", "tradeDate"],
+    ["settlement_date", "settlementDate"],
+    ["fee"],
+    ["fx_rate", "fxRate"],
+    ["institution"],
+    ["external_reference_id", "externalReferenceId"],
+    ["provider_type", "providerType"],
+    ["source_system", "sourceSystem"],
+    ["source_record_id", "sourceRecordId"],
+    ["source_group_id", "sourceGroupId"],
+    ["mapping_metadata", "mappingMetadata"],
+    ["needs_review", "needsReview"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      return false;
     }
   }
   return true;

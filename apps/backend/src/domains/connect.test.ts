@@ -5184,6 +5184,12 @@ describe("TS Connect local session service", () => {
         accountsSynced: 0,
         accountsFailed: 1,
       });
+      pageBody =
+        '{"data":[{"id":"activity-1","trade_date":"2026-01-01","tradeDate":"2026-01-02"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
     } finally {
       db.close();
     }
