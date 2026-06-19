@@ -7381,7 +7381,7 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
-    let serverCursor = 12;
+    let serverCursor: number | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7391,7 +7391,9 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: serverCursor });
+          return serverCursor === null
+            ? Response.json({ action: "PULL_TAIL" })
+            : Response.json({ action: "PULL_TAIL", cursor: serverCursor });
         }
         return Response.json({
           id: "device-1",

@@ -5615,8 +5615,7 @@ async function triggerLocalDeviceSyncCycle(
     }
     if (
       reconcile.action === "PULL_TAIL" &&
-      reconcile.cursor !== null &&
-      reconcile.cursor <= cursor &&
+      localReconcileCursorOrDefault(reconcile) <= cursor &&
       !localHasPendingSyncOutbox(db)
     ) {
       const acquiredLockVersion = localAcquireSyncCycleLock(db);
@@ -5737,6 +5736,10 @@ function markLocalSyncCycleOutcome(
 
 function localWaitSnapshotRetryAt(): string {
   return new Date(Date.now() + 30_000).toISOString();
+}
+
+function localReconcileCursorOrDefault(reconcile: LocalReconcileReadyState): number {
+  return reconcile.cursor ?? 0;
 }
 
 function localAcquireSyncCycleLock(db: Database): number {
