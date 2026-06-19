@@ -4376,6 +4376,14 @@ contract:
   broker activity validation and create-input mapping using only Rust's JSON
   `type` key while treating `activity_type`/`activityType` as ignored unknown
   fields.
+- `pr5-connect-broker-account-type-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account aliases|syncs new broker accounts|broker account fields|broker account nested"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker account validation, account type inference, and account metadata using
+  only Rust's JSON `type` field plus snake-case `raw_type`, while treating
+  `account_type`/`accountType`/`rawType` as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
