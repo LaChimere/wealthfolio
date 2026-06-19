@@ -5568,6 +5568,10 @@ async function triggerLocalDeviceSyncCycle(
       markLocalSyncCycleOutcome(db, "ok");
       return localSyncCycleResult("ok", 0, cursor);
     }
+    if (reconcileAction === "WAIT_SNAPSHOT") {
+      markLocalSyncCycleOutcome(db, "wait_snapshot", null, localWaitSnapshotRetryAt());
+      return localSyncCycleResult("wait_snapshot", 0, cursor);
+    }
     throw deviceSyncDisabled();
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {
@@ -5651,6 +5655,7 @@ function markLocalSyncCycleOutcome(
   db: Database,
   status: string,
   lastError: string | null = null,
+  nextRetryAt: string | null = null,
 ): void {
   const durationMs = 0;
   db.prepare(
@@ -5659,9 +5664,13 @@ function markLocalSyncCycleOutcome(
         id, lock_version, last_error, consecutive_failures, next_retry_at,
         last_cycle_status, last_cycle_duration_ms
       )
-      VALUES (1, 0, ?, 0, NULL, ?, ?)
+      VALUES (1, 0, ?, 0, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        last_error = excluded.last_error,
+        last_error = CASE
+          WHEN excluded.last_error IS NOT NULL OR excluded.last_cycle_status = 'ok'
+            THEN excluded.last_error
+          ELSE last_error
+        END,
         consecutive_failures = CASE
           WHEN excluded.last_cycle_status = 'ok' THEN 0
           ELSE consecutive_failures
@@ -5670,7 +5679,11 @@ function markLocalSyncCycleOutcome(
         last_cycle_status = excluded.last_cycle_status,
         last_cycle_duration_ms = excluded.last_cycle_duration_ms
     `,
-  ).run(lastError, status, durationMs);
+  ).run(lastError, nextRetryAt, status, durationMs);
+}
+
+function localWaitSnapshotRetryAt(): string {
+  return new Date(Date.now() + 30_000).toISOString();
 }
 
 function localHasPendingSyncOutbox(db: Database): boolean {

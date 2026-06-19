@@ -7105,6 +7105,116 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("returns wait_snapshot for READY trigger cycle when reconcile asks to wait", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 11, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures
+      ) VALUES (1, 4, 'state_error', 'stale error', 3);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      const before = Date.now();
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "wait_snapshot",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 11,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      const after = Date.now();
+      const row = db
+        .query<
+          {
+            last_cycle_status: string | null;
+            last_error: string | null;
+            consecutive_failures: number;
+            next_retry_at: string | null;
+          },
+          []
+        >(
+          "SELECT last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+        )
+        .get();
+      expect(row).toMatchObject({
+        last_cycle_status: "wait_snapshot",
+        last_error: "stale error",
+        consecutive_failures: 3,
+      });
+      const retryAt = Date.parse(row?.next_retry_at ?? "");
+      expect(retryAt).toBeGreaterThanOrEqual(before + 29_000);
+      expect(retryAt).toBeLessThanOrEqual(after + 31_000);
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.wealthfolio.app/api/v1/sync/team/devices/device-1",
+        "https://api.wealthfolio.app/api/v1/sync/events/reconcile-ready-state",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
