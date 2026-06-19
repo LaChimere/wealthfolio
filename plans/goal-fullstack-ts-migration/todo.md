@@ -4093,6 +4093,15 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   validating raw single-device responses before sync-state mapping and rejecting
   duplicate Rust Device snake/camel aliases like serde.
+- `pr5-connect-trusted-device-list-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed Connect trusted-device list|malformed Connect device response|reads READY"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating raw trusted-device list entries before REGISTERED/ORPHANED
+  decisions, strict optional last-seen parsing, and preserving raw-token/parsed
+  index alignment across non-object array entries after review found the initial
+  desync bypass.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
