@@ -733,6 +733,7 @@ describe("TS local device sync service", () => {
       JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
     );
     secretService.entries.set("sync_device_id", "device-1");
+    let cursorBody = '{"cursor":2}';
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -743,7 +744,7 @@ describe("TS local device sync service", () => {
       fetch: async (input) => {
         const url = String(input);
         if (url.includes("/api/v1/sync/events/cursor")) {
-          return Response.json({ cursor: 2 });
+          return new Response(cursorBody, { headers: { "content-type": "application/json" } });
         }
         if (url.includes("/api/v1/sync/snapshots/latest")) {
           return Response.json({
@@ -786,6 +787,49 @@ describe("TS local device sync service", () => {
         message: "Waiting for a snapshot generated after pairing confirmation",
         localRows: null,
         nonEmptyTables: null,
+      });
+      cursorBody = '{"cursor":1.0}';
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      cursorBody = '{"cursor":1,"gcWatermark":1,"gc_watermark":1}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "waiting_snapshot",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      cursorBody =
+        '{"cursor":1,"latest_snapshot":{"snapshot_id":"snapshot-2","schema_version":1,"oplog_seq":1.0}}';
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      cursorBody = '{"cursor":1,"gc_watermark":9223372036854775808}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "waiting_snapshot",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      cursorBody =
+        '{"cursor":1,"latest_snapshot":{"snapshot_id":"snapshot-2","schema_version":2147483648,"oplog_seq":1}}';
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
       });
     } finally {
       db.close();

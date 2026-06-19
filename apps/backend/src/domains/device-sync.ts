@@ -1238,13 +1238,17 @@ async function readRemoteCursorForFreshnessGate(
   deviceId: string,
 ): Promise<number | null> {
   try {
-    const value = await fetchDeviceSyncJson(
+    const cursorResponse = await fetchDeviceSyncJsonRaw(
       accessToken,
       env,
       fetchImpl,
       "/api/v1/sync/events/cursor",
       { deviceId },
     );
+    if (!validSyncCursorRawShape(cursorResponse.bodyText)) {
+      return null;
+    }
+    const value = cursorResponse.value;
     if (!isRecord(value) || !isSafeInteger(value.cursor)) {
       return null;
     }
@@ -1252,6 +1256,69 @@ async function readRemoteCursorForFreshnessGate(
   } catch {
     return null;
   }
+}
+
+function validSyncCursorRawShape(rawJson: string): boolean {
+  const cursorTokens = rawTokensForAliases(rawJson, ["cursor"]);
+  const gcWatermarkTokens = rawTokensForAliases(rawJson, ["gcWatermark", "gc_watermark"]);
+  const latestSnapshotTokens = rawTokensForAliases(rawJson, ["latestSnapshot", "latest_snapshot"]);
+  return (
+    cursorTokens.length === 1 &&
+    rawJsonI64TokenIsValid(cursorTokens[0] ?? "") &&
+    gcWatermarkTokens.length <= 1 &&
+    (gcWatermarkTokens.length === 0 || rawJsonI64OptionTokenIsValid(gcWatermarkTokens[0] ?? "")) &&
+    latestSnapshotTokens.length <= 1 &&
+    (latestSnapshotTokens.length === 0 ||
+      rawJsonLatestSnapshotRefTokenIsValid(latestSnapshotTokens[0] ?? ""))
+  );
+}
+
+function rawJsonLatestSnapshotRefTokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  if (trimmed === "null") {
+    return true;
+  }
+  const entries = topLevelJsonEntries(trimmed);
+  if (entries.length === 0) {
+    return false;
+  }
+  const snapshotIdTokens = rawTokensForAliases(trimmed, ["snapshotId", "snapshot_id"]);
+  const schemaVersionTokens = rawTokensForAliases(trimmed, ["schemaVersion", "schema_version"]);
+  const oplogSeqTokens = rawTokensForAliases(trimmed, ["oplogSeq", "oplog_seq"]);
+  return (
+    snapshotIdTokens.length === 1 &&
+    rawJsonStringTokenIsValid(snapshotIdTokens[0] ?? "") &&
+    schemaVersionTokens.length === 1 &&
+    rawJsonI32TokenIsValid(schemaVersionTokens[0] ?? "") &&
+    oplogSeqTokens.length === 1 &&
+    rawJsonI64TokenIsValid(oplogSeqTokens[0] ?? "")
+  );
+}
+
+function rawJsonI32TokenIsValid(token: string): boolean {
+  return rawJsonIntegerTokenIsInRange(token, -2_147_483_648n, 2_147_483_647n);
+}
+
+function rawJsonI64TokenIsValid(token: string): boolean {
+  return rawJsonIntegerTokenIsInRange(
+    token,
+    -9_223_372_036_854_775_808n,
+    9_223_372_036_854_775_807n,
+  );
+}
+
+function rawJsonI64OptionTokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  return trimmed === "null" || rawJsonI64TokenIsValid(trimmed);
+}
+
+function rawJsonIntegerTokenIsInRange(token: string, min: bigint, max: bigint): boolean {
+  const trimmed = token.trim();
+  if (!/^-?(?:0|[1-9]\d*)$/.test(trimmed)) {
+    return false;
+  }
+  const parsed = BigInt(trimmed);
+  return parsed >= min && parsed <= max;
 }
 
 function devicesFromCloud(value: unknown, rawJson: string | null = null): unknown[] {
