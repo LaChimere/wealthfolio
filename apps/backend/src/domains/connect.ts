@@ -1985,8 +1985,8 @@ function validBrokerActivityParsedShape(activity: unknown): boolean {
   if (fxRate !== undefined && fxRate !== null && !Number.isFinite(fxRate)) {
     return false;
   }
-  const needsReview = activity.needs_review ?? activity.needsReview;
-  if (needsReview !== undefined && needsReview !== null && typeof needsReview !== "boolean") {
+  const needsReview = activity.needs_review;
+  if (needsReview !== undefined && typeof needsReview !== "boolean") {
     return false;
   }
   const mappingMetadata = activity.mapping_metadata ?? activity.mappingMetadata;
@@ -2034,7 +2034,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["source_record_id", "sourceRecordId"],
     ["source_group_id", "sourceGroupId"],
     ["mapping_metadata", "mappingMetadata"],
-    ["needs_review", "needsReview"],
+    ["needs_review"],
   ]) {
     if (rawTokensForAliases(rawJson, aliases).length > 1) {
       return false;
@@ -2072,7 +2072,7 @@ function validBrokerActivityScalarRawShape(rawJson: string): boolean {
       return false;
     }
   }
-  return brokerActivityOptionalRawTokenIsValid(rawJson, ["needs_review", "needsReview"], "bool");
+  return brokerActivityDefaultBoolRawTokenIsValid(rawJson, ["needs_review"]);
 }
 
 function validBrokerActivityNestedRawShape(rawJson: string): boolean {
@@ -2237,6 +2237,15 @@ function brokerActivityOptionalObjectRawTokenIsValid(rawJson: string, aliases: s
   }
   const trimmed = token.trim();
   return trimmed === "null" || trimmed.startsWith("{");
+}
+
+function brokerActivityDefaultBoolRawTokenIsValid(rawJson: string, aliases: string[]): boolean {
+  const token = rawTokensForAliases(rawJson, aliases)[0];
+  if (token === undefined) {
+    return true;
+  }
+  const trimmed = token.trim();
+  return trimmed === "true" || trimmed === "false";
 }
 
 function validBrokerActivityNestedScalarRawShape(
@@ -2876,7 +2885,7 @@ function brokerActivityCurrency(activity: Record<string, unknown>): string | nul
 }
 
 function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
-  if (optionalBoolean(activity.needs_review ?? activity.needsReview) === true) {
+  if (optionalBoolean(activity.needs_review) === true) {
     return true;
   }
   const activityType = brokerActivityType(activity)?.toUpperCase();

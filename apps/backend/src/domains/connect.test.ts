@@ -2141,6 +2141,7 @@ describe("TS Connect local session service", () => {
               external_reference_id: "external-1",
               description: "Cash deposit",
               needs_review: true,
+              needsReview: "ignored by Rust",
             },
           ],
         });
@@ -5342,6 +5343,12 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","needs_review":null}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"confidence":1e999}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5505,6 +5512,7 @@ describe("TS Connect local session service", () => {
                   type: { code: "EQUITY", name: 123, is_supported: true },
                 },
                 mapping_metadata: { flow: { isExternal: "true" } },
+                needsReview: "true",
               },
               {
                 id: "   ",
