@@ -1884,6 +1884,9 @@ function brokerActivityPagePagination(page: unknown): Record<string, unknown> | 
 }
 
 function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
   if (
     rawTokensForAliases(rawJson, [
       "data",
@@ -1901,9 +1904,13 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
     "universalActivities",
     "universal_activities",
   ]);
-  if (dataTokens.length === 1 && dataTokens[0]?.trim().startsWith("[")) {
-    for (const activityToken of topLevelArrayValueTokens(dataTokens[0])) {
-      if (activityToken.startsWith("{") && !validBrokerActivityRawShape(activityToken)) {
+  if (dataTokens.length === 1) {
+    const dataToken = dataTokens[0]?.trim() ?? "";
+    if (!dataToken.startsWith("[")) {
+      return false;
+    }
+    for (const activityToken of topLevelArrayValueTokens(dataToken)) {
+      if (!activityToken.startsWith("{") || !validBrokerActivityRawShape(activityToken)) {
         return false;
       }
     }
@@ -1916,26 +1923,35 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
     "paginationDetails",
     "page",
   ]);
-  if (paginationTokens.length === 1 && paginationTokens[0]?.trim().startsWith("{")) {
+  if (paginationTokens.length === 1) {
+    const paginationToken = paginationTokens[0]?.trim() ?? "";
+    if (
+      !brokerActivityOptionalObjectRawTokenIsValid(rawJson, [
+        "pagination",
+        "paginationDetails",
+        "page",
+      ])
+    ) {
+      return false;
+    }
+    if (!paginationToken.startsWith("{")) {
+      return true;
+    }
     if (
       !(
-        rawTokensForAliases(paginationTokens[0], ["has_more", "hasMore"]).length <= 1 &&
-        rawTokensForAliases(paginationTokens[0], ["total"]).length <= 1 &&
-        rawTokensForAliases(paginationTokens[0], ["limit"]).length <= 1 &&
-        rawTokensForAliases(paginationTokens[0], ["offset"]).length <= 1
+        rawTokensForAliases(paginationToken, ["has_more", "hasMore"]).length <= 1 &&
+        rawTokensForAliases(paginationToken, ["total"]).length <= 1 &&
+        rawTokensForAliases(paginationToken, ["limit"]).length <= 1 &&
+        rawTokensForAliases(paginationToken, ["offset"]).length <= 1
       )
     ) {
       return false;
     }
     if (
-      !brokerActivityPaginationRawTokenIsValid(
-        paginationTokens[0],
-        ["has_more", "hasMore"],
-        "bool",
-      ) ||
-      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["total"], "i64") ||
-      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["limit"], "i64") ||
-      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["offset"], "i64")
+      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["has_more", "hasMore"], "bool") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["total"], "i64") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["limit"], "i64") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["offset"], "i64")
     ) {
       return false;
     }
