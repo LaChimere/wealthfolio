@@ -5985,6 +5985,9 @@ describe("TS Connect device sync local service", () => {
     await expectRejectedDeviceResponse(
       '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":2,"trustedKeyVersion":2}',
     );
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":2,"last_seen_at":123}',
+    );
   });
 
   test("ignores malformed Connect trusted-device list aliases during sync state reads", async () => {

@@ -4316,6 +4316,7 @@ async function fetchLocalDeviceSyncDevice(
     throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
   }
   assertDeviceResponseRawShape(bodyText);
+  assertOptionalDeviceResponseStringFields(parsed);
   return {
     id: requiredStringValue(parsed.id, "device response"),
     displayName: requiredStringValue(parsed.displayName ?? parsed.display_name, "device response"),
@@ -4325,6 +4326,13 @@ async function fetchLocalDeviceSyncDevice(
       "device response",
     ),
   };
+}
+
+function assertOptionalDeviceResponseStringFields(parsed: Record<string, unknown>): void {
+  optionalDeviceStringValue(parsed.devicePublicKey ?? parsed.device_public_key);
+  optionalDeviceStringValue(parsed.osVersion ?? parsed.os_version);
+  optionalDeviceStringValue(parsed.appVersion ?? parsed.app_version);
+  optionalDeviceStringValue(parsed.lastSeenAt ?? parsed.last_seen_at);
 }
 
 async function getTrustedDevicesBestEffort(
