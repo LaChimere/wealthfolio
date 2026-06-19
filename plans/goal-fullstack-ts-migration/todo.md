@@ -4203,6 +4203,13 @@ contract:
   broker activity sync rejecting duplicate top-level activity-list aliases,
   pagination aliases, and pagination fields before mapper or pagination
   behavior.
+- `pr5-connect-broker-activity-pagination-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|transaction accounts with empty|pagination"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity sync rejecting malformed pagination scalar values and raw
+  float/exponent integer tokens for `has_more`/`total`/`limit`/`offset`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
