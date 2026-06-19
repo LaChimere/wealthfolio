@@ -4109,6 +4109,13 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   reusing raw InitializeKeysResult validation for the best-effort ORPHANED probe
   so malformed PAIRING_REQUIRED responses conservatively preserve REGISTERED.
+- `pr5-connect-trusted-device-summary-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "trusted device summaries|FRESH device sync|malformed Connect initialize|orphan-detection initialize"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  shared enroll/initialize trusted-device summaries rejecting non-string
+  `last_seen_at` values before trusted key material can be stored.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
