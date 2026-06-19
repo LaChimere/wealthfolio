@@ -4139,6 +4139,13 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   the Connect sync-state device mapper rejecting malformed present optional Rust
   `Device` string fields while still accepting the endpoint's subset shape.
+- `pr5-connect-trusted-device-list-optional-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed Connect trusted-device list|reads READY"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  best-effort trusted-device list reads rejecting malformed present optional
+  Rust `Device` string fields before REGISTERED/ORPHANED decisions.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
