@@ -5407,7 +5407,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return Response.json({ data: [], pagination: { has_more: false } });
+        return Response.json({ data: [], pagination: { hasMore: "ignored by Rust" } });
       },
       accountService: {
         getAllAccounts: () => [

@@ -1860,7 +1860,7 @@ function brokerActivityPageHasMore(
   if (!pagination) {
     return received >= pageLimit;
   }
-  const hasMore = optionalBoolean(pagination.has_more ?? pagination.hasMore);
+  const hasMore = optionalBoolean(pagination.has_more);
   if (hasMore !== null) {
     return hasMore;
   }
@@ -1939,7 +1939,7 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
     }
     if (
       !(
-        rawTokensForAliases(paginationToken, ["has_more", "hasMore"]).length <= 1 &&
+        rawTokensForAliases(paginationToken, ["has_more"]).length <= 1 &&
         rawTokensForAliases(paginationToken, ["total"]).length <= 1 &&
         rawTokensForAliases(paginationToken, ["limit"]).length <= 1 &&
         rawTokensForAliases(paginationToken, ["offset"]).length <= 1
@@ -1948,7 +1948,7 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
       return false;
     }
     if (
-      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["has_more", "hasMore"], "bool") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationToken, ["has_more"], "bool") ||
       !brokerActivityPaginationRawTokenIsValid(paginationToken, ["total"], "i64") ||
       !brokerActivityPaginationRawTokenIsValid(paginationToken, ["limit"], "i64") ||
       !brokerActivityPaginationRawTokenIsValid(paginationToken, ["offset"], "i64")
@@ -1958,7 +1958,7 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
   }
   const pagination = brokerActivityPagePagination(value);
   if (pagination) {
-    const hasMore = pagination.has_more ?? pagination.hasMore;
+    const hasMore = pagination.has_more;
     if (hasMore !== undefined && hasMore !== null && typeof hasMore !== "boolean") {
       return false;
     }
