@@ -6402,7 +6402,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps background engine start feature-gated when sync identity can run", async () => {
+  test("skips background engine start when identity can run but session is unavailable", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set(
@@ -6416,6 +6416,47 @@ describe("TS Connect device sync local service", () => {
       }),
     );
     const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started: No sync session configured",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps background engine start feature-gated when sync state is READY", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
 
     try {
       await expect(service.startDeviceSyncBackgroundEngine()).rejects.toMatchObject({

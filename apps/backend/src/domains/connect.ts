@@ -3154,13 +3154,40 @@ export function createLocalConnectDeviceSyncService({
       );
     },
     async startDeviceSyncBackgroundEngine() {
-      if (await localSyncIdentityCanRunBackground(secretService)) {
-        throw deviceSyncDisabled();
+      if (!(await localSyncIdentityCanRunBackground(secretService))) {
+        return {
+          status: "skipped",
+          message: "Background engine not started because sync identity is not configured",
+        };
       }
-      return {
-        status: "skipped",
-        message: "Background engine not started because sync identity is not configured",
-      };
+      if (!secretService) {
+        return {
+          status: "skipped",
+          message: "Background engine not started because sync identity is not configured",
+        };
+      }
+      let session: { accessToken: string; refreshToken: string };
+      try {
+        session = await restoreDeviceSyncSession();
+      } catch (error) {
+        return {
+          status: "skipped",
+          message: `Background engine not started: ${errorMessage(error)}`,
+        };
+      }
+      const state = await getLocalDeviceSyncState(
+        secretService,
+        env,
+        fetchImpl,
+        session.accessToken,
+      );
+      if (state.state !== "READY") {
+        return {
+          status: "skipped",
+          message: "Background engine not started because device is not in READY state",
+        };
+      }
+      throw deviceSyncDisabled();
     },
     stopDeviceSyncBackgroundEngine() {
       return {
