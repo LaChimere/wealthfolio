@@ -3903,6 +3903,14 @@ contract:
   apply gate: `snapshot_id`, `schema_version`, `covers_tables`, `created_at`,
   `oplog_seq`, `size_bytes`, and `checksum`, plus raw integer validation for
   `size_bytes`.
+- `pr5-device-sync-enroll-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "device registration"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving Rust-shaped register-device cloud requests and secret persistence
+  while rejecting duplicate enrollment response aliases and raw float/exponent
+  integer tokens before storing `sync_device_id`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
