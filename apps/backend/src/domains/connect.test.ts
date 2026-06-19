@@ -7381,7 +7381,7 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
-    let serverCursor: number | null = null;
+    let serverCursor: number | string | "float-token" | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7391,6 +7391,11 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (serverCursor === "float-token") {
+            return new Response('{"action":"PULL_TAIL","cursor":12.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
           return serverCursor === null
             ? Response.json({ action: "PULL_TAIL" })
             : Response.json({ action: "PULL_TAIL", cursor: serverCursor });
@@ -7440,6 +7445,18 @@ describe("TS Connect device sync local service", () => {
       });
 
       serverCursor = 13;
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      serverCursor = "bad";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      serverCursor = "float-token";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,

@@ -5381,6 +5381,7 @@ function getLocalSyncCursor(db: Database): number {
 interface LocalReconcileReadyState {
   action: string | null;
   cursor: number | null;
+  cursorInvalid: boolean;
   latestSnapshotId: string | null;
   latestSnapshotSeq: number | null;
 }
@@ -5406,14 +5407,26 @@ async function fetchLocalReconcileReadyStateBestEffort(
     if (!response.ok) {
       return emptyLocalReconcileReadyState();
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
+    const responseText = await response.text();
+    const rawCursorToken = topLevelJsonPropertyRawToken(responseText, "cursor");
+    const parsed = JSON.parse(responseText) as unknown;
     if (!isRecord(parsed)) {
       return emptyLocalReconcileReadyState();
     }
     const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
+    const cursorValue = parsed.cursor;
+    const cursor =
+      cursorValue === undefined || cursorValue === null
+        ? null
+        : isSafeI64Integer(cursorValue)
+          ? cursorValue
+          : null;
     return {
       action: optionalString(parsed.action),
-      cursor: optionalNumber(parsed.cursor),
+      cursor,
+      cursorInvalid:
+        (rawCursorToken !== undefined && !rawJsonI64OptionTokenIsValid(rawCursorToken)) ||
+        (cursorValue !== undefined && cursorValue !== null && cursor === null),
       latestSnapshotId: isRecord(latestSnapshot)
         ? optionalString(latestSnapshot.snapshotId ?? latestSnapshot.snapshot_id)
         : null,
@@ -5437,7 +5450,13 @@ async function fetchLocalReconcileReadyActionBestEffort(
 }
 
 function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
-  return { action: null, cursor: null, latestSnapshotId: null, latestSnapshotSeq: null };
+  return {
+    action: null,
+    cursor: null,
+    cursorInvalid: false,
+    latestSnapshotId: null,
+    latestSnapshotSeq: null,
+  };
 }
 
 function reconcileActionRequiresSnapshot(action: string | null): boolean {
@@ -5615,6 +5634,7 @@ async function triggerLocalDeviceSyncCycle(
     }
     if (
       reconcile.action === "PULL_TAIL" &&
+      !reconcile.cursorInvalid &&
       localReconcileCursorOrDefault(reconcile) <= cursor &&
       !localHasPendingSyncOutbox(db)
     ) {
@@ -5740,6 +5760,122 @@ function localWaitSnapshotRetryAt(): string {
 
 function localReconcileCursorOrDefault(reconcile: LocalReconcileReadyState): number {
   return reconcile.cursor ?? 0;
+}
+
+function rawJsonI64OptionTokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  return trimmed === "null" || /^-?(?:0|[1-9]\d*)$/.test(trimmed);
+}
+
+function topLevelJsonPropertyRawToken(text: string, property: string): string | undefined {
+  let index = 0;
+  const skipWhitespace = () => {
+    while (index < text.length && /\s/.test(text[index] ?? "")) {
+      index += 1;
+    }
+  };
+  const readStringToken = (): string | null => {
+    const start = index;
+    index += 1;
+    let escaped = false;
+    while (index < text.length) {
+      const char = text[index];
+      index += 1;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        return text.slice(start, index);
+      }
+    }
+    return null;
+  };
+  const readValueToken = (): string => {
+    const start = index;
+    if (text[index] === '"') {
+      readStringToken();
+      return text.slice(start, index);
+    }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    while (index < text.length) {
+      const char = text[index];
+      if (inString) {
+        index += 1;
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        index += 1;
+        continue;
+      }
+      if (char === "{" || char === "[") {
+        depth += 1;
+        index += 1;
+        continue;
+      }
+      if (char === "}" || char === "]") {
+        if (depth === 0) {
+          break;
+        }
+        depth -= 1;
+        index += 1;
+        continue;
+      }
+      if (depth === 0 && char === ",") {
+        break;
+      }
+      index += 1;
+    }
+    return text.slice(start, index).trim();
+  };
+
+  skipWhitespace();
+  if (text[index] !== "{") {
+    return undefined;
+  }
+  index += 1;
+  while (index < text.length) {
+    skipWhitespace();
+    if (text[index] === "}") {
+      return undefined;
+    }
+    if (text[index] !== '"') {
+      return undefined;
+    }
+    const keyToken = readStringToken();
+    if (keyToken === null) {
+      return undefined;
+    }
+    skipWhitespace();
+    if (text[index] !== ":") {
+      return undefined;
+    }
+    index += 1;
+    skipWhitespace();
+    if (JSON.parse(keyToken) === property) {
+      return readValueToken();
+    }
+    readValueToken();
+    skipWhitespace();
+    if (text[index] === ",") {
+      index += 1;
+    }
+  }
+  return undefined;
 }
 
 function localAcquireSyncCycleLock(db: Database): number {
