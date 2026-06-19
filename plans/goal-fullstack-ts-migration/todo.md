@@ -4519,6 +4519,14 @@ contract:
   Connect tests, full `bun run check`, and dual GPT/Claude xhigh review.
   Coverage includes provider-backed crypto pair results like `BTC-USD` matching
   broker base symbols and creating CRYPTO activity-owned asset payloads.
+- `pr5-asset-e2e-fixture-profile-enrichment`: verification passed: focused
+  assets and market-data backend tests, backend type-check, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes E2E fixture-backed Yahoo profile enrichment without live
+  fetches, synthetic FX fixture profiles, exact-symbol precedence over colliding
+  aliases such as `APC`/`APC.DE`, fixture country metadata for region
+  classification, and fixture misses failing without falling through to live
+  Yahoo.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
