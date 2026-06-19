@@ -1281,7 +1281,7 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
         ["brokerage_authorization"],
         ["institution_name"],
         ["created_date"],
-        ["sync_status", "syncStatus"],
+        ["sync_status"],
         ["status"],
         ["raw_type"],
         ["is_paper"],
@@ -1321,7 +1321,7 @@ function assertBrokerAccountNestedRawShape(accountToken: string): void {
       "accounts response",
     );
   }
-  const syncStatusTokens = rawTokensForAliases(accountToken, ["sync_status", "syncStatus"]);
+  const syncStatusTokens = rawTokensForAliases(accountToken, ["sync_status"]);
   if (syncStatusTokens.length === 1 && syncStatusTokens[0]?.trim().startsWith("{")) {
     assertNoDuplicateConnectAliases(
       syncStatusTokens[0],
@@ -1333,11 +1333,7 @@ function assertBrokerAccountNestedRawShape(accountToken: string): void {
       if (detailTokens.length === 1 && detailTokens[0]?.trim().startsWith("{")) {
         assertNoDuplicateConnectAliases(
           detailTokens[0],
-          [
-            ["initial_sync_completed", "initialSyncCompleted"],
-            ["last_successful_sync", "lastSuccessfulSync"],
-            ["first_transaction_date", "firstTransactionDate"],
-          ],
+          [["initial_sync_completed"], ["last_successful_sync"], ["first_transaction_date"]],
           "accounts response",
         );
       }
@@ -1366,7 +1362,7 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
   }
   validateBrokerAccountBalance(account.balance);
   validateBrokerAccountOwner(account.owner);
-  validateBrokerAccountSyncStatus(account.sync_status ?? account.syncStatus);
+  validateBrokerAccountSyncStatus(account.sync_status);
 }
 
 function validateBrokerAccountBalance(value: unknown): void {
@@ -1429,11 +1425,8 @@ function validateBrokerSyncStatusDetail(value: unknown): void {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
   assertOptionalConnectBooleanField(value, "initial_sync_completed", "accounts response");
-  assertOptionalConnectBooleanField(value, "initialSyncCompleted", "accounts response");
   assertOptionalConnectStringField(value, "last_successful_sync", "accounts response");
-  assertOptionalConnectStringField(value, "lastSuccessfulSync", "accounts response");
   assertOptionalConnectStringField(value, "first_transaction_date", "accounts response");
-  assertOptionalConnectStringField(value, "firstTransactionDate", "accounts response");
 }
 
 function syncBrokerConnectionsToPlatforms(
@@ -3318,7 +3311,7 @@ function brokerAccountMeta(account: Record<string, unknown>): Record<string, unk
     is_paper: optionalBoolean(account.is_paper) ?? false,
     sync_enabled: optionalBoolean(account.sync_enabled) ?? true,
     shared_with_household: optionalBoolean(account.shared_with_household) ?? false,
-    sync_status: account.sync_status ?? account.syncStatus ?? null,
+    sync_status: account.sync_status ?? null,
     owner: account.owner ?? null,
   };
 }
