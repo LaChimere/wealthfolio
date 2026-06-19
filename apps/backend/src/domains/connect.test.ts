@@ -7258,6 +7258,8 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
+    let latestSnapshotMode: "valid" | "missing-schema" | "float-seq" | "duplicate-float-seq" =
+      "valid";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7267,10 +7269,32 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (latestSnapshotMode === "missing-schema") {
+            return Response.json({
+              action: "BOOTSTRAP_SNAPSHOT",
+              latest_snapshot: {
+                snapshot_id: "snapshot-1",
+                oplog_seq: 99,
+              },
+            });
+          }
+          if (latestSnapshotMode === "float-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":99.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (latestSnapshotMode === "duplicate-float-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":99,"oplog_seq":99.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
           return Response.json({
             action: "BOOTSTRAP_SNAPSHOT",
             latest_snapshot: {
               snapshot_id: "snapshot-1",
+              schema_version: 1,
               oplog_seq: 99,
             },
           });
@@ -7315,6 +7339,24 @@ describe("TS Connect device sync local service", () => {
         last_error: "stale error",
         consecutive_failures: 3,
         next_retry_at: null,
+      });
+
+      latestSnapshotMode = "missing-schema";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      latestSnapshotMode = "float-seq";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      latestSnapshotMode = "duplicate-float-seq";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
       });
     } finally {
       db.close();
@@ -7381,7 +7423,7 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
-    let serverCursor: number | string | "float-token" | null = null;
+    let serverCursor: number | string | "float-token" | "duplicate-float-token" | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7393,6 +7435,11 @@ describe("TS Connect device sync local service", () => {
         if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
           if (serverCursor === "float-token") {
             return new Response('{"action":"PULL_TAIL","cursor":12.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (serverCursor === "duplicate-float-token") {
+            return new Response('{"action":"PULL_TAIL","cursor":12,"cursor":12.0}', {
               headers: { "content-type": "application/json" },
             });
           }
@@ -7457,6 +7504,12 @@ describe("TS Connect device sync local service", () => {
       });
 
       serverCursor = "float-token";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      serverCursor = "duplicate-float-token";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
@@ -8381,6 +8434,7 @@ describe("TS Connect device sync local service", () => {
       }),
     );
     const requests: string[] = [];
+    let reconcileMode: "malformed-snapshot" | "noop" = "malformed-snapshot";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -8397,6 +8451,15 @@ describe("TS Connect device sync local service", () => {
           );
         }
         if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (reconcileMode === "malformed-snapshot") {
+            return Response.json({
+              action: "NOOP",
+              latest_snapshot: {
+                snapshot_id: "snapshot-1",
+                oplog_seq: 99,
+              },
+            });
+          }
           return Response.json({ action: "NOOP" });
         }
         return Response.json({
@@ -8409,6 +8472,19 @@ describe("TS Connect device sync local service", () => {
     });
 
     try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Snapshot is not available yet. Waiting for upload from a trusted device.",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({
+        count: 1,
+      });
+      reconcileMode = "noop";
+      requests.length = 0;
       await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
         status: "skipped",
         message: "No remote snapshot is required for this device",

@@ -5384,6 +5384,7 @@ interface LocalReconcileReadyState {
   cursorInvalid: boolean;
   latestSnapshotId: string | null;
   latestSnapshotSeq: number | null;
+  latestSnapshotInvalid: boolean;
 }
 
 async function fetchLocalReconcileReadyStateBestEffort(
@@ -5408,12 +5409,18 @@ async function fetchLocalReconcileReadyStateBestEffort(
       return emptyLocalReconcileReadyState();
     }
     const responseText = await response.text();
-    const rawCursorToken = topLevelJsonPropertyRawToken(responseText, "cursor");
+    const rawCursorTokens = topLevelJsonPropertyRawTokens(responseText, "cursor");
+    const rawCursorToken = rawCursorTokens[0];
     const parsed = JSON.parse(responseText) as unknown;
     if (!isRecord(parsed)) {
       return emptyLocalReconcileReadyState();
     }
     const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
+    const latestSnapshotRawTokens = [
+      ...topLevelJsonPropertyRawTokens(responseText, "latestSnapshot"),
+      ...topLevelJsonPropertyRawTokens(responseText, "latest_snapshot"),
+    ];
+    const latestSnapshotRawToken = latestSnapshotRawTokens[0];
     const cursorValue = parsed.cursor;
     const cursor =
       cursorValue === undefined || cursorValue === null
@@ -5421,18 +5428,20 @@ async function fetchLocalReconcileReadyStateBestEffort(
         : isSafeI64Integer(cursorValue)
           ? cursorValue
           : null;
+    const parsedLatestSnapshot = parseLocalReconcileLatestSnapshot(
+      latestSnapshot,
+      latestSnapshotRawToken,
+    );
     return {
       action: optionalString(parsed.action),
       cursor,
       cursorInvalid:
+        rawCursorTokens.length > 1 ||
         (rawCursorToken !== undefined && !rawJsonI64OptionTokenIsValid(rawCursorToken)) ||
         (cursorValue !== undefined && cursorValue !== null && cursor === null),
-      latestSnapshotId: isRecord(latestSnapshot)
-        ? optionalString(latestSnapshot.snapshotId ?? latestSnapshot.snapshot_id)
-        : null,
-      latestSnapshotSeq: isRecord(latestSnapshot)
-        ? optionalNumber(latestSnapshot.oplogSeq ?? latestSnapshot.oplog_seq)
-        : null,
+      latestSnapshotId: parsedLatestSnapshot.snapshotId,
+      latestSnapshotSeq: parsedLatestSnapshot.oplogSeq,
+      latestSnapshotInvalid: latestSnapshotRawTokens.length > 1 || parsedLatestSnapshot.invalid,
     };
   } catch {
     return emptyLocalReconcileReadyState();
@@ -5445,8 +5454,13 @@ async function fetchLocalReconcileReadyActionBestEffort(
   accessToken: string,
   deviceId: string,
 ): Promise<string | null> {
-  return (await fetchLocalReconcileReadyStateBestEffort(env, fetchImpl, accessToken, deviceId))
-    .action;
+  const state = await fetchLocalReconcileReadyStateBestEffort(
+    env,
+    fetchImpl,
+    accessToken,
+    deviceId,
+  );
+  return state.cursorInvalid || state.latestSnapshotInvalid ? null : state.action;
 }
 
 function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
@@ -5456,6 +5470,7 @@ function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
     cursorInvalid: false,
     latestSnapshotId: null,
     latestSnapshotSeq: null,
+    latestSnapshotInvalid: false,
   };
 }
 
@@ -5614,6 +5629,9 @@ async function triggerLocalDeviceSyncCycle(
       session.accessToken,
       deviceId,
     );
+    if (reconcile.cursorInvalid || reconcile.latestSnapshotInvalid) {
+      throw deviceSyncDisabled();
+    }
     if (reconcile.action === "NOOP" && !localHasPendingSyncOutbox(db)) {
       markLocalSyncCycleOutcome(db, "ok");
       return localSyncCycleResult("ok", 0, cursor);
@@ -5767,8 +5785,64 @@ function rawJsonI64OptionTokenIsValid(token: string): boolean {
   return trimmed === "null" || /^-?(?:0|[1-9]\d*)$/.test(trimmed);
 }
 
-function topLevelJsonPropertyRawToken(text: string, property: string): string | undefined {
+function rawJsonI32TokenIsValid(token: string): boolean {
+  return /^-?(?:0|[1-9]\d*)$/.test(token.trim());
+}
+
+function rawJsonStringTokenIsValid(token: string): boolean {
+  return token.trim().startsWith('"');
+}
+
+function parseLocalReconcileLatestSnapshot(
+  value: unknown,
+  rawToken: string | undefined,
+): { snapshotId: string | null; oplogSeq: number | null; invalid: boolean } {
+  if (value === undefined || value === null) {
+    return { snapshotId: null, oplogSeq: null, invalid: false };
+  }
+  if (!isRecord(value) || rawToken === undefined || rawToken.trim() === "null") {
+    return { snapshotId: null, oplogSeq: null, invalid: true };
+  }
+  const snapshotIdValue = value.snapshotId ?? value.snapshot_id;
+  const schemaVersionValue = value.schemaVersion ?? value.schema_version;
+  const oplogSeqValue = value.oplogSeq ?? value.oplog_seq;
+  const snapshotIdRawTokens = [
+    ...topLevelJsonPropertyRawTokens(rawToken, "snapshotId"),
+    ...topLevelJsonPropertyRawTokens(rawToken, "snapshot_id"),
+  ];
+  const schemaVersionRawTokens = [
+    ...topLevelJsonPropertyRawTokens(rawToken, "schemaVersion"),
+    ...topLevelJsonPropertyRawTokens(rawToken, "schema_version"),
+  ];
+  const oplogSeqRawTokens = [
+    ...topLevelJsonPropertyRawTokens(rawToken, "oplogSeq"),
+    ...topLevelJsonPropertyRawTokens(rawToken, "oplog_seq"),
+  ];
+  const snapshotIdRawToken = snapshotIdRawTokens[0];
+  const schemaVersionRawToken = schemaVersionRawTokens[0];
+  const oplogSeqRawToken = oplogSeqRawTokens[0];
+  const snapshotId = typeof snapshotIdValue === "string" ? snapshotIdValue : null;
+  const schemaVersion = isI32Integer(schemaVersionValue) ? schemaVersionValue : null;
+  const oplogSeq = isSafeI64Integer(oplogSeqValue) ? oplogSeqValue : null;
+  const invalid =
+    snapshotId === null ||
+    schemaVersion === null ||
+    oplogSeq === null ||
+    snapshotIdRawTokens.length !== 1 ||
+    schemaVersionRawTokens.length !== 1 ||
+    oplogSeqRawTokens.length !== 1 ||
+    snapshotIdRawToken === undefined ||
+    schemaVersionRawToken === undefined ||
+    oplogSeqRawToken === undefined ||
+    !rawJsonStringTokenIsValid(snapshotIdRawToken) ||
+    !rawJsonI32TokenIsValid(schemaVersionRawToken) ||
+    !rawJsonI64OptionTokenIsValid(oplogSeqRawToken);
+  return { snapshotId, oplogSeq, invalid };
+}
+
+function topLevelJsonPropertyRawTokens(text: string, property: string): string[] {
   let index = 0;
+  const tokens: string[] = [];
   const skipWhitespace = () => {
     while (index < text.length && /\s/.test(text[index] ?? "")) {
       index += 1;
@@ -5845,37 +5919,38 @@ function topLevelJsonPropertyRawToken(text: string, property: string): string | 
 
   skipWhitespace();
   if (text[index] !== "{") {
-    return undefined;
+    return tokens;
   }
   index += 1;
   while (index < text.length) {
     skipWhitespace();
     if (text[index] === "}") {
-      return undefined;
+      return tokens;
     }
     if (text[index] !== '"') {
-      return undefined;
+      return tokens;
     }
     const keyToken = readStringToken();
     if (keyToken === null) {
-      return undefined;
+      return tokens;
     }
     skipWhitespace();
     if (text[index] !== ":") {
-      return undefined;
+      return tokens;
     }
     index += 1;
     skipWhitespace();
     if (JSON.parse(keyToken) === property) {
-      return readValueToken();
+      tokens.push(readValueToken());
+    } else {
+      readValueToken();
     }
-    readValueToken();
     skipWhitespace();
     if (text[index] === ",") {
       index += 1;
     }
   }
-  return undefined;
+  return tokens;
 }
 
 function localAcquireSyncCycleLock(db: Database): number {
