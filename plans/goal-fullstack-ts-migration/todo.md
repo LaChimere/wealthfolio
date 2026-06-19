@@ -4471,6 +4471,14 @@ contract:
   dual GPT/Claude xhigh re-review. Coverage includes quote-currency/type-safe
   pending-asset reuse fallback for FX/crypto imports, fixture-mode symbol search
   avoiding live provider fallbacks, and Rust-like detailed-only holding lots.
+- `pr5-connect-broker-provider-backed-assets`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and dual GPT/Claude
+  xhigh review/refine. Coverage includes exact symbol+MIC provider matching,
+  Yahoo suffix normalization for raw broker symbols like `SHOP.TO`, per-symbol
+  search memoization within broker sync, activity-created provider asset
+  payloads, created asset summary accounting via an internal non-enumerable bulk
+  result marker, and continued feature-gating for unresolved broker assets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

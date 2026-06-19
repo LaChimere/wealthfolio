@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 455
+turns_used: 456
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-18T22:45:49+08:00"
+updated_at: "2026-06-19T11:29:30+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -2943,6 +2943,14 @@ updated_at: "2026-06-18T22:45:49+08:00"
   list/detail lots now match Rust's detailed-only shape. Verified with affected
   backend domain tests, targeted asset-backed-income and multi-exchange E2E,
   full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh re-review.
+- Turn 456: Extended Connect broker activity sync to provider-backed new assets.
+  Transaction-mode broker activities that do not match a local asset can now
+  resolve exact provider search results through the migrated market-data symbol
+  search, memoize per-symbol lookups, create activity-owned market assets
+  through bulk activity mutation, and report created asset IDs/counts internally
+  while preserving unresolved-symbol feature gates. Verified with focused and
+  full Connect tests, backend suite, full `bun run check`, pre-commit checks,
+  and dual GPT/Claude xhigh review/refine.
 
 ## Deferred items
 
