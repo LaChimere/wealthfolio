@@ -4359,6 +4359,15 @@ contract:
   metadata construction using Rust symbol keys (`raw_symbol`, `figi_code`,
   `type`, exchange `mic_code`) while treating camel/unknown symbol keys as
   ignored unknown fields.
+- `pr5-connect-broker-activity-raw-option-date-key-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|option broker activities|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity validation and create-input/metadata mapping using Rust
+  snake-case `raw_type`, `option_type`, `trade_date`, and `settlement_date`
+  fields while treating camel raw/option/date keys as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
