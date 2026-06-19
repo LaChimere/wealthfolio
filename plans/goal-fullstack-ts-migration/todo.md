@@ -4086,6 +4086,13 @@ contract:
   replacing local sync identity, requiring Rust-shaped `success` and
   `key_version`, strict optional `reset_at`, duplicate-alias rejection, and raw
   integer-token checks.
+- `pr5-connect-device-response-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed Connect device response|reads READY|serializes Connect token restoration"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating raw single-device responses before sync-state mapping and rejecting
+  duplicate Rust Device snake/camel aliases like serde.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
