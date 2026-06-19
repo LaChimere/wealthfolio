@@ -4487,6 +4487,11 @@ contract:
   Rust-compatible device-scoped complete-pairing cloud request payloads,
   complete response mapping, best-effort pairing-complete callback behavior, and
   retained bootstrap confirm/apply feature gates.
+- `pr5-device-sync-begin-pairing-no-db`: verification passed: focused
+  begin-pairing device-sync tests, pairing/runtime tests, full `bun run check`,
+  and dual GPT/Claude xhigh review. Coverage includes sync-identity/session
+  preconditions, cloud confirm request shape, success flow response when no
+  local DB/bootstrap state exists, and preserved confirm error propagation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
