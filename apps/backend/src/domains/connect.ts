@@ -2835,11 +2835,50 @@ function parseRefreshTokenResponse(bodyText: string): {
   if (!isRecord(parsed) || typeof parsed.access_token !== "string" || !parsed.access_token.trim()) {
     throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
   }
+  assertRefreshTokenResponseRawShape(bodyText);
+  if (
+    parsed.refresh_token !== undefined &&
+    parsed.refresh_token !== null &&
+    typeof parsed.refresh_token !== "string"
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+  }
+  if (
+    parsed.expires_in !== undefined &&
+    parsed.expires_in !== null &&
+    !isSafeI64Integer(parsed.expires_in)
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+  }
   const refreshToken =
     typeof parsed.refresh_token === "string" && parsed.refresh_token.trim()
       ? parsed.refresh_token.trim()
       : null;
   return { accessToken: parsed.access_token, refreshToken };
+}
+
+function assertRefreshTokenResponseRawShape(rawJson: string): void {
+  for (const aliases of [["access_token"], ["refresh_token"], ["expires_in"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+    }
+  }
+  for (const token of rawTokensForAliases(rawJson, ["access_token"])) {
+    if (!rawJsonStringTokenIsValid(token)) {
+      throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+    }
+  }
+  for (const token of rawTokensForAliases(rawJson, ["refresh_token"])) {
+    const trimmed = token.trim();
+    if (trimmed !== "null" && !rawJsonStringTokenIsValid(trimmed)) {
+      throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+    }
+  }
+  for (const token of rawTokensForAliases(rawJson, ["expires_in"])) {
+    if (!rawJsonI64OptionTokenIsValid(token)) {
+      throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+    }
+  }
 }
 
 function parseRefreshError(status: number, bodyText: string): { code: string; message: string } {

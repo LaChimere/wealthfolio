@@ -237,6 +237,45 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects malformed refresh token response tokens during restore", async () => {
+    async function expectRejectedTokenResponse(body: string): Promise<void> {
+      const db = new Database(":memory:");
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "old-refresh");
+      const service = createLocalConnectService({
+        db,
+        secretService,
+        fetch: async () => new Response(body, { headers: { "content-type": "application/json" } }),
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+
+      try {
+        await expect(service.restoreSyncSession()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse token response",
+          status: 500,
+        });
+        expect(secretService.entries.get("sync_refresh_token")).toBe("old-refresh");
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","access_token":"other","refresh_token":"rotated-refresh"}',
+    );
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","refresh_token":123,"expires_in":3600}',
+    );
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","refresh_token":"rotated-refresh","expires_in":3600.0}',
+    );
+  });
+
   test("serializes concurrent restores so a stale refresh failure cannot clear a rotated token", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
