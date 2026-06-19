@@ -4146,6 +4146,14 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   best-effort trusted-device list reads rejecting malformed present optional
   Rust `Device` string fields before REGISTERED/ORPHANED decisions.
+- `pr5-connect-device-sync-api-error-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "bootstrap snapshot download preflight|bootstrap snapshot download"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  device-sync cloud error bodies with duplicate or malformed structured fields
+  falling back to raw request-failed text instead of JSON.parse last-wins
+  values.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
