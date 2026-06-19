@@ -5991,51 +5991,57 @@ describe("TS Connect device sync local service", () => {
   });
 
   test("ignores malformed Connect trusted-device list aliases during sync state reads", async () => {
-    const db = createDeviceSyncStateDb();
-    const secretService = createMemorySecretService();
-    secretService.entries.set("sync_refresh_token", "refresh-token");
-    secretService.entries.set(
-      "sync_identity",
-      JSON.stringify({
-        version: 2,
-        deviceNonce: "nonce-1",
-        deviceId: "device-1",
-      }),
-    );
-    const service = createLocalConnectDeviceSyncService({
-      db,
-      secretService,
-      env: { CONNECT_API_URL: "https://api.example.test" },
-      fetch: async (input) => {
-        const url = String(input);
-        if (url.includes("/auth/v1/token")) {
-          return Response.json({ access_token: "access-token" });
-        }
-        if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
-          return new Response(
-            '[null,{"id":"trusted-device","display_name":"iPhone","displayName":"Other","platform":"ios","trust_state":"trusted","last_seen_at":null}]',
-            { headers: { "content-type": "application/json" } },
-          );
-        }
-        return Response.json({
-          id: "device-1",
-          display_name: "MacBook",
-          platform: "mac",
-          trust_state: "untrusted",
-          trusted_key_version: 2,
-        });
-      },
-    });
-
-    try {
-      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
-        state: "ORPHANED",
-        deviceId: "device-1",
-        trustedDevices: [],
+    async function expectMalformedListKeepsOrphaned(listResponse: string): Promise<void> {
+      const db = createDeviceSyncStateDb();
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+        }),
+      );
+      const service = createLocalConnectDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
+            return new Response(listResponse, { headers: { "content-type": "application/json" } });
+          }
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "untrusted",
+            trusted_key_version: 2,
+          });
+        },
       });
-    } finally {
-      db.close();
+
+      try {
+        await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+          state: "ORPHANED",
+          deviceId: "device-1",
+          trustedDevices: [],
+        });
+      } finally {
+        db.close();
+      }
     }
+
+    await expectMalformedListKeepsOrphaned(
+      '[null,{"id":"trusted-device","display_name":"iPhone","displayName":"Other","platform":"ios","trust_state":"trusted","last_seen_at":null}]',
+    );
+    await expectMalformedListKeepsOrphaned(
+      '[{"id":"trusted-device","display_name":"iPhone","platform":"ios","trust_state":"trusted","os_version":123}]',
+    );
   });
 
   test("ignores malformed Connect orphan-detection initialize responses during sync state reads", async () => {

@@ -4366,6 +4366,7 @@ async function getTrustedDevicesBestEffort(
           return null;
         }
         assertDeviceResponseRawShape(rawDeviceTokens[index] ?? "");
+        assertOptionalDeviceResponseStringFields(device);
         return device;
       })
       .filter((device): device is Record<string, unknown> => device !== null)
