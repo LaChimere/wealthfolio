@@ -1715,7 +1715,7 @@ async function syncEmptyTransactionActivityPages(
         accountFailed = true;
         break;
       }
-      if (!validBrokerActivityPageRawShape(pageResponse.bodyText)) {
+      if (!validBrokerActivityPageShape(pageResponse.value, pageResponse.bodyText)) {
         const message = "Failed to parse broker activity page response";
         upsertBrokerSyncFailure(db, account.id, message);
         summary.accountsFailed += 1;
@@ -1883,7 +1883,7 @@ function brokerActivityPagePagination(page: unknown): Record<string, unknown> | 
   return isRecord(pagination) ? pagination : null;
 }
 
-function validBrokerActivityPageRawShape(rawJson: string): boolean {
+function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean {
   if (
     rawTokensForAliases(rawJson, [
       "data",
@@ -1901,13 +1901,62 @@ function validBrokerActivityPageRawShape(rawJson: string): boolean {
     "page",
   ]);
   if (paginationTokens.length === 1 && paginationTokens[0]?.trim().startsWith("{")) {
-    return (
-      rawTokensForAliases(paginationTokens[0], ["has_more", "hasMore"]).length <= 1 &&
-      rawTokensForAliases(paginationTokens[0], ["total"]).length <= 1 &&
-      rawTokensForAliases(paginationTokens[0], ["limit"]).length <= 1
-    );
+    if (
+      !(
+        rawTokensForAliases(paginationTokens[0], ["has_more", "hasMore"]).length <= 1 &&
+        rawTokensForAliases(paginationTokens[0], ["total"]).length <= 1 &&
+        rawTokensForAliases(paginationTokens[0], ["limit"]).length <= 1 &&
+        rawTokensForAliases(paginationTokens[0], ["offset"]).length <= 1
+      )
+    ) {
+      return false;
+    }
+    if (
+      !brokerActivityPaginationRawTokenIsValid(
+        paginationTokens[0],
+        ["has_more", "hasMore"],
+        "bool",
+      ) ||
+      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["total"], "i64") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["limit"], "i64") ||
+      !brokerActivityPaginationRawTokenIsValid(paginationTokens[0], ["offset"], "i64")
+    ) {
+      return false;
+    }
+  }
+  const pagination = brokerActivityPagePagination(value);
+  if (pagination) {
+    const hasMore = pagination.has_more ?? pagination.hasMore;
+    if (hasMore !== undefined && hasMore !== null && typeof hasMore !== "boolean") {
+      return false;
+    }
+    for (const key of ["total", "limit", "offset"]) {
+      const entry = pagination[key];
+      if (entry !== undefined && entry !== null && !isSafeI64Integer(entry)) {
+        return false;
+      }
+    }
   }
   return true;
+}
+
+function brokerActivityPaginationRawTokenIsValid(
+  rawJson: string,
+  aliases: string[],
+  kind: "bool" | "i64",
+): boolean {
+  const token = rawTokensForAliases(rawJson, aliases)[0];
+  if (token === undefined) {
+    return true;
+  }
+  const trimmed = token.trim();
+  if (trimmed === "null") {
+    return true;
+  }
+  if (kind === "bool") {
+    return trimmed === "true" || trimmed === "false";
+  }
+  return rawJsonI64TokenIsValid(trimmed);
 }
 
 function hasBrokerActivityMappableId(activity: unknown): boolean {

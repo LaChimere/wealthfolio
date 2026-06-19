@@ -5115,6 +5115,8 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    let pageBody =
+      '{"data":[],"universalActivities":[{"id":"activity-1"}],"pagination":{"has_more":false}}';
     const service = createLocalConnectService({
       db,
       secretService,
@@ -5122,10 +5124,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return new Response(
-          '{"data":[],"universalActivities":[{"id":"activity-1"}],"pagination":{"has_more":false}}',
-          { headers: { "content-type": "application/json" } },
-        );
+        return new Response(pageBody, { headers: { "content-type": "application/json" } });
       },
       accountService: {
         getAllAccounts: () => [
@@ -5174,6 +5173,16 @@ describe("TS Connect local session service", () => {
       ).toEqual({
         sync_status: "FAILED",
         last_error: "Failed to parse broker activity page response",
+      });
+      pageBody = '{"data":[],"pagination":{"has_more":"false"}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[],"pagination":{"has_more":false,"limit":1000.0}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
       });
     } finally {
       db.close();
