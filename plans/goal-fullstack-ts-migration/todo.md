@@ -4437,6 +4437,14 @@ contract:
   connection fields (`authorization_id`, `brokerage_name`, `brokerage_slug`,
   `updated_at`) in snake case only while treating camel connection keys as
   ignored unknown fields.
+- `pr5-connect-broker-connection-brokerage-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connections|connection aliases|connection fields|brokerage fields"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  nested brokerage validation and mapping using Rust intermediate API brokerage
+  fields (`display_name`, `aws_s3_logo_url`, `aws_s3_square_logo_url`) in snake
+  case only while treating camel brokerage keys as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
