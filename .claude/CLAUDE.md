@@ -1,13 +1,14 @@
 ## Project Overview
 
 Wealthfolio - Desktop investment tracker with local-first data. React + Vite
-frontend, Electron desktop shell, Rust sidecar, SQLite storage.
+frontend, Electron desktop shell, Bun TypeScript backend, SQLite storage.
 
 Key directories:
 
 - `apps/frontend/` — React app (pages, components, commands, hooks)
 - `apps/electron/` — Electron main/preload desktop shell
-- `apps/server/` — Axum HTTP server and Electron sidecar
+- `apps/backend/` — Bun TypeScript backend runtime
+- `apps/server/` — Legacy Rust/Axum compatibility reference
 - `crates/` — Rust crates (core logic, storage, market-data, connect,
   device-sync)
 - `packages/` — Shared TS packages (addon-sdk, ui, addon-dev-tools)

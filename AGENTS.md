@@ -47,11 +47,11 @@ common task playbooks.
 ## Overview
 
 - **Frontend**: React + Vite + Tailwind v4 + shadcn (`apps/frontend/`)
-- **Desktop**: Electron main/preload with a Rust sidecar (`apps/electron/`,
-  `apps/server/`, `crates/`)
-- **Web mode**: Axum HTTP server (`apps/server/`)
-- **TS backend migration**: Bun runtime skeleton (`apps/backend/`) being built
-  as the eventual replacement for `apps/server/`
+- **Desktop**: Electron main/preload with a Bun TypeScript backend sidecar
+  (`apps/electron/`, `apps/backend/`)
+- **Web mode**: Bun TypeScript backend (`apps/backend/`)
+- **Legacy Rust reference**: `apps/server/` and `crates/` remain compatibility
+  and behavior-parity references during the TS migration.
 - **Packages**: `@wealthfolio/ui`, addon-sdk, addon-dev-tools (`packages/`)
 
 ## Code Layout
@@ -70,10 +70,10 @@ apps/electron/
 └── src/                # Electron main/preload/shared IPC
 
 apps/backend/
-└── src/                # Bun/TypeScript backend runtime migration target
+└── src/                # Bun/TypeScript backend runtime
 
 apps/server/src/
-└── api/                # Axum HTTP handlers
+└── api/                # Legacy Axum compatibility/reference handlers
 
 crates/
 ├── core/               # Business logic, models, services
@@ -115,8 +115,10 @@ root for migration continuity.
    `RUN_ENV` pattern)
 3. **Electron IPC** → `apps/electron/src/shared/ipc.ts` +
    `apps/electron/src/main/commands.ts`
-4. **Sidecar/Web endpoint** → `apps/server/src/api/`, call `crates/core` service
-5. **Core logic** → `crates/core/` services/repos
+4. **Backend endpoint** → `apps/backend/src/http.ts` + domain service in
+   `apps/backend/src/domains/`
+5. **Rust parity reference** → check `apps/server/src/api/` and `crates/core/`
+   when porting existing behavior
 6. **Tests** → Vitest for TS, `#[test]` for Rust
 
 ### UI patterns
@@ -131,11 +133,11 @@ root for migration continuity.
 ```
 Frontend → Adapter (Electron/Web) → Command wrapper
                 ↓
-        Electron IPC + Rust sidecar | Axum HTTP
+        Electron IPC + Bun backend | Bun HTTP
                 ↓
-           crates/core (business logic)
+        apps/backend domains (business logic)
                 ↓
-           crates/storage-sqlite
+        Bun SQLite storage (shared Rust migrations as schema source)
 ```
 
 ---
@@ -153,7 +155,8 @@ Frontend → Adapter (Electron/Web) → Command wrapper
 
 - Idiomatic Rust, small focused functions
 - `Result`/`Option`, propagate with `?`, `thiserror` for domain errors
-- Keep Electron/Axum boundaries thin—delegate business logic to `crates/core`
+- Keep legacy Rust/Axum reference changes thin and preserve parity with the TS
+  backend when touching migration-sensitive behavior.
 - Migrations in `crates/storage-sqlite/migrations`
 
 ### Security
