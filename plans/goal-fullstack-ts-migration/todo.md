@@ -4527,6 +4527,13 @@ contract:
   aliases such as `APC`/`APC.DE`, fixture country metadata for region
   classification, and fixture misses failing without falling through to live
   Yahoo.
+- `pr5-connect-trigger-cycle-ready-noop`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review/refine. Coverage
+  includes READY + reconcile `NOOP` + empty due pending outbox returning
+  Rust-shaped `ok`, trusted device-config persistence, successful cycle
+  `consecutive_failures` reset, and pending outbox retaining the sync-engine
+  feature gate.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
