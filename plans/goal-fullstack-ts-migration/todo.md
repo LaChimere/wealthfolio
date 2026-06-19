@@ -4292,6 +4292,13 @@ contract:
   broker activity page validation rejecting scalar/array top-level `currency`
   values, validating `id`/`code`/`name` string fields, and preserving
   missing/null currency handling.
+- `pr5-connect-broker-activity-has-more-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|transaction accounts with empty|pagination|broker activity page"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  pagination parsing validating only Rust's `has_more` field while treating
+  camel `hasMore` as an ignored unknown field.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full

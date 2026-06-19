@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 532
+turns_used: 533
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T05:49:29+08:00"
+updated_at: "2026-06-20T05:55:19+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3451,6 +3451,12 @@ updated_at: "2026-06-20T05:49:29+08:00"
   requires object currency fields `id`/`code`/`name` to be string or null, and
   preserves missing/null currency handling like Rust
   `Option<AccountUniversalActivityCurrency>`. Verified with focused/full Connect
+  tests, backend type-check, backend suite, full `bun run check`, and dual
+  GPT/Claude xhigh review/refine.
+- Turn 533: Tightened Connect broker activity pagination `has_more` alias
+  parity. Pagination handling now reads and validates only Rust's `has_more`
+  field, rejects malformed present `has_more`, and treats camel `hasMore` as an
+  ignored unknown field even when malformed. Verified with focused/full Connect
   tests, backend type-check, backend suite, full `bun run check`, and dual
   GPT/Claude xhigh review/refine.
 
