@@ -5697,6 +5697,57 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("rejects malformed Connect trusted device summaries during key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "PAIRING_REQUIRED",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: 123 },
+            ],
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+      const identityAfterFailedInitialize = JSON.parse(
+        secretService.entries.get("sync_identity") ?? "{}",
+      ) as Record<string, unknown>;
+      expect(identityAfterFailedInitialize.deviceId).toBe("device-1");
+      expect(identityAfterFailedInitialize.rootKey).toBe(null);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects malformed Connect commit initialize keys response before storing trusted identity", async () => {
     async function expectRejectedCommitResponse(commitResponse: string): Promise<void> {
       const db = createDeviceSyncStateDb();

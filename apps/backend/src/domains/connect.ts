@@ -4002,9 +4002,23 @@ function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>>
       id: requiredStringValue(entry.id, "initialize keys response"),
       name: requiredStringValue(entry.name, "initialize keys response"),
       platform: requiredStringValue(entry.platform, "initialize keys response"),
-      lastSeenAt: optionalString(entry.lastSeenAt ?? entry.last_seen_at),
+      lastSeenAt: optionalTrustedDeviceSummaryStringValue(entry.lastSeenAt ?? entry.last_seen_at),
     };
   });
+}
+
+function optionalTrustedDeviceSummaryStringValue(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse initialize keys response",
+      500,
+    );
+  }
+  return value;
 }
 
 function requiredBooleanValue(value: unknown, context: string): boolean {
