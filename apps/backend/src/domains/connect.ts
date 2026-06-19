@@ -2927,6 +2927,9 @@ function connectApiErrorMessage(status: number, bodyText: string): string {
   try {
     const parsed = JSON.parse(trimmed);
     if (isRecord(parsed)) {
+      if (!validConnectApiErrorResponseShape(trimmed, parsed)) {
+        return `API error ${status}`;
+      }
       const message = optionalString(parsed.message) ?? optionalString(parsed.error);
       return `API error ${status}: ${message ?? `HTTP ${status}`}`;
     }
@@ -2934,6 +2937,24 @@ function connectApiErrorMessage(status: number, bodyText: string): string {
     return `API error ${status}`;
   }
   return `API error ${status}`;
+}
+
+function validConnectApiErrorResponseShape(
+  rawJson: string,
+  parsed: Record<string, unknown>,
+): boolean {
+  if (
+    rawTokensForAliases(rawJson, ["error"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["code"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["message"]).length > 1
+  ) {
+    return false;
+  }
+  return (
+    (parsed.error === undefined || parsed.error === null || typeof parsed.error === "string") &&
+    (parsed.code === undefined || parsed.code === null || typeof parsed.code === "string") &&
+    (parsed.message === undefined || parsed.message === null || typeof parsed.message === "string")
+  );
 }
 
 function connectRequestHeaders(): Record<string, string> {

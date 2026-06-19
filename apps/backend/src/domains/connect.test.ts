@@ -505,6 +505,41 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("falls back on malformed authenticated Connect API error bodies", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response('{"message":"upstream unavailable","message":"later"}', {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "API error 503",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects malformed authenticated subscription plan scalar fields", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
