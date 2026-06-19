@@ -289,6 +289,33 @@ describe("TS local device sync service", () => {
         deviceId: "device-1",
       },
     ]);
+
+    const malformedSuccessService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response('{"success":true,"success":false}', {
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    await expect(
+      malformedSuccessService.updateDevice("device-1", { displayName: "Renamed" }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse success response",
+      status: 500,
+    });
+    await expect(malformedSuccessService.deleteDevice("device-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse success response",
+      status: 500,
+    });
+    await expect(malformedSuccessService.revokeDevice("device-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse success response",
+      status: 500,
+    });
   });
   test("returns success flow when pairing begin confirm needs no bootstrap", async () => {
     const db = new Database(":memory:");

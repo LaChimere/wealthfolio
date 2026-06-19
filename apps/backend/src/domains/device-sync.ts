@@ -324,7 +324,7 @@ export function createLocalDeviceSyncService({
     },
     async updateDevice(deviceId, request) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
-      return await fetchDeviceSyncJson(
+      const updateResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -335,27 +335,30 @@ export function createLocalDeviceSyncService({
             display_name: request.displayName,
           },
         },
-      ).then(successResponseFromCloud);
+      );
+      return successResponseFromCloud(updateResponse.value, updateResponse.bodyText);
     },
     async deleteDevice(deviceId) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
-      return await fetchDeviceSyncJson(
+      const deleteResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
         `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
         { method: "DELETE" },
-      ).then(successResponseFromCloud);
+      );
+      return successResponseFromCloud(deleteResponse.value, deleteResponse.bodyText);
     },
     async revokeDevice(deviceId) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
-      return await fetchDeviceSyncJson(
+      const revokeResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
         `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/revoke`,
         { method: "POST" },
-      ).then(successResponseFromCloud);
+      );
+      return successResponseFromCloud(revokeResponse.value, revokeResponse.bodyText);
     },
     async initializeTeamKeys() {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
