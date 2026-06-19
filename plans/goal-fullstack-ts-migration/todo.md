@@ -4350,6 +4350,15 @@ contract:
   broker activity validation, option activity detection, and metadata
   construction using top-level `option_symbol` plus nested option-symbol
   snake-case fields while treating camel option keys as ignored unknown fields.
+- `pr5-connect-broker-activity-symbol-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|provider-resolved broker activities|transaction accounts with empty|crypto broker"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity validation, symbol/crypto matching, exchange MIC handling, and
+  metadata construction using Rust symbol keys (`raw_symbol`, `figi_code`,
+  `type`, exchange `mic_code`) while treating camel/unknown symbol keys as
+  ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
