@@ -8715,6 +8715,7 @@ describe("TS Connect device sync local service", () => {
       schema_version: 1,
       covers_tables: [],
     };
+    let latestSnapshotRawText: string | null = null;
     let cursorResponse: Record<string, unknown> = { cursor: 42, latest_snapshot: null };
     const service = createLocalConnectDeviceSyncService({
       db,
@@ -8725,6 +8726,11 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (latestSnapshotRawText !== null) {
+            return new Response(latestSnapshotRawText, {
+              headers: { "content-type": "application/json" },
+            });
+          }
           return Response.json(latestSnapshotResponse);
         }
         if (String(input).includes("/api/v1/sync/events/cursor")) {
@@ -8747,6 +8753,19 @@ describe("TS Connect device sync local service", () => {
         code: "not_implemented",
         status: 501,
       });
+      latestSnapshotRawText =
+        '{"snapshot_id":"","oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      latestSnapshotRawText =
+        '{"snapshot_id":"","oplog_seq":0,"oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      latestSnapshotRawText = null;
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
       ).toEqual({ count: 1 });
@@ -9316,6 +9335,7 @@ describe("TS Connect device sync local service", () => {
     );
     let latestSchemaVersion = 2;
     let cursorSchemaVersion = 1;
+    let cursorMode: "normal" | "duplicate-latest" | "duplicate-null-latest" = "duplicate-latest";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9339,6 +9359,18 @@ describe("TS Connect device sync local service", () => {
           });
         }
         if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (cursorMode === "duplicate-latest") {
+            return new Response(
+              '{"cursor":42,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42},"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (cursorMode === "duplicate-null-latest") {
+            return new Response(
+              '{"cursor":42,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42},"latest_snapshot":null}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
           return Response.json({
             cursor: 42,
             latest_snapshot: {
@@ -9361,6 +9393,18 @@ describe("TS Connect device sync local service", () => {
     });
 
     try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "duplicate-null-latest";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "normal";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,

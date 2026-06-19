@@ -4967,7 +4967,10 @@ async function localLatestSnapshotStatusBestEffort(
     if (!isRecord(parsed)) {
       return { kind: "unknown" };
     }
-    if (!validSnapshotLatestMetadataShape(parsed)) {
+    if (
+      !validSnapshotLatestMetadataShape(parsed) ||
+      !validSnapshotLatestMetadataRawShape(bodyText)
+    ) {
       return { kind: "unknown" };
     }
     const snapshotId = optionalString(parsed.snapshotId ?? parsed.snapshot_id);
@@ -5024,18 +5027,38 @@ async function localCursorLatestSnapshotStatusBestEffort(
     if (!response.ok) {
       return { kind: "unknown" };
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
+    const responseText = await response.text();
+    const parsed = JSON.parse(responseText) as unknown;
     if (!isRecord(parsed)) {
       return { kind: "unknown" };
     }
-    if (!validSyncCursorShape(parsed)) {
+    if (!validSyncCursorShape(parsed) || !validSyncCursorRawShape(responseText)) {
+      return { kind: "unknown" };
+    }
+    const latestSnapshotRawTokens = [
+      ...topLevelJsonPropertyRawTokens(responseText, "latestSnapshot"),
+      ...topLevelJsonPropertyRawTokens(responseText, "latest_snapshot"),
+    ];
+    if (latestSnapshotRawTokens.length > 1) {
       return { kind: "unknown" };
     }
     const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
     if (latestSnapshot == null) {
+      if (latestSnapshotRawTokens.length === 1 && latestSnapshotRawTokens[0]?.trim() !== "null") {
+        return { kind: "unknown" };
+      }
       return { kind: "missing" };
     }
-    if (!validSyncLatestSnapshotRefShape(latestSnapshot)) {
+    const latestSnapshotRawToken = latestSnapshotRawTokens[0];
+    const parsedLatestSnapshot = parseLocalReconcileLatestSnapshot(
+      latestSnapshot,
+      latestSnapshotRawToken,
+    );
+    if (
+      latestSnapshotRawTokens.length !== 1 ||
+      !validSyncLatestSnapshotRefShape(latestSnapshot) ||
+      parsedLatestSnapshot.invalid
+    ) {
       return { kind: "unknown" };
     }
     return {
@@ -5315,6 +5338,32 @@ function validSnapshotLatestMetadataShape(value: Record<string, unknown>): boole
   );
 }
 
+function validSnapshotLatestMetadataRawShape(text: string): boolean {
+  const snapshotIdTokens = rawTokensForAliases(text, ["snapshotId", "snapshot_id"]);
+  const schemaVersionTokens = rawTokensForAliases(text, ["schemaVersion", "schema_version"]);
+  const coversTablesTokens = rawTokensForAliases(text, ["coversTables", "covers_tables"]);
+  const oplogSeqTokens = rawTokensForAliases(text, ["oplogSeq", "oplog_seq"]);
+  const sizeBytesTokens = rawTokensForAliases(text, ["sizeBytes", "size_bytes"]);
+  const checksumTokens = rawTokensForAliases(text, ["checksum"]);
+  const createdAtTokens = rawTokensForAliases(text, ["createdAt", "created_at"]);
+  return (
+    snapshotIdTokens.length === 1 &&
+    schemaVersionTokens.length === 1 &&
+    coversTablesTokens.length === 1 &&
+    oplogSeqTokens.length === 1 &&
+    sizeBytesTokens.length === 1 &&
+    checksumTokens.length === 1 &&
+    createdAtTokens.length === 1 &&
+    rawJsonStringTokenIsValid(snapshotIdTokens[0] ?? "") &&
+    rawJsonI32TokenIsValid(schemaVersionTokens[0] ?? "") &&
+    (coversTablesTokens[0] ?? "").trim().startsWith("[") &&
+    rawJsonI64TokenIsValid(oplogSeqTokens[0] ?? "") &&
+    rawJsonI64TokenIsValid(sizeBytesTokens[0] ?? "") &&
+    rawJsonStringTokenIsValid(checksumTokens[0] ?? "") &&
+    rawJsonStringTokenIsValid(createdAtTokens[0] ?? "")
+  );
+}
+
 function validSyncLatestSnapshotRefShape(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) {
     return false;
@@ -5332,6 +5381,11 @@ function validSyncCursorShape(value: Record<string, unknown>): boolean {
     isSafeI64Integer(value.cursor) &&
     (gcWatermark === undefined || gcWatermark === null || isSafeI64Integer(gcWatermark))
   );
+}
+
+function validSyncCursorRawShape(text: string): boolean {
+  const cursorTokens = rawTokensForAliases(text, ["cursor"]);
+  return cursorTokens.length === 1 && rawJsonI64TokenIsValid(cursorTokens[0] ?? "");
 }
 
 function isSafeI64Integer(value: unknown): value is number {
@@ -5793,7 +5847,11 @@ function localReconcileCursorOrDefault(reconcile: LocalReconcileReadyState): num
 
 function rawJsonI64OptionTokenIsValid(token: string): boolean {
   const trimmed = token.trim();
-  return trimmed === "null" || /^-?(?:0|[1-9]\d*)$/.test(trimmed);
+  return trimmed === "null" || rawJsonI64TokenIsValid(trimmed);
+}
+
+function rawJsonI64TokenIsValid(token: string): boolean {
+  return /^-?(?:0|[1-9]\d*)$/.test(token.trim());
 }
 
 function rawJsonI32TokenIsValid(token: string): boolean {
@@ -5802,6 +5860,10 @@ function rawJsonI32TokenIsValid(token: string): boolean {
 
 function rawJsonStringTokenIsValid(token: string): boolean {
   return token.trim().startsWith('"');
+}
+
+function rawTokensForAliases(text: string, aliases: string[]): string[] {
+  return aliases.flatMap((alias) => topLevelJsonPropertyRawTokens(text, alias));
 }
 
 function parseLocalReconcileLatestSnapshot(
