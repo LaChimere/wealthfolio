@@ -4571,6 +4571,13 @@ contract:
   `apps/backend` as the current Bun TypeScript backend runtime,
   `apps/server`/`crates` as legacy Rust/Axum parity references, and shared Rust
   migrations as the active schema source.
+- `pr5-connect-reconcile-snapshot-ref-validation`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review/refine. Coverage
+  includes required `latest_snapshot`/`latestSnapshot` snapshot id, schema
+  version, and oplog sequence fields; duplicate cursor/snapshot fields; raw JSON
+  float numeric tokens; and action-only helper invalidation before bootstrap
+  no-op decisions.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
