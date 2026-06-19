@@ -4069,6 +4069,14 @@ contract:
   validating raw Connect InitializeKeysResult responses before storing trusted
   key material, preserving valid BOOTSTRAP behavior while rejecting duplicate
   aliases and float/exponent i32 tokens.
+- `pr5-connect-device-commit-initialize-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "FRESH device sync|malformed Connect commit initialize|malformed Connect initialize|malformed Connect enrollment|legacy device nonce"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating raw Connect CommitInitializeKeysResponse responses before storing
+  trusted key material, preserving valid BOOTSTRAP behavior while requiring
+  Rust-shaped `success` and `key_state` fields and rejecting duplicate aliases.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
