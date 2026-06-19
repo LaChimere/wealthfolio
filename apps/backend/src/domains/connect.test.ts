@@ -1295,6 +1295,12 @@ describe("TS Connect local session service", () => {
         message: "Failed to parse accounts response",
         status: 500,
       });
+      responseBody = '{"accounts":[{"id":"broker-account","is_paper":true,"is_paper":false}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
       responseBody = '{"accounts":[{"id":"broker-account","type":"CASH","type":"TFSA"}]}';
       await expect(service.listBrokerAccounts()).rejects.toMatchObject({
         code: "internal_error",
@@ -1318,9 +1324,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return Response.json({
-          accounts: [{ id: "broker-account", institution_name: 123, is_paper: "false" }],
-        });
+        return Response.json({ accounts: [{ id: "broker-account", is_paper: null }] });
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
@@ -1576,6 +1580,9 @@ describe("TS Connect local session service", () => {
               institution_name: "SnapTrade",
               institutionName: 123,
               createdDate: 123,
+              isPaper: "false",
+              syncEnabled: "false",
+              sharedWithHousehold: "true",
               raw_type: "tfsa",
               rawType: 123,
               owner: { user_id: "user-1", is_own_account: true },

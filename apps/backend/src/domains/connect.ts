@@ -1284,9 +1284,9 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
         ["sync_status", "syncStatus"],
         ["status"],
         ["raw_type"],
-        ["is_paper", "isPaper"],
-        ["sync_enabled", "syncEnabled"],
-        ["shared_with_household", "sharedWithHousehold"],
+        ["is_paper"],
+        ["sync_enabled"],
+        ["shared_with_household"],
       ],
       "accounts response",
     );
@@ -1361,15 +1361,8 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
   ]) {
     assertOptionalConnectStringField(account, field, "accounts response");
   }
-  for (const field of [
-    "is_paper",
-    "isPaper",
-    "sync_enabled",
-    "syncEnabled",
-    "shared_with_household",
-    "sharedWithHousehold",
-  ]) {
-    assertOptionalConnectBooleanField(account, field, "accounts response");
+  for (const field of ["is_paper", "sync_enabled", "shared_with_household"]) {
+    assertDefaultConnectBooleanField(account, field, "accounts response");
   }
   validateBrokerAccountBalance(account.balance);
   validateBrokerAccountOwner(account.owner);
@@ -3322,10 +3315,9 @@ function brokerAccountMeta(account: Record<string, unknown>): Record<string, unk
     created_date: optionalString(account.created_date),
     status: optionalString(account.status),
     raw_type: optionalString(account.raw_type),
-    is_paper: optionalBoolean(account.is_paper ?? account.isPaper) ?? false,
-    sync_enabled: optionalBoolean(account.sync_enabled ?? account.syncEnabled) ?? true,
-    shared_with_household:
-      optionalBoolean(account.shared_with_household ?? account.sharedWithHousehold) ?? false,
+    is_paper: optionalBoolean(account.is_paper) ?? false,
+    sync_enabled: optionalBoolean(account.sync_enabled) ?? true,
+    shared_with_household: optionalBoolean(account.shared_with_household) ?? false,
     sync_status: account.sync_status ?? account.syncStatus ?? null,
     owner: account.owner ?? null,
   };
@@ -3384,6 +3376,17 @@ function assertOptionalConnectBooleanField(
 ): void {
   const value = record[key];
   if (value !== undefined && value !== null && typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+}
+
+function assertDefaultConnectBooleanField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && typeof value !== "boolean") {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
 }
