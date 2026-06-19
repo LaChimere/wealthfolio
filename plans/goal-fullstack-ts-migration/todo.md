@@ -4418,6 +4418,16 @@ contract:
   broker account validation and metadata construction using snake-case
   `sync_status` plus nested snake-case status detail fields, while treating
   camel `syncStatus` and nested camel detail fields as ignored unknown fields.
+- `pr5-connect-broker-account-owner-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account aliases|syncs new broker accounts|broker account fields|broker account nested"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker account validation and metadata construction using Rust owner keys
+  (`user_id`, `full_name` plus `user_full_name`, `email`, `avatar_url`, and
+  `is_own_account`), rejecting malformed/duplicate known fields, preserving
+  default owner booleans, and treating camel owner keys as ignored unknown
+  fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
