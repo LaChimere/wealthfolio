@@ -5206,7 +5206,22 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
-        '{"data":[{"id":"activity-1","trade_date":"2026-01-01","tradeDate":"2026-01-02"}],"pagination":{"has_more":false}}';
+        '{"data":[{"id":"activity-1","trade_date":"2026-01-01","trade_date":"2026-01-02"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","trade_date":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","option_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","raw_type":123}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5583,6 +5598,10 @@ describe("TS Connect local session service", () => {
                 sourceGroupId: 123,
                 providerType: 123,
                 externalReferenceId: 123,
+                rawType: 123,
+                optionType: 123,
+                tradeDate: 123,
+                settlementDate: 123,
                 optionSymbol: "ignored by Rust",
                 option_symbol: {
                   optionType: 123,

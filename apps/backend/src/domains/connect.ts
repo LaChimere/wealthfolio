@@ -2026,11 +2026,11 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["currency"],
     ["type", "activity_type", "activityType"],
     ["subtype"],
-    ["raw_type", "rawType"],
-    ["option_type", "optionType"],
+    ["raw_type"],
+    ["option_type"],
     ["description"],
-    ["trade_date", "tradeDate"],
-    ["settlement_date", "settlementDate"],
+    ["trade_date"],
+    ["settlement_date"],
     ["fee"],
     ["fx_rate"],
     ["institution"],
@@ -2057,11 +2057,11 @@ function validBrokerActivityScalarRawShape(rawJson: string): boolean {
     ["id"],
     ["type", "activity_type", "activityType"],
     ["subtype"],
-    ["raw_type", "rawType"],
-    ["option_type", "optionType"],
+    ["raw_type"],
+    ["option_type"],
     ["description"],
-    ["trade_date", "tradeDate"],
-    ["settlement_date", "settlementDate"],
+    ["trade_date"],
+    ["settlement_date"],
     ["institution"],
     ["external_reference_id"],
     ["provider_type"],
@@ -2430,20 +2430,9 @@ function brokerCashActivityCreateInput(
   return {
     accountId,
     activityType,
-    subtype: optionalString(
-      activity.subtype ??
-        activity.option_type ??
-        activity.optionType ??
-        activity.raw_type ??
-        activity.rawType,
-    ),
+    subtype: optionalString(activity.subtype ?? activity.option_type ?? activity.raw_type),
     activityDate:
-      optionalString(
-        activity.trade_date ??
-          activity.tradeDate ??
-          activity.settlement_date ??
-          activity.settlementDate,
-      ) ?? new Date().toISOString(),
+      optionalString(activity.trade_date ?? activity.settlement_date) ?? new Date().toISOString(),
     amount: brokerActivityAbsoluteNumberString(activity.amount),
     fee: brokerActivityAbsoluteNumberString(activity.fee),
     currency,
@@ -2516,20 +2505,9 @@ function brokerExistingAssetActivityCreateInput(
   return {
     accountId,
     activityType,
-    subtype: optionalString(
-      activity.subtype ??
-        activity.option_type ??
-        activity.optionType ??
-        activity.raw_type ??
-        activity.rawType,
-    ),
+    subtype: optionalString(activity.subtype ?? activity.option_type ?? activity.raw_type),
     activityDate:
-      optionalString(
-        activity.trade_date ??
-          activity.tradeDate ??
-          activity.settlement_date ??
-          activity.settlementDate,
-      ) ?? new Date().toISOString(),
+      optionalString(activity.trade_date ?? activity.settlement_date) ?? new Date().toISOString(),
     quantity: brokerActivityAbsoluteNumberString(activity.units),
     unitPrice: brokerActivityAbsoluteNumberString(activity.price),
     amount: brokerActivityAbsoluteNumberString(activity.amount),
@@ -2596,20 +2574,9 @@ async function brokerProviderAssetActivityCreateInput(
   return {
     accountId,
     activityType,
-    subtype: optionalString(
-      activity.subtype ??
-        activity.option_type ??
-        activity.optionType ??
-        activity.raw_type ??
-        activity.rawType,
-    ),
+    subtype: optionalString(activity.subtype ?? activity.option_type ?? activity.raw_type),
     activityDate:
-      optionalString(
-        activity.trade_date ??
-          activity.tradeDate ??
-          activity.settlement_date ??
-          activity.settlementDate,
-      ) ?? new Date().toISOString(),
+      optionalString(activity.trade_date ?? activity.settlement_date) ?? new Date().toISOString(),
     quantity: brokerActivityAbsoluteNumberString(activity.units),
     unitPrice: brokerActivityAbsoluteNumberString(activity.price),
     amount: brokerActivityAbsoluteNumberString(activity.amount),
@@ -2902,7 +2869,7 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
   const mappingMetadata = activity.mapping_metadata;
   const metadata: Record<string, unknown> = {
     source: "broker",
-    raw_type: optionalString(activity.raw_type ?? activity.rawType),
+    raw_type: optionalString(activity.raw_type),
     source_system: optionalString(activity.source_system),
     provider_type: optionalString(activity.provider_type),
     source_record_id: optionalString(activity.source_record_id),
@@ -2927,7 +2894,7 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
     metadata.symbol = symbolMetadata;
   }
   const optionSymbol = activity.option_symbol;
-  const optionLegType = optionalString(activity.option_type ?? activity.optionType);
+  const optionLegType = optionalString(activity.option_type);
   if (optionLegType) {
     metadata.option_leg_type = optionLegType;
   }
