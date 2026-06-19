@@ -9776,6 +9776,7 @@ describe("TS Connect device sync local service", () => {
       | "transport"
       | "body"
       | "rate-limit"
+      | "malformed-rate-limit"
       | "missing-schema-header"
       | "bad-schema-header"
       | "missing-covers-header"
@@ -9802,6 +9803,12 @@ describe("TS Connect device sync local service", () => {
           }
           if (mode === "rate-limit") {
             return Response.json({ code: "RATE_LIMIT", message: "slow down" }, { status: 429 });
+          }
+          if (mode === "malformed-rate-limit") {
+            return new Response('{"code":"RATE_LIMIT","message":"slow down","message":"later"}', {
+              status: 429,
+              headers: { "content-type": "application/json" },
+            });
           }
           if (mode === "body") {
             return {
@@ -9876,6 +9883,13 @@ describe("TS Connect device sync local service", () => {
         code: "internal_error",
         status: 500,
         message: "API error (429): RATE_LIMIT: slow down",
+      });
+      mode = "malformed-rate-limit";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          'API error (429): Request failed: {"code":"RATE_LIMIT","message":"slow down","message":"later"}',
       });
       mode = "missing-schema-header";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({

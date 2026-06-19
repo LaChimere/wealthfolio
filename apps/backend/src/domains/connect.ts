@@ -4475,14 +4475,36 @@ function connectDeviceSyncApiErrorMessage(status: number, bodyText: string): str
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (isRecord(parsed)) {
+      if (!validDeviceSyncApiErrorResponseShape(trimmed, parsed)) {
+        return `API error (${status}): Request failed: ${trimmed}`;
+      }
       const code = optionalString(parsed.code) ?? optionalString(parsed.error) ?? "";
-      const message = optionalString(parsed.message) ?? `HTTP ${status}`;
+      const message = parsed.message;
       return `API error (${status}): ${code}: ${message}`;
     }
   } catch {
     return `API error (${status}): Request failed: ${trimmed}`;
   }
   return `API error (${status}): Request failed: ${trimmed}`;
+}
+
+function validDeviceSyncApiErrorResponseShape(
+  rawJson: string,
+  parsed: Record<string, unknown>,
+): parsed is Record<string, unknown> & { message: string } {
+  if (
+    rawTokensForAliases(rawJson, ["error"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["code"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["message"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["details"]).length > 1
+  ) {
+    return false;
+  }
+  return (
+    (parsed.error === undefined || typeof parsed.error === "string") &&
+    (parsed.code === undefined || typeof parsed.code === "string") &&
+    typeof parsed.message === "string"
+  );
 }
 
 function requiredDeviceTrustState(value: unknown): string {
