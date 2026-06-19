@@ -4023,6 +4023,13 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   preserving update/delete/revoke device response mapping while rejecting
   duplicate `success` fields for Rust `SuccessResponse`.
+- `pr5-device-sync-composite-confirm-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "begin confirm needs no bootstrap|composite confirm when bootstrap is not required"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating composite confirm cloud responses before bootstrap/no-bootstrap
+  branching while preserving already-confirmed retry handling.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
