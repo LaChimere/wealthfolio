@@ -1309,6 +1309,38 @@ describe("TS local device sync service", () => {
       mode: "READY",
       e2ee_key_version: 4,
     });
+
+    let initializeBody =
+      '{"mode":"BOOTSTRAP","challenge":"challenge-1","nonce":"nonce-1","key_version":2.0}';
+    const malformedService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(initializeBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(malformedService.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse initialize keys response",
+      status: 500,
+    });
+
+    initializeBody =
+      '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"e2eeKeyVersion":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[]}';
+    await expect(malformedService.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse initialize keys response",
+      status: 500,
+    });
+
+    initializeBody =
+      '{"mode":"BOOTSTRAP","challenge":"challenge-1","challenge":"challenge-2","nonce":"nonce-1","key_version":2}';
+    await expect(malformedService.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse initialize keys response",
+      status: 500,
+    });
   });
 
   test("runs team key commit operations through cloud when device id is configured", async () => {

@@ -362,7 +362,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const initializeResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -372,7 +372,8 @@ export function createLocalDeviceSyncService({
           deviceId,
           body: { device_id: deviceId },
         },
-      ).then(initializeKeysResultFromCloud);
+      );
+      return initializeKeysResultFromCloud(initializeResponse.value, initializeResponse.bodyText);
     },
     async commitInitializeTeamKeys(request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1488,13 +1489,19 @@ function pairingMessageFromCloud(value: unknown): Record<string, unknown> {
   };
 }
 
-function initializeKeysResultFromCloud(value: unknown): Record<string, unknown> {
+function initializeKeysResultFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse initialize keys response",
       500,
     );
+  }
+  if (rawJson !== null) {
+    assertInitializeKeysResponseRawShape(rawJson);
   }
   const mode = requiredString(value.mode, "initialize keys response");
   if (mode === "BOOTSTRAP") {
@@ -1533,6 +1540,48 @@ function initializeKeysResultFromCloud(value: unknown): Record<string, unknown> 
     };
   }
   throw new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse initialize keys response",
+    500,
+  );
+}
+
+function assertInitializeKeysResponseRawShape(rawJson: string): void {
+  const modeTokens = topLevelJsonValueTokens(rawJson, "mode");
+  if (modeTokens.length !== 1 || !rawJsonStringTokenIsValid(modeTokens[0] ?? "")) {
+    throw initializeKeysResponseParseError();
+  }
+  for (const aliases of [
+    ["challenge"],
+    ["nonce"],
+    ["keyVersion", "key_version"],
+    ["e2eeKeyVersion", "e2ee_key_version"],
+    ["requireSas", "require_sas"],
+    ["pairingTtlSeconds", "pairing_ttl_seconds"],
+    ["trustedDevices", "trusted_devices"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw initializeKeysResponseParseError();
+    }
+  }
+  assertInitializeKeysRawIntegerToken(rawJson, "keyVersion");
+  assertInitializeKeysRawIntegerToken(rawJson, "key_version");
+  assertInitializeKeysRawIntegerToken(rawJson, "e2eeKeyVersion");
+  assertInitializeKeysRawIntegerToken(rawJson, "e2ee_key_version");
+  assertInitializeKeysRawIntegerToken(rawJson, "pairingTtlSeconds");
+  assertInitializeKeysRawIntegerToken(rawJson, "pairing_ttl_seconds");
+}
+
+function assertInitializeKeysRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw initializeKeysResponseParseError();
+    }
+  }
+}
+
+function initializeKeysResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
     "internal_error",
     "Failed to parse initialize keys response",
     500,
