@@ -1908,6 +1908,9 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
       }
     }
   }
+  if (brokerActivityPageData(value).some((activity) => !validBrokerActivityParsedShape(activity))) {
+    return false;
+  }
   const paginationTokens = rawTokensForAliases(rawJson, [
     "pagination",
     "paginationDetails",
@@ -1953,6 +1956,43 @@ function validBrokerActivityPageShape(value: unknown, rawJson: string): boolean 
   return true;
 }
 
+function validBrokerActivityParsedShape(activity: unknown): boolean {
+  if (!isRecord(activity)) {
+    return true;
+  }
+  for (const value of [activity.price, activity.units, activity.amount, activity.fee]) {
+    if (value !== undefined && value !== null && !Number.isFinite(value)) {
+      return false;
+    }
+  }
+  const fxRate = activity.fx_rate ?? activity.fxRate;
+  if (fxRate !== undefined && fxRate !== null && !Number.isFinite(fxRate)) {
+    return false;
+  }
+  const needsReview = activity.needs_review ?? activity.needsReview;
+  if (needsReview !== undefined && needsReview !== null && typeof needsReview !== "boolean") {
+    return false;
+  }
+  const mappingMetadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  if (isRecord(mappingMetadata)) {
+    const confidence = mappingMetadata.confidence;
+    if (confidence !== undefined && confidence !== null && !Number.isFinite(confidence)) {
+      return false;
+    }
+  }
+  return validBrokerActivityCurrencyShape(activity.currency);
+}
+
+function validBrokerActivityCurrencyShape(value: unknown): boolean {
+  if (value === undefined || value === null || typeof value === "string") {
+    return true;
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  return value.code === undefined || value.code === null || typeof value.code === "string";
+}
+
 function validBrokerActivityRawShape(rawJson: string): boolean {
   for (const aliases of [
     ["id"],
@@ -1984,10 +2024,48 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
       return false;
     }
   }
+  if (!validBrokerActivityScalarRawShape(rawJson)) {
+    return false;
+  }
   return validBrokerActivityNestedRawShape(rawJson);
 }
 
+function validBrokerActivityScalarRawShape(rawJson: string): boolean {
+  for (const aliases of [
+    ["id"],
+    ["type", "activity_type", "activityType"],
+    ["subtype"],
+    ["raw_type", "rawType"],
+    ["option_type", "optionType"],
+    ["description"],
+    ["trade_date", "tradeDate"],
+    ["settlement_date", "settlementDate"],
+    ["institution"],
+    ["external_reference_id", "externalReferenceId"],
+    ["provider_type", "providerType"],
+    ["source_system", "sourceSystem"],
+    ["source_record_id", "sourceRecordId"],
+    ["source_group_id", "sourceGroupId"],
+  ]) {
+    if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
+      return false;
+    }
+  }
+  for (const aliases of [["price"], ["units"], ["amount"], ["fee"], ["fx_rate", "fxRate"]]) {
+    if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "number")) {
+      return false;
+    }
+  }
+  return brokerActivityOptionalRawTokenIsValid(rawJson, ["needs_review", "needsReview"], "bool");
+}
+
 function validBrokerActivityNestedRawShape(rawJson: string): boolean {
+  const currencyTokens = rawTokensForAliases(rawJson, ["currency"]);
+  if (currencyTokens.length === 1 && currencyTokens[0]?.trim().startsWith("{")) {
+    if (!validBrokerActivityAliasGroups(currencyTokens[0], [["id"], ["code"], ["name"]])) {
+      return false;
+    }
+  }
   const symbolTokens = rawTokensForAliases(rawJson, ["symbol"]);
   if (symbolTokens.length === 1 && symbolTokens[0]?.trim().startsWith("{")) {
     if (!validBrokerActivitySymbolRawShape(symbolTokens[0])) {
@@ -2078,6 +2156,28 @@ function validBrokerActivityMappingMetadataRawShape(rawJson: string): boolean {
     return validBrokerActivityAliasGroups(flowTokens[0], [["is_external", "isExternal"]]);
   }
   return true;
+}
+
+function brokerActivityOptionalRawTokenIsValid(
+  rawJson: string,
+  aliases: string[],
+  kind: "bool" | "number" | "string",
+): boolean {
+  const token = rawTokensForAliases(rawJson, aliases)[0];
+  if (token === undefined) {
+    return true;
+  }
+  const trimmed = token.trim();
+  if (trimmed === "null") {
+    return true;
+  }
+  if (kind === "string") {
+    return rawJsonStringTokenIsValid(trimmed);
+  }
+  if (kind === "bool") {
+    return trimmed === "true" || trimmed === "false";
+  }
+  return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed);
 }
 
 function brokerActivityPaginationRawTokenIsValid(
