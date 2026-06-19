@@ -1417,7 +1417,60 @@ describe("TS local device sync service", () => {
     ).rejects.toMatchObject({ code: "forbidden", status: 403 });
   });
 
-  test("keeps composite pairing feature-gated after sync identity and session restore", async () => {
+  test("completes composite pairing transfer after sync identity and session restore", async () => {
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    let pairingCompleteNotifications = 0;
+    const service = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      onPairingComplete: () => {
+        pairingCompleteNotifications += 1;
+      },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, remote_seed_present: false });
+      },
+    });
+
+    await expect(
+      service.completePairingWithTransfer?.({
+        pairingId: "pairing-1",
+        encryptedKeyBundle: "bundle",
+        sasProof: { ok: true },
+        signature: "signature",
+      }),
+    ).resolves.toEqual({ success: true, remoteSeedPresent: false });
+    expect(pairingCompleteNotifications).toBe(1);
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/complete",
+        method: "POST",
+        body: JSON.stringify({
+          encrypted_key_bundle: "bundle",
+          sas_proof: { ok: true },
+          signature: "signature",
+        }),
+        deviceId: "device-1",
+      },
+    ]);
+  });
+
+  test("keeps composite pairing bootstrap confirm feature-gated after sync identity and session restore", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
       "sync_identity",
@@ -1431,14 +1484,6 @@ describe("TS local device sync service", () => {
       fetch: async () => Response.json({ success: true, key_version: 2 }),
     });
 
-    await expect(
-      service.completePairingWithTransfer?.({
-        pairingId: "pairing-1",
-        encryptedKeyBundle: "bundle",
-        sasProof: {},
-        signature: "signature",
-      }),
-    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
     await expect(
       service.confirmPairingWithBootstrap?.({
         pairingId: "pairing-1",

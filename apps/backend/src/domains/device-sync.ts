@@ -570,9 +570,29 @@ export function createLocalDeviceSyncService({
       applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
       return result;
     },
-    async completePairingWithTransfer() {
-      await requireCompositePairingPrerequisitesOrDisabled(connectService, secretService);
-      throw deviceSyncDisabled();
+    async completePairingWithTransfer(request) {
+      const { accessToken, deviceId } =
+        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+          connectService,
+          secretService,
+        );
+      const result = await fetchDeviceSyncJson(
+        accessToken,
+        env,
+        fetchImpl,
+        `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(request.pairingId)}/complete`,
+        {
+          method: "POST",
+          deviceId,
+          body: {
+            encrypted_key_bundle: request.encryptedKeyBundle,
+            sas_proof: request.sasProof,
+            signature: request.signature,
+          },
+        },
+      ).then(completePairingResponseFromCloud);
+      void notifyPairingComplete(onPairingComplete);
+      return result;
     },
     async confirmPairingWithBootstrap(request) {
       const { accessToken, deviceId } =
@@ -704,17 +724,6 @@ export function createLocalDeviceSyncService({
       };
     },
   };
-}
-
-async function requireCompositePairingPrerequisitesOrDisabled(
-  connectService: Pick<ConnectService, "restoreSyncSession"> | undefined,
-  secretService: SecretService | undefined,
-): Promise<string> {
-  const { deviceId } = await requireCompositePairingPrerequisitesWithTokenOrDisabled(
-    connectService,
-    secretService,
-  );
-  return deviceId;
 }
 
 async function requireCompositePairingPrerequisitesWithTokenOrDisabled(
