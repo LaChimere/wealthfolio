@@ -148,6 +148,11 @@ const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this bu
 const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
 const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
 const DEFAULT_DEVICE_SYNC_API_URL = "https://api.wealthfolio.app";
+const SNAPSHOT_FRESHNESS_CLOCK_SKEW_LEEWAY_MS = 120_000;
+const WAITING_FOR_TRUSTED_SNAPSHOT_MESSAGE =
+  "Snapshot is not available yet. Waiting for upload from a trusted device.";
+const WAITING_FOR_FRESH_SNAPSHOT_MESSAGE =
+  "Waiting for a snapshot generated after pairing confirmation";
 
 export interface LocalDeviceSyncServiceDependencies {
   connectService?: Pick<ConnectService, "restoreSyncSession">;
@@ -251,6 +256,7 @@ export function createLocalDeviceSyncService({
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
+  const pairingOverwriteApprovals = new Set<string>();
 
   return {
     ...disabledService,
@@ -619,6 +625,7 @@ export function createLocalDeviceSyncService({
       }
       applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
       if (!db) {
+        pairingOverwriteApprovals.delete(request.pairingId);
         return {
           status: "already_complete",
           message: "No bootstrap needed",
@@ -627,6 +634,7 @@ export function createLocalDeviceSyncService({
         };
       }
       if (db && !localBootstrapRequired(db, deviceId)) {
+        pairingOverwriteApprovals.delete(request.pairingId);
         return {
           status: "already_complete",
           message: "No bootstrap needed",
@@ -634,7 +642,12 @@ export function createLocalDeviceSyncService({
           nonEmptyTables: null,
         };
       }
-      if (db && !request.allowOverwrite) {
+      if (request.allowOverwrite) {
+        pairingOverwriteApprovals.add(request.pairingId);
+      }
+      const overwriteApproved =
+        request.allowOverwrite || pairingOverwriteApprovals.has(request.pairingId);
+      if (db && !overwriteApproved) {
         const summary = localOverwriteRiskSummary(db);
         if (summary.totalRows > 0) {
           return {
@@ -645,12 +658,17 @@ export function createLocalDeviceSyncService({
           };
         }
       }
-      if (await latestSnapshotIsMissing(accessToken, env, fetchImpl, deviceId)) {
+      const bootstrapWait = await latestSnapshotBootstrapWaitState(
+        accessToken,
+        env,
+        fetchImpl,
+        deviceId,
+        db,
+      );
+      if (bootstrapWait.waiting) {
         return {
           status: "waiting_snapshot",
-          message: request.minSnapshotCreatedAt
-            ? "Waiting for a snapshot generated after pairing confirmation"
-            : "Snapshot is not available yet. Waiting for upload from a trusted device.",
+          message: bootstrapWait.message,
           localRows: null,
           nonEmptyTables: null,
         };
@@ -708,7 +726,14 @@ export function createLocalDeviceSyncService({
           return { flowId, phase };
         }
       }
-      if (await latestSnapshotIsMissing(accessToken, env, fetchImpl, deviceId)) {
+      const bootstrapWait = await latestSnapshotBootstrapWaitState(
+        accessToken,
+        env,
+        fetchImpl,
+        deviceId,
+        db,
+      );
+      if (bootstrapWait.waiting) {
         const flowId = randomUUID();
         const phase = { phase: "syncing", detail: "waiting_snapshot" };
         pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
@@ -721,6 +746,34 @@ export function createLocalDeviceSyncService({
       if (!flow) {
         throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
       }
+      if (flow.phase.phase === "syncing" && flow.phase.detail === "waiting_snapshot") {
+        try {
+          const { accessToken, deviceId } =
+            await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+              connectService,
+              secretService,
+            );
+          const bootstrapWait = await latestSnapshotBootstrapWaitState(
+            accessToken,
+            env,
+            fetchImpl,
+            deviceId,
+            db,
+          );
+          if (bootstrapWait.waiting) {
+            return { flowId: request.flowId, phase: flow.phase };
+          }
+          const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+          pairingFlows.delete(request.flowId);
+          pairingOverwriteApprovals.delete(flow.pairingId);
+          return { flowId: request.flowId, phase };
+        } catch (error) {
+          const phase = { phase: "error", message: errorMessage(error) };
+          pairingFlows.delete(request.flowId);
+          pairingOverwriteApprovals.delete(flow.pairingId);
+          return { flowId: request.flowId, phase };
+        }
+      }
       return { flowId: request.flowId, phase: flow.phase };
     },
     async approvePairingOverwrite(request) {
@@ -728,7 +781,42 @@ export function createLocalDeviceSyncService({
       if (!flow) {
         throw new DeviceSyncServiceError("internal_error", "Flow not found", 500);
       }
-      throw deviceSyncDisabled();
+      if (flow.phase.phase !== "overwrite_required") {
+        throw new DeviceSyncServiceError(
+          "internal_error",
+          "Flow is not in overwrite_required phase",
+          500,
+        );
+      }
+      const { accessToken, deviceId } =
+        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
+          connectService,
+          secretService,
+        );
+      pairingOverwriteApprovals.add(flow.pairingId);
+      try {
+        const bootstrapWait = await latestSnapshotBootstrapWaitState(
+          accessToken,
+          env,
+          fetchImpl,
+          deviceId,
+          db,
+        );
+        if (bootstrapWait.waiting) {
+          const phase = { phase: "syncing", detail: "waiting_snapshot" };
+          pairingFlows.set(request.flowId, { ...flow, phase });
+          return { flowId: request.flowId, phase };
+        }
+      } catch (error) {
+        const phase = { phase: "error", message: errorMessage(error) };
+        pairingFlows.delete(request.flowId);
+        pairingOverwriteApprovals.delete(flow.pairingId);
+        return { flowId: request.flowId, phase };
+      }
+      const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+      pairingFlows.delete(request.flowId);
+      pairingOverwriteApprovals.delete(flow.pairingId);
+      return { flowId: request.flowId, phase };
     },
     async cancelPairingFlow(request) {
       const flow = pairingFlows.get(request.flowId);
@@ -747,6 +835,9 @@ export function createLocalDeviceSyncService({
         console.warn(`[DeviceSync] Failed to clean up pairing flow: ${errorMessage(error)}`);
       } finally {
         pairingFlows.delete(request.flowId);
+        if (flow) {
+          pairingOverwriteApprovals.delete(flow.pairingId);
+        }
       }
       return {
         flowId: request.flowId,
@@ -898,12 +989,14 @@ async function fetchDeviceSyncJson(
   }
 }
 
-async function latestSnapshotIsMissing(
+async function latestSnapshotBootstrapWaitState(
   accessToken: string,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   deviceId: string,
-): Promise<boolean> {
+  db: Database | undefined,
+): Promise<{ waiting: boolean; message: string }> {
+  const freshnessGate = getLocalMinSnapshotCreatedAt(db, deviceId);
   const clientRequestId = deviceSyncClientRequestId(deviceId);
   let response: Response;
   try {
@@ -928,7 +1021,12 @@ async function latestSnapshotIsMissing(
     throw new DeviceSyncServiceError("internal_error", errorMessage(error), 500);
   }
   if (response.status === 404) {
-    return true;
+    return {
+      waiting: true,
+      message: freshnessGate
+        ? WAITING_FOR_FRESH_SNAPSHOT_MESSAGE
+        : WAITING_FOR_TRUSTED_SNAPSHOT_MESSAGE,
+    };
   }
   if (!response.ok) {
     const requestId = response.headers.get("x-request-id")?.trim() || "none";
@@ -938,7 +1036,94 @@ async function latestSnapshotIsMissing(
       `(clientRequestId=${clientRequestId}, requestId=${requestId})`,
     );
   }
-  return false;
+  if (!freshnessGate) {
+    return { waiting: false, message: "" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      `Failed to parse response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  const latest = latestSnapshotFreshnessMetadata(parsed);
+  if (
+    latest.createdAt.getTime() + SNAPSHOT_FRESHNESS_CLOCK_SKEW_LEEWAY_MS >
+    freshnessGate.getTime()
+  ) {
+    return { waiting: false, message: "" };
+  }
+  const remoteCursor = await readRemoteCursorForFreshnessGate(
+    accessToken,
+    env,
+    fetchImpl,
+    deviceId,
+  );
+  if (remoteCursor !== null && latest.oplogSeq >= remoteCursor) {
+    return { waiting: false, message: "" };
+  }
+  return { waiting: true, message: WAITING_FOR_FRESH_SNAPSHOT_MESSAGE };
+}
+
+function latestSnapshotFreshnessMetadata(value: unknown): { createdAt: Date; oplogSeq: number } {
+  if (!isRecord(value)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
+  const rawCreatedAt = value.createdAt ?? value.created_at;
+  if (typeof rawCreatedAt !== "string") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
+  const normalizedCreatedAt = normalizeSyncDatetime(rawCreatedAt);
+  if (normalizedCreatedAt === null) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Invalid snapshot created_at in metadata",
+      500,
+    );
+  }
+  const rawOplogSeq = value.oplogSeq ?? value.oplog_seq;
+  if (!isSafeInteger(rawOplogSeq)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
+  return { createdAt: new Date(normalizedCreatedAt), oplogSeq: rawOplogSeq };
+}
+
+async function readRemoteCursorForFreshnessGate(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  deviceId: string,
+): Promise<number | null> {
+  try {
+    const value = await fetchDeviceSyncJson(
+      accessToken,
+      env,
+      fetchImpl,
+      "/api/v1/sync/events/cursor",
+      { deviceId },
+    );
+    if (!isRecord(value) || !isSafeInteger(value.cursor)) {
+      return null;
+    }
+    return value.cursor;
+  } catch {
+    return null;
+  }
 }
 
 function devicesFromCloud(value: unknown): unknown[] {
@@ -1524,6 +1709,10 @@ function isI32Integer(value: unknown): value is number {
   );
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): void {
   for (const token of topLevelJsonValueTokens(rawJson, key)) {
     if (token === "null") {
@@ -1708,6 +1897,39 @@ function applyMinSnapshotCreatedAtBestEffort(
   } catch (error) {
     console.warn(`[DeviceSync] Failed to persist freshness gate to SQLite: ${errorMessage(error)}`);
   }
+}
+
+function getLocalMinSnapshotCreatedAt(db: Database | undefined, deviceId: string): Date | null {
+  if (!db || !sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    return null;
+  }
+  const row = db
+    .query<{ min_snapshot_created_at: string | null }, [string]>(
+      `
+        SELECT min_snapshot_created_at
+        FROM sync_device_config
+        WHERE device_id = ?
+      `,
+    )
+    .get(deviceId);
+  if (!row?.min_snapshot_created_at) {
+    return null;
+  }
+  const normalized = normalizeSyncDatetime(row.min_snapshot_created_at);
+  if (normalized === null) {
+    console.warn(
+      `[DeviceSync] Dropping invalid min snapshot freshness gate: ${row.min_snapshot_created_at}`,
+    );
+    db.prepare(
+      `
+        UPDATE sync_device_config
+        SET min_snapshot_created_at = NULL
+        WHERE device_id = ?
+      `,
+    ).run(deviceId);
+    return null;
+  }
+  return new Date(normalized);
 }
 
 function localBootstrapRequired(db: Database, deviceId: string): boolean {

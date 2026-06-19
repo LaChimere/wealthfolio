@@ -387,10 +387,6 @@ describe("TS local device sync service", () => {
 
       const flowId = (result as { flowId: string }).flowId;
       await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual(result);
-      await expect(service.approvePairingOverwrite?.({ flowId })).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
-      });
       await expect(service.cancelPairingFlow?.({ flowId })).resolves.toEqual({
         flowId,
         phase: { phase: "success" },
@@ -434,6 +430,282 @@ describe("TS local device sync service", () => {
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_device_config").get()
           ?.count,
       ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("approves overwrite flow while waiting for remote snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const overwrite = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      });
+      const flowId = (overwrite as { flowId: string }).flowId;
+
+      await expect(service.approvePairingOverwrite?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      await expect(service.approvePairingOverwrite?.({ flowId })).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Flow is not in overwrite_required phase",
+        status: 500,
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
+          deviceId: "device-1",
+        },
+      ]);
+
+      requests.length = 0;
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "waiting_snapshot",
+        message: "Snapshot is not available yet. Waiting for upload from a trusted device.",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
+          deviceId: "device-1",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("ends approved waiting flow when remote snapshot appears before apply support", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    let snapshotMissing = true;
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input) => {
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (snapshotMissing) {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          return Response.json({ snapshot_id: "snapshot-1" });
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const overwrite = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      });
+      const flowId = (overwrite as { flowId: string }).flowId;
+      await expect(service.approvePairingOverwrite?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+
+      snapshotMissing = false;
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "error", message: "Device sync feature is disabled in this build." },
+      });
+      await expect(service.getPairingFlowState?.({ flowId })).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Flow not found",
+        status: 500,
+      });
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toMatchObject({
+        status: "overwrite_required",
+        localRows: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps approved waiting flow when latest snapshot misses freshness gate", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 2 });
+        }
+        if (url.includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            created_at: "2026-01-01T00:00:00Z",
+            oplog_seq: 1,
+          });
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const overwrite = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:05:00Z",
+      });
+      const flowId = (overwrite as { flowId: string }).flowId;
+      await expect(service.approvePairingOverwrite?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      ).resolves.toEqual({
+        status: "waiting_snapshot",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        localRows: null,
+        nonEmptyTables: null,
+      });
     } finally {
       db.close();
     }
@@ -1794,6 +2066,12 @@ describe("TS local device sync service", () => {
           url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
           method: "POST",
           body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
           deviceId: "device-1",
         },
         {
