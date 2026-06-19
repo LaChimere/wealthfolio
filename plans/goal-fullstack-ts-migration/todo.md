@@ -4428,6 +4428,15 @@ contract:
   `is_own_account`), rejecting malformed/duplicate known fields, preserving
   default owner booleans, and treating camel owner keys as ignored unknown
   fields.
+- `pr5-connect-broker-connection-top-level-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connections|connection aliases|connection fields"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker connection validation and mapping using Rust intermediate API
+  connection fields (`authorization_id`, `brokerage_name`, `brokerage_slug`,
+  `updated_at`) in snake case only while treating camel connection keys as
+  ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
