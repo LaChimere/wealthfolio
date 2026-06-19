@@ -4217,6 +4217,13 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   broker activity page validation rejecting duplicate top-level activity item
   aliases such as `trade_date`/`tradeDate` before mapper logic.
+- `pr5-connect-broker-activity-nested-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity page validation rejecting duplicate nested symbol/option
+  aliases such as `raw_symbol`/`rawSymbol` before mapper logic.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
