@@ -6668,11 +6668,24 @@ describe("TS Connect device sync local service", () => {
       INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 4);
       INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
       VALUES ('legacy-device', 1, 'trusted', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 1, 'trusted', '2026-01-01T00:00:00Z');
     `);
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
-      fetch: async () => Response.json({ access_token: "access-token" }),
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
     });
 
     try {
@@ -6716,10 +6729,48 @@ describe("TS Connect device sync local service", () => {
         lockVersion: 4,
         cursor: 9,
       });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: null, trust_state: "untrusted", last_bootstrap_at: null });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
 
       secretService.entries.set(
         "sync_identity",
         JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: null, trust_state: "untrusted", last_bootstrap_at: null });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 1,
+        }),
       );
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
         code: "not_implemented",

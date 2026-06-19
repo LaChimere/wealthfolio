@@ -3871,31 +3871,6 @@ async function readLocalSyncIdentityDeviceId(
   }
 }
 
-async function getLocalDeviceSyncFreshStateOrThrow(
-  secretService: SecretService,
-): Promise<Record<string, unknown>> {
-  const rawIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
-  if (rawIdentity === null) {
-    return freshDeviceSyncState();
-  }
-  try {
-    const parsed = parseStoredSyncIdentity(rawIdentity);
-    if (!parsed.deviceNonce || !parsed.deviceId) {
-      return freshDeviceSyncState();
-    }
-  } catch (error) {
-    if (error instanceof ConnectServiceError) {
-      throw error;
-    }
-    throw new ConnectServiceError(
-      "internal_error",
-      `Failed to parse identity: ${errorMessage(error)}`,
-      500,
-    );
-  }
-  throw deviceSyncDisabled();
-}
-
 async function getLocalDeviceSyncState(
   secretService: SecretService,
   env: NodeJS.ProcessEnv,
@@ -5532,12 +5507,19 @@ async function triggerLocalDeviceSyncCycle(
     return localSyncCycleResult("not_ready", lockVersion, cursor);
   }
   try {
+    let session: { accessToken: string; refreshToken: string };
     if (restoreSession) {
-      await restoreSession();
+      session = await restoreSession();
     } else {
-      await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
+      session = await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
     }
-    await getLocalDeviceSyncFreshStateOrThrow(secretService);
+    const state = await getLocalDeviceSyncState(secretService, env, fetchImpl, session.accessToken);
+    if (state.state !== "READY") {
+      persistNotReadyDeviceConfigBestEffort(db, state, deviceId);
+      markLocalSyncCycleOutcome(db, "not_ready");
+      return localSyncCycleResult("not_ready", lockVersion, cursor);
+    }
+    throw deviceSyncDisabled();
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {
       throw error;
@@ -5545,8 +5527,53 @@ async function triggerLocalDeviceSyncCycle(
     markLocalSyncCycleError(db, "state_error", `Failed to read sync state: ${errorMessage(error)}`);
     return localSyncCycleResult("state_error", lockVersion, cursor);
   }
-  markLocalSyncCycleOutcome(db, "not_ready");
-  return localSyncCycleResult("not_ready", lockVersion, cursor);
+}
+
+function persistNotReadyDeviceConfigBestEffort(
+  db: Database,
+  state: Record<string, unknown>,
+  fallbackDeviceId: string | null = null,
+): void {
+  if (!sqliteTableExists(db, "sync_device_config")) {
+    return;
+  }
+  const deviceId = optionalString(state.deviceId) ?? fallbackDeviceId;
+  if (!deviceId) {
+    return;
+  }
+  const keyVersion = optionalNumber(state.keyVersion);
+  try {
+    if (sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+      db.prepare(
+        `
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES (?, ?, 'untrusted', NULL, NULL)
+          ON CONFLICT(device_id) DO UPDATE SET
+            key_version = excluded.key_version,
+            trust_state = excluded.trust_state,
+            last_bootstrap_at = excluded.last_bootstrap_at,
+            min_snapshot_created_at = excluded.min_snapshot_created_at
+        `,
+      ).run(deviceId, keyVersion);
+      return;
+    }
+    db.prepare(
+      `
+        INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+        VALUES (?, ?, 'untrusted', NULL)
+        ON CONFLICT(device_id) DO UPDATE SET
+          key_version = excluded.key_version,
+          trust_state = excluded.trust_state,
+          last_bootstrap_at = excluded.last_bootstrap_at
+      `,
+    ).run(deviceId, keyVersion);
+  } catch (error) {
+    console.warn(
+      `[Connect] Failed to persist non-ready device sync config: ${errorMessage(error)}`,
+    );
+  }
 }
 
 function localSyncCycleResult(
