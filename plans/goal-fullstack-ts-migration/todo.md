@@ -4578,6 +4578,12 @@ contract:
   version, and oplog sequence fields; duplicate cursor/snapshot fields; raw JSON
   float numeric tokens; and action-only helper invalidation before bootstrap
   no-op decisions.
+- `pr5-connect-reconcile-action-validation`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review/refine. Coverage
+  includes requiring exactly one string `action` in reconcile responses and
+  keeping duplicate/missing/malformed action payloads gated before trigger-cycle
+  and bootstrap action-only decisions.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
