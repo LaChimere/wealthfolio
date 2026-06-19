@@ -4195,6 +4195,14 @@ contract:
   balance, owner, and sync-status aliases before mapping or creating local
   accounts, including `account_type`/`accountType` conflicts found during
   review.
+- `pr5-connect-broker-activity-page-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker activity page|duplicate page aliases|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity sync rejecting duplicate top-level activity-list aliases,
+  pagination aliases, and pagination fields before mapper or pagination
+  behavior.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
