@@ -1088,8 +1088,11 @@ function latestSnapshotBootstrapMetadata(
 ): {
   snapshotId: string;
   schemaVersion: number;
+  coversTables: string[];
   createdAt: Date;
   oplogSeq: number;
+  sizeBytes: number;
+  checksum: string;
 } {
   assertLatestSnapshotRawShape(rawJson);
   if (!isRecord(value)) {
@@ -1101,6 +1104,13 @@ function latestSnapshotBootstrapMetadata(
   }
   const rawSchemaVersion = value.schemaVersion ?? value.schema_version;
   if (!isI32Integer(rawSchemaVersion)) {
+    throw latestSnapshotParseError();
+  }
+  const rawCoversTables = value.coversTables ?? value.covers_tables;
+  if (
+    !Array.isArray(rawCoversTables) ||
+    rawCoversTables.some((entry) => typeof entry !== "string")
+  ) {
     throw latestSnapshotParseError();
   }
   const rawCreatedAt = value.createdAt ?? value.created_at;
@@ -1119,11 +1129,22 @@ function latestSnapshotBootstrapMetadata(
   if (!isSafeInteger(rawOplogSeq)) {
     throw latestSnapshotParseError();
   }
+  const rawSizeBytes = value.sizeBytes ?? value.size_bytes;
+  if (!isSafeInteger(rawSizeBytes)) {
+    throw latestSnapshotParseError();
+  }
+  const rawChecksum = value.checksum;
+  if (typeof rawChecksum !== "string") {
+    throw latestSnapshotParseError();
+  }
   return {
     snapshotId: rawSnapshotId,
     schemaVersion: rawSchemaVersion,
+    coversTables: rawCoversTables,
     createdAt: new Date(normalizedCreatedAt),
     oplogSeq: rawOplogSeq,
+    sizeBytes: rawSizeBytes,
+    checksum: rawChecksum,
   };
 }
 
@@ -1132,8 +1153,11 @@ function assertLatestSnapshotRawShape(rawJson: string): void {
   for (const aliases of [
     ["snapshotId", "snapshot_id"],
     ["schemaVersion", "schema_version"],
+    ["coversTables", "covers_tables"],
     ["createdAt", "created_at"],
     ["oplogSeq", "oplog_seq"],
+    ["sizeBytes", "size_bytes"],
+    ["checksum"],
   ]) {
     if (entries.filter((entry) => aliases.includes(entry.key)).length > 1) {
       throw latestSnapshotParseError();
@@ -1143,6 +1167,8 @@ function assertLatestSnapshotRawShape(rawJson: string): void {
   assertRawIntegerToken(rawJson, "schema_version");
   assertRawIntegerToken(rawJson, "oplogSeq");
   assertRawIntegerToken(rawJson, "oplog_seq");
+  assertRawIntegerToken(rawJson, "sizeBytes");
+  assertRawIntegerToken(rawJson, "size_bytes");
 }
 
 function assertRawIntegerToken(rawJson: string, key: string): void {

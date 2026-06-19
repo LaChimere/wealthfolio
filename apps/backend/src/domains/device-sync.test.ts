@@ -596,8 +596,11 @@ describe("TS local device sync service", () => {
           return Response.json({
             snapshot_id: "snapshot-1",
             schema_version: 1,
+            covers_tables: [],
             created_at: "2026-01-01T00:05:00Z",
             oplog_seq: 1,
+            size_bytes: 0,
+            checksum: "checksum-1",
           });
         }
         return Response.json({ success: true, key_version: 2 });
@@ -677,8 +680,11 @@ describe("TS local device sync service", () => {
           return Response.json({
             snapshot_id: "snapshot-1",
             schema_version: 1,
+            covers_tables: [],
             created_at: "2026-01-01T00:00:00Z",
             oplog_seq: 1,
+            size_bytes: 0,
+            checksum: "checksum-1",
           });
         }
         return Response.json({ success: true, key_version: 2 });
@@ -741,8 +747,11 @@ describe("TS local device sync service", () => {
     let snapshotResponse: Record<string, unknown> | string = {
       snapshot_id: "snapshot-1",
       schema_version: 2,
+      covers_tables: [],
       created_at: "2026-01-01T00:05:00Z",
       oplog_seq: 1,
+      size_bytes: 0,
+      checksum: "checksum-1",
     };
     const service = createLocalDeviceSyncService({
       db,
@@ -782,8 +791,11 @@ describe("TS local device sync service", () => {
       snapshotResponse = {
         snapshot_id: "",
         schema_version: 1,
+        covers_tables: [],
         created_at: "2026-01-01T00:05:00Z",
         oplog_seq: 1,
+        size_bytes: 0,
+        checksum: "checksum-1",
       };
       await expect(
         service.confirmPairingWithBootstrap?.({
@@ -796,7 +808,7 @@ describe("TS local device sync service", () => {
       );
 
       snapshotResponse =
-        '{"snapshot_id":"snapshot-1","schema_version":1.0,"created_at":"2026-01-01T00:05:00Z","oplog_seq":1}';
+        '{"snapshot_id":"snapshot-1","schema_version":1.0,"covers_tables":[],"created_at":"2026-01-01T00:05:00Z","oplog_seq":1,"size_bytes":0,"checksum":"checksum-1"}';
       await expect(
         service.confirmPairingWithBootstrap?.({
           pairingId: "pairing-3",
@@ -806,10 +818,36 @@ describe("TS local device sync service", () => {
       ).rejects.toThrow("Failed to parse latest snapshot response");
 
       snapshotResponse =
-        '{"snapshot_id":"snapshot-1","schema_version":1,"schemaVersion":1,"created_at":"2026-01-01T00:05:00Z","oplog_seq":1e0}';
+        '{"snapshot_id":"snapshot-1","schema_version":1,"schemaVersion":1,"covers_tables":[],"created_at":"2026-01-01T00:05:00Z","oplog_seq":1e0,"size_bytes":0,"checksum":"checksum-1"}';
       await expect(
         service.confirmPairingWithBootstrap?.({
           pairingId: "pairing-4",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow("Failed to parse latest snapshot response");
+
+      snapshotResponse =
+        '{"snapshot_id":"snapshot-1","schema_version":1,"covers_tables":[],"created_at":"2026-01-01T00:05:00Z","oplog_seq":1,"size_bytes":1.0,"checksum":"checksum-1"}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-5",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow("Failed to parse latest snapshot response");
+
+      snapshotResponse = {
+        snapshot_id: "snapshot-1",
+        schema_version: 1,
+        created_at: "2026-01-01T00:05:00Z",
+        oplog_seq: 1,
+        size_bytes: 0,
+        checksum: "checksum-1",
+      };
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-6",
           proof: "proof",
           allowOverwrite: true,
         }),
