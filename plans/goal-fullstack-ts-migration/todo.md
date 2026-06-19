@@ -4603,6 +4603,13 @@ contract:
   `confirmPairingWithBootstrap` returning Rust-shaped `waiting_snapshot` after
   cloud confirm and overwrite approval when `/sync/snapshots/latest` is 404,
   while keeping actual snapshot apply gated.
+- `pr5-device-sync-begin-confirm-waiting-snapshot-flow`: verification passed:
+  focused device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes
+  `beginPairingConfirm` creating a Rust-shaped
+  `{ phase: "syncing", detail: "waiting_snapshot" }` flow after cloud confirm
+  when bootstrap is required, overwrite risk is clear, and latest snapshot
+  is 404.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
