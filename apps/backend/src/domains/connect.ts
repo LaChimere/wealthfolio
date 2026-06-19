@@ -2204,15 +2204,41 @@ function validBrokerActivityAliasGroups(rawJson: string, aliasGroups: string[][]
 function validBrokerActivityMappingMetadataRawShape(rawJson: string): boolean {
   if (
     !validBrokerActivityAliasGroups(rawJson, [["flow"], ["reasons"], ["confidence"]]) ||
-    !brokerActivityPaginationRawTokenIsValid(rawJson, ["confidence"], "number")
+    !brokerActivityPaginationRawTokenIsValid(rawJson, ["confidence"], "number") ||
+    !brokerActivityStringArrayRawTokenIsValid(rawJson, ["reasons"])
   ) {
     return false;
   }
   const flowTokens = rawTokensForAliases(rawJson, ["flow"]);
-  if (flowTokens.length === 1 && flowTokens[0]?.trim().startsWith("{")) {
-    return validBrokerActivityAliasGroups(flowTokens[0], [["is_external", "isExternal"]]);
+  if (flowTokens.length === 1) {
+    const flowToken = flowTokens[0]?.trim() ?? "";
+    if (flowToken === "null") {
+      return true;
+    }
+    if (!flowToken.startsWith("{")) {
+      return false;
+    }
+    if (!validBrokerActivityAliasGroups(flowToken, [["is_external"]])) {
+      return false;
+    }
+    const isExternalToken = rawTokensForAliases(flowToken, ["is_external"])[0]?.trim();
+    return (
+      isExternalToken === undefined || isExternalToken === "true" || isExternalToken === "false"
+    );
   }
   return true;
+}
+
+function brokerActivityStringArrayRawTokenIsValid(rawJson: string, aliases: string[]): boolean {
+  const token = rawTokensForAliases(rawJson, aliases)[0];
+  if (token === undefined) {
+    return true;
+  }
+  const trimmed = token.trim();
+  if (!trimmed.startsWith("[")) {
+    return false;
+  }
+  return topLevelArrayValueTokens(trimmed).every((item) => rawJsonStringTokenIsValid(item));
 }
 
 function brokerActivityOptionalRawTokenIsValid(
@@ -2867,7 +2893,7 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
     metadata.confidence = optionalNumber(mappingMetadata.confidence) ?? undefined;
     metadata.mapping_reasons = mappingReasons.length > 0 ? mappingReasons : undefined;
     metadata.flow = isRecord(flow)
-      ? { is_external: optionalBoolean(flow.is_external ?? flow.isExternal) === true }
+      ? { is_external: optionalBoolean(flow.is_external) === true }
       : undefined;
   }
   const symbolMetadata = brokerActivitySymbolMetadata(activity.symbol);

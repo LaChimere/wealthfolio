@@ -2819,7 +2819,7 @@ describe("TS Connect local session service", () => {
               mapping_metadata: {
                 confidence: 0.9,
                 reasons: ["Matched by symbol"],
-                flow: { is_external: true },
+                flow: { is_external: true, isExternal: "ignored by Rust" },
               },
               symbol: {
                 id: "broker-symbol-aapl",
@@ -5221,7 +5221,37 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
-        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":true,"isExternal":false}}}],"pagination":{"has_more":false}}';
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":true,"is_external":false}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":"true"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":null}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":"external"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"reasons":"Unknown transaction type"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"reasons":["Unknown transaction type",123]}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5425,6 +5455,7 @@ describe("TS Connect local session service", () => {
                   exchange: { code: "XNAS", is_supported: "true" },
                   type: { code: "EQUITY", name: 123, is_supported: true },
                 },
+                mapping_metadata: { flow: { isExternal: "true" } },
               },
               { id: "   ", description: "blank id" },
             ],
