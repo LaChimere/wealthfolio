@@ -469,7 +469,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const createPairingResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -482,7 +482,11 @@ export function createLocalDeviceSyncService({
             ephemeral_public_key: request.ephemeralPublicKey,
           },
         },
-      ).then(createPairingResponseFromCloud);
+      );
+      return createPairingResponseFromCloud(
+        createPairingResponse.value,
+        createPairingResponse.bodyText,
+      );
     },
     async getPairing(pairingId) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1359,9 +1363,15 @@ function successResponseFromCloud(value: unknown): Record<string, unknown> {
   return { success: value.success };
 }
 
-function createPairingResponseFromCloud(value: unknown): Record<string, unknown> {
+function createPairingResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
+  }
+  if (rawJson !== null) {
+    assertCreatePairingResponseRawShape(rawJson);
   }
   return {
     pairingId: requiredString(value.pairingId ?? value.pairing_id, "pairing response"),
@@ -1369,6 +1379,33 @@ function createPairingResponseFromCloud(value: unknown): Record<string, unknown>
     keyVersion: requiredI32(value.keyVersion ?? value.key_version, "pairing response"),
     requireSas: requiredBoolean(value.requireSas ?? value.require_sas, "pairing response"),
   };
+}
+
+function assertCreatePairingResponseRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["pairingId", "pairing_id"],
+    ["expiresAt", "expires_at"],
+    ["keyVersion", "key_version"],
+    ["requireSas", "require_sas"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw pairingResponseParseError();
+    }
+  }
+  assertPairingRawIntegerToken(rawJson, "keyVersion");
+  assertPairingRawIntegerToken(rawJson, "key_version");
+}
+
+function assertPairingRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw pairingResponseParseError();
+    }
+  }
+}
+
+function pairingResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
 }
 
 function pairingFromCloud(value: unknown): Record<string, unknown> {

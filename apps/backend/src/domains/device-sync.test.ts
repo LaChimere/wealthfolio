@@ -1693,6 +1693,40 @@ describe("TS local device sync service", () => {
       }),
     ).resolves.toEqual({ success: true, remoteSeedPresent: false });
     expect(pairingCompleteNotifications).toBe(1);
+
+    let createPairingBody =
+      '{"pairing_id":"pairing-1","expires_at":"2026-01-01T00:00:00Z","key_version":2.0,"require_sas":true}';
+    const malformedCreateService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(createPairingBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(
+      malformedCreateService.createPairing?.({
+        codeHash: "hash",
+        ephemeralPublicKey: "public-key",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse pairing response",
+      status: 500,
+    });
+
+    createPairingBody =
+      '{"pairing_id":"pairing-1","pairingId":"pairing-1","expires_at":"2026-01-01T00:00:00Z","key_version":2,"require_sas":true}';
+    await expect(
+      malformedCreateService.createPairing?.({
+        codeHash: "hash",
+        ephemeralPublicKey: "public-key",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse pairing response",
+      status: 500,
+    });
     await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
     expect(requests).toEqual([
       {
