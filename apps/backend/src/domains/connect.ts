@@ -1812,16 +1812,17 @@ function brokerExistingAssetActivityCreateInput(
     return null;
   }
   const activityId = optionalString(activity.id);
-  const rawActivityType = brokerActivityType(activity);
+  const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
   const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
-  if (!activityId || !rawActivityType || !assetSymbol) {
+  if (!activityId || !assetSymbol) {
     return null;
   }
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
   if (
     BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
-    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType)
+    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    activityType !== "UNKNOWN"
   ) {
     return null;
   }
@@ -1892,16 +1893,17 @@ async function brokerProviderAssetActivityCreateInput(
     return null;
   }
   const activityId = optionalString(activity.id);
-  const rawActivityType = brokerActivityType(activity);
+  const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
   const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
-  if (!activityId || !rawActivityType || !assetSymbol) {
+  if (!activityId || !assetSymbol) {
     return null;
   }
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
   const activityType = rawActivityType.toUpperCase();
   if (
     BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
-    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType)
+    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    activityType !== "UNKNOWN"
   ) {
     return null;
   }
