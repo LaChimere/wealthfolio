@@ -2375,7 +2375,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "cash-activity-1",
-              activity_type: "DEPOSIT",
+              type: "DEPOSIT",
               trade_date: "2026-01-05T10:00:00Z",
               amount: 125.5,
               currency: { code: "USD" },
@@ -2383,7 +2383,7 @@ describe("TS Connect local session service", () => {
             },
             {
               id: "cash-activity-2",
-              activity_type: "FEE",
+              type: "FEE",
               trade_date: "2026-01-05T11:00:00Z",
               amount: -5,
               currency: { code: "USD" },
@@ -2485,7 +2485,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "cash-activity-1",
-              activity_type: "DEPOSIT",
+              type: "DEPOSIT",
               trade_date: "2026-01-05T10:00:00Z",
               amount: 125.5,
               provider_type: "SNAPTRADE",
@@ -2588,7 +2588,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "unknown-activity-1",
-              activity_type: "UNKNOWN",
+              type: "UNKNOWN",
               trade_date: "2026-01-05T10:00:00Z",
               amount: 42,
               provider_type: "SNAPTRADE",
@@ -2804,7 +2804,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-activity-1",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 2,
               price: 150,
@@ -4084,7 +4084,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-activity-1",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 2,
               price: 150,
@@ -4180,7 +4180,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-activity-1",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 2,
               price: 150,
@@ -4191,7 +4191,7 @@ describe("TS Connect local session service", () => {
             },
             {
               id: "buy-activity-2",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-06T10:00:00Z",
               units: 1,
               price: 151,
@@ -4372,7 +4372,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-shop-tsx",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 2,
               price: 95,
@@ -4512,7 +4512,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-btc",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 0.5,
               price: 90000,
@@ -4655,7 +4655,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "buy-shop-existing",
-              activity_type: "BUY",
+              type: "BUY",
               trade_date: "2026-01-05T10:00:00Z",
               units: 2,
               price: 95,
@@ -4925,7 +4925,7 @@ describe("TS Connect local session service", () => {
           data: [
             {
               id: "option-activity-1",
-              activity_type: "BUY",
+              type: "BUY",
               option_type: "BUY_TO_OPEN",
               trade_date: "2026-01-05T10:00:00Z",
               units: 1,
@@ -5217,6 +5217,11 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody = '{"data":[{"id":"activity-1","option_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","type":123}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5598,6 +5603,7 @@ describe("TS Connect local session service", () => {
                 sourceGroupId: 123,
                 providerType: 123,
                 externalReferenceId: 123,
+                activityType: 123,
                 rawType: 123,
                 optionType: 123,
                 tradeDate: 123,

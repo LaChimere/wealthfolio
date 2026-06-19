@@ -2024,7 +2024,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["units"],
     ["amount"],
     ["currency"],
-    ["type", "activity_type", "activityType"],
+    ["type"],
     ["subtype"],
     ["raw_type"],
     ["option_type"],
@@ -2055,7 +2055,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
 function validBrokerActivityScalarRawShape(rawJson: string): boolean {
   for (const aliases of [
     ["id"],
-    ["type", "activity_type", "activityType"],
+    ["type"],
     ["subtype"],
     ["raw_type"],
     ["option_type"],
@@ -2848,7 +2848,7 @@ function brokerActivityWarningReason(reason: unknown): boolean {
 }
 
 function brokerActivityType(activity: Record<string, unknown>): string | null {
-  return optionalString(activity.activity_type ?? activity.activityType ?? activity.type);
+  return optionalString(activity.type);
 }
 
 function brokerActivitySourceRecordId(activity: Record<string, unknown>): string | null {
