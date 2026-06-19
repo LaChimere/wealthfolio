@@ -1246,6 +1246,61 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects duplicate broker account response aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"accounts":[{"id":"broker-account","account_number":"A1","accountNumber":"A2"}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","owner":{"full_name":"Ada","fullName":"Lovelace"}}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","sync_status":{"transactions":{"initial_sync_completed":true,"initialSyncCompleted":false}}}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","account_type":"CASH","accountType":"TFSA"}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects broker account fields with invalid scalar types", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
@@ -1625,6 +1680,46 @@ describe("TS Connect local session service", () => {
         raw_type: "tfsa",
         sync_enabled: true,
         owner: { user_id: "user-1", is_own_account: true },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker account aliases before syncing accounts", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(
+          '{"accounts":[{"id":"new-provider-account","account_type":"CASH","accountType":"TFSA"}]}',
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts from ambiguous broker payload");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
       });
     } finally {
       db.close();

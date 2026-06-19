@@ -272,14 +272,13 @@ export function createLocalConnectService({
       return brokerConnectionsFromApi(response.value, response.bodyText);
     },
     async listBrokerAccounts() {
-      return brokerAccountsFromApi(
-        await fetchAuthenticatedConnectJson(
-          restoreSession,
-          env,
-          fetchImpl,
-          "/api/v1/sync/brokerage/accounts",
-        ),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/sync/brokerage/accounts",
       );
+      return brokerAccountsFromApi(response.value, response.bodyText);
     },
     async syncBrokerData() {
       try {
@@ -302,14 +301,13 @@ export function createLocalConnectService({
       return syncBrokerConnectionsToPlatforms(db, connections);
     },
     async syncBrokerAccounts() {
-      const accounts = brokerAccountsFromApi(
-        await fetchAuthenticatedConnectJson(
-          restoreSession,
-          env,
-          fetchImpl,
-          "/api/v1/sync/brokerage/accounts",
-        ),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/sync/brokerage/accounts",
       );
+      const accounts = brokerAccountsFromApi(response.value, response.bodyText);
       return await syncBrokerAccountsToLocal(db, accountService, accounts);
     },
     async syncBrokerActivities() {
@@ -1246,9 +1244,12 @@ function validateBrokerageFromApi(brokerage: Record<string, unknown>): void {
   }
 }
 
-function brokerAccountsFromApi(value: unknown): unknown[] {
+function brokerAccountsFromApi(value: unknown, rawJson: string | null = null): unknown[] {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
+  }
+  if (rawJson !== null) {
+    assertBrokerAccountsRawShape(rawJson);
   }
   if (value.accounts === undefined) {
     return [];
@@ -1265,6 +1266,94 @@ function brokerAccountsFromApi(value: unknown): unknown[] {
   return value.accounts;
 }
 
+function assertBrokerAccountsRawShape(rawJson: string): void {
+  assertNoDuplicateConnectAliases(rawJson, [["accounts"]], "accounts response");
+  const accountTokens = rawTokensForAliases(rawJson, ["accounts"]);
+  if (accountTokens.length !== 1 || !accountTokens[0]?.trim().startsWith("[")) {
+    return;
+  }
+  for (const accountToken of topLevelArrayValueTokens(accountTokens[0])) {
+    if (!accountToken.startsWith("{")) {
+      continue;
+    }
+    assertNoDuplicateConnectAliases(
+      accountToken,
+      [
+        ["id"],
+        ["name"],
+        ["account_number", "accountNumber", "number"],
+        ["type", "account_type", "accountType"],
+        ["currency"],
+        ["balance"],
+        ["meta"],
+        ["owner"],
+        ["brokerage_authorization", "brokerageAuthorization"],
+        ["institution_name", "institutionName"],
+        ["created_date", "createdDate"],
+        ["sync_status", "syncStatus"],
+        ["status"],
+        ["raw_type", "rawType"],
+        ["is_paper", "isPaper"],
+        ["sync_enabled", "syncEnabled"],
+        ["shared_with_household", "sharedWithHousehold"],
+      ],
+      "accounts response",
+    );
+    assertBrokerAccountNestedRawShape(accountToken);
+  }
+}
+
+function assertBrokerAccountNestedRawShape(accountToken: string): void {
+  const balanceTokens = rawTokensForAliases(accountToken, ["balance"]);
+  if (balanceTokens.length === 1 && balanceTokens[0]?.trim().startsWith("{")) {
+    assertNoDuplicateConnectAliases(balanceTokens[0], [["total"]], "accounts response");
+    const totalTokens = rawTokensForAliases(balanceTokens[0], ["total"]);
+    if (totalTokens.length === 1 && totalTokens[0]?.trim().startsWith("{")) {
+      assertNoDuplicateConnectAliases(
+        totalTokens[0],
+        [["amount"], ["currency"]],
+        "accounts response",
+      );
+    }
+  }
+  const ownerTokens = rawTokensForAliases(accountToken, ["owner"]);
+  if (ownerTokens.length === 1 && ownerTokens[0]?.trim().startsWith("{")) {
+    assertNoDuplicateConnectAliases(
+      ownerTokens[0],
+      [
+        ["user_id", "userId"],
+        ["full_name", "fullName", "user_full_name"],
+        ["email"],
+        ["avatar_url", "avatarUrl"],
+        ["is_own_account", "isOwnAccount"],
+      ],
+      "accounts response",
+    );
+  }
+  const syncStatusTokens = rawTokensForAliases(accountToken, ["sync_status", "syncStatus"]);
+  if (syncStatusTokens.length === 1 && syncStatusTokens[0]?.trim().startsWith("{")) {
+    assertNoDuplicateConnectAliases(
+      syncStatusTokens[0],
+      [["transactions"], ["holdings"]],
+      "accounts response",
+    );
+    for (const detailKey of ["transactions", "holdings"]) {
+      const detailTokens = rawTokensForAliases(syncStatusTokens[0], [detailKey]);
+      if (detailTokens.length === 1 && detailTokens[0]?.trim().startsWith("{")) {
+        assertNoDuplicateConnectAliases(
+          detailTokens[0],
+          [
+            ["initial_sync_completed", "initialSyncCompleted"],
+            ["last_successful_sync", "lastSuccessfulSync"],
+            ["first_transaction_date", "firstTransactionDate"],
+          ],
+          "accounts response",
+        );
+      }
+    }
+  }
+}
+
 function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
   for (const field of [
     "id",
@@ -1273,6 +1362,8 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
     "accountNumber",
     "number",
     "type",
+    "account_type",
+    "accountType",
     "currency",
     "brokerage_authorization",
     "brokerageAuthorization",
