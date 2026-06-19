@@ -5380,6 +5380,7 @@ function getLocalSyncCursor(db: Database): number {
 
 interface LocalReconcileReadyState {
   action: string | null;
+  actionInvalid: boolean;
   cursor: number | null;
   cursorInvalid: boolean;
   latestSnapshotId: string | null;
@@ -5409,6 +5410,8 @@ async function fetchLocalReconcileReadyStateBestEffort(
       return emptyLocalReconcileReadyState();
     }
     const responseText = await response.text();
+    const rawActionTokens = topLevelJsonPropertyRawTokens(responseText, "action");
+    const rawActionToken = rawActionTokens[0];
     const rawCursorTokens = topLevelJsonPropertyRawTokens(responseText, "cursor");
     const rawCursorToken = rawCursorTokens[0];
     const parsed = JSON.parse(responseText) as unknown;
@@ -5434,6 +5437,11 @@ async function fetchLocalReconcileReadyStateBestEffort(
     );
     return {
       action: optionalString(parsed.action),
+      actionInvalid:
+        rawActionTokens.length !== 1 ||
+        rawActionToken === undefined ||
+        !rawJsonStringTokenIsValid(rawActionToken) ||
+        optionalString(parsed.action) === null,
       cursor,
       cursorInvalid:
         rawCursorTokens.length > 1 ||
@@ -5460,12 +5468,15 @@ async function fetchLocalReconcileReadyActionBestEffort(
     accessToken,
     deviceId,
   );
-  return state.cursorInvalid || state.latestSnapshotInvalid ? null : state.action;
+  return state.actionInvalid || state.cursorInvalid || state.latestSnapshotInvalid
+    ? null
+    : state.action;
 }
 
 function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
   return {
     action: null,
+    actionInvalid: false,
     cursor: null,
     cursorInvalid: false,
     latestSnapshotId: null,
@@ -5629,7 +5640,7 @@ async function triggerLocalDeviceSyncCycle(
       session.accessToken,
       deviceId,
     );
-    if (reconcile.cursorInvalid || reconcile.latestSnapshotInvalid) {
+    if (reconcile.actionInvalid || reconcile.cursorInvalid || reconcile.latestSnapshotInvalid) {
       throw deviceSyncDisabled();
     }
     if (reconcile.action === "NOOP" && !localHasPendingSyncOutbox(db)) {

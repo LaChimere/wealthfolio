@@ -7023,6 +7023,7 @@ describe("TS Connect device sync local service", () => {
       }),
     );
     const requests: string[] = [];
+    let reconcileMode: "noop" | "duplicate-action" = "noop";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7033,6 +7034,11 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (reconcileMode === "duplicate-action") {
+            return new Response('{"action":"WAIT_SNAPSHOT","action":"NOOP"}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
           return Response.json({ action: "NOOP" });
         }
         return Response.json({
@@ -7083,6 +7089,13 @@ describe("TS Connect device sync local service", () => {
         "https://api.wealthfolio.app/api/v1/sync/team/devices/device-1",
         "https://api.wealthfolio.app/api/v1/sync/events/reconcile-ready-state",
       ]);
+      reconcileMode = "duplicate-action";
+      requests.length = 0;
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      reconcileMode = "noop";
 
       db.query(
         `
@@ -7423,7 +7436,13 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
-    let serverCursor: number | string | "float-token" | "duplicate-float-token" | null = null;
+    let serverCursor:
+      | number
+      | string
+      | "float-token"
+      | "duplicate-float-token"
+      | "duplicate-action"
+      | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -7440,6 +7459,11 @@ describe("TS Connect device sync local service", () => {
           }
           if (serverCursor === "duplicate-float-token") {
             return new Response('{"action":"PULL_TAIL","cursor":12,"cursor":12.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (serverCursor === "duplicate-action") {
+            return new Response('{"action":"NOOP","action":"PULL_TAIL"}', {
               headers: { "content-type": "application/json" },
             });
           }
@@ -7510,6 +7534,12 @@ describe("TS Connect device sync local service", () => {
       });
 
       serverCursor = "duplicate-float-token";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      serverCursor = "duplicate-action";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
