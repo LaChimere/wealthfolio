@@ -1187,6 +1187,21 @@ describe("TS local device sync service", () => {
       userId: "user-1",
       displayName: "MacBook",
     });
+    const malformedDeviceService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(
+          '{"id":"device-1","user_id":"user-1","display_name":"MacBook","displayName":"Laptop","platform":"mac","trust_state":"trusted","created_at":"2026-01-01T00:00:00Z"}',
+          { headers: { "content-type": "application/json" } },
+        ),
+    });
+    await expect(malformedDeviceService.getDevice("device-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse device response",
+      status: 500,
+    });
     await expect(service.updateDevice("device-1", { displayName: "Renamed" })).resolves.toEqual({
       success: true,
     });

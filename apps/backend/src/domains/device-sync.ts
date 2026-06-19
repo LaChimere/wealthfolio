@@ -948,14 +948,13 @@ async function fetchDeviceFromCloud(
   fetchImpl: typeof fetch,
   deviceId: string,
 ): Promise<Record<string, unknown>> {
-  return deviceFromCloud(
-    await fetchDeviceSyncJson(
-      accessToken,
-      env,
-      fetchImpl,
-      `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
-    ),
+  const deviceResponse = await fetchDeviceSyncJsonRaw(
+    accessToken,
+    env,
+    fetchImpl,
+    `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
   );
+  return deviceFromCloud(deviceResponse.value, deviceResponse.bodyText);
 }
 
 async function fetchPairingFromCloud(
@@ -1258,12 +1257,15 @@ function devicesFromCloud(value: unknown): unknown[] {
   if (!Array.isArray(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse devices response", 500);
   }
-  return value.map(deviceFromCloud);
+  return value.map((entry) => deviceFromCloud(entry));
 }
 
-function deviceFromCloud(value: unknown): Record<string, unknown> {
+function deviceFromCloud(value: unknown, rawJson: string | null = null): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  if (rawJson !== null) {
+    assertDeviceRawShape(rawJson);
   }
   const trustState = requiredTrustState(value.trustState ?? value.trust_state);
   return {
@@ -1282,6 +1284,26 @@ function deviceFromCloud(value: unknown): Record<string, unknown> {
     lastSeenAt: optionalDeviceString(value.lastSeenAt ?? value.last_seen_at, "device response"),
     createdAt: requiredString(value.createdAt ?? value.created_at, "device response"),
   };
+}
+
+function assertDeviceRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["id"],
+    ["userId", "user_id"],
+    ["displayName", "display_name"],
+    ["platform"],
+    ["devicePublicKey", "device_public_key"],
+    ["trustState", "trust_state"],
+    ["trustedKeyVersion", "trusted_key_version"],
+    ["osVersion", "os_version"],
+    ["appVersion", "app_version"],
+    ["lastSeenAt", "last_seen_at"],
+    ["createdAt", "created_at"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
+    }
+  }
 }
 
 function enrollDeviceResponseFromCloud(
