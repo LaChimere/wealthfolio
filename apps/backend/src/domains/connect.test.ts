@@ -5247,6 +5247,18 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","option_type":123}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","is_mini_option":"false"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","option_symbol":"AAPL  261218C00240000"}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5556,6 +5568,14 @@ describe("TS Connect local session service", () => {
                 sourceGroupId: 123,
                 providerType: 123,
                 externalReferenceId: 123,
+                optionSymbol: "ignored by Rust",
+                option_symbol: {
+                  optionType: 123,
+                  strikePrice: "240",
+                  expirationDate: 123,
+                  isMiniOption: "false",
+                  underlyingSymbol: "AAPL",
+                },
               },
               {
                 id: "   ",

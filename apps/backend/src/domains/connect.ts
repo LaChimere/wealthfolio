@@ -2019,7 +2019,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
   for (const aliases of [
     ["id"],
     ["symbol"],
-    ["option_symbol", "optionSymbol"],
+    ["option_symbol"],
     ["price"],
     ["units"],
     ["amount"],
@@ -2106,10 +2106,10 @@ function validBrokerActivityNestedRawShape(rawJson: string): boolean {
       return false;
     }
   }
-  const optionSymbolTokens = rawTokensForAliases(rawJson, ["option_symbol", "optionSymbol"]);
+  const optionSymbolTokens = rawTokensForAliases(rawJson, ["option_symbol"]);
   if (optionSymbolTokens.length === 1) {
     const optionSymbolToken = optionSymbolTokens[0];
-    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["option_symbol", "optionSymbol"])) {
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["option_symbol"])) {
       return false;
     }
     if (
@@ -2199,40 +2199,30 @@ function validBrokerActivityOptionSymbolRawShape(rawJson: string): boolean {
     !validBrokerActivityAliasGroups(rawJson, [
       ["id"],
       ["ticker"],
-      ["option_type", "optionType"],
-      ["strike_price", "strikePrice"],
-      ["expiration_date", "expirationDate"],
-      ["is_mini_option", "isMiniOption"],
-      ["underlying_symbol", "underlyingSymbol"],
+      ["option_type"],
+      ["strike_price"],
+      ["expiration_date"],
+      ["is_mini_option"],
+      ["underlying_symbol"],
     ])
   ) {
     return false;
   }
-  for (const aliases of [
-    ["id"],
-    ["ticker"],
-    ["option_type", "optionType"],
-    ["expiration_date", "expirationDate"],
-  ]) {
+  for (const aliases of [["id"], ["ticker"], ["option_type"], ["expiration_date"]]) {
     if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
       return false;
     }
   }
   if (
-    !brokerActivityOptionalRawTokenIsValid(rawJson, ["strike_price", "strikePrice"], "number") ||
-    !brokerActivityOptionalRawTokenIsValid(rawJson, ["is_mini_option", "isMiniOption"], "bool")
+    !brokerActivityOptionalRawTokenIsValid(rawJson, ["strike_price"], "number") ||
+    !brokerActivityOptionalRawTokenIsValid(rawJson, ["is_mini_option"], "bool")
   ) {
     return false;
   }
-  const underlyingTokens = rawTokensForAliases(rawJson, ["underlying_symbol", "underlyingSymbol"]);
+  const underlyingTokens = rawTokensForAliases(rawJson, ["underlying_symbol"]);
   if (underlyingTokens.length === 1) {
     const underlyingToken = underlyingTokens[0];
-    if (
-      !brokerActivityOptionalObjectRawTokenIsValid(rawJson, [
-        "underlying_symbol",
-        "underlyingSymbol",
-      ])
-    ) {
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["underlying_symbol"])) {
       return false;
     }
     if (underlyingToken?.trim().startsWith("{")) {
@@ -2491,7 +2481,7 @@ function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
       return true;
     }
   }
-  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  const optionSymbol = activity.option_symbol;
   return isRecord(optionSymbol) && optionalNonEmptyString(optionSymbol.ticker) !== null;
 }
 
@@ -2728,7 +2718,7 @@ function brokerActivitySymbol(
   activity: Record<string, unknown>,
   exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
 ): BrokerActivityAssetSymbol | null {
-  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  const optionSymbol = activity.option_symbol;
   if (isRecord(optionSymbol)) {
     const ticker = optionalNonEmptyString(optionSymbol.ticker);
     if (ticker) {
@@ -2949,17 +2939,15 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
   if (symbolMetadata) {
     metadata.symbol = symbolMetadata;
   }
-  const optionSymbol = activity.option_symbol ?? activity.optionSymbol;
+  const optionSymbol = activity.option_symbol;
   const optionLegType = optionalString(activity.option_type ?? activity.optionType);
   if (optionLegType) {
     metadata.option_leg_type = optionLegType;
   }
   if (isRecord(optionSymbol)) {
-    metadata.option_contract_type = optionalString(
-      optionSymbol.option_type ?? optionSymbol.optionType,
-    );
+    metadata.option_contract_type = optionalString(optionSymbol.option_type);
     metadata.option_ticker = optionalString(optionSymbol.ticker);
-    const underlying = optionSymbol.underlying_symbol ?? optionSymbol.underlyingSymbol;
+    const underlying = optionSymbol.underlying_symbol;
     metadata.option_underlying_symbol = isRecord(underlying)
       ? optionalString(underlying.symbol)
       : undefined;
