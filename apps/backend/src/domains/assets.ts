@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { BackendEventBus } from "../events";
 import type { SecretService } from "./secrets";
@@ -107,6 +109,23 @@ interface AssetProviderProfile {
   dividendYield?: number;
   week52High?: number;
   week52Low?: number;
+}
+
+interface FixtureCatalog {
+  instruments?: FixtureInstrument[];
+}
+
+interface FixtureInstrument {
+  symbol: string;
+  aliases?: string[];
+  name: string;
+  provider?: string;
+  assetType?: string;
+  currency?: string;
+  sector?: string;
+  industry?: string;
+  website?: string;
+  country?: string;
 }
 
 export type AssetSyncOperation = "Create" | "Update" | "Delete";
@@ -2615,6 +2634,13 @@ async function fetchYahooProfile(
   symbol: string,
   fetchImpl: typeof fetch,
 ): Promise<AssetProviderProfile> {
+  if (isE2eFixtureMode()) {
+    const fixtureProfile = e2eFixtureProfile(symbol);
+    if (!fixtureProfile) {
+      throw new Error(`Symbol not found: ${symbol}`);
+    }
+    return fixtureProfile;
+  }
   const quoteSummaryProfile = await fetchYahooQuoteSummaryProfile(symbol, fetchImpl).catch(
     () => null,
   );
@@ -2622,6 +2648,111 @@ async function fetchYahooProfile(
     return quoteSummaryProfile;
   }
   return fetchYahooSearchProfile(symbol, fetchImpl);
+}
+
+let fixtureCatalogCache: { dir: string; catalog: FixtureCatalog } | null = null;
+
+function isE2eFixtureMode(): boolean {
+  return process.env.WEALTHFOLIO_E2E === "1";
+}
+
+function e2eFixtureCatalog(): FixtureCatalog | null {
+  if (!isE2eFixtureMode()) {
+    return null;
+  }
+  const fixtureDir = process.env.WEALTHFOLIO_FIXTURE_DIR?.trim();
+  if (!fixtureDir) {
+    throw new Error("WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1");
+  }
+  if (fixtureCatalogCache?.dir === fixtureDir) {
+    return fixtureCatalogCache.catalog;
+  }
+  const catalog = JSON.parse(
+    readFileSync(join(fixtureDir, "instruments.json"), "utf8"),
+  ) as FixtureCatalog;
+  fixtureCatalogCache = { dir: fixtureDir, catalog };
+  return catalog;
+}
+
+function e2eFixtureProfile(symbol: string): AssetProviderProfile | null {
+  const instrument = e2eFixtureInstrument(symbol);
+  if (!instrument) {
+    return null;
+  }
+  const source = instrument.provider ?? "YAHOO";
+  const profile: AssetProviderProfile = {
+    source,
+    name: instrument.name,
+    notes: `Synthetic e2e profile for ${instrument.name}`,
+  };
+  if (instrument.assetType) {
+    profile.assetType = instrument.assetType;
+  }
+  if (instrument.currency) {
+    profile.quoteCcy = instrument.currency;
+  }
+  if (instrument.sector) {
+    profile.sectors = `[{\"name\":\"${instrument.sector}\",\"weight\":1}]`;
+  }
+  if (instrument.industry) {
+    profile.industry = instrument.industry;
+  }
+  if (instrument.website) {
+    profile.url = instrument.website;
+  }
+  if (instrument.country) {
+    profile.countries = weightedProfileJson(instrument.country, 1);
+  }
+  return profile;
+}
+
+function e2eFixtureInstrument(symbol: string, provider = "YAHOO"): FixtureInstrument | null {
+  const catalog = e2eFixtureCatalog();
+  if (!catalog) {
+    return null;
+  }
+  const normalized = symbol.trim().toUpperCase();
+  return (
+    catalog.instruments?.find(
+      (instrument) =>
+        (instrument.provider ?? "YAHOO") === provider &&
+        instrument.symbol.toUpperCase() === normalized,
+    ) ??
+    catalog.instruments?.find(
+      (instrument) =>
+        (instrument.provider ?? "YAHOO") === provider &&
+        (instrument.aliases ?? []).some((alias) => alias.toUpperCase() === normalized),
+    ) ??
+    (provider === "YAHOO" ? syntheticFixtureFxInstrument(symbol) : null)
+  );
+}
+
+function syntheticFixtureFxInstrument(symbol: string): FixtureInstrument | null {
+  const pair = parseFixtureFxPair(symbol);
+  if (!pair) {
+    return null;
+  }
+  return {
+    symbol: `${pair.base}${pair.quote}=X`,
+    aliases: [`${pair.base}/${pair.quote}`, `${pair.base}${pair.quote}`],
+    name: `${pair.base}/${pair.quote}`,
+    provider: "YAHOO",
+    assetType: "FX",
+    currency: pair.quote,
+  };
+}
+
+function parseFixtureFxPair(symbol: string): { base: string; quote: string } | null {
+  const upper = symbol.trim().toUpperCase();
+  if (!upper.startsWith("FX:") && !upper.endsWith("=X") && !upper.includes("/")) {
+    return null;
+  }
+  const compact = upper
+    .replace(/^FX:/, "")
+    .replace(/=X$/, "")
+    .replace("/", "")
+    .replace(/[^A-Z]/g, "");
+  return compact.length === 6 ? { base: compact.slice(0, 3), quote: compact.slice(3) } : null;
 }
 
 async function fetchYahooQuoteSummaryProfile(

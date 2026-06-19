@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createEventBus } from "../events";
 import {
@@ -1371,6 +1374,174 @@ describe("TS assets domain", () => {
         "https://query1.finance.yahoo.com/v10/finance/quoteSummary/MSFT?modules=price,summaryProfile,summaryDetail,topHoldings&crumb=crumb-token",
       ]);
     } finally {
+      db.close();
+    }
+  });
+
+  test("uses e2e fixture profiles for Yahoo and FX enrichment without live fetches", async () => {
+    const db = createAssetsDb();
+    const previousE2e = process.env.WEALTHFOLIO_E2E;
+    const previousFixtureDir = process.env.WEALTHFOLIO_FIXTURE_DIR;
+    const fixtureDir = mkdtempSync(join(tmpdir(), "wealthfolio-asset-fixtures-"));
+    writeFileSync(
+      join(fixtureDir, "instruments.json"),
+      JSON.stringify({
+        instruments: [
+          {
+            symbol: "BRK-B",
+            aliases: ["BRK.B"],
+            name: "Berkshire Hathaway Inc.",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "USD",
+            basePrice: 440,
+            seed: 134,
+            sector: "Financial Services",
+            industry: "Insurance - Diversified",
+            country: "United States",
+          },
+          {
+            symbol: "APC.DE",
+            aliases: ["APC"],
+            name: "Apple Inc.",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "EUR",
+            basePrice: 180,
+            seed: 123,
+          },
+          {
+            symbol: "APC",
+            name: "ARKO Petroleum Corp.",
+            provider: "YAHOO",
+            assetType: "EQUITY",
+            currency: "USD",
+            basePrice: 12,
+            seed: 124,
+            country: "Canada",
+          },
+        ],
+      }),
+    );
+    process.env.WEALTHFOLIO_E2E = "1";
+    process.env.WEALTHFOLIO_FIXTURE_DIR = fixtureDir;
+    const fetched: string[] = [];
+    const service = createAssetService(db, {
+      fetch: ((input: RequestInfo | URL) => {
+        fetched.push(String(input));
+        return Promise.reject(new Error("live Yahoo fetch should not run"));
+      }) as typeof fetch,
+      now: () => "2026-05-22T00:00:00.000Z",
+    });
+    insertAsset(db, {
+      id: "brk",
+      kind: "INVESTMENT",
+      name: null,
+      quote_mode: "MARKET",
+      quote_ccy: "USD",
+      instrument_type: "EQUITY",
+      instrument_symbol: "BRK.B",
+    });
+    insertAsset(db, {
+      id: "usd-cad",
+      kind: "FX",
+      name: null,
+      quote_mode: "MARKET",
+      quote_ccy: "CAD",
+      instrument_type: "FX",
+      instrument_symbol: "USD",
+    });
+    insertAsset(db, {
+      id: "apc",
+      kind: "INVESTMENT",
+      name: null,
+      quote_mode: "MARKET",
+      quote_ccy: "USD",
+      instrument_type: "EQUITY",
+      instrument_symbol: "APC",
+    });
+    insertAsset(db, {
+      id: "missing",
+      kind: "INVESTMENT",
+      name: null,
+      quote_mode: "MARKET",
+      quote_ccy: "USD",
+      instrument_type: "EQUITY",
+      instrument_symbol: "MISSING",
+    });
+    db.query(
+      `
+        INSERT INTO quote_sync_state (
+          asset_id, profile_enriched_at, updated_at
+        )
+        VALUES
+          ('brk', NULL, '2026-01-01T00:00:00Z'),
+          ('usd-cad', NULL, '2026-01-01T00:00:00Z'),
+          ('apc', NULL, '2026-01-01T00:00:00Z'),
+          ('missing', NULL, '2026-01-01T00:00:00Z')
+      `,
+    ).run();
+
+    try {
+      const result = await service.enrichAssets(["brk", "usd-cad", "apc", "missing"]);
+
+      expect(result).toEqual({ enriched: 3, skipped: 0, failed: 1 });
+      expect(fetched).toEqual([]);
+      expect(service.getAssetProfile("brk")).toMatchObject({
+        name: "Berkshire Hathaway Inc.",
+        notes: "Synthetic e2e profile for Berkshire Hathaway Inc.",
+        metadata: {
+          profile: {
+            quoteType: "EQUITY",
+            sectors: '[{"name":"Financial Services","weight":1}]',
+            industry: "Insurance - Diversified",
+            countries: '[{"name":"United States","weight":1}]',
+          },
+        },
+      });
+      expect(service.getAssetProfile("apc")).toMatchObject({
+        name: "ARKO Petroleum Corp.",
+        quoteCcy: "USD",
+        metadata: {
+          profile: {
+            quoteType: "EQUITY",
+            countries: '[{"name":"Canada","weight":1}]',
+          },
+        },
+      });
+      expect(service.getAssetProfile("usd-cad")).toMatchObject({
+        name: "USD/CAD",
+        notes: "Synthetic e2e profile for USD/CAD",
+        metadata: {
+          profile: {
+            quoteType: "FX",
+          },
+        },
+      });
+      expect(readSyncState(db, "brk")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+      expect(readSyncState(db, "usd-cad")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+      expect(readSyncState(db, "apc")).toMatchObject({
+        profile_enriched_at: "2026-05-22T00:00:00.000Z",
+      });
+      expect(readSyncState(db, "missing")).toMatchObject({
+        profile_enriched_at: null,
+      });
+    } finally {
+      if (previousE2e === undefined) {
+        delete process.env.WEALTHFOLIO_E2E;
+      } else {
+        process.env.WEALTHFOLIO_E2E = previousE2e;
+      }
+      if (previousFixtureDir === undefined) {
+        delete process.env.WEALTHFOLIO_FIXTURE_DIR;
+      } else {
+        process.env.WEALTHFOLIO_FIXTURE_DIR = previousFixtureDir;
+      }
+      rmSync(fixtureDir, { recursive: true, force: true });
       db.close();
     }
   });
