@@ -5572,6 +5572,50 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("rejects malformed Connect enrollment response tokens before storing identity", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let enrollResponse =
+      '{"mode":"READY","device_id":"device-1","e2ee_key_version":2.0,"trust_state":"trusted"}';
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return new Response(enrollResponse, {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
+      expect(secretService.entries.get("sync_identity")).toMatch(/"deviceId":null/);
+
+      enrollResponse =
+        '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"e2eeKeyVersion":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[]}';
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds a missing legacy device nonce before resuming existing sync", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

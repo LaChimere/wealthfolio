@@ -3432,24 +3432,23 @@ async function enrollLocalDevice(
   options: EnableLocalDeviceSyncOptions,
   deviceNonce: string,
 ): Promise<EnrollDeviceResponse> {
-  return enrollDeviceResponseFromCloud(
-    await fetchConnectDeviceSyncJson(
-      options.env,
-      options.fetchImpl,
-      options.accessToken,
-      "/api/v1/sync/team/devices",
-      {
-        method: "POST",
-        body: {
-          device_nonce: deviceNonce,
-          display_name: options.deviceDisplayName,
-          platform: options.platform,
-          os_version: undefined,
-          app_version: options.appVersion,
-        },
+  const response = await fetchConnectDeviceSyncJsonRaw(
+    options.env,
+    options.fetchImpl,
+    options.accessToken,
+    "/api/v1/sync/team/devices",
+    {
+      method: "POST",
+      body: {
+        device_nonce: deviceNonce,
+        display_name: options.deviceDisplayName,
+        platform: options.platform,
+        os_version: undefined,
+        app_version: options.appVersion,
       },
-    ),
+    },
   );
+  return enrollDeviceResponseFromCloud(response.value, response.bodyText);
 }
 
 async function initializeLocalE2eeKeys(
@@ -3686,6 +3685,16 @@ async function fetchConnectDeviceSyncJson(
   path: string,
   options: { method?: string; body?: unknown; deviceId?: string } = {},
 ): Promise<unknown> {
+  return (await fetchConnectDeviceSyncJsonRaw(env, fetchImpl, accessToken, path, options)).value;
+}
+
+async function fetchConnectDeviceSyncJsonRaw(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  path: string,
+  options: { method?: string; body?: unknown; deviceId?: string } = {},
+): Promise<{ value: unknown; bodyText: string }> {
   let response: Response;
   try {
     const headers: Record<string, string> = {
@@ -3713,7 +3722,7 @@ async function fetchConnectDeviceSyncJson(
     );
   }
   try {
-    return JSON.parse(bodyText) as unknown;
+    return { value: JSON.parse(bodyText) as unknown, bodyText };
   } catch (error) {
     throw new ConnectServiceError(
       "internal_error",
@@ -3723,9 +3732,15 @@ async function fetchConnectDeviceSyncJson(
   }
 }
 
-function enrollDeviceResponseFromCloud(value: unknown): EnrollDeviceResponse {
+function enrollDeviceResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): EnrollDeviceResponse {
   if (!isRecord(value)) {
-    throw new ConnectServiceError("internal_error", "Failed to parse enroll response", 500);
+    throw enrollResponseParseError();
+  }
+  if (rawJson !== null) {
+    assertEnrollResponseRawShape(rawJson);
   }
   const mode = requiredStringValue(value.mode, "enroll response");
   if (mode === "BOOTSTRAP") {
@@ -3765,7 +3780,42 @@ function enrollDeviceResponseFromCloud(value: unknown): EnrollDeviceResponse {
       trustState: requiredDeviceTrustState(value.trustState ?? value.trust_state),
     };
   }
-  throw new ConnectServiceError("internal_error", "Failed to parse enroll response", 500);
+  throw enrollResponseParseError();
+}
+
+function assertEnrollResponseRawShape(rawJson: string): void {
+  const modeTokens = rawTokensForAliases(rawJson, ["mode"]);
+  if (modeTokens.length !== 1 || !rawJsonStringTokenIsValid(modeTokens[0] ?? "")) {
+    throw enrollResponseParseError();
+  }
+  for (const aliases of [
+    ["deviceId", "device_id"],
+    ["e2eeKeyVersion", "e2ee_key_version"],
+    ["requireSas", "require_sas"],
+    ["pairingTtlSeconds", "pairing_ttl_seconds"],
+    ["trustedDevices", "trusted_devices"],
+    ["trustState", "trust_state"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw enrollResponseParseError();
+    }
+  }
+  assertEnrollRawI32Token(rawJson, "e2eeKeyVersion");
+  assertEnrollRawI32Token(rawJson, "e2ee_key_version");
+  assertEnrollRawI32Token(rawJson, "pairingTtlSeconds");
+  assertEnrollRawI32Token(rawJson, "pairing_ttl_seconds");
+}
+
+function assertEnrollRawI32Token(rawJson: string, key: string): void {
+  for (const token of rawTokensForAliases(rawJson, [key])) {
+    if (!rawJsonI32TokenIsValid(token)) {
+      throw enrollResponseParseError();
+    }
+  }
+}
+
+function enrollResponseParseError(): ConnectServiceError {
+  return new ConnectServiceError("internal_error", "Failed to parse enroll response", 500);
 }
 
 function initializeTeamKeysResultFromCloud(value: unknown): InitializeTeamKeysResult {
