@@ -4332,6 +4332,15 @@ contract:
   broker activity validation, source-record selection, create-input mapping, and
   metadata construction using only Rust's snake-case source keys while treating
   camel source keys as ignored unknown fields.
+- `pr5-connect-broker-activity-provider-external-key-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|provider-resolved broker activities|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity validation, source-system/source-record fallback, comments,
+  and metadata construction using only Rust's snake-case provider/external keys
+  while treating camel keys as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
