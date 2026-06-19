@@ -513,7 +513,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      const result = await fetchDeviceSyncJson(
+      const completeResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -527,7 +527,11 @@ export function createLocalDeviceSyncService({
             signature: request.signature,
           },
         },
-      ).then(completePairingResponseFromCloud);
+      );
+      const result = completePairingResponseFromCloud(
+        completeResponse.value,
+        completeResponse.bodyText,
+      );
       void notifyPairingComplete(onPairingComplete);
       return result;
     },
@@ -603,7 +607,7 @@ export function createLocalDeviceSyncService({
           connectService,
           secretService,
         );
-      const result = await fetchDeviceSyncJson(
+      const result = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -617,7 +621,7 @@ export function createLocalDeviceSyncService({
             signature: request.signature,
           },
         },
-      ).then(completePairingResponseFromCloud);
+      ).then(({ value, bodyText }) => completePairingResponseFromCloud(value, bodyText));
       void notifyPairingComplete(onPairingComplete);
       return result;
     },
@@ -1444,13 +1448,19 @@ function assertGetPairingResponseRawShape(rawJson: string): void {
   }
 }
 
-function completePairingResponseFromCloud(value: unknown): Record<string, unknown> {
+function completePairingResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse complete pairing response",
       500,
     );
+  }
+  if (rawJson !== null) {
+    assertCompletePairingResponseRawShape(rawJson);
   }
   const remoteSeedPresent = value.remoteSeedPresent ?? value.remote_seed_present;
   if (
@@ -1464,10 +1474,27 @@ function completePairingResponseFromCloud(value: unknown): Record<string, unknow
       500,
     );
   }
+
   return {
     success: value.success,
     remoteSeedPresent: remoteSeedPresent ?? null,
   };
+}
+
+function assertCompletePairingResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["remoteSeedPresent", "remote_seed_present"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw completePairingResponseParseError();
+    }
+  }
+}
+
+function completePairingResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse complete pairing response",
+    500,
+  );
 }
 
 function confirmPairingResponseFromCloud(value: unknown): Record<string, unknown> {
