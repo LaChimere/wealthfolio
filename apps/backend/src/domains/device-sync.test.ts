@@ -1064,6 +1064,21 @@ describe("TS local device sync service", () => {
         createdAt: "2026-01-01T00:00:00Z",
       },
     ]);
+    const malformedListService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(
+          '[{"id":"device-1","user_id":"user-1","display_name":"MacBook","displayName":"Laptop","platform":"mac","trust_state":"trusted","created_at":"2026-01-01T00:00:00Z"}]',
+          { headers: { "content-type": "application/json" } },
+        ),
+    });
+    await expect(malformedListService.listDevices()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse device response",
+      status: 500,
+    });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe("https://api.example.test/api/v1/sync/team/devices?scope=team");
     expect(requests[0]?.headers.authorization).toBe("Bearer token");

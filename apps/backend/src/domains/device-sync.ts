@@ -316,7 +316,8 @@ export function createLocalDeviceSyncService({
         scope === undefined
           ? "/api/v1/sync/team/devices"
           : `/api/v1/sync/team/devices?scope=${encodeURIComponent(scope)}`;
-      return await fetchDeviceSyncJson(accessToken, env, fetchImpl, path).then(devicesFromCloud);
+      const devicesResponse = await fetchDeviceSyncJsonRaw(accessToken, env, fetchImpl, path);
+      return devicesFromCloud(devicesResponse.value, devicesResponse.bodyText);
     },
     async getDevice(deviceId) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
@@ -1253,11 +1254,12 @@ async function readRemoteCursorForFreshnessGate(
   }
 }
 
-function devicesFromCloud(value: unknown): unknown[] {
+function devicesFromCloud(value: unknown, rawJson: string | null = null): unknown[] {
   if (!Array.isArray(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse devices response", 500);
   }
-  return value.map((entry) => deviceFromCloud(entry));
+  const rawDeviceTokens = rawJson === null ? [] : topLevelArrayObjectTokens(rawJson);
+  return value.map((entry, index) => deviceFromCloud(entry, rawDeviceTokens[index] ?? null));
 }
 
 function deviceFromCloud(value: unknown, rawJson: string | null = null): Record<string, unknown> {
