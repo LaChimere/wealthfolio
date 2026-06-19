@@ -1989,7 +1989,7 @@ function validBrokerActivityParsedShape(activity: unknown): boolean {
   if (needsReview !== undefined && typeof needsReview !== "boolean") {
     return false;
   }
-  const mappingMetadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  const mappingMetadata = activity.mapping_metadata;
   if (isRecord(mappingMetadata)) {
     const confidence = mappingMetadata.confidence;
     if (confidence !== undefined && confidence !== null && !Number.isFinite(confidence)) {
@@ -2039,7 +2039,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["source_system", "sourceSystem"],
     ["source_record_id", "sourceRecordId"],
     ["source_group_id", "sourceGroupId"],
-    ["mapping_metadata", "mappingMetadata"],
+    ["mapping_metadata"],
     ["needs_review"],
   ]) {
     if (rawTokensForAliases(rawJson, aliases).length > 1) {
@@ -2119,12 +2119,10 @@ function validBrokerActivityNestedRawShape(rawJson: string): boolean {
       return false;
     }
   }
-  const metadataTokens = rawTokensForAliases(rawJson, ["mapping_metadata", "mappingMetadata"]);
+  const metadataTokens = rawTokensForAliases(rawJson, ["mapping_metadata"]);
   if (metadataTokens.length === 1) {
     const metadataToken = metadataTokens[0];
-    if (
-      !brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["mapping_metadata", "mappingMetadata"])
-    ) {
+    if (!brokerActivityOptionalObjectRawTokenIsValid(rawJson, ["mapping_metadata"])) {
       return false;
     }
     if (
@@ -2906,7 +2904,7 @@ function brokerActivityNeedsReview(activity: Record<string, unknown>): boolean {
   if (!activityType || activityType === "UNKNOWN") {
     return true;
   }
-  const metadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  const metadata = activity.mapping_metadata;
   if (!isRecord(metadata)) {
     return false;
   }
@@ -2957,7 +2955,7 @@ function brokerActivityNumberString(value: unknown): string | null {
 }
 
 function brokerActivityMetadata(activity: Record<string, unknown>): Record<string, unknown> {
-  const mappingMetadata = activity.mapping_metadata ?? activity.mappingMetadata;
+  const mappingMetadata = activity.mapping_metadata;
   const metadata: Record<string, unknown> = {
     source: "broker",
     raw_type: optionalString(activity.raw_type ?? activity.rawType),

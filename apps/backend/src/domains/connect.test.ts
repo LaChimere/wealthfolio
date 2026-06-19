@@ -5524,6 +5524,7 @@ describe("TS Connect local session service", () => {
                   type: { code: "EQUITY", name: 123, is_supported: true, isSupported: "true" },
                 },
                 mapping_metadata: { flow: { isExternal: "true" } },
+                mappingMetadata: { confidence: "ignored by Rust" },
                 needsReview: "true",
               },
               {
