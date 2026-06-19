@@ -210,7 +210,7 @@ describe("TS local device sync service", () => {
     });
   });
 
-  test("keeps beginning pairing flow confirmation feature-gated after prerequisites", async () => {
+  test("returns success flow when beginning pairing confirmation has no local database", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
       "sync_identity",
@@ -232,18 +232,40 @@ describe("TS local device sync service", () => {
       noSessionService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
     ).rejects.toMatchObject({ code: "forbidden", status: 403 });
 
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
     const restoredService = createLocalDeviceSyncService({
       secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
-      fetch: async () => Response.json({ success: true, key_version: 2 }),
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 2 });
+      },
     });
-    await expect(
-      restoredService.beginPairingConfirm?.({ pairingId: "pairing-1", proof: "proof" }),
-    ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+    const result = await restoredService.beginPairingConfirm?.({
+      pairingId: "pairing-1",
+      proof: "proof",
+    });
+    expect(result).toMatchObject({ phase: { phase: "success" } });
+    expect(typeof (result as { flowId?: unknown })?.flowId).toBe("string");
+    expect(requests).toEqual([
+      {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+        method: "POST",
+        body: JSON.stringify({ proof: "proof" }),
+        deviceId: "device-1",
+      },
+    ]);
   });
-
   test("returns success flow when pairing begin confirm needs no bootstrap", async () => {
     const db = new Database(":memory:");
     db.exec(`

@@ -663,6 +663,12 @@ export function createLocalDeviceSyncService({
         }
       }
       applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
+      if (!db) {
+        return {
+          flowId: randomUUID(),
+          phase: { phase: "success" },
+        };
+      }
       if (db && !localBootstrapRequired(db, deviceId)) {
         return {
           flowId: randomUUID(),
