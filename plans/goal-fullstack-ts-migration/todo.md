@@ -3943,6 +3943,14 @@ contract:
   preserving reset-team response mapping while rejecting duplicate
   `success`/`key_version`/`reset_at` fields or aliases and raw float/exponent
   integer tokens for Rust `ResetTeamSyncResponse.key_version`.
+- `pr5-device-sync-commit-initialize-keys-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "team key commit"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving commit-initialize response mapping while rejecting duplicate
+  `success` and `key_state` fields or aliases for Rust
+  `CommitInitializeKeysResponse`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
