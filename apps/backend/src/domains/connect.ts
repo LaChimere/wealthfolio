@@ -2036,9 +2036,9 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["institution"],
     ["external_reference_id", "externalReferenceId"],
     ["provider_type", "providerType"],
-    ["source_system", "sourceSystem"],
-    ["source_record_id", "sourceRecordId"],
-    ["source_group_id", "sourceGroupId"],
+    ["source_system"],
+    ["source_record_id"],
+    ["source_group_id"],
     ["mapping_metadata"],
     ["needs_review"],
   ]) {
@@ -2065,9 +2065,9 @@ function validBrokerActivityScalarRawShape(rawJson: string): boolean {
     ["institution"],
     ["external_reference_id", "externalReferenceId"],
     ["provider_type", "providerType"],
-    ["source_system", "sourceSystem"],
-    ["source_record_id", "sourceRecordId"],
-    ["source_group_id", "sourceGroupId"],
+    ["source_system"],
+    ["source_record_id"],
+    ["source_group_id"],
   ]) {
     if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
       return false;
@@ -2468,22 +2468,14 @@ function brokerCashActivityCreateInput(
     ),
     fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem:
-      optionalString(
-        activity.source_system ??
-          activity.sourceSystem ??
-          activity.provider_type ??
-          activity.providerType,
-      ) ?? "SNAPTRADE",
+      optionalString(activity.source_system ?? activity.provider_type ?? activity.providerType) ??
+      "SNAPTRADE",
     sourceRecordId,
-    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    sourceGroupId: optionalString(activity.source_group_id),
     idempotencyKey: brokerActivityIdempotencyKey(
       accountId,
-      optionalString(
-        activity.source_system ??
-          activity.sourceSystem ??
-          activity.provider_type ??
-          activity.providerType,
-      ) ?? "SNAPTRADE",
+      optionalString(activity.source_system ?? activity.provider_type ?? activity.providerType) ??
+        "SNAPTRADE",
       sourceRecordId,
     ),
     status: needsReview ? "DRAFT" : "POSTED",
@@ -2544,12 +2536,8 @@ function brokerExistingAssetActivityCreateInput(
     optionalString(baseCurrency) ??
     "USD";
   const sourceSystem =
-    optionalString(
-      activity.source_system ??
-        activity.sourceSystem ??
-        activity.provider_type ??
-        activity.providerType,
-    ) ?? "SNAPTRADE";
+    optionalString(activity.source_system ?? activity.provider_type ?? activity.providerType) ??
+    "SNAPTRADE";
   const needsReview = brokerActivityNeedsReview(activity);
   return {
     accountId,
@@ -2580,7 +2568,7 @@ function brokerExistingAssetActivityCreateInput(
     fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem,
     sourceRecordId,
-    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    sourceGroupId: optionalString(activity.source_group_id),
     idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
     status: needsReview ? "DRAFT" : "POSTED",
     needsReview,
@@ -2631,12 +2619,8 @@ async function brokerProviderAssetActivityCreateInput(
     optionalString(baseCurrency) ??
     "USD";
   const sourceSystem =
-    optionalString(
-      activity.source_system ??
-        activity.sourceSystem ??
-        activity.provider_type ??
-        activity.providerType,
-    ) ?? "SNAPTRADE";
+    optionalString(activity.source_system ?? activity.provider_type ?? activity.providerType) ??
+    "SNAPTRADE";
   const needsReview = brokerActivityNeedsReview(activity);
   return {
     accountId,
@@ -2667,7 +2651,7 @@ async function brokerProviderAssetActivityCreateInput(
     fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem,
     sourceRecordId,
-    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    sourceGroupId: optionalString(activity.source_group_id),
     idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
     status: needsReview ? "DRAFT" : "POSTED",
     needsReview,
@@ -2937,7 +2921,6 @@ function brokerActivityType(activity: Record<string, unknown>): string | null {
 function brokerActivitySourceRecordId(activity: Record<string, unknown>): string | null {
   return optionalString(
     activity.source_record_id ??
-      activity.sourceRecordId ??
       activity.external_reference_id ??
       activity.externalReferenceId ??
       activity.id,
@@ -2959,10 +2942,10 @@ function brokerActivityMetadata(activity: Record<string, unknown>): Record<strin
   const metadata: Record<string, unknown> = {
     source: "broker",
     raw_type: optionalString(activity.raw_type ?? activity.rawType),
-    source_system: optionalString(activity.source_system ?? activity.sourceSystem),
+    source_system: optionalString(activity.source_system),
     provider_type: optionalString(activity.provider_type ?? activity.providerType),
-    source_record_id: optionalString(activity.source_record_id ?? activity.sourceRecordId),
-    source_group_id: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    source_record_id: optionalString(activity.source_record_id),
+    source_group_id: optionalString(activity.source_group_id),
     external_reference_id: optionalString(
       activity.external_reference_id ?? activity.externalReferenceId,
     ),

@@ -5325,6 +5325,12 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","source_record_id":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","amount":1e999}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5533,6 +5539,9 @@ describe("TS Connect local session service", () => {
                 mappingMetadata: { confidence: "ignored by Rust" },
                 needsReview: "true",
                 fxRate: "1.25",
+                sourceSystem: 123,
+                sourceRecordId: 123,
+                sourceGroupId: 123,
               },
               {
                 id: "   ",
