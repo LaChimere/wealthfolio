@@ -1275,7 +1275,7 @@ describe("TS Connect local session service", () => {
         status: 500,
       });
       responseBody =
-        '{"accounts":[{"id":"broker-account","owner":{"full_name":"Ada","fullName":"Lovelace"}}]}';
+        '{"accounts":[{"id":"broker-account","owner":{"full_name":"Ada","user_full_name":"Lovelace"}}]}';
       await expect(service.listBrokerAccounts()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse accounts response",
@@ -1592,7 +1592,15 @@ describe("TS Connect local session service", () => {
               },
               raw_type: "tfsa",
               rawType: 123,
-              owner: { user_id: "user-1", is_own_account: true },
+              owner: {
+                user_id: "user-1",
+                userId: 123,
+                user_full_name: "Ada Lovelace",
+                fullName: 123,
+                avatarUrl: 123,
+                is_own_account: true,
+                isOwnAccount: "true",
+              },
             },
             { id: "existing-provider-account", name: "Existing Account" },
             { name: "Missing ID Account" },
@@ -1707,7 +1715,11 @@ describe("TS Connect local session service", () => {
         brokerage_authorization: "brokerage-1",
         raw_type: "tfsa",
         sync_enabled: true,
-        owner: { user_id: "user-1", is_own_account: true },
+        owner: {
+          user_id: "user-1",
+          full_name: "Ada Lovelace",
+          is_own_account: true,
+        },
       });
     } finally {
       db.close();

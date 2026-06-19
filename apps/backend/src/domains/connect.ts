@@ -1311,13 +1311,7 @@ function assertBrokerAccountNestedRawShape(accountToken: string): void {
   if (ownerTokens.length === 1 && ownerTokens[0]?.trim().startsWith("{")) {
     assertNoDuplicateConnectAliases(
       ownerTokens[0],
-      [
-        ["user_id", "userId"],
-        ["full_name", "fullName", "user_full_name"],
-        ["email"],
-        ["avatar_url", "avatarUrl"],
-        ["is_own_account", "isOwnAccount"],
-      ],
+      [["user_id"], ["full_name", "user_full_name"], ["email"], ["avatar_url"], ["is_own_account"]],
       "accounts response",
     );
   }
@@ -1390,20 +1384,10 @@ function validateBrokerAccountOwner(value: unknown): void {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "Failed to parse accounts response", 500);
   }
-  for (const field of [
-    "user_id",
-    "userId",
-    "full_name",
-    "fullName",
-    "user_full_name",
-    "email",
-    "avatar_url",
-    "avatarUrl",
-  ]) {
+  for (const field of ["user_id", "full_name", "user_full_name", "email", "avatar_url"]) {
     assertOptionalConnectStringField(value, field, "accounts response");
   }
-  assertOptionalConnectBooleanField(value, "is_own_account", "accounts response");
-  assertOptionalConnectBooleanField(value, "isOwnAccount", "accounts response");
+  assertDefaultConnectBooleanField(value, "is_own_account", "accounts response");
 }
 
 function validateBrokerAccountSyncStatus(value: unknown): void {
@@ -3312,7 +3296,20 @@ function brokerAccountMeta(account: Record<string, unknown>): Record<string, unk
     sync_enabled: optionalBoolean(account.sync_enabled) ?? true,
     shared_with_household: optionalBoolean(account.shared_with_household) ?? false,
     sync_status: account.sync_status ?? null,
-    owner: account.owner ?? null,
+    owner: brokerAccountOwnerMeta(account.owner),
+  };
+}
+
+function brokerAccountOwnerMeta(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return {
+    user_id: optionalString(value.user_id),
+    full_name: optionalString(value.full_name ?? value.user_full_name),
+    email: optionalString(value.email),
+    avatar_url: optionalString(value.avatar_url),
+    is_own_account: optionalBoolean(value.is_own_account) ?? false,
   };
 }
 
