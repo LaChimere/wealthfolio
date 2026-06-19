@@ -4103,6 +4103,146 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("provider-resolves crypto broker pairs by base symbol", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-btc",
+              activity_type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 0.5,
+              price: 90000,
+              amount: 45000,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "BTC-USD",
+                raw_symbol: "BTC-USD",
+                type: { code: "CRYPTOCURRENCY" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "CRYPTO",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "BTC"
+          ? [
+              {
+                symbol: "BTC-USD",
+                shortName: "Bitcoin USD",
+                longName: "Bitcoin USD",
+                exchange: "CCC",
+                exchangeMic: null,
+                exchangeName: null,
+                quoteType: "CRYPTOCURRENCY",
+                typeDisplay: "Crypto",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          asset: {
+            symbol: "BTC-USD",
+            exchangeMic: undefined,
+            instrumentType: "CRYPTO",
+            quoteCcy: "USD",
+            quoteMode: "MARKET",
+            name: "Bitcoin USD",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("uses provider search existingAssetId for suffixed broker symbols", async () => {
     const db = new Database(":memory:");
     db.exec(`

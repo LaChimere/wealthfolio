@@ -2021,6 +2021,13 @@ function brokerProviderSearchResultMatches(
   const resultSymbol = parsedResult.symbol.trim().toUpperCase();
   const brokerSymbol = parsedBroker.symbol.trim().toUpperCase();
   const brokerMic = assetSymbol.exchangeMic ?? parsedBroker.exchangeMic;
+  if (instrumentTypeFromQuoteType(result.quoteType) === "CRYPTO") {
+    const cryptoBase = parseCryptoBrokerPair(result.symbol)?.base.trim().toUpperCase();
+    if (cryptoBase !== brokerSymbol) {
+      return false;
+    }
+    return brokerMic ? resultMic === brokerMic.toUpperCase() : true;
+  }
   if (brokerMic) {
     return resultMic === brokerMic.toUpperCase() && resultSymbol === brokerSymbol;
   }
