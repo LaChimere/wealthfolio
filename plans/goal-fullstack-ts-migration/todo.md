@@ -4534,6 +4534,12 @@ contract:
   Rust-shaped `ok`, trusted device-config persistence, successful cycle
   `consecutive_failures` reset, and pending outbox retaining the sync-engine
   feature gate.
+- `pr5-connect-trigger-cycle-wait-snapshot`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes
+  READY + reconcile `WAIT_SNAPSHOT` returning Rust-shaped `wait_snapshot`,
+  30-second retry scheduling, preserving existing engine error/failure fields,
+  and avoiding the gated push/pull engine.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
