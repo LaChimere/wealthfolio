@@ -5553,6 +5553,21 @@ async function triggerLocalDeviceSyncCycle(
       markLocalSyncCycleOutcome(db, "not_ready");
       return localSyncCycleResult("not_ready", lockVersion, cursor);
     }
+    try {
+      persistReadyDeviceConfigFromIdentity(db, await requireLocalSyncIdentity(secretService));
+    } catch (error) {
+      console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
+    }
+    const reconcileAction = await fetchLocalReconcileReadyActionBestEffort(
+      env,
+      fetchImpl,
+      session.accessToken,
+      deviceId,
+    );
+    if (reconcileAction === "NOOP" && !localHasPendingSyncOutbox(db)) {
+      markLocalSyncCycleOutcome(db, "ok");
+      return localSyncCycleResult("ok", 0, cursor);
+    }
     throw deviceSyncDisabled();
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {
@@ -5647,11 +5662,45 @@ function markLocalSyncCycleOutcome(
       VALUES (1, 0, ?, 0, NULL, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         last_error = excluded.last_error,
+        consecutive_failures = CASE
+          WHEN excluded.last_cycle_status = 'ok' THEN 0
+          ELSE consecutive_failures
+        END,
         next_retry_at = excluded.next_retry_at,
         last_cycle_status = excluded.last_cycle_status,
         last_cycle_duration_ms = excluded.last_cycle_duration_ms
     `,
   ).run(lastError, status, durationMs);
+}
+
+function localHasPendingSyncOutbox(db: Database): boolean {
+  if (!sqliteTableExists(db, "sync_outbox")) {
+    return false;
+  }
+  if (
+    sqliteColumnExists(db, "sync_outbox", "status") &&
+    sqliteColumnExists(db, "sync_outbox", "sent") &&
+    sqliteColumnExists(db, "sync_outbox", "next_retry_at")
+  ) {
+    const now = new Date().toISOString();
+    return (
+      (db
+        .query<{ count: number }, [string]>(
+          `
+            SELECT COUNT(*) AS count
+            FROM sync_outbox
+            WHERE status = 'pending'
+              AND sent = 0
+              AND (next_retry_at IS NULL OR next_retry_at <= ?)
+          `,
+        )
+        .get(now)?.count ?? 0) > 0
+    );
+  }
+  return (
+    (db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get()?.count ??
+      0) > 0
+  );
 }
 
 function sqliteTableExists(db: Database, tableName: string): boolean {

@@ -6962,6 +6962,149 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("returns ok for READY trigger cycle when reconcile is NOOP and outbox is empty", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 9, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures
+      ) VALUES (1, 4, 'stale_cursor', 'stale', 3);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "ok",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 9,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              last_cycle_status: string | null;
+              last_error: string | null;
+              consecutive_failures: number;
+            },
+            []
+          >(
+            "SELECT last_cycle_status, last_error, consecutive_failures FROM sync_engine_state WHERE id = 1",
+          )
+          .get(),
+      ).toEqual({ last_cycle_status: "ok", last_error: null, consecutive_failures: 0 });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: 1, trust_state: "trusted", last_bootstrap_at: null });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.wealthfolio.app/api/v1/sync/team/devices/device-1",
+        "https://api.wealthfolio.app/api/v1/sync/events/reconcile-ready-state",
+      ]);
+
+      db.query(
+        `
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES (
+            'event-1', 'account', 'account-1', 'update', '2026-01-01T00:00:00Z',
+            '{}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+          )
+        `,
+      ).run();
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reports local pairing source status preconditions before cloud cursor checks", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
