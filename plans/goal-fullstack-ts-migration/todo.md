@@ -4258,6 +4258,16 @@ contract:
   `mapping_metadata.reasons`, non-object `flow`, and present-null/non-boolean
   `flow.is_external`, while treating camel `isExternal` as a Rust-ignored
   unknown field.
+- `pr5-connect-broker-activity-nested-object-shape-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity page validation rejecting scalar/array values for struct-typed
+  fields such as `symbol`, `option_symbol`, `mapping_metadata`, nested
+  exchange/currency/type, and option `underlying_symbol`, while preserving
+  missing/null handling.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
