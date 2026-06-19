@@ -4116,6 +4116,14 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   shared enroll/initialize trusted-device summaries rejecting non-string
   `last_seen_at` values before trusted key material can be stored.
+- `pr5-connect-token-refresh-response-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "refresh token response|restores sessions|clears invalid refresh"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  refresh-token success responses rejecting duplicate fields, non-string
+  optional refresh tokens, and raw float/exponent `expires_in` tokens before
+  rotating the stored refresh token.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
