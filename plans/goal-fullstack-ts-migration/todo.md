@@ -4478,7 +4478,8 @@ contract:
   Yahoo suffix normalization for raw broker symbols like `SHOP.TO`, per-symbol
   search memoization within broker sync, activity-created provider asset
   payloads, created asset summary accounting via an internal non-enumerable bulk
-  result marker, and continued feature-gating for unresolved broker assets.
+  result marker, existingAssetId provider search reuse for suffixed symbols, and
+  continued feature-gating for unresolved broker assets.
 - `pr5-device-sync-complete-pairing-transfer`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "device sync|pairing"`,
   `bun run --cwd apps/backend test`, full `bun run check`, and dual GPT/Claude
