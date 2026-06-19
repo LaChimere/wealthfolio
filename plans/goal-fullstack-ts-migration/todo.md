@@ -4248,6 +4248,16 @@ contract:
   broker activity page validation rejecting malformed nested symbol, option,
   exchange, currency, and symbol-type scalar tokens while preserving Rust serde
   ignored-unknown-field behavior for nested objects.
+- `pr5-connect-broker-activity-mapping-metadata-scalar-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|provider-resolved broker activities|skips non-empty broker activity pages|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity page validation rejecting malformed
+  `mapping_metadata.reasons`, non-object `flow`, and present-null/non-boolean
+  `flow.is_external`, while treating camel `isExternal` as a Rust-ignored
+  unknown field.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
