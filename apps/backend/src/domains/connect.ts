@@ -2887,6 +2887,9 @@ function parseRefreshError(status: number, bodyText: string): { code: string; me
     try {
       const parsed = JSON.parse(trimmed);
       if (isRecord(parsed)) {
+        if (!validRefreshErrorResponseShape(trimmed, parsed)) {
+          return { code: "", message: trimmed };
+        }
         const description =
           typeof parsed.error_description === "string" ? parsed.error_description.trim() : "";
         const error = typeof parsed.error === "string" ? parsed.error.trim() : "";
@@ -2899,6 +2902,21 @@ function parseRefreshError(status: number, bodyText: string): { code: string; me
     }
   }
   return { code: "", message: `HTTP ${status}` };
+}
+
+function validRefreshErrorResponseShape(rawJson: string, parsed: Record<string, unknown>): boolean {
+  if (
+    rawTokensForAliases(rawJson, ["error"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["error_description"]).length > 1
+  ) {
+    return false;
+  }
+  return (
+    (parsed.error === undefined || parsed.error === null || typeof parsed.error === "string") &&
+    (parsed.error_description === undefined ||
+      parsed.error_description === null ||
+      typeof parsed.error_description === "string")
+  );
 }
 
 function connectApiErrorMessage(status: number, bodyText: string): string {

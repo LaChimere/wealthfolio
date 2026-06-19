@@ -383,6 +383,36 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("falls back to raw malformed OAuth error bodies before session invalidation", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        new Response(
+          '{"error":"temporary","error_description":"Refresh Token Not Found","error_description":"temporary"}',
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   test("fetches public subscription plans from the Connect API", async () => {
     const db = new Database(":memory:");
     const requests: Array<{ url: string; init?: RequestInit }> = [];
