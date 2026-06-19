@@ -4170,6 +4170,14 @@ contract:
   standalone device-sync cloud error bodies with duplicate/malformed structured
   fields falling back to raw request-failed text instead of JSON.parse last-wins
   values.
+- `pr5-connect-user-info-raw-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "entitlement user info|lacks broker sync|duplicate Connect user info"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  authenticated user-info reads rejecting duplicate user/team snake/camel
+  aliases and broker-sync entitlement failing closed when subscription aliases
+  conflict.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
