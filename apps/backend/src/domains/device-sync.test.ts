@@ -1435,6 +1435,40 @@ describe("TS local device sync service", () => {
       },
     ]);
 
+    let commitInitializeBody = '{"success":true,"success":false,"key_state":"ACTIVE"}';
+    const malformedCommitInitializeService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(commitInitializeBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(
+      malformedCommitInitializeService.commitInitializeTeamKeys?.({
+        keyVersion: 2,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse commit initialize keys response",
+      status: 500,
+    });
+
+    commitInitializeBody = '{"success":true,"key_state":"ACTIVE","keyState":"ACTIVE"}';
+    await expect(
+      malformedCommitInitializeService.commitInitializeTeamKeys?.({
+        keyVersion: 2,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse commit initialize keys response",
+      status: 500,
+    });
+
     let commitRotateBody = '{"success":true,"key_version":3.0}';
     const malformedCommitRotateService = createLocalDeviceSyncService({
       secretService,

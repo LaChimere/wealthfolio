@@ -380,7 +380,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const commitInitializeResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -397,7 +397,11 @@ export function createLocalDeviceSyncService({
             recovery_envelope: request.recoveryEnvelope,
           },
         },
-      ).then(commitInitializeKeysResponseFromCloud);
+      );
+      return commitInitializeKeysResponseFromCloud(
+        commitInitializeResponse.value,
+        commitInitializeResponse.bodyText,
+      );
     },
     async rotateTeamKeys() {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1636,13 +1640,19 @@ function rotateKeysResponseParseError(): DeviceSyncServiceError {
   return new DeviceSyncServiceError("internal_error", "Failed to parse rotate keys response", 500);
 }
 
-function commitInitializeKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+function commitInitializeKeysResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse commit initialize keys response",
       500,
     );
+  }
+  if (rawJson !== null) {
+    assertCommitInitializeKeysResponseRawShape(rawJson);
   }
   const keyState = requiredKeyState(
     value.keyState ?? value.key_state,
@@ -1652,6 +1662,22 @@ function commitInitializeKeysResponseFromCloud(value: unknown): Record<string, u
     success: value.success,
     keyState,
   };
+}
+
+function assertCommitInitializeKeysResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["keyState", "key_state"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw commitInitializeKeysResponseParseError();
+    }
+  }
+}
+
+function commitInitializeKeysResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse commit initialize keys response",
+    500,
+  );
 }
 
 function commitRotateKeysResponseFromCloud(
