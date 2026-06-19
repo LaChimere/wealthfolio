@@ -3927,6 +3927,14 @@ contract:
   preserving rotate-team-key response mapping while rejecting duplicate
   `challenge`/`nonce`/`new_key_version` fields or aliases and raw float/exponent
   integer tokens for Rust `RotateKeysResponse.new_key_version`.
+- `pr5-device-sync-commit-rotate-keys-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "team key commit|commit rotate|device reads and mutations"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving commit-rotate response mapping while rejecting duplicate
+  `success`/`key_version` fields or aliases and raw float/exponent integer
+  tokens for Rust `CommitRotateKeysResponse.key_version`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
