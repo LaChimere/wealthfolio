@@ -4124,6 +4124,14 @@ contract:
   refresh-token success responses rejecting duplicate fields, non-string
   optional refresh tokens, and raw float/exponent `expires_in` tokens before
   rotating the stored refresh token.
+- `pr5-connect-token-refresh-error-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed OAuth error|invalid OAuth|clears invalid refresh|refresh token response"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  malformed OAuth refresh error bodies with duplicate/non-string
+  `error`/`error_description` fields falling back to raw body text before
+  stale-session invalidation.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
