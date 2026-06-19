@@ -4510,6 +4510,11 @@ contract:
   `not_ready` results for non-READY states, untrusted device-config persistence
   with stale bootstrap timestamps cleared, and retained READY sync-engine
   feature gate.
+- `pr5-connect-background-engine-preconditions`: verification passed:
+  focused/full Connect tests, full `bun run check`, and dual GPT/Claude xhigh
+  review. Coverage includes explicit skipped responses when sync identity,
+  session, or state are not ready, and retained READY-state background-engine
+  feature gate.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
