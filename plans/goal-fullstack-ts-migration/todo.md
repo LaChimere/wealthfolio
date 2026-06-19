@@ -3968,6 +3968,15 @@ contract:
   preserving get-pairing response mapping while rejecting duplicate
   `pairing_id`/`status`/`claimer_device_id`/`claimer_ephemeral_pub`/`expires_at`
   fields or aliases for Rust `GetPairingResponse`.
+- `pr5-device-sync-claim-pairing-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "claimer pairing"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving claim-pairing response mapping while rejecting duplicate
+  `session_id`/`issuer_ephemeral_pub`/`e2ee_key_version`/`require_sas`/
+  `expires_at` fields or aliases and raw float/exponent integer tokens for Rust
+  `ClaimPairingResponse.e2ee_key_version`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
