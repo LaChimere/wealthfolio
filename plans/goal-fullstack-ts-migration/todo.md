@@ -3919,6 +3919,14 @@ contract:
   preserving BOOTSTRAP/PAIRING_REQUIRED/READY response mapping while rejecting
   duplicate BOOTSTRAP fields, duplicate snake/camel aliases, and raw
   float/exponent integer tokens for Rust `InitializeKeysResult` i32 fields.
+- `pr5-device-sync-rotate-keys-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "team key phase-one|rotate|device reads and mutations"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving rotate-team-key response mapping while rejecting duplicate
+  `challenge`/`nonce`/`new_key_version` fields or aliases and raw float/exponent
+  integer tokens for Rust `RotateKeysResponse.new_key_version`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
