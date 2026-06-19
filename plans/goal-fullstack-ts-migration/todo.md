@@ -4102,6 +4102,13 @@ contract:
   decisions, strict optional last-seen parsing, and preserving raw-token/parsed
   index alignment across non-object array entries after review found the initial
   desync bypass.
+- `pr5-connect-orphan-detection-initialize-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "orphan-detection initialize|malformed Connect trusted-device list|reads READY"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  reusing raw InitializeKeysResult validation for the best-effort ORPHANED probe
+  so malformed PAIRING_REQUIRED responses conservatively preserve REGISTERED.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
