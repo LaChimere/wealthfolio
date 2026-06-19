@@ -4559,6 +4559,12 @@ contract:
   backend suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
   includes missing reconcile cursor defaulting to `0` like Rust before the idle
   `PULL_TAIL` check, while cursor-advanced and pending paths remain gated.
+- `pr5-connect-trigger-cycle-cursor-token-validation`: verification passed:
+  focused Connect/device-sync tests, backend type-check, full `bun run check`,
+  backend suite, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes malformed non-null cursor tokens such as strings and raw
+  JSON floats staying gated, while missing/null cursors keep Rust-compatible `0`
+  defaults for idle `PULL_TAIL`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
