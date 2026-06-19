@@ -4540,6 +4540,13 @@ contract:
   READY + reconcile `WAIT_SNAPSHOT` returning Rust-shaped `wait_snapshot`,
   30-second retry scheduling, preserving existing engine error/failure fields,
   and avoiding the gated push/pull engine.
+- `pr5-connect-trigger-cycle-bootstrap-snapshot`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes
+  READY + reconcile `BOOTSTRAP_SNAPSHOT` returning Rust-shaped `stale_cursor`,
+  clearing retry timing, preserving existing engine error/failure fields, and
+  carrying bootstrap snapshot id/sequence metadata while avoiding gated
+  push/pull.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
