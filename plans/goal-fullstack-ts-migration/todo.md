@@ -4186,6 +4186,15 @@ contract:
   broker connection reads and platform-sync persistence rejecting duplicate
   connection and nested brokerage snake/camel aliases before mapping or writing
   platform rows.
+- `pr5-connect-broker-account-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate broker account|syncs new broker accounts|malformed broker account"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker account reads and sync persistence rejecting duplicate account,
+  balance, owner, and sync-status aliases before mapping or creating local
+  accounts, including `account_type`/`accountType` conflicts found during
+  review.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
