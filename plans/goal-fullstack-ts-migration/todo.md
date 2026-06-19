@@ -4392,6 +4392,15 @@ contract:
   broker account validation, account creation, and display-name fallback using
   Rust's `account_number` plus serde alias `number`, while treating camel
   `accountNumber` as an ignored unknown field.
+- `pr5-connect-broker-account-legacy-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account aliases|syncs new broker accounts|broker account fields|broker account nested"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker account validation, new-account info, display-name/platform matching,
+  and account metadata construction using snake-case `brokerage_authorization`,
+  `institution_name`, and `created_date`, while treating camel legacy metadata
+  keys as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
