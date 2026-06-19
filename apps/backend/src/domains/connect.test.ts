@@ -5190,6 +5190,18 @@ describe("TS Connect local session service", () => {
         accountsSynced: 0,
         accountsFailed: 1,
       });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":"AAPL","rawSymbol":"MSFT"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":{"raw_symbol":"AAPL","rawSymbol":"MSFT"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
     } finally {
       db.close();
     }

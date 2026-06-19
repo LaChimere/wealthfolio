@@ -1984,7 +1984,80 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
       return false;
     }
   }
+  return validBrokerActivityNestedRawShape(rawJson);
+}
+
+function validBrokerActivityNestedRawShape(rawJson: string): boolean {
+  const symbolTokens = rawTokensForAliases(rawJson, ["symbol"]);
+  if (symbolTokens.length === 1 && symbolTokens[0]?.trim().startsWith("{")) {
+    if (!validBrokerActivitySymbolRawShape(symbolTokens[0])) {
+      return false;
+    }
+  }
+  const optionSymbolTokens = rawTokensForAliases(rawJson, ["option_symbol", "optionSymbol"]);
+  if (optionSymbolTokens.length === 1 && optionSymbolTokens[0]?.trim().startsWith("{")) {
+    if (!validBrokerActivityOptionSymbolRawShape(optionSymbolTokens[0])) {
+      return false;
+    }
+  }
   return true;
+}
+
+function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
+  for (const aliases of [
+    ["id"],
+    ["symbol"],
+    ["raw_symbol", "rawSymbol"],
+    ["description"],
+    ["type", "symbol_type", "symbolType"],
+    ["exchange"],
+    ["currency"],
+    ["figi_code", "figiCode"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      return false;
+    }
+  }
+  for (const nestedKey of ["exchange", "currency", "type", "symbol_type", "symbolType"]) {
+    const nestedTokens = rawTokensForAliases(rawJson, [nestedKey]);
+    if (nestedTokens.length === 1 && nestedTokens[0]?.trim().startsWith("{")) {
+      const aliases =
+        nestedKey === "exchange"
+          ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
+          : nestedKey === "currency"
+            ? [["id"], ["code"], ["name"]]
+            : [["id"], ["code"], ["description"], ["is_supported", "isSupported"]];
+      if (!validBrokerActivityAliasGroups(nestedTokens[0], aliases)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function validBrokerActivityOptionSymbolRawShape(rawJson: string): boolean {
+  if (
+    !validBrokerActivityAliasGroups(rawJson, [
+      ["id"],
+      ["ticker"],
+      ["option_type", "optionType"],
+      ["strike_price", "strikePrice"],
+      ["expiration_date", "expirationDate"],
+      ["is_mini_option", "isMiniOption"],
+      ["underlying_symbol", "underlyingSymbol"],
+    ])
+  ) {
+    return false;
+  }
+  const underlyingTokens = rawTokensForAliases(rawJson, ["underlying_symbol", "underlyingSymbol"]);
+  if (underlyingTokens.length === 1 && underlyingTokens[0]?.trim().startsWith("{")) {
+    return validBrokerActivitySymbolRawShape(underlyingTokens[0]);
+  }
+  return true;
+}
+
+function validBrokerActivityAliasGroups(rawJson: string, aliasGroups: string[][]): boolean {
+  return aliasGroups.every((aliases) => rawTokensForAliases(rawJson, aliases).length <= 1);
 }
 
 function brokerActivityPaginationRawTokenIsValid(
