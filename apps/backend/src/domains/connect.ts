@@ -1122,12 +1122,12 @@ function assertBrokerConnectionsRawShape(rawJson: string): void {
       connectionToken,
       [
         ["id"],
-        ["authorization_id", "authorizationId"],
-        ["brokerage_name", "brokerageName"],
-        ["brokerage_slug", "brokerageSlug"],
+        ["authorization_id"],
+        ["brokerage_name"],
+        ["brokerage_slug"],
         ["brokerage"],
         ["disabled"],
-        ["updated_at", "updatedAt"],
+        ["updated_at"],
         ["name"],
         ["status"],
       ],
@@ -1159,26 +1159,19 @@ function brokerConnectionFromApi(value: unknown): unknown {
   const brokerage = brokerageFromApi(value);
   const id = requiredStringValue(value.id, "connection response");
   return {
-    id: optionalString(value.authorization_id ?? value.authorizationId) ?? id,
+    id: optionalString(value.authorization_id) ?? id,
     brokerage,
     type: null,
     status: optionalString(value.status),
     disabled: optionalBoolean(value.disabled) ?? false,
     disabled_date: null,
-    updated_at: optionalString(value.updated_at ?? value.updatedAt),
+    updated_at: optionalString(value.updated_at),
     name: optionalString(value.name),
   };
 }
 
 function validateBrokerConnectionFromApi(value: Record<string, unknown>): void {
-  for (const field of [
-    "authorization_id",
-    "authorizationId",
-    "status",
-    "updated_at",
-    "updatedAt",
-    "name",
-  ]) {
+  for (const field of ["authorization_id", "status", "updated_at", "name"]) {
     assertOptionalConnectStringField(value, field, "connection response");
   }
   assertOptionalConnectBooleanField(value, "disabled", "connection response");
@@ -1201,11 +1194,9 @@ function brokerageFromApi(value: Record<string, unknown>): unknown | null {
     };
   }
   assertOptionalConnectStringField(value, "brokerage_name", "connection response");
-  assertOptionalConnectStringField(value, "brokerageName", "connection response");
   assertOptionalConnectStringField(value, "brokerage_slug", "connection response");
-  assertOptionalConnectStringField(value, "brokerageSlug", "connection response");
-  const brokerageName = optionalString(value.brokerage_name ?? value.brokerageName);
-  const brokerageSlug = optionalString(value.brokerage_slug ?? value.brokerageSlug);
+  const brokerageName = optionalString(value.brokerage_name);
+  const brokerageSlug = optionalString(value.brokerage_slug);
   if (brokerageName !== null || brokerageSlug !== null) {
     return {
       id: null,

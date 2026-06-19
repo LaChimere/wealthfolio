@@ -935,9 +935,11 @@ describe("TS Connect local session service", () => {
               {
                 id: "connection-row-id",
                 authorization_id: "authorization-1",
+                authorizationId: 123,
                 status: "connected",
                 disabled: false,
                 updated_at: "2026-01-02T00:00:00Z",
+                updatedAt: 123,
                 name: "Main connection",
                 brokerage: {
                   id: "brokerage-1",
@@ -951,7 +953,9 @@ describe("TS Connect local session service", () => {
               {
                 id: "connection-row-2",
                 brokerage_name: "Fallback Broker",
+                brokerageName: 123,
                 brokerage_slug: "fallback",
+                brokerageSlug: 123,
               },
             ],
           });
@@ -1078,7 +1082,7 @@ describe("TS Connect local session service", () => {
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
     let responseBody =
-      '{"connections":[{"id":"connection-1","authorization_id":"auth-1","authorizationId":"auth-2","brokerage_name":"Brokerage"}]}';
+      '{"connections":[{"id":"connection-1","authorization_id":"auth-1","authorization_id":"auth-2","brokerage_name":"Brokerage"}]}';
     const service = createLocalConnectService({
       db,
       secretService,
