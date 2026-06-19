@@ -4154,6 +4154,14 @@ contract:
   device-sync cloud error bodies with duplicate or malformed structured fields
   falling back to raw request-failed text instead of JSON.parse last-wins
   values.
+- `pr5-connect-api-error-response-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed authenticated Connect API error|public subscription plan error|authenticated subscription"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  authenticated Connect API error bodies with duplicate or malformed structured
+  fields falling back to status-only errors instead of JSON.parse last-wins
+  values.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
