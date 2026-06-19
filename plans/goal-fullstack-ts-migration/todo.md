@@ -4268,6 +4268,14 @@ contract:
   fields such as `symbol`, `option_symbol`, `mapping_metadata`, nested
   exchange/currency/type, and option `underlying_symbol`, while preserving
   missing/null handling.
+- `pr5-connect-broker-activity-page-container-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity page validation rejecting non-object page bodies, non-array
+  activity-list fields, non-object activity entries, and malformed pagination
+  containers before empty/skip-only fallback.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
