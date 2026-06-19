@@ -1652,6 +1652,20 @@ function assertPairingMessagesResponseRawShape(rawJson: string): void {
       throw pairingMessagesResponseParseError();
     }
   }
+  for (const messageToken of topLevelArrayObjectTokens(
+    rawTokensForAliases(rawJson, ["messages"])[0],
+  )) {
+    for (const aliases of [
+      ["id"],
+      ["payloadType", "payload_type"],
+      ["payload"],
+      ["createdAt", "created_at"],
+    ]) {
+      if (rawTokensForAliases(messageToken, aliases).length > 1) {
+        throw pairingMessagesResponseParseError();
+      }
+    }
+  }
 }
 
 function pairingMessagesResponseParseError(): DeviceSyncServiceError {
@@ -2238,6 +2252,35 @@ function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
 
 function rawTokensForAliases(rawJson: string, aliases: string[]): string[] {
   return aliases.flatMap((alias) => topLevelJsonValueTokens(rawJson, alias));
+}
+
+function topLevelArrayObjectTokens(rawJson: string | undefined): string[] {
+  const trimmed = rawJson?.trim() ?? "";
+  if (!trimmed.startsWith("[")) {
+    return [];
+  }
+  const tokens: string[] = [];
+  let index = 1;
+  while (index < trimmed.length) {
+    index = skipJsonWhitespace(trimmed, index);
+    if (trimmed[index] === "]") {
+      break;
+    }
+    const start = index;
+    index = skipJsonValue(trimmed, index);
+    if (index < 0) {
+      return [];
+    }
+    const token = trimmed.slice(start, index).trim();
+    if (token.startsWith("{")) {
+      tokens.push(token);
+    }
+    index = skipJsonWhitespace(trimmed, index);
+    if (trimmed[index] === ",") {
+      index += 1;
+    }
+  }
+  return tokens;
 }
 
 function topLevelJsonKeys(rawJson: string): string[] {

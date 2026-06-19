@@ -1915,6 +1915,24 @@ describe("TS local device sync service", () => {
         message: "Failed to parse pairing messages response",
         status: 500,
       });
+      const malformedNestedMessagesService = createLocalDeviceSyncService({
+        secretService,
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () =>
+          new Response(
+            '{"session_status":"approved","messages":[{"id":"message-1","payload_type":"rk_transfer_v1","payloadType":"rk_transfer_v1","payload":"payload","created_at":"2026-01-01T00:00:00Z"}]}',
+            { headers: { "content-type": "application/json" } },
+          ),
+      });
+      await expect(
+        malformedNestedMessagesService.getPairingMessages?.("pairing-1"),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse pairing messages response",
+        status: 500,
+      });
       await expect(
         service.confirmPairing?.("pairing-1", {
           proof: "proof",
