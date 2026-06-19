@@ -4597,6 +4597,12 @@ contract:
   Coverage includes applying raw cursor response validation to pairing-source
   status, generate-snapshot preflight, and cursor-latest fallback paths,
   including optional `gcWatermark`/`gc_watermark` integer/null token validation.
+- `pr5-device-sync-composite-confirm-waiting-snapshot`: verification passed:
+  focused device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes
+  `confirmPairingWithBootstrap` returning Rust-shaped `waiting_snapshot` after
+  cloud confirm and overwrite approval when `/sync/snapshots/latest` is 404,
+  while keeping actual snapshot apply gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
