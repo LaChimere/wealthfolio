@@ -4401,6 +4401,15 @@ contract:
   and account metadata construction using snake-case `brokerage_authorization`,
   `institution_name`, and `created_date`, while treating camel legacy metadata
   keys as ignored unknown fields.
+- `pr5-connect-broker-account-default-bool-key-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account aliases|syncs new broker accounts|broker account fields|broker account nested"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker account validation and metadata construction using snake-case
+  `is_paper`, `sync_enabled`, and `shared_with_household`, rejecting present
+  null/non-boolean snake values, preserving Rust defaults, and treating camel
+  boolean keys as ignored unknown fields.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
