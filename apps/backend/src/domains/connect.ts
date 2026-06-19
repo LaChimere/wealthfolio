@@ -4275,18 +4275,27 @@ async function getTrustedDevicesBestEffort(
     if (!response.ok) {
       return [];
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
+    const bodyText = await response.text();
+    const parsed = JSON.parse(bodyText) as unknown;
     if (!Array.isArray(parsed)) {
       return [];
     }
+    const rawDeviceTokens = topLevelArrayValueTokens(bodyText);
     return parsed
-      .filter(isRecord)
+      .map((device, index): Record<string, unknown> | null => {
+        if (!isRecord(device)) {
+          return null;
+        }
+        assertDeviceResponseRawShape(rawDeviceTokens[index] ?? "");
+        return device;
+      })
+      .filter((device): device is Record<string, unknown> => device !== null)
       .filter((device) => (device.trustState ?? device.trust_state) === "trusted")
       .map((device) => ({
         id: requiredStringValue(device.id, "device response"),
         name: requiredStringValue(device.displayName ?? device.display_name, "device response"),
         platform: requiredStringValue(device.platform, "device response"),
-        lastSeenAt: optionalString(device.lastSeenAt ?? device.last_seen_at),
+        lastSeenAt: optionalDeviceStringValue(device.lastSeenAt ?? device.last_seen_at),
       }));
   } catch {
     return [];
@@ -4424,6 +4433,16 @@ function assertDeviceResponseRawShape(rawJson: string): void {
   }
 }
 
+function optionalDeviceStringValue(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new ConnectServiceError("internal_error", "Failed to parse device response", 500);
+  }
+  return value;
+}
+
 function optionalDeviceNumber(value: unknown, context: string): number | null {
   if (value === undefined || value === null) {
     return null;
@@ -4432,6 +4451,32 @@ function optionalDeviceNumber(value: unknown, context: string): number | null {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
+}
+
+function topLevelArrayValueTokens(rawJson: string | undefined): string[] {
+  const trimmed = rawJson?.trim() ?? "";
+  if (!trimmed.startsWith("[")) {
+    return [];
+  }
+  const tokens: string[] = [];
+  let index = 1;
+  while (index < trimmed.length) {
+    index = skipJsonWhitespace(trimmed, index);
+    if (trimmed[index] === "]") {
+      break;
+    }
+    const start = index;
+    index = skipJsonValue(trimmed, index);
+    if (index < 0) {
+      return [];
+    }
+    tokens.push(trimmed.slice(start, index).trim());
+    index = skipJsonWhitespace(trimmed, index);
+    if (trimmed[index] === ",") {
+      index += 1;
+    }
+  }
+  return tokens;
 }
 
 function freshDeviceSyncState(): Record<string, unknown> {
