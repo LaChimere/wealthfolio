@@ -574,13 +574,14 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const messagesResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
         `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/messages`,
         { deviceId },
-      ).then(pairingMessagesFromCloud);
+      );
+      return pairingMessagesFromCloud(messagesResponse.value, messagesResponse.bodyText);
     },
     async confirmPairing(pairingId, request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1625,7 +1626,10 @@ function claimPairingResponseParseError(): DeviceSyncServiceError {
   );
 }
 
-function pairingMessagesFromCloud(value: unknown): Record<string, unknown> {
+function pairingMessagesFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || !Array.isArray(value.messages)) {
     throw new DeviceSyncServiceError(
       "internal_error",
@@ -1633,10 +1637,29 @@ function pairingMessagesFromCloud(value: unknown): Record<string, unknown> {
       500,
     );
   }
+  if (rawJson !== null) {
+    assertPairingMessagesResponseRawShape(rawJson);
+  }
   return {
     sessionStatus: requiredPairingStatus(value.sessionStatus ?? value.session_status),
     messages: value.messages.map(pairingMessageFromCloud),
   };
+}
+
+function assertPairingMessagesResponseRawShape(rawJson: string): void {
+  for (const aliases of [["sessionStatus", "session_status"], ["messages"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw pairingMessagesResponseParseError();
+    }
+  }
+}
+
+function pairingMessagesResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse pairing messages response",
+    500,
+  );
 }
 
 function pairingMessageFromCloud(value: unknown): Record<string, unknown> {
