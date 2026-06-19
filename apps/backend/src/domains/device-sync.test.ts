@@ -1904,6 +1904,37 @@ describe("TS local device sync service", () => {
           minSnapshotCreatedAt: "2026-01-01 00:00:00.123456",
         }),
       ).resolves.toEqual({ success: true, keyVersion: 2, remoteSeedPresent: true });
+      let confirmPairingBody = '{"success":true,"key_version":2.0,"remote_seed_present":true}';
+      const malformedConfirmService = createLocalDeviceSyncService({
+        db,
+        secretService,
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () =>
+          new Response(confirmPairingBody, { headers: { "content-type": "application/json" } }),
+      });
+      await expect(
+        malformedConfirmService.confirmPairing?.("pairing-1", {
+          proof: "proof",
+        }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse confirm pairing response",
+        status: 500,
+      });
+
+      confirmPairingBody =
+        '{"success":true,"key_version":2,"keyVersion":2,"remote_seed_present":true}';
+      await expect(
+        malformedConfirmService.confirmPairing?.("pairing-1", {
+          proof: "proof",
+        }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse confirm pairing response",
+        status: 500,
+      });
       expect(
         db
           .query<

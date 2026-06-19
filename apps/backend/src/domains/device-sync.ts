@@ -587,7 +587,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      const result = await fetchDeviceSyncJson(
+      const confirmResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -597,7 +597,11 @@ export function createLocalDeviceSyncService({
           deviceId,
           body: { proof: request.proof },
         },
-      ).then(confirmPairingResponseFromCloud);
+      );
+      const result = confirmPairingResponseFromCloud(
+        confirmResponse.value,
+        confirmResponse.bodyText,
+      );
       applyMinSnapshotCreatedAtBestEffort(db, deviceId, request.minSnapshotCreatedAt);
       return result;
     },
@@ -1497,13 +1501,19 @@ function completePairingResponseParseError(): DeviceSyncServiceError {
   );
 }
 
-function confirmPairingResponseFromCloud(value: unknown): Record<string, unknown> {
+function confirmPairingResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse confirm pairing response",
       500,
     );
+  }
+  if (rawJson !== null) {
+    assertConfirmPairingResponseRawShape(rawJson);
   }
   const remoteSeedPresent = value.remoteSeedPresent ?? value.remote_seed_present;
   if (
@@ -1522,6 +1532,36 @@ function confirmPairingResponseFromCloud(value: unknown): Record<string, unknown
     keyVersion: requiredI32(value.keyVersion ?? value.key_version, "confirm pairing response"),
     remoteSeedPresent: remoteSeedPresent ?? null,
   };
+}
+
+function assertConfirmPairingResponseRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["success"],
+    ["keyVersion", "key_version"],
+    ["remoteSeedPresent", "remote_seed_present"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw confirmPairingResponseParseError();
+    }
+  }
+  assertConfirmPairingRawIntegerToken(rawJson, "keyVersion");
+  assertConfirmPairingRawIntegerToken(rawJson, "key_version");
+}
+
+function assertConfirmPairingRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw confirmPairingResponseParseError();
+    }
+  }
+}
+
+function confirmPairingResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse confirm pairing response",
+    500,
+  );
 }
 
 function claimPairingResponseFromCloud(
