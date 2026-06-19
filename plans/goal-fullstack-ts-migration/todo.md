@@ -4492,6 +4492,12 @@ contract:
   and dual GPT/Claude xhigh review. Coverage includes sync-identity/session
   preconditions, cloud confirm request shape, success flow response when no
   local DB/bootstrap state exists, and preserved confirm error propagation.
+- `pr5-device-sync-bootstrap-confirm-no-db`: verification passed: focused
+  bootstrap-confirm device-sync tests, pairing/runtime tests, full
+  `bun run check`, and dual GPT/Claude xhigh review. Coverage includes cloud
+  confirm request shape, Rust-shaped `already_complete` response when no local
+  DB/bootstrap state exists, and retained local DB
+  already-complete/overwrite-required branches.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
