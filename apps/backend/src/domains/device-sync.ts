@@ -2206,8 +2206,15 @@ function deviceSyncApiError(
     try {
       const parsed = JSON.parse(trimmed) as unknown;
       if (isRecord(parsed)) {
+        if (!validDeviceSyncApiErrorResponseShape(trimmed, parsed)) {
+          return new DeviceSyncServiceError(
+            "internal_error",
+            `API error (${status}): Request failed: ${trimmed} ${metadata}`,
+            500,
+          );
+        }
         const code = optionalString(parsed.code) ?? optionalString(parsed.error) ?? "";
-        const message = optionalString(parsed.message) ?? `HTTP ${status}`;
+        const message = parsed.message;
         return new DeviceSyncServiceError(
           "internal_error",
           `API error (${status}): ${code}: ${message} ${metadata}`,
@@ -2226,6 +2233,25 @@ function deviceSyncApiError(
     "internal_error",
     `API error (${status}): Request failed ${metadata}`,
     500,
+  );
+}
+
+function validDeviceSyncApiErrorResponseShape(
+  rawJson: string,
+  parsed: Record<string, unknown>,
+): parsed is Record<string, unknown> & { message: string } {
+  if (
+    rawTokensForAliases(rawJson, ["error"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["code"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["message"]).length > 1 ||
+    rawTokensForAliases(rawJson, ["details"]).length > 1
+  ) {
+    return false;
+  }
+  return (
+    (parsed.error === undefined || typeof parsed.error === "string") &&
+    (parsed.code === undefined || typeof parsed.code === "string") &&
+    typeof parsed.message === "string"
   );
 }
 

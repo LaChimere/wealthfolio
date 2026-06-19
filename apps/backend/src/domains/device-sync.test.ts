@@ -1131,21 +1131,30 @@ describe("TS local device sync service", () => {
   });
 
   test("maps device listing cloud failures to internal errors", async () => {
+    let errorBody = '{"code":"AUTH_EXPIRED","message":"expired"}';
     const service = createLocalDeviceSyncService({
       env: { CONNECT_API_URL: "https://api.example.test" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
       fetch: async () =>
-        Response.json(
-          { code: "AUTH_EXPIRED", message: "expired" },
-          { status: 403, headers: { "x-request-id": "server-request" } },
-        ),
+        new Response(errorBody, {
+          status: 403,
+          headers: { "content-type": "application/json", "x-request-id": "server-request" },
+        }),
     });
 
     await expect(service.listDevices()).rejects.toMatchObject({
       code: "internal_error",
       message: expect.stringContaining("API error (403): AUTH_EXPIRED: expired"),
+      status: 500,
+    });
+    errorBody = '{"code":"AUTH_EXPIRED","message":"expired","message":"later"}';
+    await expect(service.listDevices()).rejects.toMatchObject({
+      code: "internal_error",
+      message: expect.stringContaining(
+        'API error (403): Request failed: {"code":"AUTH_EXPIRED","message":"expired","message":"later"}',
+      ),
       status: 500,
     });
 
