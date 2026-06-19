@@ -549,7 +549,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const claimResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -562,7 +562,8 @@ export function createLocalDeviceSyncService({
             ephemeral_public_key: request.ephemeralPublicKey,
           },
         },
-      ).then(claimPairingResponseFromCloud);
+      );
+      return claimPairingResponseFromCloud(claimResponse.value, claimResponse.bodyText);
     },
     async getPairingMessages(pairingId) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1496,13 +1497,19 @@ function confirmPairingResponseFromCloud(value: unknown): Record<string, unknown
   };
 }
 
-function claimPairingResponseFromCloud(value: unknown): Record<string, unknown> {
+function claimPairingResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError(
       "internal_error",
       "Failed to parse claim pairing response",
       500,
     );
+  }
+  if (rawJson !== null) {
+    assertClaimPairingResponseRawShape(rawJson);
   }
   return {
     sessionId: requiredString(value.sessionId ?? value.session_id, "claim pairing response"),
@@ -1517,6 +1524,38 @@ function claimPairingResponseFromCloud(value: unknown): Record<string, unknown> 
     requireSas: requiredBoolean(value.requireSas ?? value.require_sas, "claim pairing response"),
     expiresAt: requiredString(value.expiresAt ?? value.expires_at, "claim pairing response"),
   };
+}
+
+function assertClaimPairingResponseRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["sessionId", "session_id"],
+    ["issuerEphemeralPub", "issuer_ephemeral_pub"],
+    ["e2eeKeyVersion", "e2ee_key_version"],
+    ["requireSas", "require_sas"],
+    ["expiresAt", "expires_at"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw claimPairingResponseParseError();
+    }
+  }
+  assertClaimPairingRawIntegerToken(rawJson, "e2eeKeyVersion");
+  assertClaimPairingRawIntegerToken(rawJson, "e2ee_key_version");
+}
+
+function assertClaimPairingRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw claimPairingResponseParseError();
+    }
+  }
+}
+
+function claimPairingResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse claim pairing response",
+    500,
+  );
 }
 
 function pairingMessagesFromCloud(value: unknown): Record<string, unknown> {

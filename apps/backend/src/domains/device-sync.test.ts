@@ -1832,6 +1832,39 @@ describe("TS local device sync service", () => {
         requireSas: true,
         expiresAt: "2026-01-01T00:00:00Z",
       });
+      let claimPairingBody =
+        '{"session_id":"pairing-1","issuer_ephemeral_pub":"issuer-key","e2ee_key_version":2.0,"require_sas":true,"expires_at":"2026-01-01T00:00:00Z"}';
+      const malformedClaimService = createLocalDeviceSyncService({
+        secretService,
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () =>
+          new Response(claimPairingBody, { headers: { "content-type": "application/json" } }),
+      });
+      await expect(
+        malformedClaimService.claimPairing?.({
+          code: "123456",
+          ephemeralPublicKey: "public-key",
+        }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse claim pairing response",
+        status: 500,
+      });
+
+      claimPairingBody =
+        '{"session_id":"pairing-1","sessionId":"pairing-1","issuer_ephemeral_pub":"issuer-key","e2ee_key_version":2,"require_sas":true,"expires_at":"2026-01-01T00:00:00Z"}';
+      await expect(
+        malformedClaimService.claimPairing?.({
+          code: "123456",
+          ephemeralPublicKey: "public-key",
+        }),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse claim pairing response",
+        status: 500,
+      });
       await expect(service.getPairingMessages?.("pairing-1")).resolves.toEqual({
         sessionStatus: "approved",
         messages: [
