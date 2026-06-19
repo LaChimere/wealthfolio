@@ -5380,6 +5380,7 @@ function getLocalSyncCursor(db: Database): number {
 
 interface LocalReconcileReadyState {
   action: string | null;
+  cursor: number | null;
   latestSnapshotId: string | null;
   latestSnapshotSeq: number | null;
 }
@@ -5412,6 +5413,7 @@ async function fetchLocalReconcileReadyStateBestEffort(
     const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
     return {
       action: optionalString(parsed.action),
+      cursor: optionalNumber(parsed.cursor),
       latestSnapshotId: isRecord(latestSnapshot)
         ? optionalString(latestSnapshot.snapshotId ?? latestSnapshot.snapshot_id)
         : null,
@@ -5435,7 +5437,7 @@ async function fetchLocalReconcileReadyActionBestEffort(
 }
 
 function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
-  return { action: null, latestSnapshotId: null, latestSnapshotSeq: null };
+  return { action: null, cursor: null, latestSnapshotId: null, latestSnapshotSeq: null };
 }
 
 function reconcileActionRequiresSnapshot(action: string | null): boolean {
@@ -5611,6 +5613,16 @@ async function triggerLocalDeviceSyncCycle(
         reconcile.latestSnapshotSeq,
       );
     }
+    if (
+      reconcile.action === "PULL_TAIL" &&
+      reconcile.cursor !== null &&
+      reconcile.cursor <= cursor &&
+      !localHasPendingSyncOutbox(db)
+    ) {
+      const acquiredLockVersion = localAcquireSyncCycleLock(db);
+      markLocalSyncCycleOutcome(db, "ok");
+      return localSyncCycleResult("ok", acquiredLockVersion, cursor);
+    }
     throw deviceSyncDisabled();
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {
@@ -5725,6 +5737,29 @@ function markLocalSyncCycleOutcome(
 
 function localWaitSnapshotRetryAt(): string {
   return new Date(Date.now() + 30_000).toISOString();
+}
+
+function localAcquireSyncCycleLock(db: Database): number {
+  const current =
+    db
+      .query<
+        { lock_version: number },
+        []
+      >("SELECT lock_version FROM sync_engine_state WHERE id = 1")
+      .get()?.lock_version ?? 0;
+  const next = current + 1;
+  db.prepare(
+    `
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_error, consecutive_failures, next_retry_at,
+        last_cycle_status, last_cycle_duration_ms
+      )
+      VALUES (1, ?, NULL, 0, NULL, NULL, NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        lock_version = excluded.lock_version
+    `,
+  ).run(next);
+  return next;
 }
 
 function localHasPendingSyncOutbox(db: Database): boolean {
