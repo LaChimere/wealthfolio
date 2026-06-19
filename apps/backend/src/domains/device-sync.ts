@@ -448,7 +448,7 @@ export function createLocalDeviceSyncService({
     },
     async resetTeamSync(request) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
-      return await fetchDeviceSyncJson(
+      const resetResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -457,7 +457,8 @@ export function createLocalDeviceSyncService({
           method: "POST",
           body: request.reason === undefined ? {} : { reason: request.reason },
         },
-      ).then(resetTeamSyncResponseFromCloud);
+      );
+      return resetTeamSyncResponseFromCloud(resetResponse.value, resetResponse.bodyText);
     },
     async createPairing(request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1699,7 +1700,10 @@ function commitRotateKeysResponseParseError(): DeviceSyncServiceError {
   );
 }
 
-function resetTeamSyncResponseFromCloud(value: unknown): Record<string, unknown> {
+function resetTeamSyncResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     throw new DeviceSyncServiceError(
       "internal_error",
@@ -1707,11 +1711,40 @@ function resetTeamSyncResponseFromCloud(value: unknown): Record<string, unknown>
       500,
     );
   }
+  if (rawJson !== null) {
+    assertResetTeamSyncResponseRawShape(rawJson);
+  }
   return {
     success: value.success,
     keyVersion: requiredI32(value.keyVersion ?? value.key_version, "reset team sync response"),
     resetAt: optionalDeviceString(value.resetAt ?? value.reset_at, "reset team sync response"),
   };
+}
+
+function assertResetTeamSyncResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["keyVersion", "key_version"], ["resetAt", "reset_at"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw resetTeamSyncResponseParseError();
+    }
+  }
+  assertResetTeamSyncRawIntegerToken(rawJson, "keyVersion");
+  assertResetTeamSyncRawIntegerToken(rawJson, "key_version");
+}
+
+function assertResetTeamSyncRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw resetTeamSyncResponseParseError();
+    }
+  }
+}
+
+function resetTeamSyncResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse reset team sync response",
+    500,
+  );
 }
 
 function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>> {

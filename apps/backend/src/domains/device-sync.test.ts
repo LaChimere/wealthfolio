@@ -1524,6 +1524,27 @@ describe("TS local device sync service", () => {
         deviceId: "",
       },
     ]);
+
+    let resetBody = '{"success":true,"key_version":1.0,"reset_at":"2026-01-01T00:00:00Z"}';
+    const malformedResetService = createLocalDeviceSyncService({
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(resetBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(malformedResetService.resetTeamSync?.({})).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse reset team sync response",
+      status: 500,
+    });
+
+    resetBody = '{"success":true,"key_version":1,"keyVersion":1,"reset_at":null}';
+    await expect(malformedResetService.resetTeamSync?.({})).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse reset team sync response",
+      status: 500,
+    });
   });
 
   test("reports missing device id for pairing operations after session restore", async () => {
