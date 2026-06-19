@@ -4284,6 +4284,14 @@ contract:
   broker activity page validation rejecting present-null/non-boolean
   `needs_review`, defaulting missing values to false, and treating camel
   `needsReview` as Rust-ignored unknown input.
+- `pr5-connect-broker-activity-currency-shape-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity page validation rejecting scalar/array top-level `currency`
+  values, validating `id`/`code`/`name` string fields, and preserving
+  missing/null currency handling.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
