@@ -3869,6 +3869,15 @@ contract:
   local data while approval is active, approval clearing when bootstrap is no
   longer required, and best-effort approval identity reads when the secret store
   fails.
+- `pr5-device-sync-pairing-overwrite-approval`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "overwrite flow|remote snapshot|waiting flow|freshness gate|composite confirm before snapshot bootstrap|begin confirm waits"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  pairing-flow overwrite approval, approval reuse by composite confirm,
+  waiting-snapshot flow polling, terminal gated-apply cleanup once a fresh
+  snapshot exists, and freshness-gate retention for stale snapshots that do not
+  cover the remote cursor.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
