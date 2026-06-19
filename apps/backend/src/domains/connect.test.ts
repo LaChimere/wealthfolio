@@ -7571,7 +7571,7 @@ describe("TS Connect device sync local service", () => {
     ).run();
     let trustState = "untrusted";
     let serverCursor = 8;
-    let failureMode: "none" | "device" | "cursor" = "none";
+    let failureMode: "none" | "device" | "cursor" | "bad-cursor" = "none";
     const requests: string[] = [];
     const service = createLocalConnectDeviceSyncService({
       db,
@@ -7585,6 +7585,11 @@ describe("TS Connect device sync local service", () => {
         if (String(input).includes("/api/v1/sync/events/cursor")) {
           if (failureMode === "cursor") {
             throw new Error("cursor offline");
+          }
+          if (failureMode === "bad-cursor") {
+            return new Response('{"cursor":8,"gc_watermark":1.0}', {
+              headers: { "content-type": "application/json" },
+            });
           }
           return Response.json({ cursor: serverCursor });
         }
@@ -7638,6 +7643,12 @@ describe("TS Connect device sync local service", () => {
         message: "cursor offline",
         status: 500,
       });
+      failureMode = "bad-cursor";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse cursor response",
+        status: 500,
+      });
       failureMode = "none";
       await expect(service.getDeviceSyncPairingSourceStatus()).resolves.toEqual({
         status: "restore_required",
@@ -7654,7 +7665,7 @@ describe("TS Connect device sync local service", () => {
       });
       expect(
         requests.filter((request) => request.includes("/api/v1/sync/events/cursor")),
-      ).toHaveLength(3);
+      ).toHaveLength(4);
     } finally {
       db.close();
     }
@@ -7764,7 +7775,7 @@ describe("TS Connect device sync local service", () => {
       "sync_identity",
       JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
     );
-    let serverCursor = 8;
+    let serverCursor: number | "bad-gc" = 8;
     let latestSnapshotOplogSeq: number | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
@@ -7775,6 +7786,11 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (serverCursor === "bad-gc") {
+            return new Response('{"cursor":10,"gc_watermark":1.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
           return Response.json({ cursor: serverCursor });
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
@@ -7809,6 +7825,12 @@ describe("TS Connect device sync local service", () => {
         status: 500,
         message:
           "SYNC_SOURCE_RESTORE_REQUIRED: This device needs to set up sync again before you add another device.",
+      });
+      serverCursor = "bad-gc";
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Failed to parse cursor response",
       });
       serverCursor = 10;
       latestSnapshotOplogSeq = 10;
@@ -9335,7 +9357,8 @@ describe("TS Connect device sync local service", () => {
     );
     let latestSchemaVersion = 2;
     let cursorSchemaVersion = 1;
-    let cursorMode: "normal" | "duplicate-latest" | "duplicate-null-latest" = "duplicate-latest";
+    let cursorMode: "normal" | "duplicate-latest" | "duplicate-null-latest" | "bad-gc" =
+      "duplicate-latest";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9371,6 +9394,12 @@ describe("TS Connect device sync local service", () => {
               { headers: { "content-type": "application/json" } },
             );
           }
+          if (cursorMode === "bad-gc") {
+            return new Response(
+              '{"cursor":42,"gc_watermark":1.0,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
           return Response.json({
             cursor: 42,
             latest_snapshot: {
@@ -9399,6 +9428,12 @@ describe("TS Connect device sync local service", () => {
         message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
       });
       cursorMode = "duplicate-null-latest";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "bad-gc";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
         code: "internal_error",
         status: 500,

@@ -5156,7 +5156,7 @@ async function fetchLocalEventsCursorOrThrow(
       500,
     );
   }
-  if (!isRecord(parsed) || !validSyncCursorShape(parsed)) {
+  if (!isRecord(parsed) || !validSyncCursorShape(parsed) || !validSyncCursorRawShape(bodyText)) {
     throw new ConnectServiceError("internal_error", "Failed to parse cursor response", 500);
   }
   return requiredInteger(parsed.cursor, "cursor response");
@@ -5183,8 +5183,9 @@ async function localEventsCursorBestEffort(
     if (!response.ok) {
       return null;
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
-    if (!isRecord(parsed) || !validSyncCursorShape(parsed)) {
+    const bodyText = await response.text();
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (!isRecord(parsed) || !validSyncCursorShape(parsed) || !validSyncCursorRawShape(bodyText)) {
       return null;
     }
     return requiredInteger(parsed.cursor, "cursor response");
@@ -5385,7 +5386,13 @@ function validSyncCursorShape(value: Record<string, unknown>): boolean {
 
 function validSyncCursorRawShape(text: string): boolean {
   const cursorTokens = rawTokensForAliases(text, ["cursor"]);
-  return cursorTokens.length === 1 && rawJsonI64TokenIsValid(cursorTokens[0] ?? "");
+  const gcWatermarkTokens = rawTokensForAliases(text, ["gcWatermark", "gc_watermark"]);
+  return (
+    cursorTokens.length === 1 &&
+    rawJsonI64TokenIsValid(cursorTokens[0] ?? "") &&
+    gcWatermarkTokens.length <= 1 &&
+    (gcWatermarkTokens.length === 0 || rawJsonI64OptionTokenIsValid(gcWatermarkTokens[0] ?? ""))
+  );
 }
 
 function isSafeI64Integer(value: unknown): value is number {
