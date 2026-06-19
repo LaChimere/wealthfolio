@@ -2,10 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
 import type { AccountService } from "./accounts";
-import type { ActivityService } from "./activities";
+import { ACTIVITY_BULK_CREATED_ASSET_IDS, type ActivityService } from "./activities";
 import type { ExchangeMetadata } from "./assets";
 import { localOverwriteRiskSummary } from "./device-sync-overwrite-risk";
 import { normalizeSyncDatetime } from "./device-sync-time";
+import { instrumentTypeFromQuoteType, type SymbolSearchResult } from "./market-data";
 import type { SecretService } from "./secrets";
 import { createSyncCryptoService } from "./sync-crypto";
 
@@ -25,6 +26,7 @@ export interface LocalConnectServiceDependencies {
     Partial<Pick<ActivityService, "bulkMutateActivities" | "checkExistingDuplicates">>;
   accountService: Pick<AccountService, "createAccount" | "getAllAccounts" | "getBaseCurrency">;
   exchangeMetadata?: Pick<ExchangeMetadata, "yahooSuffixToMic">;
+  symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   secretService?: SecretService;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
@@ -188,6 +190,7 @@ export function createLocalConnectService({
   activityService,
   accountService,
   exchangeMetadata,
+  symbolSearch,
   secretService,
   env = process.env,
   fetch: fetchImpl = fetch,
@@ -316,6 +319,7 @@ export function createLocalConnectService({
         env,
         fetchImpl,
         exchangeMetadata,
+        symbolSearch,
       );
     },
     getSyncedAccounts() {
@@ -1389,6 +1393,7 @@ function syncBrokerActivitiesForHoldingsOnly(
   env?: NodeJS.ProcessEnv,
   fetchImpl?: typeof fetch,
   exchangeMetadata?: Pick<ExchangeMetadata, "yahooSuffixToMic">,
+  symbolSearch?: LocalConnectServiceDependencies["symbolSearch"],
 ):
   | Promise<{
       accountsSynced: number;
@@ -1424,6 +1429,7 @@ function syncBrokerActivitiesForHoldingsOnly(
       transactionAccounts,
       accountService.getBaseCurrency() ?? "USD",
       exchangeMetadata,
+      symbolSearch,
     );
   }
   return {
@@ -1445,6 +1451,7 @@ async function syncEmptyTransactionActivityPages(
   accounts: ReturnType<AccountService["getAllAccounts"]>,
   baseCurrency: string,
   exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+  symbolSearch: LocalConnectServiceDependencies["symbolSearch"] | undefined,
 ): Promise<{
   accountsSynced: number;
   activitiesUpserted: number;
@@ -1461,6 +1468,7 @@ async function syncEmptyTransactionActivityPages(
     accountsWarned: 0,
     newAssetIds: [] as string[],
   };
+  const providerSearchCache = new Map<string, Promise<SymbolSearchResult[]>>();
   const endDate = dateOnly(new Date());
   const pageLimit = 1000;
   for (const account of accounts) {
@@ -1520,7 +1528,16 @@ async function syncEmptyTransactionActivityPages(
             account.currency,
             baseCurrency,
             exchangeMetadata,
-          );
+          ) ??
+          (await brokerProviderAssetActivityCreateInput(
+            activity,
+            account.id,
+            account.currency,
+            baseCurrency,
+            exchangeMetadata,
+            symbolSearch,
+            providerSearchCache,
+          ));
         if (createInput === null) {
           hasUnsupportedMappableActivity = true;
         } else if (!brokerActivityAlreadyImported(db, activity, createInput)) {
@@ -1574,6 +1591,9 @@ async function syncEmptyTransactionActivityPages(
           break;
         }
         summary.activitiesUpserted += bulkMutationCreatedCount(result);
+        const createdAssetIds = bulkMutationCreatedAssetIds(result);
+        summary.assetsInserted += createdAssetIds.length;
+        summary.newAssetIds.push(...createdAssetIds);
       }
       const firstId = brokerActivityFirstId(data);
       if (firstId !== null) {
@@ -1857,6 +1877,156 @@ function brokerExistingAssetActivityCreateInput(
     needsReview,
     metadata: brokerActivityMetadata(activity),
   };
+}
+
+async function brokerProviderAssetActivityCreateInput(
+  activity: unknown,
+  accountId: string,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+  symbolSearch: LocalConnectServiceDependencies["symbolSearch"] | undefined,
+  providerSearchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown> | null> {
+  if (!symbolSearch || !isRecord(activity)) {
+    return null;
+  }
+  const activityId = optionalString(activity.id);
+  const rawActivityType = brokerActivityType(activity);
+  const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
+  if (!activityId || !rawActivityType || !assetSymbol) {
+    return null;
+  }
+  const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
+  const activityType = rawActivityType.toUpperCase();
+  if (
+    BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType)
+  ) {
+    return null;
+  }
+
+  const providerAsset = await resolveBrokerProviderAsset(
+    assetSymbol,
+    symbolSearch,
+    exchangeMetadata,
+    providerSearchCache,
+  );
+  if (!providerAsset) {
+    return null;
+  }
+  const currency =
+    brokerActivityCurrency(activity) ??
+    optionalString(accountCurrency) ??
+    optionalString(baseCurrency) ??
+    "USD";
+  const sourceSystem =
+    optionalString(
+      activity.source_system ??
+        activity.sourceSystem ??
+        activity.provider_type ??
+        activity.providerType,
+    ) ?? "SNAPTRADE";
+  const needsReview = brokerActivityNeedsReview(activity);
+  return {
+    accountId,
+    activityType,
+    subtype: optionalString(
+      activity.subtype ??
+        activity.option_type ??
+        activity.optionType ??
+        activity.raw_type ??
+        activity.rawType,
+    ),
+    activityDate:
+      optionalString(
+        activity.trade_date ??
+          activity.tradeDate ??
+          activity.settlement_date ??
+          activity.settlementDate,
+      ) ?? new Date().toISOString(),
+    quantity: brokerActivityAbsoluteNumberString(activity.units),
+    unitPrice: brokerActivityAbsoluteNumberString(activity.price),
+    amount: brokerActivityAbsoluteNumberString(activity.amount),
+    fee: brokerActivityAbsoluteNumberString(activity.fee),
+    currency,
+    asset: providerAsset,
+    comment: optionalString(
+      activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
+    ),
+    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    sourceSystem,
+    sourceRecordId,
+    sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
+    idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
+    status: needsReview ? "DRAFT" : "POSTED",
+    needsReview,
+    metadata: brokerActivityMetadata(activity),
+  };
+}
+
+async function resolveBrokerProviderAsset(
+  assetSymbol: BrokerActivityAssetSymbol,
+  symbolSearch: NonNullable<LocalConnectServiceDependencies["symbolSearch"]>,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+  providerSearchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown> | null> {
+  const query = assetSymbol.symbol.trim().toUpperCase();
+  if (!query) {
+    return null;
+  }
+  const cached =
+    providerSearchCache.get(query) ??
+    Promise.resolve(symbolSearch(query)).catch((): SymbolSearchResult[] => []);
+  providerSearchCache.set(query, cached);
+  const results = await cached;
+  const match = results.find((result) =>
+    brokerProviderSearchResultMatches(result, assetSymbol, exchangeMetadata),
+  );
+  if (!match) {
+    return null;
+  }
+  if (match.existingAssetId) {
+    return { id: match.existingAssetId, symbol: assetSymbol.symbol };
+  }
+  const instrumentType = instrumentTypeFromQuoteType(match.quoteType);
+  const exchangeMic = match.exchangeMic?.trim().toUpperCase() || undefined;
+  const quoteCcy = match.currency?.trim().toUpperCase();
+  if (!instrumentType || !quoteCcy) {
+    return null;
+  }
+  if (instrumentType === "EQUITY" && !exchangeMic) {
+    return null;
+  }
+  return {
+    symbol: match.symbol,
+    exchangeMic,
+    instrumentType,
+    quoteCcy,
+    quoteMode: "MARKET",
+    name: providerSearchResultName(match, assetSymbol.symbol),
+  };
+}
+
+function brokerProviderSearchResultMatches(
+  result: SymbolSearchResult,
+  assetSymbol: BrokerActivityAssetSymbol,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+): boolean {
+  const resultMic = result.exchangeMic?.trim().toUpperCase() || null;
+  const parsedResult = parseKnownYahooSuffix(result.symbol, exchangeMetadata);
+  const parsedBroker = parseKnownYahooSuffix(assetSymbol.symbol, exchangeMetadata);
+  const resultSymbol = parsedResult.symbol.trim().toUpperCase();
+  const brokerSymbol = parsedBroker.symbol.trim().toUpperCase();
+  const brokerMic = assetSymbol.exchangeMic ?? parsedBroker.exchangeMic;
+  if (brokerMic) {
+    return resultMic === brokerMic.toUpperCase() && resultSymbol === brokerSymbol;
+  }
+  return resultSymbol === brokerSymbol;
+}
+
+function providerSearchResultName(result: SymbolSearchResult, fallback: string): string {
+  return result.longName?.trim() || result.shortName?.trim() || fallback;
 }
 
 interface BrokerActivityAssetSymbol {
@@ -2241,6 +2411,13 @@ function bulkMutationDuplicateError(error: { message: string }): boolean {
 
 function bulkMutationCreatedCount(result: unknown): number {
   return isRecord(result) && Array.isArray(result.created) ? result.created.length : 0;
+}
+
+function bulkMutationCreatedAssetIds(result: unknown): string[] {
+  const createdAssetIds = isRecord(result) ? result[ACTIVITY_BULK_CREATED_ASSET_IDS] : undefined;
+  return Array.isArray(createdAssetIds)
+    ? createdAssetIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
 }
 
 function brokerActivitiesPath(

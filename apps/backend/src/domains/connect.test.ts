@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
+import { ACTIVITY_BULK_CREATED_ASSET_IDS } from "./activities";
 import type { SecretService } from "./secrets";
 import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./connect";
 
@@ -3764,6 +3765,339 @@ describe("TS Connect local session service", () => {
         code: "not_implemented",
         status: 501,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs provider-resolved broker activities as new activity-created assets", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const symbolSearchCalls: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              activity_type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+            {
+              id: "buy-activity-2",
+              activity_type: "BUY",
+              trade_date: "2026-01-06T10:00:00Z",
+              units: 1,
+              price: 151,
+              amount: 151,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) => {
+        symbolSearchCalls.push(query);
+        return query === "AAPL"
+          ? [
+              {
+                symbol: "MSFT",
+                shortName: "Microsoft Corporation",
+                longName: "Microsoft Corporation",
+                exchange: "NMS",
+                exchangeMic: "XNAS",
+                exchangeName: "NASDAQ",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+              {
+                symbol: "AAPL",
+                shortName: "Apple Inc.",
+                longName: "Apple Inc.",
+                exchange: "NMS",
+                exchangeMic: "XNAS",
+                exchangeName: "NASDAQ",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 99,
+              },
+            ]
+          : [];
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          const result = {
+            created: [{ id: "created-activity-1" }, { id: "created-activity-2" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+          Object.defineProperty(result, ACTIVITY_BULK_CREATED_ASSET_IDS, {
+            value: ["asset-aapl"],
+            enumerable: false,
+          });
+          return result;
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 2,
+        assetsInserted: 1,
+        newAssetIds: ["asset-aapl"],
+      });
+      expect(symbolSearchCalls).toEqual(["AAPL"]);
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          currency: "USD",
+          asset: {
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            quoteMode: "MARKET",
+            name: "Apple Inc.",
+          },
+        }),
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          quantity: "1",
+          unitPrice: "151",
+          amount: "151",
+          currency: "USD",
+          asset: expect.objectContaining({
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+          }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("provider-resolves suffixed broker raw symbols by normalized symbol and MIC", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-shop-tsx",
+              activity_type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 95,
+              amount: 190,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "SHOP",
+                raw_symbol: "SHOP.TO",
+                exchange: { mic_code: "XTSE" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "SHOP.TO"
+          ? [
+              {
+                symbol: "SHOP.TO",
+                shortName: "Shopify Inc.",
+                longName: "Shopify Inc.",
+                exchange: "TOR",
+                exchangeMic: "XTSE",
+                exchangeName: "TSX",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "CAD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          asset: {
+            symbol: "SHOP.TO",
+            exchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+            quoteMode: "MARKET",
+            name: "Shopify Inc.",
+          },
+        }),
+      ]);
     } finally {
       db.close();
     }

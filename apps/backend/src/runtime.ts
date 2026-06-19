@@ -455,6 +455,7 @@ function createServicesFromDatabase(
     activityService,
     accountService,
     exchangeMetadata,
+    symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
     secretService,
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,

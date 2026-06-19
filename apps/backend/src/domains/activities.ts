@@ -13,6 +13,7 @@ const ASSETS_CREATED_EVENT = "assets_created";
 export const ACTIVITY_IMPORT_CONTEXT_KIND = "ACTIVITY";
 export const CSV_ACTIVITY_CONTEXT_KIND = "CSV_ACTIVITY";
 export const CSV_HOLDINGS_CONTEXT_KIND = "CSV_HOLDINGS";
+export const ACTIVITY_BULK_CREATED_ASSET_IDS = "__wealthfolioCreatedAssetIds";
 
 export type FieldMappingValue = string | string[];
 export type ImportTemplateScope = "SYSTEM" | "USER";
@@ -3688,6 +3689,11 @@ function persistPreparedBulkActivityMutation(
   }
 
   const createdAssetIds = [...prepared.assetContext.createdAssetIds];
+  Object.defineProperty(result, ACTIVITY_BULK_CREATED_ASSET_IDS, {
+    value: createdAssetIds,
+    enumerable: false,
+    configurable: true,
+  });
   const updatedAssetIds = existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds);
   return {
     result,
