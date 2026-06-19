@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 499
+turns_used: 500
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-19T23:40:44+08:00"
+updated_at: "2026-06-19T23:52:27+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3237,6 +3237,12 @@ updated_at: "2026-06-19T23:40:44+08:00"
   tokens like Rust serde. Verified with focused/full device-sync tests, backend
   type-check, backend suite, full `bun run check`, and dual GPT/Claude xhigh
   review/refine.
+- Turn 500: Tightened standalone device-sync single-device response parsing
+  parity. `getDevice` and `getCurrentDevice` now validate raw `Device` JSON
+  before returning mapped results, rejecting duplicate snake/camel alias fields
+  like Rust serde; list-device array parsing remains a separate follow-up.
+  Verified with focused/full device-sync tests, backend type-check, backend
+  suite, full `bun run check`, and dual GPT/Claude xhigh review/refine.
 
 ## Deferred items
 
