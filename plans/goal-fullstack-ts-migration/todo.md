@@ -4132,6 +4132,13 @@ contract:
   malformed OAuth refresh error bodies with duplicate/non-string
   `error`/`error_description` fields falling back to raw body text before
   stale-session invalidation.
+- `pr5-connect-device-optional-field-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "malformed Connect device response|reads READY"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  the Connect sync-state device mapper rejecting malformed present optional Rust
+  `Device` string fields while still accepting the endpoint's subset shape.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
