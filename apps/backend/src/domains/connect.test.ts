@@ -5203,6 +5203,24 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"symbol":"AAPL","type":{"code":"EQUITY","is_supported":"true"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","strike_price":"240"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","strike_price":1e999}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
         '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":true,"isExternal":false}}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
@@ -5399,7 +5417,17 @@ describe("TS Connect local session service", () => {
         }
         if (String(input).includes("offset=0")) {
           return Response.json({
-            data: [{ description: "missing id" }, { id: "   ", description: "blank id" }],
+            data: [
+              {
+                description: "missing id",
+                symbol: {
+                  currency: { code: "USD", description: 123, is_supported: "true" },
+                  exchange: { code: "XNAS", is_supported: "true" },
+                  type: { code: "EQUITY", name: 123, is_supported: true },
+                },
+              },
+              { id: "   ", description: "blank id" },
+            ],
             pagination: { has_more: true },
           });
         }

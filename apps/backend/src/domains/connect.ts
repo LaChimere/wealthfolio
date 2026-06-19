@@ -2102,6 +2102,17 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
       return false;
     }
   }
+  for (const aliases of [
+    ["id"],
+    ["symbol"],
+    ["raw_symbol", "rawSymbol"],
+    ["description"],
+    ["figi_code", "figiCode"],
+  ]) {
+    if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
+      return false;
+    }
+  }
   for (const nestedKey of ["exchange", "currency", "type", "symbol_type", "symbolType"]) {
     const nestedTokens = rawTokensForAliases(rawJson, [nestedKey]);
     if (nestedTokens.length === 1 && nestedTokens[0]?.trim().startsWith("{")) {
@@ -2112,6 +2123,15 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
             ? [["id"], ["code"], ["name"]]
             : [["id"], ["code"], ["description"], ["is_supported", "isSupported"]];
       if (!validBrokerActivityAliasGroups(nestedTokens[0], aliases)) {
+        return false;
+      }
+      const nestedKind =
+        nestedKey === "exchange"
+          ? "exchange"
+          : nestedKey === "currency"
+            ? "currency"
+            : "symbol-type";
+      if (!validBrokerActivityNestedScalarRawShape(nestedTokens[0], nestedKind)) {
         return false;
       }
     }
@@ -2133,11 +2153,48 @@ function validBrokerActivityOptionSymbolRawShape(rawJson: string): boolean {
   ) {
     return false;
   }
+  for (const aliases of [
+    ["id"],
+    ["ticker"],
+    ["option_type", "optionType"],
+    ["expiration_date", "expirationDate"],
+  ]) {
+    if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
+      return false;
+    }
+  }
+  if (
+    !brokerActivityOptionalRawTokenIsValid(rawJson, ["strike_price", "strikePrice"], "number") ||
+    !brokerActivityOptionalRawTokenIsValid(rawJson, ["is_mini_option", "isMiniOption"], "bool")
+  ) {
+    return false;
+  }
   const underlyingTokens = rawTokensForAliases(rawJson, ["underlying_symbol", "underlyingSymbol"]);
   if (underlyingTokens.length === 1 && underlyingTokens[0]?.trim().startsWith("{")) {
     return validBrokerActivitySymbolRawShape(underlyingTokens[0]);
   }
   return true;
+}
+
+function validBrokerActivityNestedScalarRawShape(
+  rawJson: string,
+  kind: "currency" | "exchange" | "symbol-type",
+): boolean {
+  const stringGroups =
+    kind === "exchange"
+      ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
+      : kind === "currency"
+        ? [["id"], ["code"], ["name"]]
+        : [["id"], ["code"], ["description"]];
+  for (const aliases of stringGroups) {
+    if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
+      return false;
+    }
+  }
+  return (
+    kind !== "symbol-type" ||
+    brokerActivityOptionalRawTokenIsValid(rawJson, ["is_supported", "isSupported"], "bool")
+  );
 }
 
 function validBrokerActivityAliasGroups(rawJson: string, aliasGroups: string[][]): boolean {
@@ -2177,7 +2234,10 @@ function brokerActivityOptionalRawTokenIsValid(
   if (kind === "bool") {
     return trimmed === "true" || trimmed === "false";
   }
-  return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed);
+  return (
+    /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed) &&
+    Number.isFinite(Number(trimmed))
+  );
 }
 
 function brokerActivityPaginationRawTokenIsValid(
@@ -2197,7 +2257,10 @@ function brokerActivityPaginationRawTokenIsValid(
     return trimmed === "true" || trimmed === "false";
   }
   if (kind === "number") {
-    return /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed);
+    return (
+      /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed) &&
+      Number.isFinite(Number(trimmed))
+    );
   }
   return rawJsonI64TokenIsValid(trimmed);
 }
