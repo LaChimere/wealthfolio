@@ -1981,7 +1981,7 @@ function validBrokerActivityParsedShape(activity: unknown): boolean {
       return false;
     }
   }
-  const fxRate = activity.fx_rate ?? activity.fxRate;
+  const fxRate = activity.fx_rate;
   if (fxRate !== undefined && fxRate !== null && !Number.isFinite(fxRate)) {
     return false;
   }
@@ -2032,7 +2032,7 @@ function validBrokerActivityRawShape(rawJson: string): boolean {
     ["trade_date", "tradeDate"],
     ["settlement_date", "settlementDate"],
     ["fee"],
-    ["fx_rate", "fxRate"],
+    ["fx_rate"],
     ["institution"],
     ["external_reference_id", "externalReferenceId"],
     ["provider_type", "providerType"],
@@ -2073,7 +2073,7 @@ function validBrokerActivityScalarRawShape(rawJson: string): boolean {
       return false;
     }
   }
-  for (const aliases of [["price"], ["units"], ["amount"], ["fee"], ["fx_rate", "fxRate"]]) {
+  for (const aliases of [["price"], ["units"], ["amount"], ["fee"], ["fx_rate"]]) {
     if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "number")) {
       return false;
     }
@@ -2466,7 +2466,7 @@ function brokerCashActivityCreateInput(
     comment: optionalString(
       activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
     ),
-    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem:
       optionalString(
         activity.source_system ??
@@ -2577,7 +2577,7 @@ function brokerExistingAssetActivityCreateInput(
     comment: optionalString(
       activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
     ),
-    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem,
     sourceRecordId,
     sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
@@ -2664,7 +2664,7 @@ async function brokerProviderAssetActivityCreateInput(
     comment: optionalString(
       activity.description ?? activity.external_reference_id ?? activity.externalReferenceId,
     ),
-    fxRate: brokerActivityNumberString(activity.fx_rate ?? activity.fxRate),
+    fxRate: brokerActivityNumberString(activity.fx_rate),
     sourceSystem,
     sourceRecordId,
     sourceGroupId: optionalString(activity.source_group_id ?? activity.sourceGroupId),
