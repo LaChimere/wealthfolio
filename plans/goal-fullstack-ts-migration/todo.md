@@ -3878,6 +3878,14 @@ contract:
   waiting-snapshot flow polling, terminal gated-apply cleanup once a fresh
   snapshot exists, and freshness-gate retention for stale snapshots that do not
   cover the remote cursor.
+- `pr5-device-sync-pairing-snapshot-metadata-preflight`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "metadata preflight|freshness gate|waiting flow|remote snapshot"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  requiring Rust-shaped latest snapshot metadata before the explicit apply gate,
+  returning update-required errors for newer schema versions, rejecting empty
+  snapshot IDs, and preserving freshness-gate waiting behavior.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
