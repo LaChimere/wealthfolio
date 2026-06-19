@@ -4591,6 +4591,12 @@ contract:
   `latest_snapshot` metadata raw-token validation, duplicate snake/camel alias
   field rejection, raw float/exponent numeric token rejection, and preserving
   genuinely missing/null cursor latest snapshots.
+- `pr5-connect-cursor-response-metadata-validation`: verification passed:
+  focused Connect/device-sync tests, backend type-check, full `bun run check`,
+  backend suite, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes applying raw cursor response validation to pairing-source
+  status, generate-snapshot preflight, and cursor-latest fallback paths,
+  including optional `gcWatermark`/`gc_watermark` integer/null token validation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
