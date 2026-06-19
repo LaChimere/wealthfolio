@@ -404,7 +404,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const rotateResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -414,7 +414,8 @@ export function createLocalDeviceSyncService({
           deviceId,
           body: { initiator_device_id: deviceId },
         },
-      ).then(rotateKeysResponseFromCloud);
+      );
+      return rotateKeysResponseFromCloud(rotateResponse.value, rotateResponse.bodyText);
     },
     async commitRotateTeamKeys(request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1588,9 +1589,15 @@ function initializeKeysResponseParseError(): DeviceSyncServiceError {
   );
 }
 
-function rotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+function rotateKeysResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse rotate keys response", 500);
+  }
+  if (rawJson !== null) {
+    assertRotateKeysResponseRawShape(rawJson);
   }
   return {
     challenge: requiredString(value.challenge, "rotate keys response"),
@@ -1600,6 +1607,28 @@ function rotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
       "rotate keys response",
     ),
   };
+}
+
+function assertRotateKeysResponseRawShape(rawJson: string): void {
+  for (const aliases of [["challenge"], ["nonce"], ["newKeyVersion", "new_key_version"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw rotateKeysResponseParseError();
+    }
+  }
+  assertRotateKeysRawIntegerToken(rawJson, "newKeyVersion");
+  assertRotateKeysRawIntegerToken(rawJson, "new_key_version");
+}
+
+function assertRotateKeysRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw rotateKeysResponseParseError();
+    }
+  }
+}
+
+function rotateKeysResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError("internal_error", "Failed to parse rotate keys response", 500);
 }
 
 function commitInitializeKeysResponseFromCloud(value: unknown): Record<string, unknown> {

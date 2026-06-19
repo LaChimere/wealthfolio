@@ -1275,6 +1275,28 @@ describe("TS local device sync service", () => {
       expect.stringMatching(/^device-1:/),
       expect.stringMatching(/^device-1:/),
     ]);
+
+    let rotateBody = '{"challenge":"challenge","nonce":"nonce","new_key_version":2.0}';
+    const malformedRotateService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(rotateBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(malformedRotateService.rotateTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse rotate keys response",
+      status: 500,
+    });
+
+    rotateBody = '{"challenge":"challenge","nonce":"nonce","new_key_version":2,"newKeyVersion":2}';
+    await expect(malformedRotateService.rotateTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse rotate keys response",
+      status: 500,
+    });
   });
 
   test("preserves Rust initialize team key response field names", async () => {
