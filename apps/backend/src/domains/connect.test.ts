@@ -1073,6 +1073,47 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects duplicate broker connection response aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"connections":[{"id":"connection-1","authorization_id":"auth-1","authorizationId":"auth-2","brokerage_name":"Brokerage"}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+      responseBody =
+        '{"connections":[{"id":"connection-1","brokerage":{"id":"brokerage-1","display_name":"Broker","displayName":"Other"}}]}';
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse brokerage response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects broker connection fields with invalid scalar types", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
@@ -1372,6 +1413,56 @@ describe("TS Connect local session service", () => {
           logo_url: "https://logo.example.test/square.png",
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker connection aliases before syncing platforms", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(
+          '{"connections":[{"id":"row-1","brokerage":{"id":"brokerage-1","slug":"dup","display_name":"Broker","displayName":"Other"}}]}',
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse brokerage response",
+        status: 500,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM platforms").get(),
+      ).toEqual({
+        count: 0,
+      });
     } finally {
       db.close();
     }

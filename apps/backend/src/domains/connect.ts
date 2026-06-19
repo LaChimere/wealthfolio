@@ -263,14 +263,13 @@ export function createLocalConnectService({
       return userInfoFromApi(response.value, response.bodyText);
     },
     async listBrokerConnections() {
-      return brokerConnectionsFromApi(
-        await fetchAuthenticatedConnectJson(
-          restoreSession,
-          env,
-          fetchImpl,
-          "/api/v1/sync/brokerage/connections",
-        ),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/sync/brokerage/connections",
       );
+      return brokerConnectionsFromApi(response.value, response.bodyText);
     },
     async listBrokerAccounts() {
       return brokerAccountsFromApi(
@@ -293,14 +292,13 @@ export function createLocalConnectService({
       return await syncBrokerDataBounded(this);
     },
     async syncBrokerConnections() {
-      const connections = brokerConnectionsFromApi(
-        await fetchAuthenticatedConnectJson(
-          restoreSession,
-          env,
-          fetchImpl,
-          "/api/v1/sync/brokerage/connections",
-        ),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/sync/brokerage/connections",
       );
+      const connections = brokerConnectionsFromApi(response.value, response.bodyText);
       return syncBrokerConnectionsToPlatforms(db, connections);
     },
     async syncBrokerAccounts() {
@@ -1105,9 +1103,12 @@ function valueOrNull(value: unknown): unknown | null {
   return value === undefined ? null : value;
 }
 
-function brokerConnectionsFromApi(value: unknown): unknown[] {
+function brokerConnectionsFromApi(value: unknown, rawJson: string | null = null): unknown[] {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "Failed to parse connections response", 500);
+  }
+  if (rawJson !== null) {
+    assertBrokerConnectionsRawShape(rawJson);
   }
   if (value.connections === undefined) {
     return [];
@@ -1116,6 +1117,49 @@ function brokerConnectionsFromApi(value: unknown): unknown[] {
     throw new ConnectServiceError("internal_error", "Failed to parse connections response", 500);
   }
   return value.connections.map(brokerConnectionFromApi);
+}
+
+function assertBrokerConnectionsRawShape(rawJson: string): void {
+  assertNoDuplicateConnectAliases(rawJson, [["connections"]], "connections response");
+  const connectionTokens = rawTokensForAliases(rawJson, ["connections"]);
+  if (connectionTokens.length !== 1 || !connectionTokens[0]?.trim().startsWith("[")) {
+    return;
+  }
+  for (const connectionToken of topLevelArrayValueTokens(connectionTokens[0])) {
+    if (!connectionToken.startsWith("{")) {
+      continue;
+    }
+    assertNoDuplicateConnectAliases(
+      connectionToken,
+      [
+        ["id"],
+        ["authorization_id", "authorizationId"],
+        ["brokerage_name", "brokerageName"],
+        ["brokerage_slug", "brokerageSlug"],
+        ["brokerage"],
+        ["disabled"],
+        ["updated_at", "updatedAt"],
+        ["name"],
+        ["status"],
+      ],
+      "connection response",
+    );
+    const brokerageTokens = rawTokensForAliases(connectionToken, ["brokerage"]);
+    if (brokerageTokens.length === 1 && brokerageTokens[0]?.trim().startsWith("{")) {
+      assertNoDuplicateConnectAliases(
+        brokerageTokens[0],
+        [
+          ["id"],
+          ["slug"],
+          ["name"],
+          ["display_name", "displayName"],
+          ["aws_s3_logo_url", "awsS3LogoUrl"],
+          ["aws_s3_square_logo_url", "awsS3SquareLogoUrl"],
+        ],
+        "brokerage response",
+      );
+    }
+  }
 }
 
 function brokerConnectionFromApi(value: unknown): unknown {
