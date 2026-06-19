@@ -4547,6 +4547,13 @@ contract:
   clearing retry timing, preserving existing engine error/failure fields, and
   carrying bootstrap snapshot id/sequence metadata while avoiding gated
   push/pull.
+- `pr5-connect-trigger-cycle-idle-pull-tail`: verification passed: focused
+  Connect/device-sync tests, backend type-check, full `bun run check`, backend
+  suite, pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes
+  READY + reconcile `PULL_TAIL` with server cursor already at/before local
+  cursor and no due pending outbox returning Rust-shaped `ok`, simulated
+  cycle-lock acquisition, success error/failure clearing, and
+  cursor-advanced/pending paths retaining the push/pull feature gate.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
