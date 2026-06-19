@@ -4498,6 +4498,12 @@ contract:
   confirm request shape, Rust-shaped `already_complete` response when no local
   DB/bootstrap state exists, and retained local DB
   already-complete/overwrite-required branches.
+- `pr5-connect-broker-unknown-asset-backed`: verification passed: focused/full
+  Connect tests, backend suite, full `bun run check`, and dual GPT/Claude xhigh
+  review. Coverage includes symbol-bearing missing/UNKNOWN type broker
+  activities importing as asset-backed `UNKNOWN` draft/review activities through
+  existing/provider-backed asset resolution while preserving no-symbol unknown
+  cash draft behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
