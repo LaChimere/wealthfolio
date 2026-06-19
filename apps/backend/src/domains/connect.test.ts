@@ -5212,13 +5212,13 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody =
-        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":"AAPL","rawSymbol":"MSFT"}}],"pagination":{"has_more":false}}';
+        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":"AAPL","raw_symbol":"MSFT"}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
       });
       pageBody =
-        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":{"raw_symbol":"AAPL","rawSymbol":"MSFT"}}}],"pagination":{"has_more":false}}';
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":{"raw_symbol":"AAPL","raw_symbol":"MSFT"}}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5230,6 +5230,18 @@ describe("TS Connect local session service", () => {
         accountsFailed: 1,
       });
       pageBody = '{"data":[{"id":"activity-1","symbol":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":123}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"exchange":{"mic_code":123}}}],"pagination":{"has_more":false}}';
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 0,
         accountsFailed: 1,
@@ -5555,8 +5567,11 @@ describe("TS Connect local session service", () => {
               {
                 description: "missing id",
                 symbol: {
+                  rawSymbol: 123,
+                  figiCode: 123,
+                  symbolType: { code: "IGNORED" },
                   currency: { code: "USD", description: 123, is_supported: "true" },
-                  exchange: { code: "XNAS", is_supported: "true" },
+                  exchange: { code: "XNAS", micCode: 123, is_supported: "true" },
                   type: { code: "EQUITY", name: 123, is_supported: true, isSupported: "true" },
                 },
                 mapping_metadata: { flow: { isExternal: "true" } },

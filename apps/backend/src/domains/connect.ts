@@ -2139,29 +2139,23 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
   for (const aliases of [
     ["id"],
     ["symbol"],
-    ["raw_symbol", "rawSymbol"],
+    ["raw_symbol"],
     ["description"],
-    ["type", "symbol_type", "symbolType"],
+    ["type"],
     ["exchange"],
     ["currency"],
-    ["figi_code", "figiCode"],
+    ["figi_code"],
   ]) {
     if (rawTokensForAliases(rawJson, aliases).length > 1) {
       return false;
     }
   }
-  for (const aliases of [
-    ["id"],
-    ["symbol"],
-    ["raw_symbol", "rawSymbol"],
-    ["description"],
-    ["figi_code", "figiCode"],
-  ]) {
+  for (const aliases of [["id"], ["symbol"], ["raw_symbol"], ["description"], ["figi_code"]]) {
     if (!brokerActivityOptionalRawTokenIsValid(rawJson, aliases, "string")) {
       return false;
     }
   }
-  for (const nestedKey of ["exchange", "currency", "type", "symbol_type", "symbolType"]) {
+  for (const nestedKey of ["exchange", "currency", "type"]) {
     const nestedTokens = rawTokensForAliases(rawJson, [nestedKey]);
     if (nestedTokens.length === 1) {
       const nestedToken = nestedTokens[0];
@@ -2173,7 +2167,7 @@ function validBrokerActivitySymbolRawShape(rawJson: string): boolean {
       }
       const aliases =
         nestedKey === "exchange"
-          ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
+          ? [["id"], ["code"], ["mic_code"], ["name"]]
           : nestedKey === "currency"
             ? [["id"], ["code"], ["name"]]
             : [["id"], ["code"], ["description"], ["is_supported"]];
@@ -2256,7 +2250,7 @@ function validBrokerActivityNestedScalarRawShape(
 ): boolean {
   const stringGroups =
     kind === "exchange"
-      ? [["id"], ["code"], ["mic_code", "micCode"], ["name"]]
+      ? [["id"], ["code"], ["mic_code"], ["name"]]
       : kind === "currency"
         ? [["id"], ["code"], ["name"]]
         : [["id"], ["code"], ["description"]];
@@ -2473,11 +2467,7 @@ function brokerCashActivityCreateInput(
 function brokerActivityHasSymbol(activity: Record<string, unknown>): boolean {
   const symbol = activity.symbol;
   if (isRecord(symbol)) {
-    if (
-      optionalNonEmptyString(symbol.raw_symbol) ||
-      optionalNonEmptyString(symbol.rawSymbol) ||
-      optionalNonEmptyString(symbol.symbol)
-    ) {
+    if (optionalNonEmptyString(symbol.raw_symbol) || optionalNonEmptyString(symbol.symbol)) {
       return true;
     }
   }
@@ -2729,19 +2719,19 @@ function brokerActivitySymbol(
   if (!isRecord(symbol)) {
     return null;
   }
-  const symbolType = symbol.type ?? symbol.symbol_type ?? symbol.symbolType;
+  const symbolType = symbol.type;
   const symbolTypeCode = isRecord(symbolType)
     ? optionalString(symbolType.code)?.toUpperCase()
     : null;
   const exchangeMic = brokerActivitySymbolExchangeMic(symbol);
   if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
     const cryptoSymbol =
-      parseCryptoBrokerPair(optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol))?.base ??
+      parseCryptoBrokerPair(optionalNonEmptyString(symbol.raw_symbol))?.base ??
       parseCryptoBrokerPair(optionalNonEmptyString(symbol.symbol))?.base ??
       null;
     return cryptoSymbol ? { symbol: cryptoSymbol.toUpperCase(), exchangeMic: null } : null;
   }
-  const rawSymbol = optionalNonEmptyString(symbol.raw_symbol ?? symbol.rawSymbol);
+  const rawSymbol = optionalNonEmptyString(symbol.raw_symbol);
   if (rawSymbol) {
     return { symbol: rawSymbol.toUpperCase(), exchangeMic };
   }
@@ -2758,10 +2748,7 @@ function brokerActivitySymbolExchangeMic(symbol: Record<string, unknown>): strin
   if (!isRecord(exchange)) {
     return null;
   }
-  return (
-    optionalNonEmptyString(exchange.mic_code ?? exchange.micCode ?? exchange.code)?.toUpperCase() ??
-    null
-  );
+  return optionalNonEmptyString(exchange.mic_code ?? exchange.code)?.toUpperCase() ?? null;
 }
 
 function optionalNonEmptyString(value: unknown): string | null {
@@ -2960,16 +2947,14 @@ function brokerActivitySymbolMetadata(symbol: unknown): Record<string, unknown> 
     return undefined;
   }
   const exchange = symbol.exchange;
-  const symbolType = symbol.type ?? symbol.symbol_type ?? symbol.symbolType;
+  const symbolType = symbol.type;
   const currency = symbol.currency;
   const metadata: Record<string, unknown> = {
     id: optionalString(symbol.id),
     symbol: optionalString(symbol.symbol),
-    raw_symbol: optionalString(symbol.raw_symbol ?? symbol.rawSymbol),
-    figi_code: optionalString(symbol.figi_code ?? symbol.figiCode),
-    exchange_mic: isRecord(exchange)
-      ? optionalString(exchange.mic_code ?? exchange.micCode)
-      : undefined,
+    raw_symbol: optionalString(symbol.raw_symbol),
+    figi_code: optionalString(symbol.figi_code),
+    exchange_mic: isRecord(exchange) ? optionalString(exchange.mic_code) : undefined,
     symbol_type_code: isRecord(symbolType) ? optionalString(symbolType.code) : undefined,
     currency_code: isRecord(currency) ? optionalString(currency.code) : undefined,
   };
