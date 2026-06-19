@@ -1141,9 +1141,9 @@ function assertBrokerConnectionsRawShape(rawJson: string): void {
           ["id"],
           ["slug"],
           ["name"],
-          ["display_name", "displayName"],
-          ["aws_s3_logo_url", "awsS3LogoUrl"],
-          ["aws_s3_square_logo_url", "awsS3SquareLogoUrl"],
+          ["display_name"],
+          ["aws_s3_logo_url"],
+          ["aws_s3_square_logo_url"],
         ],
         "brokerage response",
       );
@@ -1186,11 +1186,9 @@ function brokerageFromApi(value: Record<string, unknown>): unknown | null {
       id: optionalString(nested.id),
       slug: optionalString(nested.slug),
       name,
-      display_name: optionalString(nested.display_name ?? nested.displayName) ?? name,
-      aws_s3_logo_url: optionalString(nested.aws_s3_logo_url ?? nested.awsS3LogoUrl),
-      aws_s3_square_logo_url: optionalString(
-        nested.aws_s3_square_logo_url ?? nested.awsS3SquareLogoUrl,
-      ),
+      display_name: optionalString(nested.display_name) ?? name,
+      aws_s3_logo_url: optionalString(nested.aws_s3_logo_url),
+      aws_s3_square_logo_url: optionalString(nested.aws_s3_square_logo_url),
     };
   }
   assertOptionalConnectStringField(value, "brokerage_name", "connection response");
@@ -1216,11 +1214,8 @@ function validateBrokerageFromApi(brokerage: Record<string, unknown>): void {
     "slug",
     "name",
     "display_name",
-    "displayName",
     "aws_s3_logo_url",
-    "awsS3LogoUrl",
     "aws_s3_square_logo_url",
-    "awsS3SquareLogoUrl",
   ]) {
     assertOptionalConnectStringField(brokerage, field, "brokerage response");
   }

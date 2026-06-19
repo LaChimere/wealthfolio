@@ -946,8 +946,11 @@ describe("TS Connect local session service", () => {
                   slug: "snaptrade",
                   name: "SnapTrade",
                   display_name: "SnapTrade Display",
+                  displayName: 123,
                   aws_s3_logo_url: "https://logo.example.test/logo.png",
+                  awsS3LogoUrl: 123,
                   aws_s3_square_logo_url: "https://logo.example.test/square.png",
+                  awsS3SquareLogoUrl: 123,
                 },
               },
               {
@@ -1107,7 +1110,7 @@ describe("TS Connect local session service", () => {
         status: 500,
       });
       responseBody =
-        '{"connections":[{"id":"connection-1","brokerage":{"id":"brokerage-1","display_name":"Broker","displayName":"Other"}}]}';
+        '{"connections":[{"id":"connection-1","brokerage":{"id":"brokerage-1","display_name":"Broker","display_name":"Other"}}]}';
       await expect(service.listBrokerConnections()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse brokerage response",
@@ -1165,7 +1168,9 @@ describe("TS Connect local session service", () => {
           return Response.json({ access_token: "access-token" });
         }
         return Response.json({
-          connections: [{ id: "connection-1", brokerage: { id: 123, slug: "broker" } }],
+          connections: [
+            { id: "connection-1", brokerage: { id: "brokerage-1", display_name: 123 } },
+          ],
         });
       },
       accountService: { getAllAccounts: () => [] },
@@ -1511,7 +1516,7 @@ describe("TS Connect local session service", () => {
           return Response.json({ access_token: "access-token" });
         }
         return new Response(
-          '{"connections":[{"id":"row-1","brokerage":{"id":"brokerage-1","slug":"dup","display_name":"Broker","displayName":"Other"}}]}',
+          '{"connections":[{"id":"row-1","brokerage":{"id":"brokerage-1","slug":"dup","display_name":"Broker","display_name":"Other"}}]}',
           { headers: { "content-type": "application/json" } },
         );
       },
