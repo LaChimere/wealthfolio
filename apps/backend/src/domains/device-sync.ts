@@ -500,13 +500,14 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const approveResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
         `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/approve`,
         { method: "POST", deviceId },
-      ).then(successResponseFromCloud);
+      );
+      return successResponseFromCloud(approveResponse.value, approveResponse.bodyText);
     },
     async completePairing(pairingId, request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -540,13 +541,14 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const cancelResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
         `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/cancel`,
         { method: "POST", deviceId },
-      ).then(successResponseFromCloud);
+      );
+      return successResponseFromCloud(cancelResponse.value, cancelResponse.bodyText);
     },
     async claimPairing(request) {
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
@@ -1365,8 +1367,14 @@ function enrollResponseParseError(): DeviceSyncServiceError {
   return new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
 }
 
-function successResponseFromCloud(value: unknown): Record<string, unknown> {
+function successResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse success response", 500);
+  }
+  if (rawJson !== null && topLevelJsonValueTokens(rawJson, "success").length !== 1) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse success response", 500);
   }
   return { success: value.success };

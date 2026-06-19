@@ -1749,6 +1749,26 @@ describe("TS local device sync service", () => {
       message: "Failed to parse complete pairing response",
       status: 500,
     });
+    const malformedSuccessService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response('{"success":true,"success":false}', {
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    await expect(malformedSuccessService.approvePairing?.("pairing-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse success response",
+      status: 500,
+    });
+    await expect(malformedSuccessService.cancelPairing?.("pairing-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse success response",
+      status: 500,
+    });
     await expect(service.cancelPairing?.("pairing-1")).resolves.toEqual({ success: true });
     expect(requests).toEqual([
       {
