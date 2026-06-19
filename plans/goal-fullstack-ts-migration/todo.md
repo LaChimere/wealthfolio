@@ -4515,6 +4515,10 @@ contract:
   review. Coverage includes explicit skipped responses when sync identity,
   session, or state are not ready, and retained READY-state background-engine
   feature gate.
+- `pr5-connect-broker-provider-crypto-assets`: verification passed: focused/full
+  Connect tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes provider-backed crypto pair results like `BTC-USD` matching
+  broker base symbols and creating CRYPTO activity-owned asset payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
