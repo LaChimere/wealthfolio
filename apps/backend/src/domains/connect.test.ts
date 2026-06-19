@@ -6116,6 +6116,44 @@ describe("TS Connect device sync local service", () => {
       failingDb.close();
     }
 
+    async function expectRejectedMalformedReset(resetResponse: string): Promise<void> {
+      const malformedDb = createDeviceSyncStateDb();
+      const malformedSecretService = createMemorySecretService();
+      malformedSecretService.entries.set("sync_refresh_token", "refresh-token");
+      malformedSecretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+      const malformedService = createLocalConnectDeviceSyncService({
+        db: malformedDb,
+        secretService: malformedSecretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        reinitializeDelayMs: 0,
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response(resetResponse, { headers: { "content-type": "application/json" } });
+        },
+      });
+
+      try {
+        await expect(malformedService.reinitializeDeviceSync()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse reset team sync response",
+          status: 500,
+        });
+        expect(JSON.parse(malformedSecretService.entries.get("sync_identity") ?? "{}")).toEqual(
+          originalIdentity,
+        );
+      } finally {
+        malformedDb.close();
+      }
+    }
+
+    await expectRejectedMalformedReset('{"success":true,"key_version":1.0,"reset_at":null}');
+    await expectRejectedMalformedReset(
+      '{"success":true,"key_version":1,"keyVersion":1,"reset_at":null}',
+    );
+    await expectRejectedMalformedReset('{"success":true,"key_version":1,"reset_at":123}');
+
     const db = createDeviceSyncStateDb();
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");

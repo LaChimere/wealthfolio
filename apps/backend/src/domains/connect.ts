@@ -3594,18 +3594,17 @@ async function applyLocalEnableSyncSideEffects(
 async function resetLocalTeamSyncChecked(
   options: ReinitializeLocalDeviceSyncOptions,
 ): Promise<void> {
-  const resetResult = resetTeamSyncResponseFromCloud(
-    await fetchConnectDeviceSyncJson(
-      options.env,
-      options.fetchImpl,
-      options.accessToken,
-      "/api/v1/sync/team/keys/reset",
-      {
-        method: "POST",
-        body: { reason: RESET_REASON_REINITIALIZE },
-      },
-    ),
+  const resetResponse = await fetchConnectDeviceSyncJsonRaw(
+    options.env,
+    options.fetchImpl,
+    options.accessToken,
+    "/api/v1/sync/team/keys/reset",
+    {
+      method: "POST",
+      body: { reason: RESET_REASON_REINITIALIZE },
+    },
   );
+  const resetResult = resetTeamSyncResponseFromCloud(resetResponse.value, resetResponse.bodyText);
   if (!resetResult.success) {
     throw new ConnectServiceError(
       "internal_error",
@@ -3677,16 +3676,6 @@ async function saveStoredSyncIdentity(
       devicePublicKey: identity.devicePublicKey,
     }),
   );
-}
-
-async function fetchConnectDeviceSyncJson(
-  env: NodeJS.ProcessEnv,
-  fetchImpl: typeof fetch,
-  accessToken: string,
-  path: string,
-  options: { method?: string; body?: unknown; deviceId?: string } = {},
-): Promise<unknown> {
-  return (await fetchConnectDeviceSyncJsonRaw(env, fetchImpl, accessToken, path, options)).value;
 }
 
 async function fetchConnectDeviceSyncJsonRaw(
@@ -3944,15 +3933,53 @@ function commitInitializeKeysResponseParseError(): ConnectServiceError {
   );
 }
 
-function resetTeamSyncResponseFromCloud(value: unknown): { success: boolean } {
+function resetTeamSyncResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): { success: boolean; keyVersion: number; resetAt: string | null } {
   if (!isRecord(value) || typeof value.success !== "boolean") {
-    throw new ConnectServiceError(
-      "internal_error",
-      "Failed to parse reset team sync response",
-      500,
-    );
+    throw resetTeamSyncResponseParseError();
   }
-  return { success: value.success };
+  if (rawJson !== null) {
+    assertResetTeamSyncResponseRawShape(rawJson);
+  }
+  return {
+    success: value.success,
+    keyVersion: requiredI32Value(value.keyVersion ?? value.key_version, "reset team sync response"),
+    resetAt: optionalResetTeamSyncStringValue(value.resetAt ?? value.reset_at),
+  };
+}
+
+function assertResetTeamSyncResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["keyVersion", "key_version"], ["resetAt", "reset_at"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw resetTeamSyncResponseParseError();
+    }
+  }
+  assertResetTeamSyncRawI32Token(rawJson, "keyVersion");
+  assertResetTeamSyncRawI32Token(rawJson, "key_version");
+}
+
+function assertResetTeamSyncRawI32Token(rawJson: string, key: string): void {
+  for (const token of rawTokensForAliases(rawJson, [key])) {
+    if (!rawJsonI32TokenIsValid(token)) {
+      throw resetTeamSyncResponseParseError();
+    }
+  }
+}
+
+function resetTeamSyncResponseParseError(): ConnectServiceError {
+  return new ConnectServiceError("internal_error", "Failed to parse reset team sync response", 500);
+}
+
+function optionalResetTeamSyncStringValue(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw resetTeamSyncResponseParseError();
+  }
+  return value;
 }
 
 function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>> {
