@@ -1250,8 +1250,7 @@ describe("TS Connect local session service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
-    let responseBody =
-      '{"accounts":[{"id":"broker-account","account_number":"A1","accountNumber":"A2"}]}';
+    let responseBody = '{"accounts":[{"id":"broker-account","account_number":"A1","number":"A2"}]}';
     const service = createLocalConnectService({
       db,
       secretService,
@@ -1556,6 +1555,7 @@ describe("TS Connect local session service", () => {
               id: "new-provider-account",
               name: "Broker Account",
               number: "****1234",
+              accountNumber: 123,
               type: "TFSA",
               account_type: 123,
               accountType: 123,

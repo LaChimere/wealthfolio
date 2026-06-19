@@ -1272,7 +1272,7 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
       [
         ["id"],
         ["name"],
-        ["account_number", "accountNumber", "number"],
+        ["account_number", "number"],
         ["type"],
         ["currency"],
         ["balance"],
@@ -1350,7 +1350,6 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
     "id",
     "name",
     "account_number",
-    "accountNumber",
     "number",
     "type",
     "currency",
@@ -1559,9 +1558,7 @@ async function syncBrokerAccountsToLocal(
       isArchived: false,
       trackingMode: "HOLDINGS",
       platformId: findPlatformForBrokerAccount(db, brokerAccount),
-      accountNumber: optionalString(
-        brokerAccount.account_number ?? brokerAccount.accountNumber ?? brokerAccount.number,
-      ),
+      accountNumber: optionalString(brokerAccount.account_number ?? brokerAccount.number),
       meta: JSON.stringify(brokerAccountMeta(brokerAccount)),
       provider: "SNAPTRADE",
       providerAccountId,
@@ -3160,8 +3157,7 @@ function brokerAccountDisplayName(account: Record<string, unknown>): string {
   }
   const institution =
     optionalString(account.institution_name ?? account.institutionName) ?? "Unknown";
-  const accountNumber =
-    optionalString(account.account_number ?? account.accountNumber ?? account.number) ?? "Account";
+  const accountNumber = optionalString(account.account_number ?? account.number) ?? "Account";
   return `${institution} - ${accountNumber}`;
 }
 
