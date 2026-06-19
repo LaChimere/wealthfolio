@@ -4053,6 +4053,14 @@ contract:
   preserving conservative freshness-gate waiting behavior when cursor responses
   contain malformed `cursor`, `gc_watermark`, or `latest_snapshot` fields,
   including Rust i32/i64 range checks.
+- `pr5-connect-device-enroll-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "FRESH device sync|malformed Connect enrollment|legacy device nonce"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  validating raw Connect enrollment responses before storing sync identity or
+  initializing keys, preserving valid BOOTSTRAP/PAIR/READY behavior while
+  rejecting duplicate aliases and float/exponent i32 tokens.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
