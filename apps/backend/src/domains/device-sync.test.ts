@@ -1732,4 +1732,79 @@ describe("TS local device sync service", () => {
       db.close();
     }
   });
+
+  test("returns syncing flow when pairing begin confirm waits for remote snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const result = await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      });
+      expect(result).toMatchObject({
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      const flowId = (result as { flowId: string }).flowId;
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual(result);
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-1",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
+          deviceId: "device-1",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -708,6 +708,12 @@ export function createLocalDeviceSyncService({
           return { flowId, phase };
         }
       }
+      if (await latestSnapshotIsMissing(accessToken, env, fetchImpl, deviceId)) {
+        const flowId = randomUUID();
+        const phase = { phase: "syncing", detail: "waiting_snapshot" };
+        pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+        return { flowId, phase };
+      }
       throw deviceSyncDisabled();
     },
     async getPairingFlowState(request) {
