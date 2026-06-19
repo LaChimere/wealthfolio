@@ -3502,24 +3502,26 @@ async function initializeLocalE2eeKeys(
     .update(`${initResult.challenge}:${initResult.nonce}`, "utf8")
     .digest("hex");
 
-  const commitResult = commitInitializeKeysResponseFromCloud(
-    await fetchConnectDeviceSyncJson(
-      options.env,
-      options.fetchImpl,
-      options.accessToken,
-      "/api/v1/sync/team/keys/initialize/commit",
-      {
-        method: "POST",
-        deviceId,
-        body: {
-          device_id: deviceId,
-          key_version: initResult.keyVersion,
-          device_key_envelope: deviceKeyEnvelope,
-          signature,
-          challenge_response: challengeResponse,
-        },
+  const commitResponse = await fetchConnectDeviceSyncJsonRaw(
+    options.env,
+    options.fetchImpl,
+    options.accessToken,
+    "/api/v1/sync/team/keys/initialize/commit",
+    {
+      method: "POST",
+      deviceId,
+      body: {
+        device_id: deviceId,
+        key_version: initResult.keyVersion,
+        device_key_envelope: deviceKeyEnvelope,
+        signature,
+        challenge_response: challengeResponse,
       },
-    ),
+    },
+  );
+  const commitResult = commitInitializeKeysResponseFromCloud(
+    commitResponse.value,
+    commitResponse.bodyText,
   );
   if (!commitResult.success) {
     throw new ConnectServiceError("internal_error", "Server rejected key commitment", 500);
@@ -3907,15 +3909,39 @@ function initializeKeysResponseParseError(): ConnectServiceError {
   return new ConnectServiceError("internal_error", "Failed to parse initialize keys response", 500);
 }
 
-function commitInitializeKeysResponseFromCloud(value: unknown): { success: boolean } {
+function commitInitializeKeysResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): { success: boolean; keyState: string } {
   if (!isRecord(value) || typeof value.success !== "boolean") {
-    throw new ConnectServiceError(
-      "internal_error",
-      "Failed to parse commit initialize keys response",
-      500,
-    );
+    throw commitInitializeKeysResponseParseError();
   }
-  return { success: value.success };
+  if (rawJson !== null) {
+    assertCommitInitializeKeysResponseRawShape(rawJson);
+  }
+  return {
+    success: value.success,
+    keyState: requiredKeyStateValue(
+      value.keyState ?? value.key_state,
+      "commit initialize keys response",
+    ),
+  };
+}
+
+function assertCommitInitializeKeysResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["keyState", "key_state"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw commitInitializeKeysResponseParseError();
+    }
+  }
+}
+
+function commitInitializeKeysResponseParseError(): ConnectServiceError {
+  return new ConnectServiceError(
+    "internal_error",
+    "Failed to parse commit initialize keys response",
+    500,
+  );
 }
 
 function resetTeamSyncResponseFromCloud(value: unknown): { success: boolean } {
@@ -3956,6 +3982,13 @@ function trustedDevicesFromCloud(value: unknown): Array<Record<string, unknown>>
 
 function requiredBooleanValue(value: unknown, context: string): boolean {
   if (typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return value;
+}
+
+function requiredKeyStateValue(value: unknown, context: string): string {
+  if (value !== "ACTIVE" && value !== "PENDING") {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
