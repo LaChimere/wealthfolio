@@ -254,9 +254,13 @@ export function createLocalConnectService({
       );
     },
     async getUserInfo() {
-      return userInfoFromApi(
-        await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, "/api/v1/user/me"),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/user/me",
       );
+      return userInfoFromApi(response.value, response.bodyText);
     },
     async listBrokerConnections() {
       return brokerConnectionsFromApi(
@@ -750,8 +754,17 @@ async function fetchAuthenticatedConnectJson(
   fetchImpl: typeof fetch,
   path: string,
 ): Promise<unknown> {
+  return (await fetchAuthenticatedConnectJsonRaw(restoreSession, env, fetchImpl, path)).value;
+}
+
+async function fetchAuthenticatedConnectJsonRaw(
+  restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+): Promise<{ value: unknown; bodyText: string }> {
   const { accessToken } = await restoreSession();
-  return await fetchConnectJsonWithAccessToken(accessToken, env, fetchImpl, path);
+  return await fetchConnectJsonWithAccessTokenRaw(accessToken, env, fetchImpl, path);
 }
 
 async function fetchConnectJsonWithAccessToken(
@@ -760,6 +773,15 @@ async function fetchConnectJsonWithAccessToken(
   fetchImpl: typeof fetch,
   path: string,
 ): Promise<unknown> {
+  return (await fetchConnectJsonWithAccessTokenRaw(accessToken, env, fetchImpl, path)).value;
+}
+
+async function fetchConnectJsonWithAccessTokenRaw(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+): Promise<{ value: unknown; bodyText: string }> {
   const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
   const url = `${baseUrl}${path}`;
   let response: Response;
@@ -793,7 +815,7 @@ async function fetchConnectJsonWithAccessToken(
     );
   }
   try {
-    return JSON.parse(bodyText) as unknown;
+    return { value: JSON.parse(bodyText) as unknown, bodyText };
   } catch (error) {
     throw new ConnectServiceError(
       "internal_error",
@@ -874,9 +896,12 @@ function planLimitValueFromApi(value: unknown): number | string {
   return requiredInteger(value, "plans response");
 }
 
-function userInfoFromApi(value: unknown): unknown {
+function userInfoFromApi(value: unknown, rawJson: string | null = null): unknown {
   if (!isRecord(value)) {
     throw new ConnectServiceError("internal_error", "No user info returned", 500);
+  }
+  if (rawJson !== null) {
+    assertUserInfoRawShape(rawJson);
   }
   validateUserInfoFromApi(value);
   const team = isRecord(value.team) ? value.team : null;
@@ -914,14 +939,71 @@ function userInfoFromApi(value: unknown): unknown {
   };
 }
 
+function assertUserInfoRawShape(rawJson: string): void {
+  assertNoDuplicateConnectAliases(
+    rawJson,
+    [
+      ["id"],
+      ["fullName", "full_name"],
+      ["email"],
+      ["avatarUrl", "avatar_url"],
+      ["locale"],
+      ["weekStartsOnMonday", "week_starts_on_monday"],
+      ["timezone"],
+      ["timezoneAutoSync", "timezone_auto_sync"],
+      ["timeFormat", "time_format"],
+      ["dateFormat", "date_format"],
+      ["teamId", "team_id"],
+      ["teamRole", "team_role"],
+      ["team"],
+    ],
+    "user info",
+  );
+  const teamTokens = rawTokensForAliases(rawJson, ["team"]);
+  if (teamTokens.length === 1 && teamTokens[0]?.trim().startsWith("{")) {
+    assertNoDuplicateConnectAliases(
+      teamTokens[0],
+      [
+        ["id"],
+        ["name"],
+        ["logoUrl", "logo_url"],
+        ["plan"],
+        ["subscriptionStatus", "subscription_status"],
+        ["subscriptionCurrentPeriodEnd", "subscription_current_period_end"],
+        ["subscriptionCancelAtPeriodEnd", "subscription_cancel_at_period_end"],
+        ["canceledAt", "canceled_at"],
+        ["countryCode", "country_code"],
+        ["createdAt", "created_at"],
+      ],
+      "team info",
+    );
+  }
+}
+
+function assertNoDuplicateConnectAliases(
+  rawJson: string,
+  aliasGroups: string[][],
+  context: string,
+): void {
+  for (const aliases of aliasGroups) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+    }
+  }
+}
+
 async function hasBrokerSyncEntitlement(
   restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
 ): Promise<boolean> {
-  const userInfo = userInfoFromApi(
-    await fetchAuthenticatedConnectJson(restoreSession, env, fetchImpl, "/api/v1/user/me"),
+  const response = await fetchAuthenticatedConnectJsonRaw(
+    restoreSession,
+    env,
+    fetchImpl,
+    "/api/v1/user/me",
   );
+  const userInfo = userInfoFromApi(response.value, response.bodyText);
   if (!isRecord(userInfo) || !isRecord(userInfo.team)) {
     return false;
   }

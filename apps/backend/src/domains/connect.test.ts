@@ -802,6 +802,47 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects duplicate Connect user info aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"id":"user-1","fullName":"Ada","full_name":"Lovelace","team":{"id":"team-1"}}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      responseBody =
+        '{"id":"user-1","team":{"id":"team-1","subscriptionStatus":"active","subscription_status":"trialing"}}';
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse team info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects malformed Connect user team optional scalar fields", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
@@ -1713,6 +1754,46 @@ describe("TS Connect local session service", () => {
         "POST https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
         "GET https://api.example.test/api/v1/user/me",
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when entitlement user info has duplicate aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return new Response(
+            '{"id":"user-1","team":{"id":"team-1","plan":"pro","subscription_status":"canceled","subscriptionStatus":"active"}}',
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        throw new Error(`broker sync should not fetch ${String(input)}`);
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when entitlement fails closed");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
     } finally {
       db.close();
     }
