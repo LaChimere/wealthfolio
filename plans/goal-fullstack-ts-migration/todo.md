@@ -4045,6 +4045,14 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   preserving list-device response mapping while rejecting duplicate `Device`
   snake/camel alias fields in each returned array item.
+- `pr5-device-sync-cursor-freshness-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "freshness gate|waiting flow|remote snapshot"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving conservative freshness-gate waiting behavior when cursor responses
+  contain malformed `cursor`, `gc_watermark`, or `latest_snapshot` fields,
+  including Rust i32/i64 range checks.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
