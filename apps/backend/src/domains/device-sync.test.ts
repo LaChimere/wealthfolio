@@ -2028,6 +2028,23 @@ describe("TS local device sync service", () => {
       message: "No device ID configured",
       status: 500,
     });
+
+    const malformedGetService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(
+          '{"pairing_id":"pairing-1","pairingId":"pairing-2","status":"open","claimer_device_id":null,"claimer_ephemeral_pub":null,"expires_at":"2026-01-01T00:00:00Z"}',
+          { headers: { "content-type": "application/json" } },
+        ),
+    });
+    await expect(malformedGetService.getPairing?.("pairing-1")).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse pairing response",
+      status: 500,
+    });
   });
 
   test("requires Connect session for composite pairing after sync identity is configured", async () => {

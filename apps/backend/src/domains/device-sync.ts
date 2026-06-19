@@ -950,15 +950,14 @@ async function fetchPairingFromCloud(
   deviceId: string,
   pairingId: string,
 ): Promise<Record<string, unknown>> {
-  return pairingFromCloud(
-    await fetchDeviceSyncJson(
-      accessToken,
-      env,
-      fetchImpl,
-      `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}`,
-      { deviceId },
-    ),
+  const pairingResponse = await fetchDeviceSyncJsonRaw(
+    accessToken,
+    env,
+    fetchImpl,
+    `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}`,
+    { deviceId },
   );
+  return pairingFromCloud(pairingResponse.value, pairingResponse.bodyText);
 }
 
 async function fetchDeviceSyncJson(
@@ -1408,9 +1407,12 @@ function pairingResponseParseError(): DeviceSyncServiceError {
   return new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
 }
 
-function pairingFromCloud(value: unknown): Record<string, unknown> {
+function pairingFromCloud(value: unknown, rawJson: string | null = null): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse pairing response", 500);
+  }
+  if (rawJson !== null) {
+    assertGetPairingResponseRawShape(rawJson);
   }
   return {
     pairingId: requiredString(value.pairingId ?? value.pairing_id, "pairing response"),
@@ -1425,6 +1427,20 @@ function pairingFromCloud(value: unknown): Record<string, unknown> {
     ),
     expiresAt: requiredString(value.expiresAt ?? value.expires_at, "pairing response"),
   };
+}
+
+function assertGetPairingResponseRawShape(rawJson: string): void {
+  for (const aliases of [
+    ["pairingId", "pairing_id"],
+    ["status"],
+    ["claimerDeviceId", "claimer_device_id"],
+    ["claimerEphemeralPub", "claimer_ephemeral_pub"],
+    ["expiresAt", "expires_at"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw pairingResponseParseError();
+    }
+  }
 }
 
 function completePairingResponseFromCloud(value: unknown): Record<string, unknown> {
