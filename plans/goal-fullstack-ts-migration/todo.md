@@ -4479,6 +4479,13 @@ contract:
   search memoization within broker sync, activity-created provider asset
   payloads, created asset summary accounting via an internal non-enumerable bulk
   result marker, and continued feature-gating for unresolved broker assets.
+- `pr5-device-sync-complete-pairing-transfer`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts apps/backend/src/runtime.test.ts --test-name-pattern "device sync|pairing"`,
+  `bun run --cwd apps/backend test`, full `bun run check`, and dual GPT/Claude
+  xhigh review. Coverage includes composite sync-identity/session preconditions,
+  Rust-compatible device-scoped complete-pairing cloud request payloads,
+  complete response mapping, best-effort pairing-complete callback behavior, and
+  retained bootstrap confirm/apply feature gates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
