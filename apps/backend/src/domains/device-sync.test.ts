@@ -1434,6 +1434,40 @@ describe("TS local device sync service", () => {
         deviceId: "device-1",
       },
     ]);
+
+    let commitRotateBody = '{"success":true,"key_version":3.0}';
+    const malformedCommitRotateService = createLocalDeviceSyncService({
+      secretService,
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(commitRotateBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(
+      malformedCommitRotateService.commitRotateTeamKeys?.({
+        newKeyVersion: 3,
+        envelopes: [],
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse commit rotate keys response",
+      status: 500,
+    });
+
+    commitRotateBody = '{"success":true,"key_version":3,"keyVersion":3}';
+    await expect(
+      malformedCommitRotateService.commitRotateTeamKeys?.({
+        newKeyVersion: 3,
+        envelopes: [],
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse commit rotate keys response",
+      status: 500,
+    });
   });
 
   test("requires Connect session before reset team sync and calls cloud after restore", async () => {

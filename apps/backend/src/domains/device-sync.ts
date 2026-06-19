@@ -422,7 +422,7 @@ export function createLocalDeviceSyncService({
         connectService,
         secretService,
       );
-      return await fetchDeviceSyncJson(
+      const commitRotateResponse = await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -440,7 +440,11 @@ export function createLocalDeviceSyncService({
             challenge_response: request.challengeResponse,
           },
         },
-      ).then(commitRotateKeysResponseFromCloud);
+      );
+      return commitRotateKeysResponseFromCloud(
+        commitRotateResponse.value,
+        commitRotateResponse.bodyText,
+      );
     },
     async resetTeamSync(request) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
@@ -1649,7 +1653,10 @@ function commitInitializeKeysResponseFromCloud(value: unknown): Record<string, u
   };
 }
 
-function commitRotateKeysResponseFromCloud(value: unknown): Record<string, unknown> {
+function commitRotateKeysResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     throw new DeviceSyncServiceError(
       "internal_error",
@@ -1657,10 +1664,39 @@ function commitRotateKeysResponseFromCloud(value: unknown): Record<string, unkno
       500,
     );
   }
+  if (rawJson !== null) {
+    assertCommitRotateKeysResponseRawShape(rawJson);
+  }
   return {
     success: value.success,
     keyVersion: requiredI32(value.keyVersion ?? value.key_version, "commit rotate keys response"),
   };
+}
+
+function assertCommitRotateKeysResponseRawShape(rawJson: string): void {
+  for (const aliases of [["success"], ["keyVersion", "key_version"]]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw commitRotateKeysResponseParseError();
+    }
+  }
+  assertCommitRotateKeysRawIntegerToken(rawJson, "keyVersion");
+  assertCommitRotateKeysRawIntegerToken(rawJson, "key_version");
+}
+
+function assertCommitRotateKeysRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw commitRotateKeysResponseParseError();
+    }
+  }
+}
+
+function commitRotateKeysResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    "Failed to parse commit rotate keys response",
+    500,
+  );
 }
 
 function resetTeamSyncResponseFromCloud(value: unknown): Record<string, unknown> {
