@@ -112,6 +112,30 @@ describe("TS local device sync service", () => {
       message: "Failed to store device ID: keyring unavailable",
       status: 500,
     });
+
+    let enrollBody =
+      '{"mode":"READY","device_id":"device-1","e2ee_key_version":2.0,"trust_state":"trusted"}';
+    const malformedResponseService = createLocalDeviceSyncService({
+      secretService: createMemorySecretService(),
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        new Response(enrollBody, { headers: { "content-type": "application/json" } }),
+    });
+    await expect(malformedResponseService.registerDevice(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse enroll response",
+      status: 500,
+    });
+
+    enrollBody =
+      '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"e2eeKeyVersion":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[]}';
+    await expect(malformedResponseService.registerDevice(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse enroll response",
+      status: 500,
+    });
   });
 
   test("reports missing current device id after restoring Connect session", async () => {

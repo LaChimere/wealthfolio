@@ -265,8 +265,12 @@ export function createLocalDeviceSyncService({
       if (!secretService) {
         throw deviceSyncDisabled();
       }
-      const result = enrollDeviceResponseFromCloud(
-        await fetchDeviceSyncJson(accessToken, env, fetchImpl, "/api/v1/sync/team/devices", {
+      const enrollResponse = await fetchDeviceSyncJsonRaw(
+        accessToken,
+        env,
+        fetchImpl,
+        "/api/v1/sync/team/devices",
+        {
           method: "POST",
           body: {
             device_nonce: request.instanceId,
@@ -275,8 +279,9 @@ export function createLocalDeviceSyncService({
             os_version: request.osVersion,
             app_version: request.appVersion,
           },
-        }),
+        },
       );
+      const result = enrollDeviceResponseFromCloud(enrollResponse.value, enrollResponse.bodyText);
       try {
         await secretService.setSecret(
           DEVICE_SYNC_DEVICE_ID_KEY,
@@ -948,6 +953,16 @@ async function fetchDeviceSyncJson(
   path: string,
   options: { method?: string; body?: unknown; deviceId?: string } = {},
 ): Promise<unknown> {
+  return (await fetchDeviceSyncJsonRaw(accessToken, env, fetchImpl, path, options)).value;
+}
+
+async function fetchDeviceSyncJsonRaw(
+  accessToken: string,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  path: string,
+  options: { method?: string; body?: unknown; deviceId?: string } = {},
+): Promise<{ value: unknown; bodyText: string }> {
   const clientRequestId = deviceSyncClientRequestId(options.deviceId);
   let response: Response;
   try {
@@ -979,7 +994,7 @@ async function fetchDeviceSyncJson(
     throw deviceSyncApiError(response.status, bodyText, metadata);
   }
   try {
-    return JSON.parse(bodyText) as unknown;
+    return { value: JSON.parse(bodyText) as unknown, bodyText };
   } catch (error) {
     throw new DeviceSyncServiceError(
       "internal_error",
@@ -1240,9 +1255,15 @@ function deviceFromCloud(value: unknown): Record<string, unknown> {
   };
 }
 
-function enrollDeviceResponseFromCloud(value: unknown): Record<string, unknown> {
+function enrollDeviceResponseFromCloud(
+  value: unknown,
+  rawJson: string | null = null,
+): Record<string, unknown> {
   if (!isRecord(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
+  }
+  if (rawJson !== null) {
+    assertEnrollResponseRawShape(rawJson);
   }
   const mode = requiredString(value.mode, "enroll response");
   if (mode === "BOOTSTRAP") {
@@ -1283,6 +1304,41 @@ function enrollDeviceResponseFromCloud(value: unknown): Record<string, unknown> 
     };
   }
   throw new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
+}
+
+function assertEnrollResponseRawShape(rawJson: string): void {
+  const modeTokens = topLevelJsonValueTokens(rawJson, "mode");
+  if (modeTokens.length !== 1 || !rawJsonStringTokenIsValid(modeTokens[0] ?? "")) {
+    throw enrollResponseParseError();
+  }
+  for (const aliases of [
+    ["deviceId", "device_id"],
+    ["e2eeKeyVersion", "e2ee_key_version"],
+    ["trustState", "trust_state"],
+    ["requireSas", "require_sas"],
+    ["pairingTtlSeconds", "pairing_ttl_seconds"],
+    ["trustedDevices", "trusted_devices"],
+  ]) {
+    if (rawTokensForAliases(rawJson, aliases).length > 1) {
+      throw enrollResponseParseError();
+    }
+  }
+  assertEnrollRawIntegerToken(rawJson, "e2eeKeyVersion");
+  assertEnrollRawIntegerToken(rawJson, "e2ee_key_version");
+  assertEnrollRawIntegerToken(rawJson, "pairingTtlSeconds");
+  assertEnrollRawIntegerToken(rawJson, "pairing_ttl_seconds");
+}
+
+function assertEnrollRawIntegerToken(rawJson: string, key: string): void {
+  for (const token of topLevelJsonValueTokens(rawJson, key)) {
+    if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token) && /[.eE]/.test(token)) {
+      throw enrollResponseParseError();
+    }
+  }
+}
+
+function enrollResponseParseError(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError("internal_error", "Failed to parse enroll response", 500);
 }
 
 function successResponseFromCloud(value: unknown): Record<string, unknown> {
@@ -1797,6 +1853,10 @@ function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
 }
 
+function rawJsonStringTokenIsValid(token: string): boolean {
+  return token.trim().startsWith('"');
+}
+
 function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): void {
   for (const token of topLevelJsonValueTokens(rawJson, key)) {
     if (token === "null") {
@@ -1819,6 +1879,10 @@ function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
     }
   }
   return tokens;
+}
+
+function rawTokensForAliases(rawJson: string, aliases: string[]): string[] {
+  return aliases.flatMap((alias) => topLevelJsonValueTokens(rawJson, alias));
 }
 
 function topLevelJsonKeys(rawJson: string): string[] {
