@@ -4504,6 +4504,12 @@ contract:
   activities importing as asset-backed `UNKNOWN` draft/review activities through
   existing/provider-backed asset resolution while preserving no-symbol unknown
   cash draft behavior.
+- `pr5-connect-trigger-cycle-not-ready`: verification passed: focused/full
+  Connect tests, backend suite, full `bun run check`, and dual GPT/Claude xhigh
+  review/refine. Coverage includes state read before trigger-cycle execution,
+  `not_ready` results for non-READY states, untrusted device-config persistence
+  with stale bootstrap timestamps cleared, and retained READY sync-engine
+  feature gate.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
