@@ -3960,6 +3960,14 @@ contract:
   `pairing_id`/`expires_at`/`key_version`/`require_sas` fields or aliases and
   raw float/exponent integer tokens for Rust
   `CreatePairingResponse.key_version`.
+- `pr5-device-sync-get-pairing-raw-validation`: verification passed:
+  `bun test apps/backend/src/domains/device-sync.test.ts -t "issuer pairing"`,
+  `bun test apps/backend/src/domains/device-sync.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  preserving get-pairing response mapping while rejecting duplicate
+  `pairing_id`/`status`/`claimer_device_id`/`claimer_ephemeral_pub`/`expires_at`
+  fields or aliases for Rust `GetPairingResponse`.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
