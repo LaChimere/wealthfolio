@@ -1289,8 +1289,7 @@ describe("TS Connect local session service", () => {
         message: "Failed to parse accounts response",
         status: 500,
       });
-      responseBody =
-        '{"accounts":[{"id":"broker-account","account_type":"CASH","accountType":"TFSA"}]}';
+      responseBody = '{"accounts":[{"id":"broker-account","type":"CASH","type":"TFSA"}]}';
       await expect(service.listBrokerAccounts()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse accounts response",
@@ -1558,12 +1557,15 @@ describe("TS Connect local session service", () => {
               name: "Broker Account",
               number: "****1234",
               type: "TFSA",
+              account_type: 123,
+              accountType: 123,
               currency: null,
               balance: { total: { currency: "CAD" } },
               status: "open",
               brokerage_authorization: "brokerage-1",
               institution_name: "SnapTrade",
               raw_type: "tfsa",
+              rawType: 123,
               owner: { user_id: "user-1", is_own_account: true },
             },
             { id: "existing-provider-account", name: "Existing Account" },
@@ -1698,7 +1700,7 @@ describe("TS Connect local session service", () => {
           return Response.json({ access_token: "access-token" });
         }
         return new Response(
-          '{"accounts":[{"id":"new-provider-account","account_type":"CASH","accountType":"TFSA"}]}',
+          '{"accounts":[{"id":"new-provider-account","type":"CASH","type":"TFSA"}]}',
           { headers: { "content-type": "application/json" } },
         );
       },

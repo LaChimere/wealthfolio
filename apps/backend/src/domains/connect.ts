@@ -1273,7 +1273,7 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
         ["id"],
         ["name"],
         ["account_number", "accountNumber", "number"],
-        ["type", "account_type", "accountType"],
+        ["type"],
         ["currency"],
         ["balance"],
         ["meta"],
@@ -1283,7 +1283,7 @@ function assertBrokerAccountsRawShape(rawJson: string): void {
         ["created_date", "createdDate"],
         ["sync_status", "syncStatus"],
         ["status"],
-        ["raw_type", "rawType"],
+        ["raw_type"],
         ["is_paper", "isPaper"],
         ["sync_enabled", "syncEnabled"],
         ["shared_with_household", "sharedWithHousehold"],
@@ -1353,8 +1353,6 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
     "accountNumber",
     "number",
     "type",
-    "account_type",
-    "accountType",
     "currency",
     "brokerage_authorization",
     "brokerageAuthorization",
@@ -1364,7 +1362,6 @@ function validateBrokerAccountFromApi(account: Record<string, unknown>): void {
     "createdDate",
     "status",
     "raw_type",
-    "rawType",
   ]) {
     assertOptionalConnectStringField(account, field, "accounts response");
   }
@@ -3183,11 +3180,11 @@ function brokerAccountCurrency(
 }
 
 function brokerAccountType(account: Record<string, unknown>): string {
-  const accountType = optionalString(account.type ?? account.account_type ?? account.accountType);
+  const accountType = optionalString(account.type);
   if (accountType) {
     return accountType;
   }
-  const rawType = (optionalString(account.raw_type ?? account.rawType) ?? "").toUpperCase();
+  const rawType = (optionalString(account.raw_type) ?? "").toUpperCase();
   switch (rawType) {
     case "RRSP":
     case "RSP":
@@ -3338,7 +3335,7 @@ function brokerAccountMeta(account: Record<string, unknown>): Record<string, unk
     ),
     created_date: optionalString(account.created_date ?? account.createdDate),
     status: optionalString(account.status),
-    raw_type: optionalString(account.raw_type ?? account.rawType),
+    raw_type: optionalString(account.raw_type),
     is_paper: optionalBoolean(account.is_paper ?? account.isPaper) ?? false,
     sync_enabled: optionalBoolean(account.sync_enabled ?? account.syncEnabled) ?? true,
     shared_with_household:
