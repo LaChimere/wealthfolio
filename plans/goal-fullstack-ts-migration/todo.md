@@ -4307,6 +4307,15 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   nested symbol-type parsing validating only Rust's `is_supported` field while
   treating camel `isSupported` as an ignored unknown field.
+- `pr5-connect-broker-activity-mapping-metadata-alias-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "duplicate page aliases|skips non-empty broker activity pages|broker activity page|provider-resolved broker activities|transaction accounts with empty"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  broker activity parsing, review decisions, and metadata construction using
+  only Rust's `mapping_metadata` field while treating camel `mappingMetadata` as
+  an ignored unknown field.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
