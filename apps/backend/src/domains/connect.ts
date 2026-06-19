@@ -4325,14 +4325,13 @@ async function detectOrphanedWithoutTrustedDevicesBestEffort(
     if (!response.ok) {
       return false;
     }
-    const parsed = JSON.parse(await response.text()) as unknown;
-    if (!isRecord(parsed) || parsed.mode !== "PAIRING_REQUIRED") {
+    const bodyText = await response.text();
+    const parsed = JSON.parse(bodyText) as unknown;
+    const initResult = initializeTeamKeysResultFromCloud(parsed, bodyText);
+    if (initResult.mode !== "PAIRING_REQUIRED") {
       return false;
     }
-    const e2eeKeyVersion = optionalNumber(parsed.e2eeKeyVersion ?? parsed.e2ee_key_version);
-    const trustedDevicesValue = parsed.trustedDevices ?? parsed.trusted_devices;
-    const trustedDevices = Array.isArray(trustedDevicesValue) ? trustedDevicesValue : [];
-    return (e2eeKeyVersion ?? 0) > 0 && trustedDevices.length === 0;
+    return initResult.e2eeKeyVersion > 0 && initResult.trustedDevices.length === 0;
   } catch {
     return false;
   }

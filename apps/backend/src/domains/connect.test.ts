@@ -5915,6 +5915,56 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("ignores malformed Connect orphan-detection initialize responses during sync state reads", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
+          return Response.json([]);
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return new Response(
+            '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"e2eeKeyVersion":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[]}',
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "untrusted",
+        });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        trustedDevices: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("serializes Connect token restoration during concurrent state and enable calls", async () => {
     const db = createDeviceSyncStateDb();
     const secretService = createMemorySecretService();
