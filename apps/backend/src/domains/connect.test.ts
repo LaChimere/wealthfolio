@@ -6101,6 +6101,33 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("keeps ready reconcile overwrite identity lookup best-effort", async () => {
+    const db = new Database(":memory:");
+    const secretService: SecretService = {
+      setSecret() {},
+      getSecret() {
+        throw new Error("keychain down");
+      },
+      deleteSecret() {},
+    };
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: true }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: keychain down",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("reconciles READY local state when bootstrap is already complete", async () => {
     const db = new Database(":memory:");
     db.exec(`
@@ -6514,6 +6541,97 @@ describe("TS Connect device sync local service", () => {
           { table: "import_templates", rows: 1 },
           { table: "quotes", rows: 1 },
         ],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves ready reconcile overwrite approval while waiting for snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        if (url.includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+        hasLocalData: true,
+        localRows: 1,
+      });
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: true }),
+      ).resolves.toMatchObject({
+        status: "ok",
+        bootstrapStatus: "requested",
+        bootstrapAction: "WAIT_REMOTE_SNAPSHOT",
+      });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
+        bootstrapRequired: true,
+        hasLocalData: false,
+        localRows: 0,
+        nonEmptyTables: [],
       });
     } finally {
       db.close();

@@ -3022,6 +3022,7 @@ export function createLocalConnectDeviceSyncService({
   const disabledService = createDisabledConnectDeviceSyncService();
   const runWithEnrollLock = createAsyncOperationLock();
   const runWithSessionRestoreLock = createAsyncOperationLock();
+  const readyStateOverwriteApprovals = new Set<string>();
   const restoreDeviceSyncSession = () => {
     if (!secretService) {
       throw deviceSyncDisabled();
@@ -3079,10 +3080,19 @@ export function createLocalConnectDeviceSyncService({
         });
       });
     },
-    async reconcileDeviceSyncReadyState() {
+    async reconcileDeviceSyncReadyState(request) {
       if (!secretService) {
         throw deviceSyncDisabled();
       }
+      const approvalDeviceId = await readLocalSyncIdentityDeviceIdBestEffort(secretService);
+      const hadOverwriteApproval =
+        approvalDeviceId !== undefined &&
+        approvalDeviceId !== null &&
+        readyStateOverwriteApprovals.has(approvalDeviceId);
+      if (request.allowOverwrite && approvalDeviceId) {
+        readyStateOverwriteApprovals.add(approvalDeviceId);
+      }
+      let result: Record<string, unknown> = localReadyReconcileBase();
       try {
         const session = await restoreDeviceSyncSession();
         const state = await getLocalDeviceSyncState(
@@ -3092,11 +3102,12 @@ export function createLocalConnectDeviceSyncService({
           session.accessToken,
         );
         if (state.state !== "READY") {
-          return {
+          result = {
             ...localReadyReconcileBase(),
             status: "skipped_not_ready",
             message: "Device is not in READY state",
           };
+          return result;
         }
         const bootstrap = await bootstrapSnapshotIfNotReady(
           db,
@@ -3107,25 +3118,43 @@ export function createLocalConnectDeviceSyncService({
         );
         const bootstrapStatus = optionalString(bootstrap.status) ?? "not_attempted";
         const bootstrapSnapshotId = optionalString(bootstrap.snapshotId);
-        return {
+        result = {
           ...localReadyReconcileBase(),
           bootstrapStatus,
           bootstrapMessage: optionalString(bootstrap.message),
           bootstrapSnapshotId,
           bootstrapAction: localReadyReconcileBootstrapAction(bootstrapStatus, bootstrapSnapshotId),
         };
+        return result;
       } catch (error) {
         if (error instanceof ConnectNotImplementedError) {
-          return localReadyReconcileError(`Snapshot bootstrap failed: ${error.message}`);
+          result = localReadyReconcileError(`Snapshot bootstrap failed: ${error.message}`);
+          return result;
         }
-        return localReadyReconcileError(`Failed to read sync state: ${errorMessage(error)}`);
+        result = localReadyReconcileError(`Failed to read sync state: ${errorMessage(error)}`);
+        return result;
+      } finally {
+        if (approvalDeviceId) {
+          if (
+            (request.allowOverwrite || hadOverwriteApproval) &&
+            localReadyReconcileShouldKeepOverwriteApproval(result!)
+          ) {
+            readyStateOverwriteApprovals.add(approvalDeviceId);
+          } else {
+            readyStateOverwriteApprovals.delete(approvalDeviceId);
+          }
+        }
       }
     },
     async getDeviceSyncEngineStatus() {
       return getLocalDeviceSyncEngineStatus(db, secretService);
     },
     async getDeviceSyncBootstrapOverwriteCheck() {
-      return getLocalDeviceSyncBootstrapOverwriteCheck(db, secretService);
+      return getLocalDeviceSyncBootstrapOverwriteCheck(
+        db,
+        secretService,
+        readyStateOverwriteApprovals,
+      );
     },
     async clearDeviceSyncData() {
       if (!secretService) {
@@ -3905,6 +3934,16 @@ async function readLocalSyncIdentityDeviceId(
   }
 }
 
+async function readLocalSyncIdentityDeviceIdBestEffort(
+  secretService: SecretService | undefined,
+): Promise<string | null | undefined> {
+  try {
+    return await readLocalSyncIdentityDeviceId(secretService);
+  } catch {
+    return undefined;
+  }
+}
+
 async function getLocalDeviceSyncState(
   secretService: SecretService,
   env: NodeJS.ProcessEnv,
@@ -4603,12 +4642,27 @@ async function getLocalDeviceSyncEngineStatus(
 async function getLocalDeviceSyncBootstrapOverwriteCheck(
   db: Database,
   secretService: SecretService | undefined,
+  readyStateOverwriteApprovals: Set<string> = new Set(),
 ): Promise<Record<string, unknown>> {
   const engineStatus = await getLocalDeviceSyncEngineStatus(db, secretService);
   const bootstrapRequired = engineStatus.bootstrapRequired === true;
+  const deviceId = secretService
+    ? await readLocalSyncIdentityDeviceIdBestEffort(secretService)
+    : undefined;
   if (!bootstrapRequired) {
+    if (deviceId) {
+      readyStateOverwriteApprovals.delete(deviceId);
+    }
     return {
       bootstrapRequired: false,
+      hasLocalData: false,
+      localRows: 0,
+      nonEmptyTables: [],
+    };
+  }
+  if (deviceId && readyStateOverwriteApprovals.has(deviceId)) {
+    return {
+      bootstrapRequired: true,
       hasLocalData: false,
       localRows: 0,
       nonEmptyTables: [],
@@ -4661,6 +4715,18 @@ function localReadyReconcileError(message: string): Record<string, unknown> {
     status: "error",
     message,
   };
+}
+
+function localReadyReconcileShouldKeepOverwriteApproval(result: Record<string, unknown>): boolean {
+  if (optionalString(result.status) === "error") {
+    return true;
+  }
+  return (
+    optionalString(result.bootstrapStatus) === "requested" ||
+    optionalBoolean(result.cycleNeedsBootstrap) === true ||
+    ["wait_snapshot", "stale_cursor"].includes(optionalString(result.cycleStatus) ?? "") ||
+    ["wait_snapshot", "stale_cursor"].includes(optionalString(result.retryCycleStatus) ?? "")
+  );
 }
 
 async function getLocalDeviceSyncPairingSourceStatus(
