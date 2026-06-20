@@ -5713,6 +5713,10 @@ contract:
   custom-provider tests. Coverage includes rejecting Rust-invalid control
   characters in user header values, the Node-only 509 status override, and CSV
   row currency defaulting to `USD`.
+- `pr5-custom-provider-header-rereview-fixes`: verification passed: focused
+  custom-provider tests. Coverage includes resolving secret header values before
+  invalid-name skipping and preserving Rust-valid tab/non-ASCII header values
+  while rejecting invalid controls and DEL.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

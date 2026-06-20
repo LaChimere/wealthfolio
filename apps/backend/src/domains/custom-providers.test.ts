@@ -411,6 +411,8 @@ describe("TS custom providers domain", () => {
           "X-Bad": "line\nbreak",
           "X-Ctrl": "bad\u001fvalue",
           "X-Del": "bad\u007fvalue",
+          "X-Tab": "ok\tvalue",
+          "X-Accent": "café",
         }),
         symbol: "M219",
         currency: "gbp",
@@ -439,9 +441,20 @@ describe("TS custom providers domain", () => {
       expect(calls[0]?.headers.get("x-bad")).toBeNull();
       expect(calls[0]?.headers.get("x-ctrl")).toBeNull();
       expect(calls[0]?.headers.get("x-del")).toBeNull();
+      expect(calls[0]?.headers.get("x-tab")).toBe("ok\tvalue");
+      expect(calls[0]?.headers.get("x-accent")).toBe("café");
       expect(Array.from(calls[0]?.headers.keys() ?? [])).not.toContain("bad header");
       expect(calls[0]?.headers.get("referer")).toBe("https://api.example.test/");
       expect(calls[0]?.headers.get("user-agent")).toContain("Chrome/131.0.0.0");
+
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          headers: JSON.stringify({
+            "Bad Secret": "__SECRET__missing_secret",
+          }),
+        }),
+      ).rejects.toThrow("Secret 'missing_secret' not found");
 
       const rows = await service.fetchSourceRows({
         ...request,

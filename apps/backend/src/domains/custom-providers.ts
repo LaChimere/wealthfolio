@@ -1196,12 +1196,12 @@ async function buildTestSourceHeaders(
     if (typeof value !== "string") {
       continue;
     }
-    if (!isRustCompatibleHeaderName(name)) {
-      continue;
-    }
     const resolved = value.startsWith("__SECRET__")
       ? await resolveSecretHeaderValue(value.slice("__SECRET__".length), secretService)
       : value;
+    if (!isRustCompatibleHeaderName(name)) {
+      continue;
+    }
     if (!isRustCompatibleHeaderValue(resolved)) {
       continue;
     }
@@ -1221,7 +1221,7 @@ function isRustCompatibleHeaderName(value: string): boolean {
 function isRustCompatibleHeaderValue(value: string): boolean {
   return [...value].every((char) => {
     const code = char.charCodeAt(0);
-    return code >= 0x20 && code <= 0x7e;
+    return code === 0x09 || (code >= 0x20 && code !== 0x7f);
   });
 }
 
