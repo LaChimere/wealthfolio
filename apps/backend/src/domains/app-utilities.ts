@@ -460,7 +460,7 @@ function compareBuildMetadata(left: string[], right: string[]): number {
   if (right.length === 0) {
     return 1;
   }
-  return compareIdentifiers(left, right);
+  return compareIdentifiers(left, right, compareBuildNumericIdentifier);
 }
 
 function comparePreRelease(left: string[], right: string[]): number {
@@ -473,10 +473,14 @@ function comparePreRelease(left: string[], right: string[]): number {
   if (right.length === 0) {
     return -1;
   }
-  return compareIdentifiers(left, right);
+  return compareIdentifiers(left, right, compareNumericIdentifier);
 }
 
-function compareIdentifiers(left: string[], right: string[]): number {
+function compareIdentifiers(
+  left: string[],
+  right: string[],
+  compareNumeric: (left: string, right: string) => number,
+): number {
   const maxLength = Math.max(left.length, right.length);
   for (let index = 0; index < maxLength; index += 1) {
     const leftIdentifier = left[index];
@@ -493,7 +497,7 @@ function compareIdentifiers(left: string[], right: string[]): number {
     const leftNumeric = /^\d+$/.test(leftIdentifier);
     const rightNumeric = /^\d+$/.test(rightIdentifier);
     if (leftNumeric && rightNumeric) {
-      return compareNumericIdentifier(leftIdentifier, rightIdentifier);
+      return compareNumeric(leftIdentifier, rightIdentifier);
     }
     if (leftNumeric) {
       return -1;
@@ -554,6 +558,21 @@ function compareNumericIdentifier(left: string, right: string): number {
     return 0;
   }
   return left < right ? -1 : 1;
+}
+
+function compareBuildNumericIdentifier(left: string, right: string): number {
+  const leftTrimmed = left.replace(/^0+/u, "");
+  const rightTrimmed = right.replace(/^0+/u, "");
+  if (leftTrimmed.length !== rightTrimmed.length) {
+    return leftTrimmed.length < rightTrimmed.length ? -1 : 1;
+  }
+  if (leftTrimmed !== rightTrimmed) {
+    return leftTrimmed < rightTrimmed ? -1 : 1;
+  }
+  if (left.length !== right.length) {
+    return left.length < right.length ? -1 : 1;
+  }
+  return 0;
 }
 
 function normalizeFilePath(filePath: string): string {
