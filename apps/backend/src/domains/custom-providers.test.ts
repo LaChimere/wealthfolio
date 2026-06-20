@@ -463,6 +463,34 @@ describe("TS custom providers domain", () => {
           },
         ],
       });
+
+      const earlyCalls: string[] = [];
+      const earlyNow = new Date(Date.UTC(2000, 0, 1, 12, 34, 56));
+      earlyNow.setUTCFullYear(0, 1, 29);
+      const earlyService = createCustomProviderService(createCustomProviderRepository(db), {
+        fetchImpl: ((input) => {
+          earlyCalls.push(input.toString());
+          return Promise.resolve(
+            jsonResponse({
+              price: "1",
+              effectiveDate: "0000-02-29",
+              currencyCode: "USD",
+            }),
+          );
+        }) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+        now: () => earlyNow,
+      });
+      await expect(
+        earlyService.testSource({
+          ...baseTestSourceRequest(),
+          url: "https://api.example.test/{SYMBOL}?year={DATE:%Y}&full={DATE:%F}&century={DATE:%C}&doy={DATE:%j}&weekday={DATE:%a-%A-%u-%w}&short={DATE:%D-%h}",
+          datePath: "$.effectiveDate",
+          currencyPath: "$.currencyCode",
+        }),
+      ).resolves.toMatchObject({ success: true, date: "0000-02-29" });
+      expect(earlyCalls).toEqual([
+        "https://api.example.test/AAPL?year=0000&full=0000-02-29&century=00&doy=060&weekday=Tue-Tuesday-2-2&short=02/29/00-Feb",
+      ]);
     } finally {
       db.close();
     }

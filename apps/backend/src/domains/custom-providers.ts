@@ -1106,14 +1106,16 @@ function formatUtcDate(date: Date, format: string): string {
   const second = date.getUTCSeconds();
   const weekday = date.getUTCDay();
   const isoWeekday = weekday === 0 ? 7 : weekday;
+  const currentDate = utcDateFromParts(year, date.getUTCMonth(), day);
+  const yearStart = utcDateFromParts(year, 0, 1);
   const dayOfYear =
-    Math.floor(
-      (Date.UTC(year, date.getUTCMonth(), day) - Date.UTC(year, 0, 1)) / (24 * 60 * 60 * 1000),
-    ) + 1;
+    Math.floor((currentDate.getTime() - yearStart.getTime()) / (24 * 60 * 60 * 1000)) + 1;
   const replacements: Record<string, string> = {
-    "%Y": year.toString(),
+    "%Y": year >= 0 && year <= 9999 ? year.toString().padStart(4, "0") : year.toString(),
     "%y": pad(year % 100),
-    "%C": Math.trunc(year / 100).toString(),
+    "%C": Math.trunc(year / 100)
+      .toString()
+      .padStart(2, "0"),
     "%m": pad(month),
     "%d": pad(day),
     "%e": day.toString().padStart(2, " "),
@@ -1121,7 +1123,7 @@ function formatUtcDate(date: Date, format: string): string {
     "%H": pad(hour),
     "%M": pad(minute),
     "%S": pad(second),
-    "%F": `${year}-${pad(month)}-${pad(day)}`,
+    "%F": `${year >= 0 && year <= 9999 ? year.toString().padStart(4, "0") : year}-${pad(month)}-${pad(day)}`,
     "%D": `${pad(month)}/${pad(day)}/${pad(year % 100)}`,
     "%R": `${pad(hour)}:${pad(minute)}`,
     "%T": `${pad(hour)}:${pad(minute)}:${pad(second)}`,
@@ -1138,6 +1140,12 @@ function formatUtcDate(date: Date, format: string): string {
     "%%": "%",
   };
   return format.replace(/%[YyCmdejHMSFDRTszZaAbhBuw%]/g, (token) => replacements[token] ?? token);
+}
+
+function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, monthIndex, day);
+  return date;
 }
 
 function validateHttpUrl(raw: string): void {
