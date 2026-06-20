@@ -144,6 +144,14 @@ function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
+function toRustUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  if (iso.endsWith(".000Z")) {
+    return `${iso.slice(0, -5)}+00:00`;
+  }
+  return iso.replace(/Z$/u, "+00:00");
+}
+
 export function createAppUtilityService(options: AppUtilityServiceOptions): AppUtilityService {
   const now = options.now ?? (() => new Date());
   const fetchUpdate = options.fetchUpdate ?? fetch;
@@ -242,7 +250,7 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
         backups.push({
           filename,
           sizeBytes: stats.size,
-          modifiedAt: stats.mtime.toISOString(),
+          modifiedAt: toRustUtcRfc3339(stats.mtime),
         });
       }
 

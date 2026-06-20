@@ -5627,6 +5627,9 @@ contract:
 - `pr5-backup-download-canonical-path`: verification passed: focused HTTP tests
   and full `bun run check`. Coverage includes canonical backup download reads,
   missing backup 404s, and valid-named symlink escape rejection.
+- `pr5-backup-list-rfc3339-timestamp`: verification passed: focused app utility
+  tests and full `bun run check`. Coverage includes Rust chrono-compatible UTC
+  RFC3339 `modifiedAt` formatting for backup listings.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

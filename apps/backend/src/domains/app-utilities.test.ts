@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -283,6 +283,31 @@ describe("TS app utility domain", () => {
     } finally {
       backupDb.close();
     }
+  });
+
+  test("lists backup modified times with Rust-compatible RFC3339 UTC formatting", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-list-"));
+    const backupDir = path.join(appDataDir, "backups");
+    mkdirSync(backupDir, { recursive: true });
+    const backupPath = path.join(backupDir, "wealthfolio_backup_20260506_070809.db");
+    writeFileSync(backupPath, "backup");
+    const modifiedAt = new Date("2026-05-06T07:08:09.123Z");
+    utimesSync(backupPath, modifiedAt, modifiedAt);
+    writeFileSync(path.join(backupDir, "ignored.txt"), "ignored");
+    const service = createAppUtilityService({
+      appDataDir,
+      appVersion: "3.4.0",
+      dbPath: path.join(appDataDir, "app.db"),
+      logsDir: path.join(appDataDir, "logs"),
+    });
+
+    await expect(service.listDatabaseBackups()).resolves.toEqual([
+      {
+        filename: "wealthfolio_backup_20260506_070809.db",
+        sizeBytes: 6,
+        modifiedAt: "2026-05-06T07:08:09.123+00:00",
+      },
+    ]);
   });
 
   test("restores database from normalized backup paths after preparing runtime", async () => {
