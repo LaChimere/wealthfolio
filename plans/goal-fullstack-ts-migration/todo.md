@@ -5376,6 +5376,11 @@ contract:
   review. Coverage includes Rust-compatible `i32` validation for direct taxonomy
   sort orders, category sort orders, move positions, and assignment weights
   before repository persistence or side effects.
+- `pr5-market-data-provider-domain-priority-i32`: verification passed: focused
+  provider domain tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review. Coverage includes Rust-compatible `i32` validation
+  for direct market-data provider settings priority before repository update or
+  refresh side effects.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
