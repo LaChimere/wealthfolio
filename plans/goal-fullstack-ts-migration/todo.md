@@ -5637,6 +5637,10 @@ contract:
 - `pr5-backup-timestamp-autosi`: verification passed: focused app utility tests
   and full `bun run check`. Coverage includes Rust chrono-compatible AutoSi
   fractional timestamp widths for backup listing `modifiedAt`.
+- `pr5-addon-update-response-serde`: verification passed: focused add-on tests
+  and full `bun run check`. Coverage includes typed Rust-shaped
+  `AddonUpdateCheckResult` parsing and per-addon fallback errors for malformed
+  update-check API responses.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

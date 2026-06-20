@@ -109,6 +109,23 @@ interface AddonStoreContext {
   storeBaseUrl: string;
 }
 
+interface AddonUpdateCheckRecord {
+  addonId: string;
+  updateInfo: {
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+    downloadUrl: string | null;
+    releaseNotes: string | null;
+    releaseDate: string | null;
+    changelogUrl: string | null;
+    isCritical: boolean | null;
+    hasBreakingChanges: boolean | null;
+    minWealthfolioVersion: string | null;
+  };
+  error: string | null;
+}
+
 type FetchStore = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 const DEFAULT_ADDON_STORE_API_BASE_URL = "https://wealthfolio.app/api/addons";
@@ -534,18 +551,85 @@ async function checkAllAddonUpdates(
   return results;
 }
 
-function checkAddonUpdateFromApi(
+async function checkAddonUpdateFromApi(
   context: AddonStoreContext,
   addonId: string,
   currentVersion: string,
-): Promise<unknown> {
+): Promise<AddonUpdateCheckRecord> {
   const query = new URLSearchParams({ addonId, currentVersion });
-  return fetchAddonStoreJson<unknown>(
+  const responseJson = await fetchAddonStoreJson<unknown>(
     context,
     `${context.storeBaseUrl}/update-check?${query.toString()}`,
     "Update check",
     { requireInstanceId: true },
   );
+  return parseAddonUpdateCheckResponse(responseJson);
+}
+
+function parseAddonUpdateCheckResponse(value: unknown): AddonUpdateCheckRecord {
+  if (!isRecord(value)) {
+    throw new Error("Invalid update check response structure");
+  }
+  const updateInfo = value.updateInfo;
+  if (!isRecord(updateInfo)) {
+    throw new Error("Invalid update check response structure");
+  }
+  return {
+    addonId: requiredApiString(value.addonId, "addonId"),
+    updateInfo: {
+      currentVersion: requiredApiString(updateInfo.currentVersion, "updateInfo.currentVersion"),
+      latestVersion: requiredApiString(updateInfo.latestVersion, "updateInfo.latestVersion"),
+      updateAvailable: requiredApiBoolean(updateInfo.updateAvailable, "updateInfo.updateAvailable"),
+      downloadUrl: optionalApiString(updateInfo.downloadUrl, "updateInfo.downloadUrl"),
+      releaseNotes: optionalApiString(updateInfo.releaseNotes, "updateInfo.releaseNotes"),
+      releaseDate: optionalApiString(updateInfo.releaseDate, "updateInfo.releaseDate"),
+      changelogUrl: optionalApiString(updateInfo.changelogUrl, "updateInfo.changelogUrl"),
+      isCritical: optionalApiBoolean(updateInfo.isCritical, "updateInfo.isCritical"),
+      hasBreakingChanges: optionalApiBoolean(
+        updateInfo.hasBreakingChanges,
+        "updateInfo.hasBreakingChanges",
+      ),
+      minWealthfolioVersion: optionalApiString(
+        updateInfo.minWealthfolioVersion,
+        "updateInfo.minWealthfolioVersion",
+      ),
+    },
+    error: optionalApiString(value.error, "error"),
+  };
+}
+
+function requiredApiString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Invalid update check response: ${field} must be a string`);
+  }
+  return value;
+}
+
+function requiredApiBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid update check response: ${field} must be a boolean`);
+  }
+  return value;
+}
+
+function optionalApiString(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid update check response: ${field} must be a string`);
+  }
+  return value;
+}
+
+function optionalApiBoolean(value: unknown, field: string): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid update check response: ${field} must be a boolean`);
+  }
+  return value;
 }
 
 async function updateAddonFromStore(

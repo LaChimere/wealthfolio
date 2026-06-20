@@ -528,7 +528,12 @@ describe("TS addon domain", () => {
 
     await expect(service.checkAddonUpdate("update-ok")).resolves.toMatchObject({
       addonId: "update-ok",
-      updateInfo: { latestVersion: "1.1.0", updateAvailable: true },
+      updateInfo: {
+        latestVersion: "1.1.0",
+        updateAvailable: true,
+        downloadUrl: null,
+        releaseNotes: null,
+      },
     });
     const allResults = (await service.checkAllAddonUpdates()) as Array<{
       addonId: string;
@@ -556,6 +561,55 @@ describe("TS addon domain", () => {
         },
       ]),
     );
+  });
+
+  test("rejects malformed add-on update check responses like Rust serde", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    writeAddon(appDataDir, "update-bad", {
+      manifest: {
+        id: "update-bad",
+        name: "Update Bad",
+        version: "1.0.0",
+        main: "main.js",
+      },
+      files: { "main.js": "export default {};" },
+    });
+    const service = createLocalAddonService({
+      appDataDir,
+      storeBaseUrl: "https://store.test/api/addons",
+      fetchStore: async () =>
+        Response.json({
+          addonId: "update-bad",
+          updateInfo: {
+            currentVersion: "1.0.0",
+            latestVersion: "1.1.0",
+            updateAvailable: "yes",
+          },
+          error: null,
+        }),
+    });
+
+    await expect(service.checkAddonUpdate("update-bad")).rejects.toThrow(
+      "updateInfo.updateAvailable must be a boolean",
+    );
+    await expect(service.checkAllAddonUpdates()).resolves.toEqual([
+      {
+        addonId: "update-bad",
+        updateInfo: {
+          currentVersion: "1.0.0",
+          latestVersion: "unknown",
+          updateAvailable: false,
+          downloadUrl: null,
+          releaseNotes: null,
+          releaseDate: null,
+          changelogUrl: null,
+          isCritical: null,
+          hasBreakingChanges: null,
+          minWealthfolioVersion: null,
+        },
+        error: "Invalid update check response: updateInfo.updateAvailable must be a boolean",
+      },
+    ]);
   });
 
   test("downloads store addons to staging and updates while preserving enabled state", async () => {
