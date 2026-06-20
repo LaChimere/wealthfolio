@@ -544,6 +544,14 @@ describe("TS Connect local session service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody = JSON.stringify({
+      plans: [
+        {
+          ...connectSubscriptionPlan("pro"),
+          pricing: { monthly: "10", yearly: 100 },
+        },
+      ],
+    });
     const service = createLocalConnectService({
       db,
       secretService,
@@ -552,14 +560,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return Response.json({
-          plans: [
-            {
-              ...connectSubscriptionPlan("pro"),
-              pricing: { monthly: "10", yearly: 100 },
-            },
-          ],
-        });
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
@@ -569,6 +570,67 @@ describe("TS Connect local session service", () => {
     });
 
     try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({ plans: [connectSubscriptionPlan("pro")] }).replace(
+        '"householdSize":4',
+        '"householdSize":4.0',
+      );
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            limits: { householdSize: 4, institutionConnections: 2_147_483_648, devices: 5 },
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            limits: { householdSize: 4, institutionConnections: 4, devices: 5 },
+          },
+        ],
+      }).replace('"institutionConnections":4', '"institutionConnections":4.0');
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            yearlyDiscountPercent: 2_147_483_648,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            yearlyDiscountPercent: 4,
+          },
+        ],
+      }).replace('"yearlyDiscountPercent":4', '"yearlyDiscountPercent":4.0');
       await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse plans response",

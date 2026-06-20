@@ -244,14 +244,13 @@ export function createLocalConnectService({
       return await fetchPublicSubscriptionPlans(env, fetchImpl);
     },
     async getSubscriptionPlans() {
-      return plansResponseFromApi(
-        await fetchAuthenticatedConnectJson(
-          restoreSession,
-          env,
-          fetchImpl,
-          "/api/v1/subscription/plans",
-        ),
+      const response = await fetchAuthenticatedConnectJsonRaw(
+        restoreSession,
+        env,
+        fetchImpl,
+        "/api/v1/subscription/plans",
       );
+      return plansResponseFromApi(response.value, response.bodyText);
     },
     async getUserInfo() {
       const response = await fetchAuthenticatedConnectJsonRaw(
@@ -731,7 +730,7 @@ async function fetchPublicSubscriptionPlans(
   }
   try {
     const parsed = JSON.parse(bodyText) as unknown;
-    return plansResponseFromApi(parsed);
+    return plansResponseFromApi(parsed, bodyText);
   } catch (error) {
     if (error instanceof ConnectServiceError) {
       throw error;
@@ -742,15 +741,6 @@ async function fetchPublicSubscriptionPlans(
       500,
     );
   }
-}
-
-async function fetchAuthenticatedConnectJson(
-  restoreSession: () => Promise<{ accessToken: string; refreshToken: string }>,
-  env: NodeJS.ProcessEnv,
-  fetchImpl: typeof fetch,
-  path: string,
-): Promise<unknown> {
-  return (await fetchAuthenticatedConnectJsonRaw(restoreSession, env, fetchImpl, path)).value;
 }
 
 async function fetchAuthenticatedConnectJsonRaw(
@@ -812,7 +802,10 @@ async function fetchConnectJsonWithAccessTokenRaw(
   }
 }
 
-function plansResponseFromApi(value: unknown): unknown {
+function plansResponseFromApi(value: unknown, rawJson: string | null = null): unknown {
+  if (rawJson !== null) {
+    assertPlansResponseRawShape(rawJson);
+  }
   if (!isRecord(value) || !Array.isArray(value.plans)) {
     throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
   }
@@ -860,9 +853,9 @@ function subscriptionPlanFromApi(value: unknown): Record<string, unknown> {
           : requiredFiniteNumber(pricing.yearlyPerMonth, "plans response"),
     },
     limits: {
-      householdSize: requiredInteger(limits.householdSize, "plans response"),
+      householdSize: requiredI32Value(limits.householdSize, "plans response"),
       institutionConnections: planLimitValueFromApi(limits.institutionConnections),
-      devices: requiredInteger(limits.devices, "plans response"),
+      devices: requiredI32Value(limits.devices, "plans response"),
     },
     features: features ?? [],
     featuresExtended: featuresExtended ?? null,
@@ -872,7 +865,7 @@ function subscriptionPlanFromApi(value: unknown): Record<string, unknown> {
     yearlyDiscountPercent:
       valueOrNull(value.yearlyDiscountPercent) === null
         ? null
-        : requiredInteger(value.yearlyDiscountPercent, "plans response"),
+        : requiredI32Value(value.yearlyDiscountPercent, "plans response"),
   };
 }
 
@@ -880,7 +873,60 @@ function planLimitValueFromApi(value: unknown): number | string {
   if (typeof value === "string") {
     return value;
   }
-  return requiredInteger(value, "plans response");
+  return requiredI32Value(value, "plans response");
+}
+
+function assertPlansResponseRawShape(rawJson: string): void {
+  const plansTokens = rawTokensForAliases(rawJson, ["plans"]);
+  if (plansTokens.length > 1) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  const plansToken = plansTokens[0];
+  if (plansToken === undefined || !plansToken.trim().startsWith("[")) {
+    return;
+  }
+  for (const planToken of topLevelJsonArrayElementTokens(plansToken)) {
+    if (planToken.trim().startsWith("{")) {
+      assertSubscriptionPlanRawShape(planToken);
+    }
+  }
+}
+
+function assertSubscriptionPlanRawShape(rawJson: string): void {
+  const limitsTokens = rawTokensForAliases(rawJson, ["limits"]);
+  if (limitsTokens.length > 1) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  const yearlyDiscountPercentTokens = rawTokensForAliases(rawJson, ["yearlyDiscountPercent"]);
+  if (
+    yearlyDiscountPercentTokens.length > 1 ||
+    (yearlyDiscountPercentTokens.length === 1 &&
+      !rawJsonI32OptionTokenIsValid(yearlyDiscountPercentTokens[0] ?? ""))
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
+  const limitsToken = limitsTokens[0];
+  if (limitsToken === undefined || !limitsToken.trim().startsWith("{")) {
+    return;
+  }
+  assertSubscriptionPlanLimitsRawShape(limitsToken);
+}
+
+function assertSubscriptionPlanLimitsRawShape(rawJson: string): void {
+  for (const field of ["householdSize", "devices"]) {
+    const tokens = rawTokensForAliases(rawJson, [field]);
+    if (tokens.length > 1 || (tokens.length === 1 && !rawJsonI32TokenIsValid(tokens[0] ?? ""))) {
+      throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+    }
+  }
+  const institutionConnectionsTokens = rawTokensForAliases(rawJson, ["institutionConnections"]);
+  if (
+    institutionConnectionsTokens.length > 1 ||
+    (institutionConnectionsTokens.length === 1 &&
+      !rawJsonPlanLimitTokenIsValid(institutionConnectionsTokens[0] ?? ""))
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
+  }
 }
 
 function userInfoFromApi(value: unknown, rawJson: string | null = null): unknown {
@@ -5352,6 +5398,37 @@ function topLevelJsonValueTokens(rawJson: string, targetKey: string): string[] {
   return tokens;
 }
 
+function topLevelJsonArrayElementTokens(rawJson: string): string[] {
+  const elements: string[] = [];
+  let index = skipJsonWhitespace(rawJson, 0);
+  if (rawJson[index] !== "[") {
+    return elements;
+  }
+  index += 1;
+  while (index < rawJson.length) {
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === "]") {
+      break;
+    }
+    const valueStart = index;
+    index = skipJsonArrayValue(rawJson, index);
+    if (index < 0) {
+      return elements;
+    }
+    elements.push(rawJson.slice(valueStart, index).trim());
+    index = skipJsonWhitespace(rawJson, index);
+    if (rawJson[index] === ",") {
+      index += 1;
+      continue;
+    }
+    if (rawJson[index] === "]") {
+      break;
+    }
+    return elements;
+  }
+  return elements;
+}
+
 function topLevelJsonKeys(rawJson: string): string[] {
   return topLevelJsonEntries(rawJson).map((entry) => entry.key);
 }
@@ -5438,6 +5515,20 @@ function skipJsonValue(rawJson: string, index: number): number {
     return skipJsonComposite(rawJson, index);
   }
   while (index < rawJson.length && rawJson[index] !== "," && rawJson[index] !== "}") {
+    index += 1;
+  }
+  return index;
+}
+
+function skipJsonArrayValue(rawJson: string, index: number): number {
+  const char = rawJson[index];
+  if (char === '"') {
+    return skipJsonString(rawJson, index);
+  }
+  if (char === "{" || char === "[") {
+    return skipJsonComposite(rawJson, index);
+  }
+  while (index < rawJson.length && rawJson[index] !== "," && rawJson[index] !== "]") {
     index += 1;
   }
   return index;
@@ -6865,6 +6956,11 @@ function rawJsonI64TokenIsValid(token: string): boolean {
 function rawJsonI32TokenIsValid(token: string): boolean {
   const trimmed = token.trim();
   return /^-?(?:0|[1-9]\d*)$/.test(trimmed) && isI32Integer(Number(trimmed));
+}
+
+function rawJsonPlanLimitTokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  return rawJsonStringTokenIsValid(trimmed) || rawJsonI32TokenIsValid(trimmed);
 }
 
 function rawJsonStringTokenIsValid(token: string): boolean {
