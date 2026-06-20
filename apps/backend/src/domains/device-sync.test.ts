@@ -2434,7 +2434,7 @@ describe("TS local device sync service", () => {
         sasProof: { ok: true },
         signature: "signature",
       }),
-    ).resolves.toEqual({ success: true, remoteSeedPresent: false });
+    ).resolves.toEqual({ success: true });
     expect(pairingCompleteNotifications).toBe(1);
     expect(requests).toEqual([
       {

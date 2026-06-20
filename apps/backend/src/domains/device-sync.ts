@@ -622,7 +622,7 @@ export function createLocalDeviceSyncService({
           connectService,
           secretService,
         );
-      const result = await fetchDeviceSyncJsonRaw(
+      await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
         fetchImpl,
@@ -638,7 +638,7 @@ export function createLocalDeviceSyncService({
         },
       ).then(({ value, bodyText }) => completePairingResponseFromCloud(value, bodyText));
       void notifyPairingComplete(onPairingComplete);
-      return result;
+      return { success: true };
     },
     async confirmPairingWithBootstrap(request) {
       const { accessToken, deviceId } =
