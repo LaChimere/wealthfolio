@@ -5562,6 +5562,11 @@ contract:
   device-sync tests, full `bun run check`, and dual GPT/Claude xhigh review.
   Coverage includes rejecting direct fractional and over-i32 team-key commit
   versions before session lookup or cloud requests.
+- `pr5-fx-expanded-history-range-parity`: verification passed: focused
+  exchange-rate tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes Rust-style `+00:00` start-boundary rows, mixed
+  `9999`/`+10000` historical ranges, and invalid-offset quote exclusion during
+  converter initialization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
