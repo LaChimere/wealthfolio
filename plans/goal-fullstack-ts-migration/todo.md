@@ -5404,6 +5404,11 @@ contract:
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review. Coverage includes constructor-time Rust-compatible u32/finite-f64
   validation for health config thresholds.
+- `pr5-alternative-assets-timezone-fixture`: verification passed: focused
+  alternative-assets tests in default timezone and `TZ=US/Hawaii`, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh re-review.
+  Coverage fixes the milestone-review finding that local-date as-of quote tests
+  could fail or use stale quotes in negative timezones.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
