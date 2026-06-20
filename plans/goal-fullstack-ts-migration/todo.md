@@ -5391,6 +5391,11 @@ contract:
   review. Coverage includes Rust/serde-compatible finite numeric validation for
   direct goal target, summary, progress, and projected value fields before
   repository persistence.
+- `pr5-contribution-limit-numeric-bounds`: verification passed: focused
+  contribution-limit domain tests, full `bun run check`, pre-commit checks, and
+  dual GPT/Claude xhigh review. Coverage includes Rust-compatible `i32` year and
+  finite `f64` limit-amount validation before persistence or portfolio-update
+  side effects.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
