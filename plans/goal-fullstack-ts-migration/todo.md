@@ -5728,6 +5728,10 @@ contract:
 - `pr5-yahoo-http-status-text`: verification passed: focused market-data tests.
   Coverage includes canonical Rust-compatible status reason phrases and
   `<unknown status code>` fallback for Yahoo provider HTTP errors.
+- `pr5-market-data-provider-http-status-text`: verification passed: focused
+  market-data tests. Coverage includes canonical Rust-compatible status reason
+  phrases for direct non-Yahoo provider HTTP errors, with MarketData.app 509
+  failure-state coverage.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

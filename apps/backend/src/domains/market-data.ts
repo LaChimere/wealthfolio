@@ -2367,7 +2367,7 @@ async function fetchOpenFigiJson(
     throw new Error(`${OPENFIGI_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   try {
     return await response.json();
@@ -4610,7 +4610,7 @@ async function ensureUsTreasuryCurves(
     throw new Error(`${US_TREASURY_CALC_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${US_TREASURY_CALC_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${US_TREASURY_CALC_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   let xml: string;
   try {
@@ -5032,7 +5032,7 @@ async function fetchAlphaVantageJson(
     throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
   }
   if (!response.ok) {
-    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   const text = await response.text();
   try {
@@ -5764,7 +5764,9 @@ async function fetchMarketDataAppJson(
     throw new Error(`${MARKETDATA_APP_PROVIDER}: rate limited`);
   }
   if (!response.ok) {
-    throw new Error(`${MARKETDATA_APP_PROVIDER}: HTTP error: ${response.status}`);
+    throw new Error(
+      `${MARKETDATA_APP_PROVIDER}: HTTP error: ${formatRustHttpStatus(response.status)}`,
+    );
   }
   const text = await response.text();
   try {
@@ -5951,7 +5953,9 @@ async function fetchFinnhubJson(
   }
   if (!response.ok) {
     const parsedError = parseFinnhubError(text);
-    throw new Error(`${FINNHUB_PROVIDER}: ${parsedError ?? `HTTP ${response.status} - ${text}`}`);
+    throw new Error(
+      `${FINNHUB_PROVIDER}: ${parsedError ?? `HTTP ${formatRustHttpStatus(response.status)} - ${text}`}`,
+    );
   }
   try {
     return JSON.parse(text) as unknown;
@@ -6189,7 +6193,7 @@ async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unkno
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   try {
     return await response.json();

@@ -5116,6 +5116,53 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("records MarketData.app HTTP status failures like Rust", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: ((input, init) => {
+        const url = String(input);
+        expect(url).toStartWith("https://api.marketdata.app/v1/stocks/candles/D/AAPL");
+        expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe(
+          "Bearer test-key",
+        );
+        return Promise.resolve(
+          new Response("", {
+            status: 509,
+            statusText: "Bandwidth Limit Exceeded",
+          }),
+        );
+      }) as typeof fetch,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("MARKETDATA_APP", "test-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-marketdata",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "MARKETDATA_APP" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-marketdata"] }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        failures: [["AAPL", "MARKETDATA_APP: HTTP error: 509 <unknown status code>"]],
+      });
+      expect(readSyncState(db, "asset-marketdata")).toMatchObject({
+        data_source: "MARKETDATA_APP",
+        error_count: 1,
+        last_error: "MARKETDATA_APP: HTTP error: 509 <unknown status code>",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("resolves MarketData.app quote summaries through price information", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
