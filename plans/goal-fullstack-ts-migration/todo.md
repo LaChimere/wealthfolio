@@ -5485,6 +5485,11 @@ contract:
   includes accepting Rust-compatible early proleptic leap days such as
   `0004-02-29` while preserving modern leap-day validation such as `2024-02-29`
   and existing invalid-date rejection.
+- `pr5-http-u32-leading-plus-query-parity`: verification passed: focused HTTP
+  tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes accepting percent-encoded leading-plus unsigned integers such as
+  `%2B1` for `u32` query fields while preserving unsigned and u32 bounds
+  rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
