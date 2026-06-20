@@ -3852,6 +3852,11 @@ describe("TS backend HTTP skeleton", () => {
         headers: authHeaders,
       }),
     );
+    await handler(
+      new Request("http://127.0.0.1/api/v1/ai/threads?limit=%2B1", {
+        headers: authHeaders,
+      }),
+    );
     for (const limit of ["", "-1", "1.5", "abc", "4294967296"]) {
       expect(
         (
@@ -3973,6 +3978,7 @@ describe("TS backend HTTP skeleton", () => {
       ["stream", { mode: "serialize-error" }],
       ["stream", { mode: "cancel" }],
       ["list-threads", { cursor: "", limit: 0, search: "" }],
+      ["list-threads", { limit: 1 }],
       ["get-thread", "thread/1"],
       ["get-thread", "missing"],
       ["messages", "thread/1"],

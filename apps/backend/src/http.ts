@@ -5299,7 +5299,7 @@ function parseOptionalU32Query(url: URL, field: string): number | undefined | Re
     return undefined;
   }
   const value = url.searchParams.get(field) ?? "";
-  if (!/^\d+$/.test(value)) {
+  if (!/^\+?\d+$/.test(value)) {
     return jsonResponse({ code: 400, message: `${field} must be an unsigned integer` }, 400);
   }
   const parsed = Number(value);
