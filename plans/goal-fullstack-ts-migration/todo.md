@@ -5320,6 +5320,16 @@ contract:
   fail-closed 501 behavior before approve/complete cloud mutations when modern
   `sync_outbox` has unsent pending rows, while sent rows do not gate; full
   sync-cycle/snapshot upload orchestration remains a follow-up.
+- `pr5-addon-rating-bounds`: verification passed: focused HTTP tests, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
+  includes Rust-compatible add-on store submit-rating bounds (`1..=5`) at the
+  HTTP seam before service dispatch while preserving malformed/u8 parse
+  rejection.
+- `pr5-alternative-assets-as-of-quotes`: verification passed: focused
+  alternative-assets tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine. Coverage includes Rust-compatible latest quote
+  selection for holdings (`day <= local today`) so future-dated alternative
+  asset valuation/payoff rows do not affect current holdings.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
