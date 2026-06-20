@@ -5465,6 +5465,11 @@ contract:
   tests, full `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage
   includes rejecting non-generated pinned cursor prefixes such as `2` and `1e0`
   plus empty updated-at/id fields before SQLite cursor filtering.
+- `pr5-holdings-lots-query-bool-parity`: verification passed: focused HTTP
+  tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes Rust-compatible `includeSnapshotPositions` parsing for holdings lots:
+  absent defaults to false, lowercase `true`/`false` are accepted, and malformed
+  query values reject before service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
