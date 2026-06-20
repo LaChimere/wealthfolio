@@ -5490,6 +5490,10 @@ contract:
   includes accepting percent-encoded leading-plus unsigned integers such as
   `%2B1` for `u32` query fields while preserving unsigned and u32 bounds
   rejection.
+- `pr5-alpha-vantage-proleptic-date-validation`: verification passed: focused
+  market-data tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes resolving an Alpha Vantage daily quote dated `0004-02-29`
+  while preserving existing invalid-date filtering and modern date behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
