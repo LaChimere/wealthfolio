@@ -813,7 +813,7 @@ function extractJsonRows(
   const volumes = extractJsonNumberArray(body, payload.volumePath, expandPath);
   const rows: CustomProviderQuoteRow[] = [];
   for (const [index, priceValue] of prices.entries()) {
-    const price = jsonValueToNumber(priceValue, payload.locale ?? undefined);
+    const price = jsonValueToNumber(priceValue);
     if (price === null) {
       continue;
     }
@@ -855,7 +855,7 @@ function extractJsonNumberArray(
     return [];
   }
   return extractJsonMatches(body, expandPath(path)).map((value) => {
-    const parsed = jsonValueToNumber(value, payload?.locale ?? undefined);
+    const parsed = jsonValueToNumber(value);
     if (parsed === null) {
       return null;
     }
@@ -882,12 +882,12 @@ function extractJsonMatches(body: string, path: string): unknown[] {
   }
 }
 
-function jsonValueToNumber(value: unknown, locale: string | undefined): number | null {
+function jsonValueToNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
   if (typeof value === "string") {
-    return parseNumberString(value, locale);
+    return parseNumberString(value);
   }
   return null;
 }

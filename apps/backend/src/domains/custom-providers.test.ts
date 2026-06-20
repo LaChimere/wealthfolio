@@ -464,6 +464,45 @@ describe("TS custom providers domain", () => {
         ],
       });
 
+      const jsonLocaleService = createCustomProviderService(createCustomProviderRepository(db), {
+        fetchImpl: (() =>
+          Promise.resolve(
+            jsonResponse({
+              price: "4,832",
+              prices: ["4,832"],
+            }),
+          )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      });
+      await expect(
+        jsonLocaleService.testSource({
+          ...baseTestSourceRequest(),
+          locale: "de-DE",
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        price: 4832,
+      });
+      await expect(
+        jsonLocaleService.fetchSourceRows({
+          ...baseTestSourceRequest(),
+          pricePath: "$.prices[*]",
+          locale: "de-DE",
+        }),
+      ).resolves.toEqual({
+        statusCode: 200,
+        currency: null,
+        rows: [
+          {
+            price: 4832,
+            open: null,
+            high: null,
+            low: null,
+            volume: null,
+            date: null,
+          },
+        ],
+      });
+
       const earlyCalls: string[] = [];
       const earlyNow = new Date(Date.UTC(2000, 0, 1, 12, 34, 56));
       earlyNow.setUTCFullYear(0, 1, 29);

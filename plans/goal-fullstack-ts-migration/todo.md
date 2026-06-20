@@ -5691,6 +5691,10 @@ contract:
   custom-provider tests. Coverage includes Rust `usize::parse`-compatible CSV
   numeric column indices, including plus-prefixed decimal indices and rejection
   of decimal/exponent/whitespace numeric-looking column strings.
+- `pr5-custom-provider-json-locale-numbers`: verification passed: focused
+  custom-provider tests. Coverage includes JSON numeric-string parsing ignoring
+  configured locale like Rust while preserving auto-detection for
+  comma-separated values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
