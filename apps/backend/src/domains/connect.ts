@@ -5264,7 +5264,7 @@ function optionalDeviceNumber(value: unknown, context: string): number | null {
   if (value === undefined || value === null) {
     return null;
   }
-  if (typeof value !== "number") {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
   return value;
