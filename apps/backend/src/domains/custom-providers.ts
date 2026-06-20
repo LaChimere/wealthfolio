@@ -807,13 +807,14 @@ function extractJsonRows(
   const dates = payload.datePath
     ? extractJsonMatches(body, expandPath(payload.datePath)).map(jsonValueToString)
     : [];
-  const opens = extractJsonNumberArray(body, payload.openPath, expandPath, payload);
-  const highs = extractJsonNumberArray(body, payload.highPath, expandPath, payload);
-  const lows = extractJsonNumberArray(body, payload.lowPath, expandPath, payload);
-  const volumes = extractJsonNumberArray(body, payload.volumePath, expandPath);
+  const locale = payload.locale ?? undefined;
+  const opens = extractJsonNumberArray(body, payload.openPath, expandPath, locale, payload);
+  const highs = extractJsonNumberArray(body, payload.highPath, expandPath, locale, payload);
+  const lows = extractJsonNumberArray(body, payload.lowPath, expandPath, locale, payload);
+  const volumes = extractJsonNumberArray(body, payload.volumePath, expandPath, locale);
   const rows: CustomProviderQuoteRow[] = [];
   for (const [index, priceValue] of prices.entries()) {
-    const price = jsonValueToNumber(priceValue);
+    const price = jsonValueToNumber(priceValue, locale);
     if (price === null) {
       continue;
     }
@@ -849,13 +850,14 @@ function extractJsonNumberArray(
   body: string,
   path: string | null | undefined,
   expandPath: (path: string) => string,
+  locale: string | undefined,
   payload?: TestSourceRequest,
 ): Array<number | null> {
   if (!path) {
     return [];
   }
   return extractJsonMatches(body, expandPath(path)).map((value) => {
-    const parsed = jsonValueToNumber(value);
+    const parsed = jsonValueToNumber(value, locale);
     if (parsed === null) {
       return null;
     }
@@ -882,12 +884,12 @@ function extractJsonMatches(body: string, path: string): unknown[] {
   }
 }
 
-function jsonValueToNumber(value: unknown): number | null {
+function jsonValueToNumber(value: unknown, locale: string | undefined): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
   if (typeof value === "string") {
-    return parseNumberString(value);
+    return parseNumberString(value, locale);
   }
   return null;
 }

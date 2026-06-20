@@ -493,7 +493,7 @@ describe("TS custom providers domain", () => {
         currency: null,
         rows: [
           {
-            price: 4832,
+            price: 4.832,
             open: null,
             high: null,
             low: null,
