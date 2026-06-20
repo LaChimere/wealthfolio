@@ -298,7 +298,7 @@ describe("TS app utility domain", () => {
     mkdirSync(backupDir, { recursive: true });
     const backupPath = path.join(backupDir, "wealthfolio_backup_20260506_070809.db");
     writeFileSync(backupPath, "backup");
-    const modifiedAt = new Date("2026-05-06T07:08:09.123Z");
+    const modifiedAt = new Date("2026-05-06T07:08:09.120Z");
     utimesSync(backupPath, modifiedAt, modifiedAt);
     writeFileSync(path.join(backupDir, "ignored.txt"), "ignored");
     if (process.platform !== "win32") {
@@ -318,7 +318,7 @@ describe("TS app utility domain", () => {
       {
         filename: "wealthfolio_backup_20260506_070809.db",
         sizeBytes: 6,
-        modifiedAt: "2026-05-06T07:08:09.123+00:00",
+        modifiedAt: "2026-05-06T07:08:09.120+00:00",
       },
     ]);
   });

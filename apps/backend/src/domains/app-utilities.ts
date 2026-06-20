@@ -151,7 +151,13 @@ function toRustUtcRfc3339(timestampNs: bigint): string {
   if (nanos === 0n) {
     return `${base}+00:00`;
   }
-  const fractional = nanos.toString().padStart(9, "0").replace(/0+$/u, "");
+  const nanosPadded = nanos.toString().padStart(9, "0");
+  const fractional =
+    nanos % 1_000_000n === 0n
+      ? nanosPadded.slice(0, 3)
+      : nanos % 1_000n === 0n
+        ? nanosPadded.slice(0, 6)
+        : nanosPadded;
   return `${base}.${fractional}+00:00`;
 }
 
