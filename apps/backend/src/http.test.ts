@@ -2932,6 +2932,25 @@ describe("TS backend HTTP skeleton", () => {
     expect(
       await (
         await handler(
+          new Request("http://127.0.0.1/api/v1/net-worth?date=0004-02-29", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).json(),
+    ).toEqual({ totalAssets: "100.00", totalLiabilities: "25.00", netWorth: "75.00" });
+    expect(
+      await (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/net-worth?date=2024-02-29", {
+            headers: { authorization: "Bearer sidecar-token" },
+          }),
+        )
+      ).json(),
+    ).toEqual({ totalAssets: "100.00", totalLiabilities: "25.00", netWorth: "75.00" });
+
+    expect(
+      await (
+        await handler(
           new Request(
             "http://127.0.0.1/api/v1/net-worth/history?startDate=2026-05-01&endDate=2026-05-14",
             { headers: { authorization: "Bearer sidecar-token" } },
@@ -3067,6 +3086,8 @@ describe("TS backend HTTP skeleton", () => {
 
     expect(calls).toEqual([
       ["net-worth", "2026-05-14"],
+      ["net-worth", "0004-02-29"],
+      ["net-worth", "2024-02-29"],
       ["net-worth-history", { startDate: "2026-05-01", endDate: "2026-05-14" }],
       ["accounts-simple", ["acc-1"]],
       [
