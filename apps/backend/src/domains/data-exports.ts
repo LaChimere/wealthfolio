@@ -77,7 +77,7 @@ export function createDataExportService(options: DataExportServiceOptions): Data
       }
       case "activities": {
         const result = await activityService.searchActivities({
-          page: 1,
+          page: 0,
           pageSize: EXPORT_ACTIVITY_PAGE_SIZE,
           sort: { id: "date", desc: true },
         });
