@@ -901,7 +901,10 @@ function userInfoFromApi(value: unknown, rawJson: string | null = null): unknown
     week_starts_on_monday: optionalBoolean(value.weekStartsOnMonday),
     timezone: optionalString(value.timezone),
     timezone_auto_sync: optionalBoolean(value.timezoneAutoSync),
-    time_format: optionalNumber(value.timeFormat),
+    time_format:
+      value.timeFormat === undefined || value.timeFormat === null
+        ? null
+        : requiredI32Value(value.timeFormat, "user info"),
     date_format: optionalString(value.dateFormat),
     team_id: optionalString(value.teamId),
     team_role: optionalString(value.teamRole),
@@ -961,6 +964,10 @@ function assertUserInfoRawShape(rawJson: string): void {
       "team info",
     );
   }
+  const timeFormatTokens = rawTokensForAliases(rawJson, ["timeFormat"]);
+  if (timeFormatTokens.length === 1 && !rawJsonI32OptionTokenIsValid(timeFormatTokens[0] ?? "")) {
+    throw new ConnectServiceError("internal_error", "Failed to parse user info", 500);
+  }
 }
 
 function assertNoDuplicateConnectAliases(
@@ -1014,7 +1021,7 @@ function validateUserInfoFromApi(value: Record<string, unknown>): void {
   for (const field of ["weekStartsOnMonday", "timezoneAutoSync"]) {
     assertOptionalConnectBooleanField(value, field, "user info");
   }
-  assertOptionalConnectNumberField(value, "timeFormat", "user info");
+  assertOptionalConnectI32Field(value, "timeFormat", "user info");
 
   const team = value.team;
   if (team !== undefined && team !== null && !isRecord(team)) {
@@ -3374,6 +3381,17 @@ function assertOptionalConnectNumberField(
     value !== null &&
     (typeof value !== "number" || !Number.isFinite(value))
   ) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+}
+
+function assertOptionalConnectI32Field(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && !isI32Integer(value)) {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
 }
@@ -6835,12 +6853,18 @@ function rawJsonI64OptionTokenIsValid(token: string): boolean {
   return trimmed === "null" || rawJsonI64TokenIsValid(trimmed);
 }
 
+function rawJsonI32OptionTokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  return trimmed === "null" || rawJsonI32TokenIsValid(trimmed);
+}
+
 function rawJsonI64TokenIsValid(token: string): boolean {
   return /^-?(?:0|[1-9]\d*)$/.test(token.trim());
 }
 
 function rawJsonI32TokenIsValid(token: string): boolean {
-  return /^-?(?:0|[1-9]\d*)$/.test(token.trim());
+  const trimmed = token.trim();
+  return /^-?(?:0|[1-9]\d*)$/.test(trimmed) && isI32Integer(Number(trimmed));
 }
 
 function rawJsonStringTokenIsValid(token: string): boolean {

@@ -810,6 +810,75 @@ describe("TS Connect local session service", () => {
         message: "Failed to parse user info",
         status: 500,
       });
+      const floatTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":24.5}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(floatTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      const rawFloatTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":24.0}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(rawFloatTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      const outOfRangeTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":2147483648}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(outOfRangeTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
     } finally {
       db.close();
     }
