@@ -137,6 +137,12 @@ describe("TS activities import domain", () => {
           needsReview: true,
         }),
       ]);
+      expect(() =>
+        service.searchActivities!({ page: Number.MAX_SAFE_INTEGER, pageSize: 2 }),
+      ).toThrow("pagination offset must be a safe integer");
+      expect(() => service.searchActivities!({ page: 0, pageSize: 1.5 })).toThrow(
+        "pagination values must be safe integers",
+      );
     } finally {
       db.close();
     }

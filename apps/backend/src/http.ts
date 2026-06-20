@@ -4386,6 +4386,10 @@ function parseActivitySearchRequest(
   if (pageSize instanceof Response) {
     return pageSize;
   }
+  const pagination = validatePaginationWindow(page, pageSize);
+  if (pagination instanceof Response) {
+    return pagination;
+  }
   const accountIds = parseOptionalStringOrArray(payload.accountIdFilter, "accountIdFilter");
   if (accountIds instanceof Response) {
     return accountIds;
@@ -4451,6 +4455,17 @@ function parseActivitySearchRequest(
     parsed.dateTo = dateTo;
   }
   return parsed;
+}
+
+function validatePaginationWindow(page: number, pageSize: number): Response | null {
+  if (!Number.isSafeInteger(page) || !Number.isSafeInteger(pageSize)) {
+    return jsonResponse({ code: 400, message: "pagination values must be safe integers" }, 400);
+  }
+  const offset = page * pageSize;
+  if (!Number.isSafeInteger(offset)) {
+    return jsonResponse({ code: 400, message: "pagination offset must be a safe integer" }, 400);
+  }
+  return null;
 }
 
 function parseOptionalStringOrArray(

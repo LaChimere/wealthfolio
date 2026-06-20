@@ -859,6 +859,17 @@ describe("TS backend HTTP skeleton", () => {
           new Request("http://127.0.0.1/api/v1/activities/search", {
             method: "POST",
             headers: jsonHeaders,
+            body: JSON.stringify({ page: Number.MAX_SAFE_INTEGER, pageSize: 2 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/activities/search", {
+            method: "POST",
+            headers: jsonHeaders,
             body: JSON.stringify({ page: 0, pageSize: 25, dateFrom: "01/01/2024" }),
           }),
         )

@@ -763,6 +763,7 @@ export function createActivityService(
     },
 
     searchActivities(request) {
+      validateActivitySearchPagination(request.page, request.pageSize);
       const pageSize = request.pageSize;
       const offset = request.page * pageSize;
       const { whereSql, params } = activitySearchWhereClause(request);
@@ -5343,6 +5344,16 @@ function computeActivityIdempotencyKey(input: {
 
 function normalizeDescription(value: string): string {
   return value.split(/\s+/u).filter(Boolean).join(" ");
+}
+
+function validateActivitySearchPagination(page: number, pageSize: number): void {
+  if (!Number.isSafeInteger(page) || !Number.isSafeInteger(pageSize)) {
+    throw new Error("Invalid input: pagination values must be safe integers");
+  }
+  const offset = page * pageSize;
+  if (!Number.isSafeInteger(offset)) {
+    throw new Error("Invalid input: pagination offset must be a safe integer");
+  }
 }
 
 function activitySearchWhereClause(request: ActivitySearchRequest): {
