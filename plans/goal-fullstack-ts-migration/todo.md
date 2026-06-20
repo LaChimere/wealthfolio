@@ -5480,6 +5480,11 @@ contract:
   includes Rust-compatible `includeArchived` query parsing for account list
   reads: absent defaults to false, lowercase `true`/`false` are accepted, and
   malformed query values reject before account service dispatch.
+- `pr5-http-date-proleptic-year-validation`: verification passed: focused HTTP
+  tests, full `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage
+  includes accepting Rust-compatible early proleptic leap days such as
+  `0004-02-29` while preserving modern leap-day validation such as `2024-02-29`
+  and existing invalid-date rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
