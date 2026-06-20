@@ -5445,6 +5445,10 @@ contract:
   Connect tests, full `bun run check`, pre-commit checks, and dual GPT/Claude
   xhigh review. Coverage includes rejecting unsafe direct local import-run
   `limit`/`offset` values before SQLite reads.
+- `pr5-ai-chat-thread-limit-validation`: verification passed: focused AI chat
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes rejecting invalid direct AI thread-list limits
+  before SQLite reads, matching HTTP u32 query parsing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
