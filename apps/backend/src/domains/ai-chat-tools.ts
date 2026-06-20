@@ -1525,8 +1525,14 @@ function parseImportCsvArgs(args: unknown): ImportCsvArgs {
     symbolMappings: readStringMap(args.symbolMappings ?? args.symbol_mappings),
     accountMappings: readStringMap(args.accountMappings ?? args.account_mappings),
     delimiter: readOptionalString(args.delimiter),
-    skipTopRows: readOptionalNonNegativeInteger(args.skipTopRows ?? args.skip_top_rows),
-    skipBottomRows: readOptionalNonNegativeInteger(args.skipBottomRows ?? args.skip_bottom_rows),
+    skipTopRows: readOptionalNonNegativeInteger(
+      args.skipTopRows ?? args.skip_top_rows,
+      "skipTopRows",
+    ),
+    skipBottomRows: readOptionalNonNegativeInteger(
+      args.skipBottomRows ?? args.skip_bottom_rows,
+      "skipBottomRows",
+    ),
     dateFormat: readOptionalString(args.dateFormat ?? args.date_format),
     decimalSeparator: readOptionalString(args.decimalSeparator ?? args.decimal_separator),
     thousandsSeparator: readOptionalString(args.thousandsSeparator ?? args.thousands_separator),
@@ -2453,8 +2459,14 @@ function readOptionalFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function readOptionalNonNegativeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+function readOptionalNonNegativeInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative integer`);
+  }
+  return value;
 }
 
 function readStringMap(value: unknown): Record<string, string> | undefined {

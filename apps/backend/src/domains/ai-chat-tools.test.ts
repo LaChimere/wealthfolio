@@ -898,6 +898,27 @@ describe("TS AI chat built-in tools", () => {
     ).rejects.toThrow("No CSV content provided. The user needs to attach the CSV file again");
   });
 
+  test("rejects malformed import_csv skip row arguments like Rust serde", async () => {
+    const tools = createPortfolioAiChatTools({
+      accountService: {
+        getActiveAccounts: () => [],
+      },
+      activityService: {
+        parseCsv: () => {
+          throw new Error("invalid skip rows should fail before parsing");
+        },
+      },
+    });
+    const importCsv = tools.find((tool) => tool.name === "import_csv");
+
+    await expect(
+      importCsv?.execute({ csvContent: "Date\n2026-01-01", skipTopRows: -1 }),
+    ).rejects.toThrow("skipTopRows must be a non-negative integer");
+    await expect(
+      importCsv?.execute({ csvContent: "Date\n2026-01-01", skipBottomRows: 1.5 }),
+    ).rejects.toThrow("skipBottomRows must be a non-negative integer");
+  });
+
   test("exposes Rust-compatible get_holdings output", async () => {
     const tools = createPortfolioAiChatTools({
       accountService: {

@@ -5577,6 +5577,10 @@ contract:
   age values above Rust `u32` before goal-plan persistence or direct retirement
   route calculations, while preserving existing negative/fraction validation
   messages.
+- `pr5-ai-import-csv-skip-rows`: verification passed: focused AI chat tool tests
+  and full `bun run check`. Coverage includes rejecting malformed
+  `skipTopRows`/`skipBottomRows` values before CSV parsing instead of silently
+  dropping them, matching Rust serde `Option<usize>` tool argument behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
