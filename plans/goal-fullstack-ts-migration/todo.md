@@ -5432,6 +5432,11 @@ contract:
   GPT/Claude xhigh review. Coverage includes rejecting unsupported direct
   `syncMarketData` day windows before execution, including empty-target no-op
   calls.
+- `pr5-activity-search-pagination-validation`: verification passed: focused
+  activity and HTTP tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review. Coverage includes rejecting unsafe pagination values
+  and unsafe computed offsets before SQLite search queries at HTTP and direct
+  service boundaries.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
