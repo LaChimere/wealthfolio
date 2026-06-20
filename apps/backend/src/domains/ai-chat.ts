@@ -2946,16 +2946,17 @@ function parseThreadCursor(cursor: string): { isPinned: number; updatedAt: strin
     );
   }
   const isPinnedRaw = cursor.slice(0, firstSeparator);
-  if (isPinnedRaw !== "0" && isPinnedRaw !== "1") {
+  if (!/^[+-]?\d+$/.test(isPinnedRaw)) {
+    throw aiChatError("invalid_cursor", `Invalid is_pinned value: ${isPinnedRaw}`, 400);
+  }
+  const isPinned = BigInt(isPinnedRaw);
+  if (isPinned < -2_147_483_648n || isPinned > 2_147_483_647n) {
     throw aiChatError("invalid_cursor", `Invalid is_pinned value: ${isPinnedRaw}`, 400);
   }
   const updatedAt = cursor.slice(firstSeparator + 1, lastSeparator);
   const id = cursor.slice(lastSeparator + 1);
-  if (updatedAt.trim() === "" || id.trim() === "") {
-    throw aiChatError("invalid_cursor", `Invalid cursor fields: ${cursor}`, 400);
-  }
   return {
-    isPinned: Number(isPinnedRaw),
+    isPinned: Number(isPinned),
     updatedAt,
     id,
   };

@@ -71,15 +71,23 @@ describe("TS AI chat domain", () => {
         tags: [],
       });
       expect(() => service.listThreads({ cursor: "" })).toThrow("Expected format");
-      expect(() => service.listThreads({ cursor: "2:2026-01-03T00:00:00Z:thread-b" })).toThrow(
-        "Invalid is_pinned value: 2",
-      );
+      expect(service.listThreads({ cursor: "2:2026-01-03T00:00:00Z:thread-b" })).toMatchObject({
+        threads: [{ id: "thread-pinned" }, { id: "thread-b" }, { id: "thread-a" }],
+      });
+      expect(service.listThreads({ cursor: "0:2026-01-03T00:00:00Z:" })).toMatchObject({
+        threads: [{ id: "thread-a" }],
+      });
       expect(() => service.listThreads({ cursor: "1e0:2026-01-03T00:00:00Z:thread-b" })).toThrow(
         "Invalid is_pinned value: 1e0",
       );
-      expect(() => service.listThreads({ cursor: "0:2026-01-03T00:00:00Z:" })).toThrow(
-        "Invalid cursor fields",
-      );
+      expect(() =>
+        service.listThreads({ cursor: "2147483648:2026-01-03T00:00:00Z:thread-b" }),
+      ).toThrow("Invalid is_pinned value: 2147483648");
+      expect(
+        service.listThreads({ cursor: "+1:2026-01-01T00:00:00Z:thread-pinned" }),
+      ).toMatchObject({
+        threads: [{ id: "thread-b" }, { id: "thread-a" }],
+      });
     } finally {
       db.close();
     }
