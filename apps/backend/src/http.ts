@@ -5467,6 +5467,9 @@ function parseAddonRatingRequest(payload: Record<string, unknown>): AddonRatingR
   if (rating instanceof Response) {
     return rating;
   }
+  if (rating < 1 || rating > 5) {
+    return jsonResponse({ code: 400, message: "rating must be between 1 and 5" }, 400);
+  }
   const review = parseOptionalStringOrNull(payload.review, "review");
   if (review instanceof Response) {
     return review;

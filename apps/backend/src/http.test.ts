@@ -614,9 +614,20 @@ describe("TS backend HTTP skeleton", () => {
       new Request("http://127.0.0.1/api/v1/addons/store/ratings", {
         method: "POST",
         headers: jsonHeaders,
-        body: JSON.stringify({ addonId: "addon-1", rating: 255, review: null }),
+        body: JSON.stringify({ addonId: "addon-1", rating: 5, review: null }),
       }),
     );
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/addons/store/ratings", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ addonId: "addon-1", rating: 255 }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
     expect(
       (
         await handler(
@@ -687,7 +698,7 @@ describe("TS backend HTTP skeleton", () => {
       ["extract", [4, 5]],
       ["store-listings", undefined],
       ["get-ratings", "addon-1"],
-      ["submit-rating", { addonId: "addon-1", rating: 255 }],
+      ["submit-rating", { addonId: "addon-1", rating: 5 }],
       ["check-update", "addon-1"],
       ["check-all", undefined],
       ["store-update", "addon-1"],
