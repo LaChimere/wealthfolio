@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 597
+turns_used: 598
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T16:58:17+08:00"
+updated_at: "2026-06-20T17:04:10+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3835,6 +3835,11 @@ updated_at: "2026-06-20T16:58:17+08:00"
   before SQLite `LIMIT` queries, matching the HTTP query parser and Rust u32
   request semantics. Verified with focused AI chat tests, full `bun run check`,
   pre-commit checks, and dual GPT/Claude xhigh review.
+- Turn 598: Fixed activity data export pagination parity. Activity exports now
+  call search with page `0`, matching the Rust export route and preventing the
+  first page of activities from being skipped. Verified with focused data-export
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review.
 
 ## Deferred items
 
