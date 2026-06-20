@@ -5305,7 +5305,8 @@ contract:
   focused composite pairing tests, full standalone device-sync tests, full
   `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
   includes Rust approve-before-complete ordering plus 400/409 already-approved
-  idempotency for `completePairingWithTransfer`; sync-cycle/snapshot upload
+  idempotency for `completePairingWithTransfer`, and non-idempotent approval
+  failures short-circuiting before `/complete`; sync-cycle/snapshot upload
   orchestration remains a follow-up.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix

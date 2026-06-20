@@ -3665,9 +3665,10 @@ updated_at: "2026-06-20T11:01:55+08:00"
 - Turn 567: Advanced standalone device-sync composite transfer orchestration
   parity. `completePairingWithTransfer` now POSTs pairing approval before
   completion and treats already-approved 400/409 responses as idempotent,
-  matching the Rust engine's approve-before-complete step. Verified with
-  focused/full device-sync tests, full `bun run check`, pre-commit checks, and
-  dual GPT/Claude xhigh review.
+  matching the Rust engine's approve-before-complete step while propagating
+  other approval failures before `/complete`. Verified with focused/full
+  device-sync tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review.
 
 ## Deferred items
 
