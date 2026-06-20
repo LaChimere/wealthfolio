@@ -1661,15 +1661,15 @@ function parseTablePath(path: string): [number, number] | null {
   if (parts.length !== 2) {
     return null;
   }
-  const tableIndex = parseTablePathIndex(parts[0] ?? "");
-  const columnIndex = parseTablePathIndex(parts[1] ?? "");
+  const tableIndex = parseRustUnsignedIndex(parts[0] ?? "");
+  const columnIndex = parseRustUnsignedIndex(parts[1] ?? "");
   if (tableIndex === null || columnIndex === null) {
     return null;
   }
   return [tableIndex, columnIndex];
 }
 
-function parseTablePathIndex(value: string): number | null {
+function parseRustUnsignedIndex(value: string): number | null {
   if (!/^\+?\d+$/u.test(value)) {
     return null;
   }
@@ -1765,13 +1765,13 @@ function extractCsvString(body: string, column: string): string | null {
 }
 
 function resolveCsvColumn(headers: string[], column: string): number | null {
-  if (/^\d+$/.test(column)) {
-    const index = Number(column);
+  const index = parseRustUnsignedIndex(column);
+  if (index !== null) {
     return index < headers.length ? index : null;
   }
   const lower = column.toLowerCase();
-  const index = headers.findIndex((header) => header.trim().toLowerCase() === lower);
-  return index >= 0 ? index : null;
+  const headerIndex = headers.findIndex((header) => header.trim().toLowerCase() === lower);
+  return headerIndex >= 0 ? headerIndex : null;
 }
 
 function parseNumberString(raw: string, locale?: string): number | null {

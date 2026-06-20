@@ -5687,6 +5687,10 @@ contract:
   custom-provider tests. Coverage includes Rust `usize::parse`-compatible
   HTML-table path parsing for plus/leading-zero decimal components and rejection
   of whitespace, decimal, and exponent path components.
+- `pr5-custom-provider-csv-column-integers`: verification passed: focused
+  custom-provider tests. Coverage includes Rust `usize::parse`-compatible CSV
+  numeric column indices, including plus-prefixed decimal indices and rejection
+  of decimal/exponent/whitespace numeric-looking column strings.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -816,6 +816,31 @@ describe("TS custom providers domain", () => {
         volume: 200,
         date: "2026-05-04",
       });
+
+      const rustUnsignedColumnResult = await service.testSource({
+        ...baseTestSourceRequest(),
+        format: "csv",
+        pricePath: "+04",
+        locale: "de-DE",
+      });
+      expect(rustUnsignedColumnResult).toMatchObject({
+        success: true,
+        price: 1234.56,
+      });
+
+      for (const pricePath of ["4.0", "4e0", " 4"]) {
+        const invalidColumnResult = await service.testSource({
+          ...baseTestSourceRequest(),
+          format: "csv",
+          pricePath,
+          locale: "de-DE",
+        });
+        expect(invalidColumnResult).toMatchObject({
+          success: false,
+          error: `Could not extract price from CSV using column '${pricePath}'`,
+          price: null,
+        });
+      }
     } finally {
       db.close();
     }
