@@ -3373,7 +3373,11 @@ function assertOptionalConnectNumberField(
   context: string,
 ): void {
   const value = record[key];
-  if (value !== undefined && value !== null && typeof value !== "number") {
+  if (
+    value !== undefined &&
+    value !== null &&
+    (typeof value !== "number" || !Number.isFinite(value))
+  ) {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
 }

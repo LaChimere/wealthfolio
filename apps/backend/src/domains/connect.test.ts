@@ -1357,6 +1357,8 @@ describe("TS Connect local session service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"accounts":[{"id":"broker-account","balance":{"total":{"amount":"100","currency":"USD"}},"owner":{"user_id":123,"is_own_account":"true"},"sync_status":{"transactions":{"initial_sync_completed":"false"}}}]}';
     const service = createLocalConnectService({
       db,
       secretService,
@@ -1365,16 +1367,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return Response.json({
-          accounts: [
-            {
-              id: "broker-account",
-              balance: { total: { amount: "100", currency: "USD" } },
-              owner: { user_id: 123, is_own_account: "true" },
-              sync_status: { transactions: { initial_sync_completed: "false" } },
-            },
-          ],
-        });
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
@@ -1384,6 +1377,13 @@ describe("TS Connect local session service", () => {
     });
 
     try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","balance":{"total":{"amount":1e999,"currency":"USD"}}}]}';
       await expect(service.listBrokerAccounts()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse accounts response",
