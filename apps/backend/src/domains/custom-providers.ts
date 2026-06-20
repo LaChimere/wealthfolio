@@ -434,6 +434,7 @@ export function createCustomProviderService(
       repository.delete(providerCode);
     },
     async testSource(payload) {
+      validateSourceNumericFields(payload);
       return testCustomProviderSource(payload, {
         fetchImpl,
         now,
@@ -442,6 +443,7 @@ export function createCustomProviderService(
       });
     },
     async fetchSourceRows(payload) {
+      validateSourceNumericFields(payload);
       return fetchCustomProviderSourceRows(payload, {
         fetchImpl,
         now,
@@ -1950,6 +1952,23 @@ function validateSourceDefinitions(sources: NewCustomProviderSource[]): void {
         `Invalid input: Invalid source format '${source.format}'. Must be one of: ${VALID_SOURCE_FORMATS.join(", ")}`,
       );
     }
+    validateSourceNumericFields(source);
+  }
+}
+
+function validateSourceNumericFields(
+  source: Pick<NewCustomProviderSource, "defaultPrice" | "factor">,
+): void {
+  validateOptionalFiniteNumber(source.factor, "factor");
+  validateOptionalFiniteNumber(source.defaultPrice, "defaultPrice");
+}
+
+function validateOptionalFiniteNumber(value: number | null | undefined, field: string): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!Number.isFinite(value)) {
+    throw new Error(`Invalid input: ${field} must be a finite number`);
   }
 }
 

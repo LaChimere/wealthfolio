@@ -196,6 +196,21 @@ describe("TS custom providers domain", () => {
       ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
       await expect(
         service.create({
+          code: "bad-factor",
+          name: "Bad Factor",
+          sources: [
+            {
+              kind: "latest",
+              format: "json",
+              url: "https://example.test",
+              pricePath: "$.price",
+              factor: Number.POSITIVE_INFINITY,
+            },
+          ],
+        }),
+      ).rejects.toThrow("factor must be a finite number");
+      await expect(
+        service.create({
           code: "bad-priority",
           name: "Bad Priority",
           priority: 2_147_483_648,
@@ -273,6 +288,19 @@ describe("TS custom providers domain", () => {
       await expect(service.update("demo", { priority: -2_147_483_649 })).rejects.toThrow(
         "Priority must be an integer between -2147483648 and 2147483647",
       );
+      await expect(
+        service.update("demo", {
+          sources: [
+            {
+              kind: "historical",
+              format: "csv",
+              url: "https://example.test/history/{SYMBOL}",
+              pricePath: "1",
+              defaultPrice: Number.NaN,
+            },
+          ],
+        }),
+      ).rejects.toThrow("defaultPrice must be a finite number");
       expect(syncEvents.map((event) => event.operation)).toEqual(["Update", "Update"]);
     } finally {
       db.close();
@@ -697,6 +725,18 @@ describe("TS custom providers domain", () => {
         price: 7.25,
         currency: "AUD",
       });
+      await expect(
+        service.testSource({
+          ...baseTestSourceRequest(),
+          factor: Number.POSITIVE_INFINITY,
+        }),
+      ).rejects.toThrow("factor must be a finite number");
+      await expect(
+        service.fetchSourceRows({
+          ...baseTestSourceRequest(),
+          defaultPrice: Number.NaN,
+        }),
+      ).rejects.toThrow("defaultPrice must be a finite number");
 
       expect(calls).toEqual([
         "https://example.test/network",
