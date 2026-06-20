@@ -3512,13 +3512,6 @@ function parseRefreshTokenResponse(bodyText: string): {
   ) {
     throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
   }
-  if (
-    parsed.expires_in !== undefined &&
-    parsed.expires_in !== null &&
-    !isSafeI64Integer(parsed.expires_in)
-  ) {
-    throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
-  }
   const refreshToken =
     typeof parsed.refresh_token === "string" && parsed.refresh_token.trim()
       ? parsed.refresh_token.trim()

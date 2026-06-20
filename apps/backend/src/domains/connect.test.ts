@@ -169,11 +169,10 @@ describe("TS Connect local session service", () => {
       },
       fetch: async (input, init) => {
         requests.push({ url: String(input), init });
-        return Response.json({
-          access_token: "access-token",
-          refresh_token: "rotated-refresh",
-          expires_in: 3600,
-        });
+        return new Response(
+          '{"access_token":"access-token","refresh_token":"rotated-refresh","expires_in":9223372036854775807}',
+          { headers: { "content-type": "application/json" } },
+        );
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
