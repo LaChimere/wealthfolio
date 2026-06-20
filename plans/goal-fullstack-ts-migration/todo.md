@@ -5396,6 +5396,10 @@ contract:
   dual GPT/Claude xhigh review. Coverage includes Rust-compatible `i32` year and
   finite `f64` limit-amount validation before persistence or portfolio-update
   side effects.
+- `pr5-contribution-limit-route-year-i32`: verification passed: focused HTTP
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes Rust-compatible `i32` contribution-year parsing
+  before create/update service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
