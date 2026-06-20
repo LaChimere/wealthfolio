@@ -1738,6 +1738,68 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("rejects non-u32 health config hours before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const validConfig = {
+      priceStaleWarningHours: 24,
+      priceStaleCriticalHours: 72,
+      fxStaleWarningHours: 24,
+      fxStaleCriticalHours: 72,
+      mvEscalationThreshold: 0.3,
+      classificationWarnThreshold: 0.05,
+    };
+    const healthService: HealthService = {
+      dismissIssue() {
+        throw new Error("not used");
+      },
+      restoreIssue() {
+        throw new Error("not used");
+      },
+      getDismissedIds() {
+        return Promise.resolve([]);
+      },
+      getConfig() {
+        return Promise.resolve(validConfig);
+      },
+      updateConfig(config) {
+        calls.push(config);
+        return Promise.resolve();
+      },
+      clearCache() {},
+      getHealthStatus() {
+        return { isStale: false, issues: [] };
+      },
+      runHealthChecks() {
+        return { isStale: false, issues: [] };
+      },
+      executeFix() {},
+    };
+    const handler = createBackendRequestHandler(config, { healthService });
+    const staleHourFields = [
+      "priceStaleWarningHours",
+      "priceStaleCriticalHours",
+      "fxStaleWarningHours",
+      "fxStaleCriticalHours",
+    ] as const;
+
+    for (const field of staleHourFields) {
+      for (const value of [-1, 4_294_967_296]) {
+        const response = await handler(
+          new Request("http://127.0.0.1/api/v1/health/config", {
+            method: "PUT",
+            headers: {
+              authorization: "Bearer sidecar-token",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ...validConfig, [field]: value }),
+          }),
+        );
+        expect(response.status).toBe(400);
+      }
+    }
+    expect(calls).toEqual([]);
+  });
+
   test("routes migrated health runtime and classification migration seams when service methods are provided", async () => {
     const calls: Array<[string, unknown]> = [];
     const healthService: HealthService = {

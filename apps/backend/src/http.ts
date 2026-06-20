@@ -3820,28 +3820,25 @@ function parseHealthFixAction(payload: Record<string, unknown>): HealthFixAction
 }
 
 function parseHealthConfig(payload: Record<string, unknown>): HealthConfig | Response {
-  const priceStaleWarningHours = parseRequiredInteger(
+  const priceStaleWarningHours = parseRequiredU32(
     payload.priceStaleWarningHours,
     "priceStaleWarningHours",
   );
   if (priceStaleWarningHours instanceof Response) {
     return priceStaleWarningHours;
   }
-  const priceStaleCriticalHours = parseRequiredInteger(
+  const priceStaleCriticalHours = parseRequiredU32(
     payload.priceStaleCriticalHours,
     "priceStaleCriticalHours",
   );
   if (priceStaleCriticalHours instanceof Response) {
     return priceStaleCriticalHours;
   }
-  const fxStaleWarningHours = parseRequiredInteger(
-    payload.fxStaleWarningHours,
-    "fxStaleWarningHours",
-  );
+  const fxStaleWarningHours = parseRequiredU32(payload.fxStaleWarningHours, "fxStaleWarningHours");
   if (fxStaleWarningHours instanceof Response) {
     return fxStaleWarningHours;
   }
-  const fxStaleCriticalHours = parseRequiredInteger(
+  const fxStaleCriticalHours = parseRequiredU32(
     payload.fxStaleCriticalHours,
     "fxStaleCriticalHours",
   );
