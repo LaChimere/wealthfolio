@@ -5381,6 +5381,11 @@ contract:
   GPT/Claude xhigh review. Coverage includes Rust-compatible `i32` validation
   for direct market-data provider settings priority before repository update or
   refresh side effects.
+- `pr5-custom-provider-source-finite-numbers`: verification passed: focused
+  custom-provider domain tests, full `bun run check`, pre-commit checks, and
+  dual GPT/Claude xhigh review. Coverage includes Rust-compatible finite
+  `Option<f64>` validation for direct source `factor` and `defaultPrice` values
+  before persistence, fetch, or fallback side effects.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
