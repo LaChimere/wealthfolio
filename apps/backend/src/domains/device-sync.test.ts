@@ -2475,6 +2475,44 @@ describe("TS local device sync service", () => {
       "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
       "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/complete",
     ]);
+
+    requests.length = 0;
+    approveAlreadyDone = false;
+    const failingApproveService = createLocalDeviceSyncService({
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (String(input).endsWith("/approve")) {
+          return Response.json({ code: "PAIRING_CLOSED", message: "closed" }, { status: 409 });
+        }
+        return Response.json({ success: true });
+      },
+    });
+    await expect(
+      failingApproveService.completePairingWithTransfer?.({
+        pairingId: "pairing-1",
+        encryptedKeyBundle: "bundle",
+        sasProof: { ok: true },
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      status: 500,
+      message: expect.stringContaining("PAIRING_CLOSED"),
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
+    ]);
   });
 
   test("returns already complete from bootstrap confirm when no local database exists", async () => {
