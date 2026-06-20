@@ -51,6 +51,7 @@ describe("TS save-up planning domain", () => {
 
     expect(overview.health).toBe("on_track");
     expect(overview.projectedValueAtTargetDate).toBeGreaterThan(100.05);
+    expect(overview.projectedCompletionDate).toBe("0000-03-28");
     expect(overview.trajectory).toEqual([]);
   });
 

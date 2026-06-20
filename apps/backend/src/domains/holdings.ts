@@ -3403,6 +3403,7 @@ function subtractMonths(date: string, months: number): string | null {
   const targetMonthIndex = (year ?? 1970) * 12 + ((month ?? 1) - 1) - months;
   const targetYear = Math.floor(targetMonthIndex / 12);
   if (targetYear < 0 || targetYear > 9999) {
+    // Snapshot dates are stored as sortable YYYY-MM-DD strings; do not synthesize BCE rows.
     return null;
   }
   const targetMonth = (((targetMonthIndex % 12) + 12) % 12) + 1;

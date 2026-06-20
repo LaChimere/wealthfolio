@@ -387,11 +387,15 @@ function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
 }
 
 function formatDate(date: PlainDate): string {
-  return `${date.year}-${pad2(date.month)}-${pad2(date.day)}`;
+  return `${padYear(date.year)}-${pad2(date.month)}-${pad2(date.day)}`;
 }
 
 function formatMonth(date: PlainDate): string {
-  return `${date.year}-${pad2(date.month)}`;
+  return `${padYear(date.year)}-${pad2(date.month)}`;
+}
+
+function padYear(value: number): string {
+  return value >= 0 && value <= 9999 ? value.toString().padStart(4, "0") : value.toString();
 }
 
 function pad2(value: number): string {
