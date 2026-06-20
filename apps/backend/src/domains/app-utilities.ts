@@ -77,6 +77,13 @@ interface UpdateCheckResponseRaw {
   screenshots?: unknown;
 }
 
+interface ParsedSemver {
+  major: number;
+  minor: number;
+  patch: number;
+  preRelease: string[];
+}
+
 type FetchUpdate = (input: string, init?: RequestInit) => Promise<Response>;
 
 const WEB_RUNTIME_TARGET = "web-docker";
@@ -299,7 +306,7 @@ async function parseUpdateResponse(
       ? (payload.platforms as Record<string, UpdatePlatformInfo>)
       : {};
   return {
-    updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
+    updateAvailable: isUpdateAvailable(currentVersion, latestVersion),
     latestVersion,
     notes: optionalString(payload.notes),
     pubDate: optionalString(payload.pubDate ?? payload.pub_date),
@@ -371,27 +378,88 @@ function normalizeArch(arch: string | undefined): string {
   }
 }
 
-function compareVersions(left: string, right: string): number {
-  const leftParts = versionParts(left);
-  const rightParts = versionParts(right);
-  const maxLength = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < maxLength; index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+function isUpdateAvailable(current: string, latest: string): boolean {
+  const currentVersion = parseSemver(current) ?? {
+    major: 0,
+    minor: 0,
+    patch: 0,
+    preRelease: [],
+  };
+  const latestVersion = parseSemver(latest) ?? currentVersion;
+  return compareSemver(latestVersion, currentVersion) > 0;
+}
+
+function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
+  for (const key of ["major", "minor", "patch"] as const) {
+    const difference = left[key] - right[key];
     if (difference !== 0) {
       return difference;
     }
   }
+  return comparePreRelease(left.preRelease, right.preRelease);
+}
+
+function comparePreRelease(left: string[], right: string[]): number {
+  if (left.length === 0 && right.length === 0) {
+    return 0;
+  }
+  if (left.length === 0) {
+    return 1;
+  }
+  if (right.length === 0) {
+    return -1;
+  }
+  const maxLength = Math.max(left.length, right.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftIdentifier = left[index];
+    const rightIdentifier = right[index];
+    if (leftIdentifier === undefined) {
+      return -1;
+    }
+    if (rightIdentifier === undefined) {
+      return 1;
+    }
+    if (leftIdentifier === rightIdentifier) {
+      continue;
+    }
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return Number(leftIdentifier) - Number(rightIdentifier);
+    }
+    if (leftNumeric) {
+      return -1;
+    }
+    if (rightNumeric) {
+      return 1;
+    }
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
   return 0;
 }
 
-function versionParts(value: string): number[] {
-  return value
-    .split(/[+-]/, 1)[0]
-    .split(".")
-    .map((part) => {
-      const parsed = Number(part);
-      return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
-    });
+function parseSemver(value: string): ParsedSemver | null {
+  const match =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const preRelease = match[4]?.split(".") ?? [];
+  if (
+    preRelease.some(
+      (identifier) => /^\d+$/.test(identifier) && identifier.length > 1 && identifier[0] === "0",
+    )
+  ) {
+    return null;
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    preRelease,
+  };
 }
 
 function normalizeFilePath(filePath: string): string {

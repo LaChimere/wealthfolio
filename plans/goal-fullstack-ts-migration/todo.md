@@ -5602,6 +5602,10 @@ contract:
   tests and full `bun run check`. Coverage includes accepting Rust-compatible
   year-zero leap-day backup filenames while continuing to reject invalid
   month/day/time rollovers.
+- `pr5-app-update-semver-compare`: verification passed: focused app utility
+  tests and full `bun run check`. Coverage includes Rust-compatible semver
+  prerelease ordering and invalid latest-version fallback behavior for update
+  availability.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

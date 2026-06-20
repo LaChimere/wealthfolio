@@ -118,6 +118,44 @@ describe("TS app utility domain", () => {
     });
   });
 
+  test("compares update versions with Rust semver fallback semantics", async () => {
+    const prereleaseService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0-0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "3.4.0",
+          platforms: {},
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(prereleaseService.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: true,
+      latestVersion: "3.4.0",
+    });
+
+    const invalidLatestService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "3.4.1e1",
+          platforms: {},
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(invalidLatestService.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: false,
+      latestVersion: "3.4.1e1",
+    });
+  });
+
   test("creates base64 and path backups from the configured app data dir", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-"));
     const dbPath = path.join(appDataDir, "app.db");
