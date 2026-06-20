@@ -72,6 +72,21 @@ describe("TS goals domain", () => {
           statusLifecycle: "paused",
         }),
       ).rejects.toThrow("Unsupported goal lifecycle 'paused'");
+      await expect(
+        service.createGoal({
+          goalType: "custom_save_up",
+          title: "Bad Priority",
+          priority: 4.5,
+        }),
+      ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.createGoal({
+          goalType: "custom_save_up",
+          title: "Bad Priority",
+          priority: 2_147_483_648,
+        }),
+      ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
+      expect(syncEvents).toHaveLength(1);
     } finally {
       db.close();
     }
@@ -147,6 +162,12 @@ describe("TS goals domain", () => {
         summaryCurrentValue: 25,
       });
       expect(updated.updatedAt).not.toBe("2026-01-01T00:00:00Z");
+      await expect(service.updateGoal({ ...updated, priority: 4.5 })).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
+      await expect(service.updateGoal({ ...updated, priority: -2_147_483_649 })).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
     } finally {
       db.close();
     }

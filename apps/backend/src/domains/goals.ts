@@ -540,6 +540,7 @@ export function createGoalService(
     },
     async createGoal(newGoal) {
       const isRetirement = newGoal.goalType === "retirement";
+      validateOptionalI32GoalPriority(newGoal.priority);
       if (newGoal.statusLifecycle !== undefined && newGoal.statusLifecycle !== null) {
         validateGoalLifecycle(newGoal.statusLifecycle);
       }
@@ -558,6 +559,7 @@ export function createGoalService(
       if (existing.goalType !== goal.goalType) {
         throw new Error("Invalid input: Goal type cannot be changed after creation");
       }
+      validateI32GoalPriority(goal.priority);
       validateGoalLifecycle(goal.statusLifecycle);
       if (goal.goalType === "retirement" && goal.statusLifecycle !== GOAL_LIFECYCLE_ARCHIVED) {
         assertSingleRetirementGoal(repository.loadGoals(), goal.id);
@@ -924,6 +926,21 @@ function validateGoalLifecycle(statusLifecycle: string): void {
     statusLifecycle !== GOAL_LIFECYCLE_ARCHIVED
   ) {
     throw new Error(`Invalid input: Unsupported goal lifecycle '${statusLifecycle}'`);
+  }
+}
+
+function validateOptionalI32GoalPriority(priority: number | null | undefined): void {
+  if (priority === undefined || priority === null) {
+    return;
+  }
+  validateI32GoalPriority(priority);
+}
+
+function validateI32GoalPriority(priority: number): void {
+  if (!Number.isInteger(priority) || priority < -2_147_483_648 || priority > 2_147_483_647) {
+    throw new Error(
+      "Invalid input: Priority must be an integer between -2147483648 and 2147483647",
+    );
   }
 }
 
