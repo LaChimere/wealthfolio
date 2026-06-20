@@ -560,7 +560,7 @@ function localYearUtcBounds(year: number, timezone: string): [Date, Date] {
 
 function activityDateInTimezone(activityInstant: Date, timezone: string): string {
   const parts = zonedDateParts(activityInstant, timezone);
-  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+  return `${padYear(parts.year)}-${pad2(parts.month)}-${pad2(parts.day)}`;
 }
 
 function zonedDateTimeToUtc(
@@ -572,11 +572,11 @@ function zonedDateTimeToUtc(
   second: number,
   timezone: string,
 ): Date {
-  const targetUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const targetUtcMs = utcMsFromParts(year, month - 1, day, hour, minute, second);
   let utcMs = targetUtcMs;
   for (let iteration = 0; iteration < 3; iteration += 1) {
     const parts = zonedDateParts(new Date(utcMs), timezone);
-    const actualUtcMs = Date.UTC(
+    const actualUtcMs = utcMsFromParts(
       parts.year,
       parts.month - 1,
       parts.day,
@@ -593,6 +593,19 @@ function zonedDateTimeToUtc(
   return new Date(utcMs);
 }
 
+function utcMsFromParts(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): number {
+  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, second));
+  date.setUTCFullYear(year, monthIndex, day);
+  return date.getTime();
+}
+
 function zonedDateParts(
   date: Date,
   timezone: string,
@@ -604,9 +617,20 @@ function zonedDateParts(
   minute: number;
   second: number;
 } {
+  if (timezone === "UTC" || timezone === "Etc/UTC") {
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+      hour: date.getUTCHours(),
+      minute: date.getUTCMinutes(),
+      second: date.getUTCSeconds(),
+    };
+  }
   const formatter = new Intl.DateTimeFormat("en-US", {
-    calendar: "iso8601",
+    calendar: "gregory",
     day: "2-digit",
+    era: "short",
     hour: "2-digit",
     hour12: false,
     minute: "2-digit",
@@ -621,8 +645,9 @@ function zonedDateParts(
       .filter((part) => part.type !== "literal")
       .map((part) => [part.type, part.value]),
   );
+  const eraYear = Number(parts.year);
   return {
-    year: Number(parts.year),
+    year: parts.era === "BC" ? 1 - eraYear : eraYear,
     month: Number(parts.month),
     day: Number(parts.day),
     hour: Number(parts.hour) % 24,
@@ -683,6 +708,10 @@ function toRustUtcRfc3339(date: Date): string {
 
 function pad2(value: number): string {
   return value.toString().padStart(2, "0");
+}
+
+function padYear(value: number): string {
+  return value >= 0 && value <= 9999 ? value.toString().padStart(4, "0") : value.toString();
 }
 
 function resolveBaseCurrency(options: ContributionLimitServiceOptions): string | undefined {

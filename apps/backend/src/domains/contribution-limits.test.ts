@@ -524,6 +524,102 @@ describe("TS contribution limits domain", () => {
       db.close();
     }
   });
+
+  test("uses proleptic early contribution years without 1900 remapping", async () => {
+    const db = createContributionLimitsDb();
+    const fxDates: string[] = [];
+    const service = createContributionLimitService(createContributionLimitRepository(db), {
+      baseCurrency: "USD",
+      calculateDeposits: createContributionDepositCalculator(
+        db,
+        exchangeRateStub((amount, _from, _to, date) => {
+          fxDates.push(date);
+          return amount;
+        }),
+        () => "UTC",
+      ),
+    });
+
+    try {
+      seedAccount(db, "acc1");
+      seedActivity(db, {
+        id: "early-start",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "2",
+        currency: "USD",
+        activityDate: "0000-01-01T00:00:00.000Z",
+      });
+      seedActivity(db, {
+        id: "early-end",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "3",
+        currency: "USD",
+        activityDate: "0000-12-31T23:59:59.000Z",
+      });
+      seedActivity(db, {
+        id: "next-year",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "5",
+        currency: "USD",
+        activityDate: "0001-01-01T00:00:00.000Z",
+      });
+
+      const created = await service.createContributionLimit(
+        newLimit({ accountIds: "acc1", contributionYear: 0 }),
+      );
+      await expect(
+        service.calculateDepositsForContributionLimit(created.id),
+      ).resolves.toMatchObject({
+        total: 5,
+      });
+      expect(fxDates).toEqual(["0000-01-01", "0000-12-31"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves proleptic local years for non-UTC contribution ranges", async () => {
+    const db = createContributionLimitsDb();
+    const fxDates: string[] = [];
+    const service = createContributionLimitService(createContributionLimitRepository(db), {
+      baseCurrency: "USD",
+      calculateDeposits: createContributionDepositCalculator(
+        db,
+        exchangeRateStub((amount, _from, _to, date) => {
+          fxDates.push(date);
+          return amount;
+        }),
+        () => "America/Los_Angeles",
+      ),
+    });
+
+    try {
+      seedAccount(db, "acc1");
+      seedActivity(db, {
+        id: "la-midyear",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "7",
+        currency: "USD",
+        activityDate: "0000-06-15T12:00:00.000Z",
+      });
+
+      const created = await service.createContributionLimit(
+        newLimit({ accountIds: "acc1", contributionYear: 0 }),
+      );
+      await expect(
+        service.calculateDepositsForContributionLimit(created.id),
+      ).resolves.toMatchObject({
+        total: 7,
+      });
+      expect(fxDates).toEqual(["0000-06-15"]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 export function createContributionLimitsDb(): Database {
