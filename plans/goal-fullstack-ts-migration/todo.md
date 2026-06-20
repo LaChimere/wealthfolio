@@ -5522,6 +5522,10 @@ contract:
   review. Coverage includes zero-padded early save-up projected completion dates
   such as `0000-03-28` and explicit documentation of the holdings negative-year
   synthetic snapshot skip.
+- `pr5-portfolio-metrics-proleptic-date-arithmetic`: verification passed:
+  focused portfolio-metrics tests, full `bun run check`, and dual GPT/Claude
+  xhigh review. Coverage includes stale-asset day counts from `0000-02-29` to
+  `0000-05-30` crossing the Rust-compatible >90 day threshold.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
