@@ -5526,6 +5526,10 @@ contract:
   focused portfolio-metrics tests, full `bun run check`, and dual GPT/Claude
   xhigh review. Coverage includes stale-asset day counts from `0000-02-29` to
   `0000-05-30` crossing the Rust-compatible >90 day threshold.
+- `pr5-retirement-goal-proleptic-date-format`: verification passed: focused
+  goals tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes a FIRE retirement summary on `0000-02-29` emitting a zero-padded
+  projected completion date without JavaScript's 1900-year remap.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
