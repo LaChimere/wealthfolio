@@ -153,6 +153,10 @@ const WAITING_FOR_TRUSTED_SNAPSHOT_MESSAGE =
   "Snapshot is not available yet. Waiting for upload from a trusted device.";
 const WAITING_FOR_FRESH_SNAPSHOT_MESSAGE =
   "Waiting for a snapshot generated after pairing confirmation";
+const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
+type I64Value = number | bigint;
 
 export interface LocalDeviceSyncServiceDependencies {
   connectService?: Pick<ConnectService, "restoreSyncSession">;
@@ -1120,7 +1124,7 @@ async function latestSnapshotBootstrapWaitState(
     fetchImpl,
     deviceId,
   );
-  if (remoteCursor !== null && latest.oplogSeq >= remoteCursor) {
+  if (remoteCursor !== null && compareI64Values(latest.oplogSeq, remoteCursor) >= 0) {
     return { waiting: false, message: "" };
   }
   return { waiting: true, message: WAITING_FOR_FRESH_SNAPSHOT_MESSAGE };
@@ -1134,8 +1138,8 @@ function latestSnapshotBootstrapMetadata(
   schemaVersion: number;
   coversTables: string[];
   createdAt: Date;
-  oplogSeq: number;
-  sizeBytes: number;
+  oplogSeq: I64Value;
+  sizeBytes: I64Value;
   checksum: string;
 } {
   assertLatestSnapshotRawShape(rawJson);
@@ -1169,14 +1173,8 @@ function latestSnapshotBootstrapMetadata(
       500,
     );
   }
-  const rawOplogSeq = value.oplogSeq ?? value.oplog_seq;
-  if (!isSafeInteger(rawOplogSeq)) {
-    throw latestSnapshotParseError();
-  }
-  const rawSizeBytes = value.sizeBytes ?? value.size_bytes;
-  if (!isSafeInteger(rawSizeBytes)) {
-    throw latestSnapshotParseError();
-  }
+  const rawOplogSeq = requiredI64FromRawJson(rawJson, ["oplogSeq", "oplog_seq"]);
+  const rawSizeBytes = requiredI64FromRawJson(rawJson, ["sizeBytes", "size_bytes"]);
   const rawChecksum = value.checksum;
   if (typeof rawChecksum !== "string") {
     throw latestSnapshotParseError();
@@ -1236,7 +1234,7 @@ async function readRemoteCursorForFreshnessGate(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   deviceId: string,
-): Promise<number | null> {
+): Promise<I64Value | null> {
   try {
     const cursorResponse = await fetchDeviceSyncJsonRaw(
       accessToken,
@@ -1248,14 +1246,38 @@ async function readRemoteCursorForFreshnessGate(
     if (!validSyncCursorRawShape(cursorResponse.bodyText)) {
       return null;
     }
-    const value = cursorResponse.value;
-    if (!isRecord(value) || !isSafeInteger(value.cursor)) {
+    if (!isRecord(cursorResponse.value)) {
       return null;
     }
-    return value.cursor;
+    return requiredI64FromRawJson(cursorResponse.bodyText, ["cursor"]);
   } catch {
     return null;
   }
+}
+
+function requiredI64FromRawJson(
+  rawJson: string,
+  aliases: string[],
+  parseError: () => Error = latestSnapshotParseError,
+): I64Value {
+  const tokens = rawTokensForAliases(rawJson, aliases);
+  if (tokens.length !== 1 || !rawJsonI64TokenIsValid(tokens[0] ?? "")) {
+    throw parseError();
+  }
+  const parsed = BigInt(tokens[0] ?? "0");
+  if (parsed >= MIN_SAFE_BIGINT && parsed <= MAX_SAFE_BIGINT) {
+    return Number(parsed);
+  }
+  return parsed;
+}
+
+function compareI64Values(left: I64Value, right: I64Value): number {
+  const leftBigInt = typeof left === "bigint" ? left : BigInt(left);
+  const rightBigInt = typeof right === "bigint" ? right : BigInt(right);
+  if (leftBigInt === rightBigInt) {
+    return 0;
+  }
+  return leftBigInt > rightBigInt ? 1 : -1;
 }
 
 function validSyncCursorRawShape(rawJson: string): boolean {
@@ -2376,10 +2398,6 @@ function isI32Integer(value: unknown): value is number {
     value >= -2_147_483_648 &&
     value <= 2_147_483_647
   );
-}
-
-function isSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 function rawJsonStringTokenIsValid(token: string): boolean {

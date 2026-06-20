@@ -751,6 +751,8 @@ describe("TS local device sync service", () => {
     );
     secretService.entries.set("sync_device_id", "device-1");
     let cursorBody = '{"cursor":2}';
+    let snapshotBody =
+      '{"snapshot_id":"snapshot-1","schema_version":1,"covers_tables":[],"created_at":"2026-01-01T00:00:00Z","oplog_seq":1,"size_bytes":0,"checksum":"checksum-1"}';
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -764,15 +766,7 @@ describe("TS local device sync service", () => {
           return new Response(cursorBody, { headers: { "content-type": "application/json" } });
         }
         if (url.includes("/api/v1/sync/snapshots/latest")) {
-          return Response.json({
-            snapshot_id: "snapshot-1",
-            schema_version: 1,
-            covers_tables: [],
-            created_at: "2026-01-01T00:00:00Z",
-            oplog_seq: 1,
-            size_bytes: 0,
-            checksum: "checksum-1",
-          });
+          return new Response(snapshotBody, { headers: { "content-type": "application/json" } });
         }
         return Response.json({ success: true, key_version: 2 });
       },
@@ -844,6 +838,13 @@ describe("TS local device sync service", () => {
       });
       cursorBody =
         '{"cursor":1,"latest_snapshot":{"snapshot_id":"snapshot-2","schema_version":2147483648,"oplog_seq":1}}';
+      await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+      snapshotBody =
+        '{"snapshot_id":"snapshot-1","schema_version":1,"covers_tables":[],"created_at":"2026-01-01T00:00:00Z","oplog_seq":9007199254740992,"size_bytes":0,"checksum":"checksum-1"}';
+      cursorBody = '{"cursor":9007199254740993}';
       await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
         flowId,
         phase: { phase: "syncing", detail: "waiting_snapshot" },
@@ -967,6 +968,16 @@ describe("TS local device sync service", () => {
         }),
       ).rejects.toThrow("Failed to parse latest snapshot response");
 
+      snapshotResponse =
+        '{"snapshot_id":"snapshot-1","schema_version":1,"covers_tables":[],"created_at":"2026-01-01T00:05:00Z","oplog_seq":9007199254740993,"size_bytes":9007199254740993,"checksum":"checksum-1"}';
+      await expect(
+        service.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-6",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).rejects.toThrow("Device sync feature is disabled in this build.");
+
       snapshotResponse = {
         snapshot_id: "snapshot-1",
         schema_version: 1,
@@ -977,7 +988,7 @@ describe("TS local device sync service", () => {
       };
       await expect(
         service.confirmPairingWithBootstrap?.({
-          pairingId: "pairing-6",
+          pairingId: "pairing-7",
           proof: "proof",
           allowOverwrite: true,
         }),
