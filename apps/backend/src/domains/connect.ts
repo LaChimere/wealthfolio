@@ -894,17 +894,17 @@ function userInfoFromApi(value: unknown, rawJson: string | null = null): unknown
   const team = isRecord(value.team) ? value.team : null;
   return {
     id: requiredStringValue(value.id, "user info"),
-    full_name: optionalString(value.fullName ?? value.full_name),
+    full_name: optionalString(value.fullName),
     email: optionalString(value.email),
-    avatar_url: optionalString(value.avatarUrl ?? value.avatar_url),
+    avatar_url: optionalString(value.avatarUrl),
     locale: optionalString(value.locale),
-    week_starts_on_monday: optionalBoolean(value.weekStartsOnMonday ?? value.week_starts_on_monday),
+    week_starts_on_monday: optionalBoolean(value.weekStartsOnMonday),
     timezone: optionalString(value.timezone),
-    timezone_auto_sync: optionalBoolean(value.timezoneAutoSync ?? value.timezone_auto_sync),
-    time_format: optionalNumber(value.timeFormat ?? value.time_format),
-    date_format: optionalString(value.dateFormat ?? value.date_format),
-    team_id: optionalString(value.teamId ?? value.team_id),
-    team_role: optionalString(value.teamRole ?? value.team_role),
+    timezone_auto_sync: optionalBoolean(value.timezoneAutoSync),
+    time_format: optionalNumber(value.timeFormat),
+    date_format: optionalString(value.dateFormat),
+    team_id: optionalString(value.teamId),
+    team_role: optionalString(value.teamRole),
     team: team
       ? {
           id: requiredStringValue(team.id, "team info"),
@@ -927,17 +927,17 @@ function assertUserInfoRawShape(rawJson: string): void {
     rawJson,
     [
       ["id"],
-      ["fullName", "full_name"],
+      ["fullName"],
       ["email"],
-      ["avatarUrl", "avatar_url"],
+      ["avatarUrl"],
       ["locale"],
-      ["weekStartsOnMonday", "week_starts_on_monday"],
+      ["weekStartsOnMonday"],
       ["timezone"],
-      ["timezoneAutoSync", "timezone_auto_sync"],
-      ["timeFormat", "time_format"],
-      ["dateFormat", "date_format"],
-      ["teamId", "team_id"],
-      ["teamRole", "team_role"],
+      ["timezoneAutoSync"],
+      ["timeFormat"],
+      ["dateFormat"],
+      ["teamId"],
+      ["teamRole"],
       ["team"],
     ],
     "user info",
@@ -1001,31 +1001,20 @@ async function hasBrokerSyncEntitlement(
 function validateUserInfoFromApi(value: Record<string, unknown>): void {
   for (const field of [
     "fullName",
-    "full_name",
     "email",
     "avatarUrl",
-    "avatar_url",
     "locale",
     "timezone",
     "dateFormat",
-    "date_format",
     "teamId",
-    "team_id",
     "teamRole",
-    "team_role",
   ]) {
     assertOptionalConnectStringField(value, field, "user info");
   }
-  for (const field of [
-    "weekStartsOnMonday",
-    "week_starts_on_monday",
-    "timezoneAutoSync",
-    "timezone_auto_sync",
-  ]) {
+  for (const field of ["weekStartsOnMonday", "timezoneAutoSync"]) {
     assertOptionalConnectBooleanField(value, field, "user info");
   }
   assertOptionalConnectNumberField(value, "timeFormat", "user info");
-  assertOptionalConnectNumberField(value, "time_format", "user info");
 
   const team = value.team;
   if (team !== undefined && team !== null && !isRecord(team)) {

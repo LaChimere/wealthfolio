@@ -640,16 +640,24 @@ describe("TS Connect local session service", () => {
         return Response.json({
           id: "user-1",
           fullName: "Ada Lovelace",
+          full_name: 123,
           email: "ada@example.test",
           avatarUrl: "https://example.test/avatar.png",
+          avatar_url: 123,
           locale: "en",
           weekStartsOnMonday: true,
+          week_starts_on_monday: "true",
           timezone: "UTC",
           timezoneAutoSync: false,
+          timezone_auto_sync: "false",
           timeFormat: 24,
+          time_format: "24",
           dateFormat: "yyyy-MM-dd",
+          date_format: 123,
           teamId: "team-1",
+          team_id: 123,
           teamRole: "owner",
+          team_role: 123,
           team: {
             id: "team-1",
             name: null,
@@ -812,7 +820,7 @@ describe("TS Connect local session service", () => {
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
     let responseBody =
-      '{"id":"user-1","fullName":"Ada","full_name":"Lovelace","team":{"id":"team-1"}}';
+      '{"id":"user-1","fullName":"Ada","fullName":"Lovelace","team":{"id":"team-1"}}';
     const service = createLocalConnectService({
       db,
       secretService,
