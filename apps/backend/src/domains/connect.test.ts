@@ -2382,6 +2382,41 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects unsafe local import-run pagination before database reads", () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      accountService: {
+        getAllAccounts: () => [],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("not used");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      expect(() =>
+        service.getImportRuns({
+          limit: Number.MAX_SAFE_INTEGER + 1,
+          offset: 0,
+        }),
+      ).toThrow("import run pagination values must be safe integers");
+      expect(() =>
+        service.getImportRuns({
+          limit: 50,
+          offset: Number.MAX_SAFE_INTEGER + 1,
+        }),
+      ).toThrow("import run pagination values must be safe integers");
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs pure cash broker activities through activity bulk mutation", async () => {
     const db = new Database(":memory:");
     db.exec(`

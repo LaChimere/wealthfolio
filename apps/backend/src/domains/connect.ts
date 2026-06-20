@@ -456,6 +456,7 @@ function getLocalBrokerSyncStates(db: Database): unknown[] {
 }
 
 function getLocalImportRuns(db: Database, request: ConnectImportRunsRequest): unknown[] {
+  validateConnectImportRunsPagination(request);
   const params: Array<string | number> = [];
   const runType = request.runType;
   const hasRunTypeFilter = runType !== undefined;
@@ -480,6 +481,16 @@ function getLocalImportRuns(db: Database, request: ConnectImportRunsRequest): un
     )
     .all(...params)
     .map(importRunFromRow);
+}
+
+function validateConnectImportRunsPagination(request: ConnectImportRunsRequest): void {
+  if (!Number.isSafeInteger(request.limit) || !Number.isSafeInteger(request.offset)) {
+    throw new ConnectServiceError(
+      "bad_request",
+      "import run pagination values must be safe integers",
+      400,
+    );
+  }
 }
 
 function importRunFromRow(row: ImportRunRow): unknown {
