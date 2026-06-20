@@ -249,6 +249,51 @@ describe("TS alternative assets domain", () => {
     }
   });
 
+  test("prefers manual alternative asset quotes over broker quotes for the same day", async () => {
+    const db = createAlternativeAssetsDb();
+    const service = createAlternativeAssetService(db, { now: fixedNow });
+
+    try {
+      const created = await service.createAlternativeAsset({
+        kind: "vehicle",
+        name: "Car",
+        currency: "USD",
+        currentValue: "38000.00",
+        valueDate: "2026-05-01",
+      });
+      db.prepare(
+        `
+          INSERT INTO quotes (
+            id, asset_id, day, source, close, currency, created_at, timestamp
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "broker-quote-id",
+        created.assetId,
+        "2026-05-14",
+        "BROKER",
+        "39000.00",
+        "USD",
+        "2026-05-14T09:00:00+00:00",
+        "2026-05-14T12:00:00+00:00",
+      );
+      await service.updateValuation(created.assetId, {
+        value: "40000.00",
+        date: "2026-05-14",
+      });
+
+      await expect(Promise.resolve(service.getAlternativeHoldings())).resolves.toEqual([
+        expect.objectContaining({
+          id: created.assetId,
+          marketValue: "40000",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("queues quote update sync callbacks when valuation reuses an existing UUID quote", async () => {
     const db = createAlternativeAssetsDb();
     const quoteEvents: AlternativeQuoteSyncEvent[] = [];
@@ -494,6 +539,34 @@ describe("TS alternative assets domain", () => {
         limited: true,
         purchase_price: "9000.00",
         purchase_date: "2025-01-01",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("removes only requested alternative asset metadata keys", async () => {
+    const db = createAlternativeAssetsDb();
+    const service = createAlternativeAssetService(db, { now: fixedNow });
+
+    try {
+      const asset = await service.createAlternativeAsset({
+        kind: "collectible",
+        name: "Watch",
+        currency: "USD",
+        currentValue: "10000",
+        valueDate: "2026-05-14",
+        metadata: { sub_type: "luxury_watch", serial: "12345", limited: true },
+      });
+
+      await service.updateAssetDetails({
+        assetId: asset.assetId,
+        metadata: { serial: null },
+      });
+
+      expect(JSON.parse(readAsset(db, asset.assetId).metadata ?? "{}")).toEqual({
+        sub_type: "luxury_watch",
+        limited: true,
       });
     } finally {
       db.close();
