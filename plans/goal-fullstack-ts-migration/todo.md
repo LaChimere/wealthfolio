@@ -5504,6 +5504,10 @@ contract:
   Coverage includes counting early proleptic-year trading days without
   JavaScript's 1900-year remap so `0004-02-27` to `0004-03-01` remains a
   one-trading-day warning instead of an over-counted critical issue.
+- `pr5-activity-date-proleptic-year-validation`: verification passed: focused
+  activity tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes creating an activity on Rust-compatible `0000-02-29` while
+  preserving existing invalid date rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
