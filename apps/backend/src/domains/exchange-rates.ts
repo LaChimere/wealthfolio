@@ -204,6 +204,7 @@ export function createExchangeRateRepository(
           `,
         )
         .all(ASSET_KIND_FX)
+        .filter((row) => timestampSortValue(row.timestamp) !== Number.NEGATIVE_INFINITY)
         .map(exchangeRateFromQuoteWithAsset);
     },
     getLatestExchangeRate(fromCurrency, toCurrency) {
@@ -214,7 +215,7 @@ export function createExchangeRateRepository(
     },
     getHistoricalRatesBySymbol(symbol, start, end) {
       return db
-        .query<QuoteWithAssetRow, [string, string, string, string]>(
+        .query<QuoteWithAssetRow, [string, string]>(
           `
             SELECT ${quoteColumns("q")},
               a.instrument_symbol AS asset_instrument_symbol,
@@ -222,12 +223,15 @@ export function createExchangeRateRepository(
             FROM quotes q
             INNER JOIN assets a ON q.asset_id = a.id
             WHERE (a.instrument_key = ? OR a.id = ?)
-              AND q.timestamp >= ?
-              AND q.timestamp <= ?
             ORDER BY q.timestamp ASC
           `,
         )
-        .all(symbol, symbol, start.toISOString(), end.toISOString())
+        .all(symbol, symbol)
+        .filter((row) => timestampInRange(row.timestamp, start, end))
+        .filter((row) => timestampSortValue(row.timestamp) !== Number.NEGATIVE_INFINITY)
+        .sort(
+          (left, right) => timestampSortValue(left.timestamp) - timestampSortValue(right.timestamp),
+        )
         .map(exchangeRateFromQuoteWithAsset);
     },
     addExchangeRate(newRate) {
@@ -526,6 +530,9 @@ class CurrencyConverter {
       }
 
       const date = dateStringFromTimestamp(exchangeRate.timestamp);
+      if (!date) {
+        continue;
+      }
       const forwardRate = decimalOrZero(exchangeRate.rate);
       this.addRate(exchangeRate.fromCurrency, exchangeRate.toCurrency, date, forwardRate);
       if (!forwardRate.isZero()) {
@@ -1098,7 +1105,7 @@ function utcDateString(date: Date): string {
 
 function dateStringFromTimestamp(timestamp: string): string {
   const parsed = parseTimestampDate(timestamp);
-  return utcDateString(parsed ?? new Date(timestampNow()));
+  return parsed ? utcDateString(parsed) : "";
 }
 
 function daysBetween(left: string, right: string): number {
@@ -1156,6 +1163,11 @@ function timestampSortValue(value: string): number {
   return parseTimestampDate(value)?.getTime() ?? Number.NEGATIVE_INFINITY;
 }
 
+function timestampInRange(value: string, start: Date, end: Date): boolean {
+  const parsed = parseTimestampDate(value);
+  return parsed !== null && parsed >= start && parsed <= end;
+}
+
 function parseExpandedRfc3339DateTime(value: string): Date | null {
   const match =
     /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(
@@ -1185,7 +1197,9 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
   const minute = Number(minuteRaw);
   const second = Number(secondRaw);
   const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
-  const offsetMinutes = zoneRaw === "Z" ? 0 : Number(zoneHourRaw) * 60 + Number(zoneMinuteRaw);
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  const offsetMinutes = zoneRaw === "Z" ? 0 : zoneHour * 60 + zoneMinute;
   const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
   const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
   local.setUTCFullYear(year, month - 1, day);
@@ -1196,7 +1210,9 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
     local.getUTCDate() !== day ||
     hour > 23 ||
     minute > 59 ||
-    second > 59
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
   ) {
     return null;
   }

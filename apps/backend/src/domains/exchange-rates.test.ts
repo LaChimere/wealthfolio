@@ -411,6 +411,7 @@ describe("TS exchange rates domain", () => {
         day: "2026-05-03",
         close: "1.20",
         source: "MANUAL",
+        timestamp: "2026-05-03T16:00:00+00:00",
       });
       seedQuote(db, {
         id: "included-end",
@@ -433,6 +434,73 @@ describe("TS exchange rates domain", () => {
       expect(() => service.getHistoricalRates("USD", "CAD", 100_000_000_000)).toThrow(
         "days is outside supported date range",
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reads expanded-year historical rates with Rust timestamp bounds", () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      now: () => new Date("+010000-01-02T16:00:00.000Z"),
+    });
+
+    try {
+      seedFxAsset(db, { id: "usd-jpy", from: "USD", to: "JPY" });
+      seedQuote(db, {
+        id: "expanded",
+        assetId: "usd-jpy",
+        day: "+10000-01-01",
+        close: "2",
+        source: "MANUAL",
+        timestamp: "+10000-01-01T16:00:00+00:00",
+      });
+      seedQuote(db, {
+        id: "invalid-offset",
+        assetId: "usd-jpy",
+        day: "2026-01-01",
+        close: "99",
+        source: "MANUAL",
+        timestamp: "2026-01-01T00:00:00+24:00",
+      });
+
+      expect(service.getHistoricalRates("USD", "JPY", 1).map((rate) => rate.rate)).toEqual(["2"]);
+      service.initialize();
+      expect(service.convertCurrencyForDate("10", "USD", "JPY", "2026-01-01")).toBe("20");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reads historical FX rates across chrono expanded-year boundaries", () => {
+    const db = createExchangeRatesDb();
+    const service = createExchangeRateService(createExchangeRateRepository(db), {
+      now: () => new Date("+010000-01-02T16:00:00.000Z"),
+    });
+
+    try {
+      seedFxAsset(db, { id: "usd-jpy", from: "USD", to: "JPY" });
+      seedQuote(db, {
+        id: "boundary-start",
+        assetId: "usd-jpy",
+        day: "9999-12-31",
+        close: "1",
+        source: "MANUAL",
+        timestamp: "9999-12-31T16:00:00.000Z",
+      });
+      seedQuote(db, {
+        id: "boundary-end",
+        assetId: "usd-jpy",
+        day: "+10000-01-01",
+        close: "2",
+        source: "MANUAL",
+        timestamp: "+10000-01-01T16:00:00+00:00",
+      });
+
+      expect(service.getHistoricalRates("USD", "JPY", 2).map((rate) => rate.rate)).toEqual([
+        "1",
+        "2",
+      ]);
     } finally {
       db.close();
     }
