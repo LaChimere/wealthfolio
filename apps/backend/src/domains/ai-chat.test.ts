@@ -71,6 +71,15 @@ describe("TS AI chat domain", () => {
         tags: [],
       });
       expect(() => service.listThreads({ cursor: "" })).toThrow("Expected format");
+      expect(() => service.listThreads({ cursor: "2:2026-01-03T00:00:00Z:thread-b" })).toThrow(
+        "Invalid is_pinned value: 2",
+      );
+      expect(() => service.listThreads({ cursor: "1e0:2026-01-03T00:00:00Z:thread-b" })).toThrow(
+        "Invalid is_pinned value: 1e0",
+      );
+      expect(() => service.listThreads({ cursor: "0:2026-01-03T00:00:00Z:" })).toThrow(
+        "Invalid cursor fields",
+      );
     } finally {
       db.close();
     }
