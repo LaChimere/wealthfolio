@@ -5266,6 +5266,12 @@ contract:
   for device `trustedKeyVersion` / `trusted_key_version`, rejecting raw
   out-of-range numeric tokens such as `1e999` that `JSON.parse` converts to
   `Infinity`.
+- `pr5-device-sync-device-finite-number`: verification passed: focused device
+  listing tests, full standalone device-sync tests, full `bun run check`,
+  pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes Rust
+  `Option<f64>` parity for standalone device-sync `trustedKeyVersion` /
+  `trusted_key_version`, rejecting raw out-of-range numeric tokens such as
+  `1e999` that `JSON.parse` converts to `Infinity`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
