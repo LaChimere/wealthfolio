@@ -5702,6 +5702,10 @@ contract:
 - `pr5-custom-provider-invalid-header-skip`: verification passed: focused
   custom-provider tests. Coverage includes skipping invalid user header names
   and values like Rust header parsing while preserving valid/secret headers.
+- `pr5-custom-provider-row-currency-default`: verification passed: focused
+  custom-provider tests. Coverage includes defaulting production JSON/CSV/HTML
+  row fetch currencies to `USD` when no currency hint/path is present, matching
+  Rust custom scraper quote generation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

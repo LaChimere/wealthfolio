@@ -498,7 +498,7 @@ describe("TS custom providers domain", () => {
         }),
       ).resolves.toEqual({
         statusCode: 200,
-        currency: null,
+        currency: "USD",
         rows: [
           {
             price: 4.832,
@@ -1067,7 +1067,7 @@ describe("TS custom providers domain", () => {
         }),
       ).resolves.toEqual({
         statusCode: 200,
-        currency: null,
+        currency: "USD",
         rows: [
           {
             price: 4.832,
@@ -1091,7 +1091,7 @@ describe("TS custom providers domain", () => {
         }),
       ).resolves.toEqual({
         statusCode: 200,
-        currency: null,
+        currency: "USD",
         rows: [
           {
             price: 4.832,

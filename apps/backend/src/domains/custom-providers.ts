@@ -516,7 +516,7 @@ async function fetchCustomProviderSourceRows(
   if (payload.format === "csv") {
     return {
       statusCode,
-      currency: payload.currency ?? null,
+      currency: payload.currency ?? "USD",
       rows: extractCsvRows(body, payload),
     };
   }
@@ -524,7 +524,7 @@ async function fetchCustomProviderSourceRows(
     const locale = runtimeHtmlLocale(payload, body);
     return {
       statusCode,
-      currency: payload.currency ?? null,
+      currency: payload.currency ?? "USD",
       rows: extractHtmlTableRows(body, payload, locale),
     };
   }
@@ -532,7 +532,7 @@ async function fetchCustomProviderSourceRows(
     const result = testHtmlSource(payload, statusCode, body, runtimeHtmlLocale(payload, body));
     return {
       statusCode,
-      currency: payload.currency ?? null,
+      currency: payload.currency ?? "USD",
       rows:
         result.success && result.price !== null
           ? [
@@ -837,12 +837,12 @@ function resolveJsonCurrency(
   now: Date,
 ): string | null {
   if (!payload.currencyPath) {
-    return payload.currency ?? null;
+    return payload.currency ?? "USD";
   }
   return (
     extractJsonString(body, expandTemplate(payload.currencyPath, context, now)) ??
     payload.currency ??
-    null
+    "USD"
   );
 }
 
