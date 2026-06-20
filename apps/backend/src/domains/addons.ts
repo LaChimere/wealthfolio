@@ -450,8 +450,8 @@ async function submitAddonRating(
   context: AddonStoreContext,
   request: AddonRatingRequest,
 ): Promise<unknown> {
-  if (request.rating < 1 || request.rating > 5) {
-    throw new Error("Rating must be between 1 and 5");
+  if (!Number.isInteger(request.rating) || request.rating < 1 || request.rating > 5) {
+    throw new Error("Rating must be an integer between 1 and 5");
   }
   const body: Record<string, unknown> = { rating: request.rating };
   if (request.review !== undefined) {

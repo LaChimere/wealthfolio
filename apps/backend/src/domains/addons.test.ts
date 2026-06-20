@@ -462,7 +462,10 @@ describe("TS addon domain", () => {
     expect(calls[1]?.headers.get("x-instance-id")).toBe("");
 
     await expect(service.submitRating({ addonId: "addon/id", rating: 0 })).rejects.toThrow(
-      "Rating must be between 1 and 5",
+      "Rating must be an integer between 1 and 5",
+    );
+    await expect(service.submitRating({ addonId: "addon/id", rating: 4.5 })).rejects.toThrow(
+      "Rating must be an integer between 1 and 5",
     );
     expect(calls).toHaveLength(3);
 
