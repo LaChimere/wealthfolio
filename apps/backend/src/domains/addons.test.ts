@@ -704,6 +704,15 @@ describe("TS addon domain", () => {
     expect(existsSync(path.join(appDataDir, "addons", "other-addon"))).toBe(false);
   });
 
+  test("reports missing staged addon files with Rust-compatible errors", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+
+    await expect(
+      service.installAddonFromStaging({ addonId: "missing-addon", enableAfterInstall: true }),
+    ).rejects.toThrow("Staged addon file not found for addon: missing-addon");
+  });
+
   test("rejects store updates whose manifest id does not match the requested add-on", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
     writeAddon(appDataDir, "requested-addon", {

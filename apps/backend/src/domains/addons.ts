@@ -297,6 +297,9 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
 
     async installAddonFromStaging(request) {
       const zipPath = getStagingZipPath(appDataDir, request.addonId);
+      if (!existsSync(zipPath)) {
+        throw new Error(`Staged addon file not found for addon: ${request.addonId}`);
+      }
       const zipData = readFileSync(zipPath);
       ensureAddonManifestMatchesRequest(extractAddonZip(zipData).metadata, request.addonId);
       const manifest = installAddonZip(appDataDir, {

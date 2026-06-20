@@ -5645,6 +5645,9 @@ contract:
   full `bun run check`. Coverage includes Rust-compatible non-success rating
   submission error messages while preserving store request headers and success
   JSON parsing.
+- `pr5-addon-staged-missing-file`: verification passed: focused add-on tests and
+  full `bun run check`. Coverage includes Rust-compatible missing staged ZIP
+  errors before filesystem reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
