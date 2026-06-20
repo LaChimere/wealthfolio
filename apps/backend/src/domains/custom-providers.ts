@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { STATUS_CODES } from "node:http";
 
 import { load, type CheerioAPI } from "cheerio";
 import type { AnyNode, Element } from "domhandler";
@@ -1310,10 +1311,17 @@ function parseContentLength(value: string | null): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+const RUST_HTTP_STATUS_REASON_OVERRIDES: Record<number, string> = {
+  418: "I'm a teapot",
+  509: "<unknown status code>",
+};
+
 function formatHttpStatus(response: Response): string {
-  return response.statusText
-    ? `${response.status} ${response.statusText}`
-    : response.status.toString();
+  const reason =
+    RUST_HTTP_STATUS_REASON_OVERRIDES[response.status] ??
+    STATUS_CODES[response.status] ??
+    "<unknown status code>";
+  return `${response.status} ${reason}`;
 }
 
 function extractOptionalJsonNumber(

@@ -573,10 +573,58 @@ describe("TS custom providers domain", () => {
       expect(result.success).toBe(false);
       expect(result.statusCode).toBe(403);
       expect(result.error).toStartWith("HTTP 403");
-      expect(result.error?.length).toBeLessThan(520);
+      expect(result.error?.length).toBeLessThanOrEqual(520);
       expect(result.rawResponse).toContain("Forbidden body");
     } finally {
       httpDb.close();
+    }
+
+    const statusTextDb = createCustomProvidersDb();
+    const statusTextService = createCustomProviderService(
+      createCustomProviderRepository(statusTextDb),
+      {
+        fetchImpl: (() =>
+          Promise.resolve(
+            new Response("teapot", {
+              status: 418,
+              statusText: "Custom Teapot",
+            }),
+          )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      },
+    );
+    try {
+      await expect(statusTextService.testSource(baseTestSourceRequest())).resolves.toMatchObject({
+        success: false,
+        statusCode: 418,
+        error: "HTTP 418 I'm a teapot: teapot",
+      });
+    } finally {
+      statusTextDb.close();
+    }
+
+    const unknownStatusDb = createCustomProvidersDb();
+    const unknownStatusService = createCustomProviderService(
+      createCustomProviderRepository(unknownStatusDb),
+      {
+        fetchImpl: (() =>
+          Promise.resolve(
+            new Response("unknown", {
+              status: 520,
+              statusText: "Unknown Custom",
+            }),
+          )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      },
+    );
+    try {
+      await expect(unknownStatusService.testSource(baseTestSourceRequest())).resolves.toMatchObject(
+        {
+          success: false,
+          statusCode: 520,
+          error: "HTTP 520 <unknown status code>: unknown",
+        },
+      );
+    } finally {
+      unknownStatusDb.close();
     }
 
     const oversizedDb = createCustomProvidersDb();

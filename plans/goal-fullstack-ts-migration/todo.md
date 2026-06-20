@@ -5706,6 +5706,9 @@ contract:
   custom-provider tests. Coverage includes defaulting production JSON/CSV/HTML
   row fetch currencies to `USD` when no currency hint/path is present, matching
   Rust custom scraper quote generation.
+- `pr5-custom-provider-http-status-text`: verification passed: focused
+  custom-provider tests. Coverage includes canonical Rust-compatible status
+  reason phrases and `<unknown status code>` fallback for source HTTP errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
