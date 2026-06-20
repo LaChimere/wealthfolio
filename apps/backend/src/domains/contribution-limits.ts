@@ -482,9 +482,12 @@ function getContributionActivities(
 ): ContributionActivityRow[] {
   const accountPlaceholders = accountIds.map(() => "?").join(", ");
   const typePlaceholders = CONTRIBUTION_ACTIVITY_TYPES.map(() => "?").join(", ");
-  return db
-    .query<ContributionActivityRow, string[]>(
-      `
+  const startBound = toRustUtcRfc3339(startUtc);
+  const endBound = toRustUtcRfc3339(endExclusiveUtc);
+  if (/^\d{4}-/.test(startBound) && /^\d{4}-/.test(endBound)) {
+    return db
+      .query<ContributionActivityRow, string[]>(
+        `
         SELECT
           activities.account_id,
           activities.activity_type,
@@ -501,13 +504,42 @@ function getContributionActivities(
           AND activities.activity_date >= ?
           AND activities.activity_date < ?
       `,
+      )
+      .all(...accountIds, ...CONTRIBUTION_ACTIVITY_TYPES, startBound, endBound);
+  }
+  return db
+    .query<ContributionActivityRow, string[]>(
+      `
+        SELECT
+          activities.account_id,
+          activities.activity_type,
+          activities.activity_date,
+          activities.amount,
+          activities.currency,
+          activities.metadata,
+          activities.source_group_id
+        FROM activities
+        INNER JOIN accounts ON activities.account_id = accounts.id
+        WHERE accounts.id IN (${accountPlaceholders})
+          AND accounts.is_archived = 0
+          AND activities.activity_type IN (${typePlaceholders})
+      `,
     )
-    .all(
-      ...accountIds,
-      ...CONTRIBUTION_ACTIVITY_TYPES,
-      toRustUtcRfc3339(startUtc),
-      toRustUtcRfc3339(endExclusiveUtc),
-    );
+    .all(...accountIds, ...CONTRIBUTION_ACTIVITY_TYPES)
+    .filter((activity) => contributionActivityInRange(activity, startUtc, endExclusiveUtc));
+}
+
+function contributionActivityInRange(
+  activity: ContributionActivityRow,
+  startUtc: Date,
+  endExclusiveUtc: Date,
+): boolean {
+  try {
+    const activityInstant = parseActivityInstant(activity.activity_date);
+    return activityInstant >= startUtc && activityInstant < endExclusiveUtc;
+  } catch {
+    return false;
+  }
 }
 
 function shouldCountContribution(
@@ -600,8 +632,9 @@ function utcMsFromParts(
   hour: number,
   minute: number,
   second: number,
+  millisecond = 0,
 ): number {
-  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, second));
+  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
   date.setUTCFullYear(year, monthIndex, day);
   return date.getTime();
 }
@@ -669,7 +702,7 @@ function normalizeTimezone(timezone: string | undefined): string {
 }
 
 function parseActivityInstant(value: string): Date {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (/^[+-]?\d{4,}-\d{2}-\d{2}$/.test(value)) {
     return parseDateTime(`${value}T00:00:00Z`);
   }
   return parseDateTime(value);
@@ -677,17 +710,71 @@ function parseActivityInstant(value: string): Date {
 
 function parseDateTime(value: string): Date {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) {
+  if (!Number.isNaN(parsed.valueOf())) {
+    return parsed;
+  }
+  const expanded = parseExpandedRfc3339DateTime(value);
+  if (!expanded) {
     throw new Error(`Invalid date: ${value}`);
   }
-  return parsed;
+  return expanded;
 }
 
 function parseRfc3339DateTime(value: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+  if (!/^[+-]?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
     throw new Error(`Invalid date: ${value}`);
   }
   return parseDateTime(value);
+}
+
+function parseExpandedRfc3339DateTime(value: string): Date | null {
+  const match =
+    /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const offsetMinutes = zoneRaw === "Z" ? 0 : Number(zoneHourRaw) * 60 + Number(zoneMinuteRaw);
+  const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
+  const utcMs =
+    utcMsFromParts(year, month - 1, day, hour, minute, second, millisecond) - offset * 60_000;
+  const parsed = new Date(utcMs);
+  if (
+    Number.isNaN(parsed.valueOf()) ||
+    !Number.isInteger(year) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+  return parsed;
 }
 
 function parseDecimalOrNull(value: string | null): Decimal | null {
@@ -702,8 +789,13 @@ function isDecimalString(value: string): boolean {
 }
 
 function toRustUtcRfc3339(date: Date): string {
-  const iso = date.toISOString();
-  return iso.endsWith(".000Z") ? iso.replace(".000Z", "+00:00") : iso.replace("Z", "+00:00");
+  const millisecond = date.getUTCMilliseconds();
+  const fractional = millisecond === 0 ? "" : `.${millisecond.toString().padStart(3, "0")}`;
+  return `${padYear(date.getUTCFullYear())}-${pad2(date.getUTCMonth() + 1)}-${pad2(
+    date.getUTCDate(),
+  )}T${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(
+    date.getUTCSeconds(),
+  )}${fractional}+00:00`;
 }
 
 function pad2(value: number): string {
@@ -711,7 +803,14 @@ function pad2(value: number): string {
 }
 
 function padYear(value: number): string {
-  return value >= 0 && value <= 9999 ? value.toString().padStart(4, "0") : value.toString();
+  if (value >= 0 && value <= 9999) {
+    return value.toString().padStart(4, "0");
+  }
+  if (value > 9999) {
+    return `+${value}`;
+  }
+  const absolute = Math.abs(value);
+  return `-${absolute < 10_000 ? absolute.toString().padStart(4, "0") : absolute}`;
 }
 
 function resolveBaseCurrency(options: ContributionLimitServiceOptions): string | undefined {

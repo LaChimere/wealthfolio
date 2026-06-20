@@ -620,6 +620,62 @@ describe("TS contribution limits domain", () => {
       db.close();
     }
   });
+
+  test("formats expanded contribution years like Rust chrono", async () => {
+    const db = createContributionLimitsDb();
+    const fxDates: string[] = [];
+    const service = createContributionLimitService(createContributionLimitRepository(db), {
+      baseCurrency: "USD",
+      calculateDeposits: createContributionDepositCalculator(
+        db,
+        exchangeRateStub((amount, _from, _to, date) => {
+          fxDates.push(date);
+          return amount;
+        }),
+        () => "UTC",
+      ),
+    });
+
+    try {
+      seedAccount(db, "acc1");
+      seedActivity(db, {
+        id: "expanded-start",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "11",
+        currency: "USD",
+        activityDate: "+10000-01-01T00:00:00+00:00",
+      });
+      seedActivity(db, {
+        id: "expanded-date-only",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "17",
+        currency: "USD",
+        activityDate: "+10000-01-01",
+      });
+      seedActivity(db, {
+        id: "expanded-next",
+        accountId: "acc1",
+        type: "DEPOSIT",
+        amount: "13",
+        currency: "USD",
+        activityDate: "+10001-01-01T00:00:00+00:00",
+      });
+
+      const created = await service.createContributionLimit(
+        newLimit({ accountIds: "acc1", contributionYear: 10_000 }),
+      );
+      await expect(
+        service.calculateDepositsForContributionLimit(created.id),
+      ).resolves.toMatchObject({
+        total: 28,
+      });
+      expect(fxDates).toEqual(["+10000-01-01", "+10000-01-01"]);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 export function createContributionLimitsDb(): Database {

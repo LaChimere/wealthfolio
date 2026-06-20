@@ -539,7 +539,7 @@ class CurrencyConverter {
     }
 
     for (const history of this.rates.values()) {
-      history.sort((left, right) => left.date.localeCompare(right.date));
+      history.sort((left, right) => dateOnlyToUtcMs(left.date) - dateOnlyToUtcMs(right.date));
     }
   }
 
@@ -607,11 +607,13 @@ class CurrencyConverter {
 
     let previous: { date: string; rate: Decimal } | undefined;
     let next: { date: string; rate: Decimal } | undefined;
+    const targetMs = dateOnlyToUtcMs(date);
     for (const entry of history) {
-      if (entry.date <= date) {
+      const entryMs = dateOnlyToUtcMs(entry.date);
+      if (entryMs <= targetMs) {
         previous = entry;
       }
-      if (entry.date >= date) {
+      if (entryMs >= targetMs) {
         next = entry;
         break;
       }
@@ -742,16 +744,18 @@ function latestFxQuotesByAssetId(db: Database): Map<string, QuoteRow> {
         SELECT ${quoteColumns("q")}
         FROM quotes q
         WHERE q.asset_id IN (SELECT id FROM assets WHERE kind = ?)
-          AND (q.asset_id, q.timestamp) IN (
-            SELECT asset_id, MAX(timestamp)
-            FROM quotes
-            GROUP BY asset_id
-          )
-        ORDER BY q.asset_id
+        ORDER BY q.asset_id ASC
       `,
     )
     .all(ASSET_KIND_FX);
-  return new Map(rows.map((row) => [row.asset_id, row]));
+  const latest = new Map<string, QuoteRow>();
+  for (const row of rows) {
+    const existing = latest.get(row.asset_id);
+    if (!existing || timestampSortValue(row.timestamp) > timestampSortValue(existing.timestamp)) {
+      latest.set(row.asset_id, row);
+    }
+  }
+  return latest;
 }
 
 function exchangeRateFromAssetAndQuote(asset: AssetRow, quote: QuoteRow | undefined): ExchangeRate {
@@ -802,7 +806,7 @@ function exchangeRateFromQuoteWithAsset(row: QuoteWithAssetRow): ExchangeRate {
 }
 
 function getLatestExchangeRateByAssetIdentity(db: Database, identity: string): ExchangeRate | null {
-  const row = db
+  const rows = db
     .query<QuoteWithAssetRow, [string, string]>(
       `
         SELECT ${quoteColumns("q")},
@@ -812,10 +816,16 @@ function getLatestExchangeRateByAssetIdentity(db: Database, identity: string): E
         INNER JOIN assets a ON q.asset_id = a.id
         WHERE a.instrument_key = ? OR a.id = ?
         ORDER BY q.timestamp DESC
-        LIMIT 1
       `,
     )
-    .get(identity, identity);
+    .all(identity, identity);
+  const row = rows.reduce<QuoteWithAssetRow | null>(
+    (latest, candidate) =>
+      latest && timestampSortValue(latest.timestamp) >= timestampSortValue(candidate.timestamp)
+        ? latest
+        : candidate,
+    null,
+  );
   return row ? exchangeRateFromQuoteWithAsset(row) : null;
 }
 
@@ -1064,12 +1074,15 @@ function pairKey(fromCurrency: string, toCurrency: string): string {
 }
 
 function parseTimestampOrNow(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? timestampNow() : parsed.toISOString();
+  const parsed = parseTimestampDate(value);
+  if (!parsed) {
+    return timestampNow();
+  }
+  return timestampToString(parsed);
 }
 
 function parseDateInput(date: string | Date): string {
-  const parsed = date instanceof Date ? date : new Date(`${date}T00:00:00.000Z`);
+  const parsed = date instanceof Date ? date : dateOnlyToDate(date);
   if (Number.isNaN(parsed.valueOf())) {
     throw new Error(`Invalid date: ${String(date)}`);
   }
@@ -1077,17 +1090,131 @@ function parseDateInput(date: string | Date): string {
 }
 
 function utcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return `${chronoYearString(date.getUTCFullYear())}-${String(date.getUTCMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 function dateStringFromTimestamp(timestamp: string): string {
-  return parseTimestampOrNow(timestamp).slice(0, 10);
+  const parsed = parseTimestampDate(timestamp);
+  return utcDateString(parsed ?? new Date(timestampNow()));
 }
 
 function daysBetween(left: string, right: string): number {
-  const leftMs = Date.parse(`${left}T00:00:00.000Z`);
-  const rightMs = Date.parse(`${right}T00:00:00.000Z`);
+  const leftMs = dateOnlyToUtcMs(left);
+  const rightMs = dateOnlyToUtcMs(right);
   return Math.round((rightMs - leftMs) / (24 * 60 * 60 * 1000));
+}
+
+function dateOnlyToDate(value: string): Date {
+  return new Date(dateOnlyToUtcMs(value));
+}
+
+function dateOnlyToUtcMs(value: string): number {
+  const match = /^([+-]?\d{4,})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, yearRaw, monthRaw, dayRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(date.valueOf()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return Number.NaN;
+  }
+  return date.getTime();
+}
+
+function chronoYearString(year: number): string {
+  if (year >= 0 && year <= 9999) {
+    return year.toString().padStart(4, "0");
+  }
+  if (year > 9999) {
+    return `+${year}`;
+  }
+  const absolute = Math.abs(year);
+  return `-${absolute < 10_000 ? absolute.toString().padStart(4, "0") : absolute}`;
+}
+
+function parseTimestampDate(value: string): Date | null {
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.valueOf())) {
+    return parsed;
+  }
+  return parseExpandedRfc3339DateTime(value);
+}
+
+function timestampSortValue(value: string): number {
+  return parseTimestampDate(value)?.getTime() ?? Number.NEGATIVE_INFINITY;
+}
+
+function parseExpandedRfc3339DateTime(value: string): Date | null {
+  const match =
+    /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const offsetMinutes = zoneRaw === "Z" ? 0 : Number(zoneHourRaw) * 60 + Number(zoneMinuteRaw);
+  const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+  return new Date(local.getTime() - offset * 60_000);
+}
+
+function timestampToString(date: Date): string {
+  const year = date.getUTCFullYear();
+  if (year >= 0 && year <= 9999) {
+    return date.toISOString();
+  }
+  const millisecond = date.getUTCMilliseconds();
+  const fractional = millisecond === 0 ? "" : `.${millisecond.toString().padStart(3, "0")}`;
+  return `${chronoYearString(year)}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}T${String(date.getUTCHours()).padStart(2, "0")}:${String(
+    date.getUTCMinutes(),
+  ).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(2, "0")}${fractional}+00:00`;
 }
 
 function publishAssetsCreated(eventBus: BackendEventBus | undefined, assetId: string): void {

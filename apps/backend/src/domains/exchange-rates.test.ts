@@ -271,6 +271,23 @@ describe("TS exchange rates domain", () => {
         close: "3",
         source: "MANUAL",
       });
+      seedFxAsset(db, { id: "usd-jpy", from: "USD", to: "JPY" });
+      seedQuote(db, {
+        id: "usd-jpy-expanded",
+        assetId: "usd-jpy",
+        day: "+10000-01-01",
+        close: "2",
+        source: "MANUAL",
+        timestamp: "+10000-01-01T16:00:00+00:00",
+      });
+      seedQuote(db, {
+        id: "usd-jpy-expanded-next",
+        assetId: "usd-jpy",
+        day: "+10001-01-01",
+        close: "4",
+        source: "MANUAL",
+        timestamp: "+10001-01-01T16:00:00+00:00",
+      });
 
       service.initialize();
 
@@ -281,6 +298,11 @@ describe("TS exchange rates domain", () => {
       expect(service.convertCurrency("1e-7", "USD", "USD")).toBe("1e-7");
       expect(service.convertCurrencyForDate("10", "USD", "CHF", "2023-10-26")).toBe("20");
       expect(service.convertCurrencyForDate("1e-7", "USD", "CHF", "2023-10-26")).toBe("2e-7");
+      expect(service.convertCurrencyForDate("10", "USD", "JPY", "+10000-01-01")).toBe("20");
+      expect(createExchangeRateRepository(db).getLatestExchangeRate("USD", "JPY")).toMatchObject({
+        rate: "4",
+        timestamp: "+10001-01-01T16:00:00+00:00",
+      });
       expect(service.convertCurrency("6", "EUR", "GBP")).toBe("18");
       expect(() => service.convertCurrency("not-a-number", "USD", "CAD")).toThrow(
         "amount must be a decimal string",
