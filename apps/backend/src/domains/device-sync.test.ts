@@ -2515,6 +2515,65 @@ describe("TS local device sync service", () => {
     ]);
   });
 
+  test("keeps composite pairing transfer gated when local snapshot bootstrap is required", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', NULL);
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const requests: string[] = [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ success: true });
+      },
+    });
+
+    try {
+      await expect(
+        service.completePairingWithTransfer?.({
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      expect(requests).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns already complete from bootstrap confirm when no local database exists", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(

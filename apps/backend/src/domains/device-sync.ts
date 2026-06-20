@@ -622,6 +622,9 @@ export function createLocalDeviceSyncService({
           connectService,
           secretService,
         );
+      if (db && localBootstrapRequired(db, deviceId)) {
+        throw deviceSyncDisabled();
+      }
       try {
         await fetchDeviceSyncJsonRaw(
           accessToken,
