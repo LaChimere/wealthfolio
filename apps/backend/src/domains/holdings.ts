@@ -1264,7 +1264,7 @@ function ensureSyntheticHoldingsSnapshot(
     return null;
   }
   const syntheticDate = subtractMonths(earliest.snapshot_date, 3);
-  if (syntheticDate === earliest.snapshot_date) {
+  if (!syntheticDate || syntheticDate === earliest.snapshot_date) {
     return null;
   }
   const existingSynthetic = db
@@ -3398,11 +3398,14 @@ function bytesToHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function subtractMonths(date: string, months: number): string {
+function subtractMonths(date: string, months: number): string | null {
   const [year, month, day] = date.split("-").map(Number);
   const targetMonthIndex = (year ?? 1970) * 12 + ((month ?? 1) - 1) - months;
   const targetYear = Math.floor(targetMonthIndex / 12);
-  const targetMonth = (targetMonthIndex % 12) + 1;
+  if (targetYear < 0 || targetYear > 9999) {
+    return null;
+  }
+  const targetMonth = (((targetMonthIndex % 12) + 12) % 12) + 1;
   const clampedDay = Math.min(day ?? 1, daysInMonth(targetYear, targetMonth));
   return `${targetYear.toString().padStart(4, "0")}-${targetMonth
     .toString()
@@ -3410,7 +3413,9 @@ function subtractMonths(date: string, months: number): string {
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthEnd = new Date(Date.UTC(2000, 0, 1));
+  monthEnd.setUTCFullYear(year, month, 0);
+  return monthEnd.getUTCDate();
 }
 
 function readExistingSnapshotDates(

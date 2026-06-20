@@ -284,6 +284,29 @@ describe("TS holdings domain", () => {
           .get("2025-11-15"),
       ).toEqual({ cost_basis: "18", net_contribution: "0" });
 
+      insertAccount(db, { id: "early", name: "Early", currency: "USD" });
+      await service.saveManualHoldings({
+        accountId: "early",
+        snapshotDate: "0000-05-31",
+        holdings: [{ symbol: "EARLY", quantity: "1", currency: "USD", averageCost: "1" }],
+        cashBalances: {},
+      });
+      expect(service.getSnapshots("early")).toEqual([
+        expect.objectContaining({ snapshotDate: "0000-02-29", source: "SYNTHETIC" }),
+        expect.objectContaining({ snapshotDate: "0000-05-31", source: "MANUAL_ENTRY" }),
+      ]);
+
+      insertAccount(db, { id: "edge", name: "Edge", currency: "USD" });
+      await service.saveManualHoldings({
+        accountId: "edge",
+        snapshotDate: "0000-03-31",
+        holdings: [{ symbol: "EDGE", quantity: "1", currency: "USD", averageCost: "1" }],
+        cashBalances: {},
+      });
+      expect(service.getSnapshots("edge")).toEqual([
+        expect.objectContaining({ snapshotDate: "0000-03-31", source: "MANUAL_ENTRY" }),
+      ]);
+
       const asset = db
         .query<
           { id: string; quote_mode: string; quote_ccy: string },
