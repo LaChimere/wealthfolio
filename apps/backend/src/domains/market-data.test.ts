@@ -124,6 +124,13 @@ describe("TS market data domain", () => {
         service.syncMarketData?.({
           type: "refetch_recent",
           asset_ids: [],
+          days: 1.5,
+        }),
+      ).rejects.toThrow("days is outside supported date range");
+      await expect(
+        service.syncMarketData?.({
+          type: "refetch_recent",
+          asset_ids: [],
           days: 1_000_000,
         }),
       ).rejects.toThrow("days is outside supported date range");

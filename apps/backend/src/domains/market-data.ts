@@ -628,6 +628,9 @@ function validateMarketSyncModeDays(marketSyncMode: MarketSyncMode, currentTime:
 }
 
 function marketDataDaysSupported(days: number, currentTime: Date): boolean {
+  if (!Number.isInteger(days)) {
+    return false;
+  }
   const endDate = isoDate(currentTime);
   return (
     marketDataStartDateSupported(endDate, days) &&
