@@ -712,7 +712,7 @@ function createAlternativeAssetsDb(): Database {
 }
 
 function fixedNow(): Date {
-  return new Date("2026-05-14T09:00:00.000Z");
+  return new Date(2026, 4, 14, 12, 0, 0);
 }
 
 function readAsset(db: Database, assetId: string): Record<string, unknown> {
