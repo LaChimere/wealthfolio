@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
+import { STATUS_CODES } from "node:http";
 import { join } from "node:path";
 
 import type { BackendEventBus } from "../events";
@@ -992,7 +993,7 @@ async function fetchAlphaVantageJson(
     throw new Error(`${ALPHA_VANTAGE_PROVIDER}: rate limited`);
   }
   if (!response.ok) {
-    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${ALPHA_VANTAGE_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   const text = await response.text();
   try {
@@ -1178,7 +1179,7 @@ async function fetchOpenFigiMapping(
     throw new Error(`${OPENFIGI_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${OPENFIGI_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
 
   let payload: unknown;
@@ -1283,7 +1284,7 @@ async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unkno
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${response.status}`);
+    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   try {
     return await response.json();
@@ -1398,7 +1399,7 @@ async function fetchFinnhubJson(
     throw new Error(`${FINNHUB_PROVIDER}: Access forbidden - check API key: ${text}`);
   }
   if (!response.ok) {
-    throw new Error(`${FINNHUB_PROVIDER}: HTTP ${response.status} - ${text}`);
+    throw new Error(`${FINNHUB_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)} - ${text}`);
   }
   try {
     return JSON.parse(text) as unknown;
@@ -1416,7 +1417,7 @@ async function fetchYahooSearchProfileFromEndpoint(
     headers: yahooHeaders(),
   });
   if (!response.ok) {
-    throw new Error(`YAHOO: HTTP ${response.status}`);
+    throw new Error(`YAHOO: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   const payload = (await response.json()) as unknown;
   if (!isRecord(payload) || !Array.isArray(payload.quotes)) {
@@ -2185,6 +2186,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const RUST_HTTP_STATUS_REASON_OVERRIDES: Record<number, string> = {
+  418: "I'm a teapot",
+  509: "<unknown status code>",
+};
+
+function formatRustHttpStatus(status: number): string {
+  const reason =
+    RUST_HTTP_STATUS_REASON_OVERRIDES[status] ?? STATUS_CODES[status] ?? "<unknown status code>";
+  return `${status} ${reason}`;
+}
+
 function queueAssetSyncEvent(
   options: AssetServiceOptions,
   row: AssetRow,
@@ -2790,7 +2802,7 @@ async function fetchYahooQuoteSummaryProfile(
     throw new Error("YAHOO: authentication expired");
   }
   if (!response.ok) {
-    throw new Error(`YAHOO: HTTP ${response.status}`);
+    throw new Error(`YAHOO: HTTP ${formatRustHttpStatus(response.status)}`);
   }
   const payload = (await response.json()) as unknown;
   const profile = mapYahooQuoteSummaryProfile(symbol, payload);

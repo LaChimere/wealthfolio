@@ -1086,6 +1086,59 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("records asset provider HTTP status failures like Rust", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      exchangeMetadata: testExchangeMetadata(),
+      now: () => "2026-05-22T00:00:00.000Z",
+      warn: (message) => warnings.push(message),
+      secretService: {
+        setSecret() {},
+        getSecret(secretKey) {
+          return secretKey === "ALPHA_VANTAGE" ? "alpha-key" : null;
+        },
+        deleteSecret() {},
+      },
+      fetch: ((input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        expect(url.searchParams.get("function")).toBe("OVERVIEW");
+        expect(url.searchParams.get("symbol")).toBe("AAPL");
+        expect(url.searchParams.get("apikey")).toBe("alpha-key");
+        return Promise.resolve(
+          new Response("", {
+            status: 509,
+            statusText: "Bandwidth Limit Exceeded",
+          }),
+        );
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-alpha-error",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+
+      await expect(service.enrichAssets(["equity-alpha-error"])).resolves.toEqual({
+        enriched: 0,
+        skipped: 0,
+        failed: 1,
+      });
+      expect(warnings).toEqual([
+        "Failed to enrich asset equity-alpha-error: ALPHA_VANTAGE: HTTP 509 <unknown status code>",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches US Treasury bond metadata and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
