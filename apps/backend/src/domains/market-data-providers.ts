@@ -261,10 +261,19 @@ export function createMarketDataProviderService(
       return providers.sort((a, b) => a.priority - b.priority);
     },
     async updateProviderSettings(providerId, priority, enabled) {
+      validateI32Priority(priority);
       repository.updateProvider({ providerId, priority, enabled });
       await options.refreshClient?.();
     },
   };
+}
+
+function validateI32Priority(priority: number): void {
+  if (!Number.isInteger(priority) || priority < -2_147_483_648 || priority > 2_147_483_647) {
+    throw new Error(
+      "Invalid input: Priority must be an integer between -2147483648 and 2147483647",
+    );
+  }
 }
 
 function providerFromRow(row: ProviderRow): MarketDataProviderSetting {

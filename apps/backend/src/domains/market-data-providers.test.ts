@@ -73,6 +73,13 @@ describe("TS market data provider settings domain", () => {
         enabled: true,
       });
       expect(refreshCount).toBe(1);
+      await expect(service.updateProviderSettings("FINNHUB", 4.5, true)).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
+      await expect(service.updateProviderSettings("FINNHUB", 2_147_483_648, true)).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
+      expect(refreshCount).toBe(1);
       await expect(service.updateProviderSettings("MISSING", 99, true)).rejects.toThrow(
         "Market data provider not found: MISSING",
       );
