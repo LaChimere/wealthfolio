@@ -1447,7 +1447,23 @@ async function fetchTreasuryBondDetails(
   const fetchBondDetails =
     options.fetchTreasuryBondDetails ??
     ((value: string) => fetchUsTreasuryBondDetails(value, options.fetch));
-  return fetchBondDetails(isin);
+  const details = await fetchBondDetails(isin);
+  if (!details) {
+    return null;
+  }
+  if (!validTreasuryBondDetails(details)) {
+    options.warn?.(`Ignoring invalid Treasury bond details for ${isin}`);
+    return null;
+  }
+  return details;
+}
+
+function validTreasuryBondDetails(details: TreasuryBondDetails): boolean {
+  return (
+    Number.isFinite(details.couponRate) &&
+    Number.isFinite(details.faceValue) &&
+    isIsoDate(details.maturityDate)
+  );
 }
 
 function needsProfileEnrichment(

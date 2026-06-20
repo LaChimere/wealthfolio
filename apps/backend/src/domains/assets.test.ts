@@ -1174,6 +1174,60 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("skips invalid Treasury bond details without persisting non-finite metadata", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      warn: (message) => warnings.push(message),
+      fetch: (() =>
+        Promise.resolve(
+          Response.json([
+            {
+              data: [
+                {
+                  name: "US TREASURY N/B",
+                  ticker: "T 4.5 05/15/43",
+                },
+              ],
+            },
+          ]),
+        )) as typeof fetch,
+      fetchTreasuryBondDetails() {
+        return {
+          couponRate: Number.POSITIVE_INFINITY,
+          maturityDate: "2043-05-15",
+          faceValue: 1000,
+          couponFrequency: "Semi-Annual",
+        };
+      },
+    });
+
+    try {
+      insertAsset(db, {
+        id: "bond-1",
+        kind: "INVESTMENT",
+        metadata: JSON.stringify({ identifiers: { isin: "US912810TH14" } }),
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH14",
+      });
+
+      await expect(service.enrichAssets(["bond-1"])).resolves.toEqual({
+        enriched: 1,
+        skipped: 0,
+        failed: 0,
+      });
+      expect(service.getAssetProfile("bond-1").metadata).toEqual({
+        identifiers: { isin: "US912810TH14" },
+      });
+      expect(warnings).toContain("Ignoring invalid Treasury bond details for US912810TH14");
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches Yahoo quoteSummary profiles and marks profile enriched", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
