@@ -3,12 +3,22 @@ import { describe, expect, test } from "bun:test";
 
 import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
-import { createDataExportService } from "./data-exports";
+import {
+  createDataExportService,
+  parseExportDataType,
+  parseExportFileFormat,
+} from "./data-exports";
 
 const unusedAccountService = {} as AccountService;
 const unusedActivityService = {} as ActivityService;
 
 describe("TS data export domain", () => {
+  test("parses export route segments with Rust-compatible case sensitivity", () => {
+    expect(parseExportDataType("accounts")).toBe("accounts");
+    expect(() => parseExportDataType("Accounts")).toThrow("Unsupported export data type: Accounts");
+    expect(parseExportFileFormat("CSV")).toBe("csv");
+  });
+
   test("exports activities from the first search page like Rust", async () => {
     const db = new Database(":memory:");
     const searchRequests: unknown[] = [];

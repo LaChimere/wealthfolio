@@ -26,14 +26,13 @@ const EXPORT_ACTIVITY_PAGE_SIZE = 9_007_199_254_740_991;
 const PORTFOLIO_TOTAL_ACCOUNT_ID = "TOTAL";
 
 export function parseExportDataType(value: string): ExportDataType {
-  const normalized = value.toLowerCase();
   if (
-    normalized === "accounts" ||
-    normalized === "activities" ||
-    normalized === "goals" ||
-    normalized === "portfolio-history"
+    value === "accounts" ||
+    value === "activities" ||
+    value === "goals" ||
+    value === "portfolio-history"
   ) {
-    return normalized as ExportDataType;
+    return value;
   }
   throw new Error(`Unsupported export data type: ${value}`);
 }
