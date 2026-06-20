@@ -1200,11 +1200,17 @@ function dateForPlanAge(plan: RetirementPlan, age: number, now = new Date()): st
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthEnd = new Date(Date.UTC(2000, 0, 1));
+  monthEnd.setUTCFullYear(year, month, 0);
+  return monthEnd.getUTCDate();
 }
 
 function formatDate(date: { year: number; month: number; day: number }): string {
-  return `${date.year}-${pad2(date.month)}-${pad2(date.day)}`;
+  return `${padYear(date.year)}-${pad2(date.month)}-${pad2(date.day)}`;
+}
+
+function padYear(value: number): string {
+  return value >= 0 && value <= 9999 ? value.toString().padStart(4, "0") : value.toString();
 }
 
 function pad2(value: number): string {

@@ -748,6 +748,51 @@ describe("TS goals domain", () => {
     }
   });
 
+  test("formats early retirement projected completion dates without 1900 remapping", async () => {
+    const db = createGoalsDb();
+    const earlyNow = new Date(2000, 0, 1, 12);
+    earlyNow.setFullYear(0, 1, 29);
+    const service = createGoalService(createGoalRepository(db), {
+      now: () => earlyNow,
+    });
+
+    try {
+      seedGoal(db, {
+        id: "early-retirement",
+        title: "Early Retirement",
+        goalType: "retirement",
+      });
+      seedGoalPlan(db, {
+        goalId: "early-retirement",
+        planKind: "retirement",
+        plannerMode: "fire",
+        settingsJson: JSON.stringify(
+          validRetirementPlan({
+            personal: {
+              currentAge: 45,
+              targetRetirementAge: 46,
+              planningHorizonAge: 90,
+            },
+          }),
+        ),
+      });
+      seedFundingRule(db, {
+        id: "early-rule",
+        goalId: "early-retirement",
+        accountId: "brokerage",
+        sharePercent: 100,
+      });
+
+      const refreshed = await service.refreshGoalSummary("early-retirement", {
+        brokerage: 100_000_000,
+      });
+
+      expect(refreshed.projectedCompletionDate).toBe("0000-02-29");
+    } finally {
+      db.close();
+    }
+  });
+
   test("saves retirement goal plans with validation, age normalization, sync, and unknown preservation", async () => {
     const db = createGoalsDb();
     const syncEvents: GoalSyncEvent[] = [];
