@@ -5624,6 +5624,9 @@ contract:
   tests and full `bun run check`. Coverage includes mapping missing backup
   directories/files to 404 style errors and catching synchronous DELETE service
   failures in the route.
+- `pr5-backup-download-canonical-path`: verification passed: focused HTTP tests
+  and full `bun run check`. Coverage includes canonical backup download reads,
+  missing backup 404s, and valid-named symlink escape rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

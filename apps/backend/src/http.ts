@@ -1438,27 +1438,31 @@ function routeAlternativeAssetRequest(
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
 }
 
-async function routeBackupDownloadRequest(
-  filename: string,
-  appUtilityService: AppUtilityService,
-  appDataDir: string,
-): Promise<Response> {
+async function routeBackupDownloadRequest(filename: string, appDataDir: string): Promise<Response> {
   if (!isValidBackupFilename(filename)) {
     return jsonResponse({ code: 400, message: "Invalid backup filename" }, 400);
   }
 
   try {
-    const backups = await appUtilityService.listDatabaseBackups();
-    const backup = backups.find((b) => b.filename === filename);
-    if (!backup) {
-      return jsonResponse({ code: 404, message: "Backup not found" }, 404);
+    const { readFileSync, realpathSync } = await import("node:fs");
+    const { resolve, sep } = await import("node:path");
+
+    const backupDir = resolve(appDataDir, "backups");
+    let canonicalDir: string;
+    let canonicalFile: string;
+    try {
+      canonicalDir = realpathSync(backupDir);
+      canonicalFile = realpathSync(resolve(backupDir, filename));
+    } catch (error) {
+      if (isFsNotFoundError(error)) {
+        return jsonResponse({ code: 404, message: "Backup not found" }, 404);
+      }
+      throw error;
     }
-
-    const { readFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
-
-    const backupPath = resolve(appDataDir, "backups", filename);
-    const fileContent = readFileSync(backupPath);
+    if (!canonicalFile.startsWith(canonicalDir + sep)) {
+      return jsonResponse({ code: 400, message: "Invalid backup filename" }, 400);
+    }
+    const fileContent = readFileSync(canonicalFile);
 
     return new Response(fileContent as BodyInit, {
       status: 200,
@@ -1667,7 +1671,7 @@ function routeAppUtilityRequest(
     if (!appDataDir) {
       return jsonResponse({ code: 500, message: "App data directory not configured" }, 500);
     }
-    return routeBackupDownloadRequest(filename, appUtilityService, appDataDir);
+    return routeBackupDownloadRequest(filename, appDataDir);
   }
 
   return jsonResponse({ code: 404, message: "Not Found" }, 404);
@@ -3585,6 +3589,15 @@ function jsonResponse(body: unknown, status = 200): Response {
       "content-type": "application/json",
     },
   });
+}
+
+function isFsNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 function domainErrorResponse(error: unknown): Response {

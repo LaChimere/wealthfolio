@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -4574,6 +4574,62 @@ describe("TS backend HTTP skeleton", () => {
       ["restore", "/tmp/backups/wealthfolio_backup.db"],
       ["delete-backup", "wealthfolio_backup_20260506_070809.db"],
     ]);
+  });
+
+  test("downloads database backups only from the canonical backup directory", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-backups-"));
+    const backupDir = path.join(appDataDir, "backups");
+    mkdirSync(backupDir, { recursive: true });
+    const backupFilename = "wealthfolio_backup_20260506_070809.db";
+    writeFileSync(path.join(backupDir, backupFilename), "backup");
+    const outsideDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-backups-outside-"));
+    const outsideFile = path.join(outsideDir, "outside.db");
+    writeFileSync(outsideFile, "outside");
+
+    const appUtilityService = {
+      listDatabaseBackups() {
+        return [];
+      },
+    } as AppUtilityService;
+    const handler = createBackendRequestHandler(config, { appUtilityService, appDataDir });
+
+    const downloadResponse = await handler(
+      new Request(`http://127.0.0.1/api/v1/utilities/database/backups/${backupFilename}/download`, {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(downloadResponse.status).toBe(200);
+    expect(downloadResponse.headers.get("content-type")).toBe("application/octet-stream");
+    expect(downloadResponse.headers.get("content-disposition")).toBe(
+      `attachment; filename="${backupFilename}"`,
+    );
+    expect(await downloadResponse.text()).toBe("backup");
+
+    if (process.platform !== "win32") {
+      const symlinkFilename = "wealthfolio_backup_20260507_070809.db";
+      symlinkSync(outsideFile, path.join(backupDir, symlinkFilename));
+      const symlinkResponse = await handler(
+        new Request(
+          `http://127.0.0.1/api/v1/utilities/database/backups/${symlinkFilename}/download`,
+          { headers: { authorization: "Bearer sidecar-token" } },
+        ),
+      );
+      expect(symlinkResponse.status).toBe(400);
+      await expect(symlinkResponse.json()).resolves.toMatchObject({
+        message: "Invalid backup filename",
+      });
+    }
+
+    const missingResponse = await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/utilities/database/backups/wealthfolio_backup_20260508_070809.db/download",
+        { headers: { authorization: "Bearer sidecar-token" } },
+      ),
+    );
+    expect(missingResponse.status).toBe(404);
+    await expect(missingResponse.json()).resolves.toMatchObject({
+      message: "Backup not found",
+    });
   });
 
   test("routes migrated secrets seam only when a service is provided", async () => {
