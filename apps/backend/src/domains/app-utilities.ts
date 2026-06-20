@@ -123,15 +123,18 @@ export function isValidBackupFilename(filename: string): boolean {
     return false;
   }
 
-  const date = new Date(year, month - 1, day, hour, minute, second);
-  return (
-    date.getFullYear() === year &&
-    date.getMonth() === month - 1 &&
-    date.getDate() === day &&
-    date.getHours() === hour &&
-    date.getMinutes() === minute &&
-    date.getSeconds() === second
-  );
+  return day <= daysInMonth(year, month);
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 export function createAppUtilityService(options: AppUtilityServiceOptions): AppUtilityService {

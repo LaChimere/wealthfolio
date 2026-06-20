@@ -5,11 +5,18 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { openSqliteDatabase } from "../storage/sqlite";
-import { createAppUtilityService } from "./app-utilities";
+import { createAppUtilityService, isValidBackupFilename } from "./app-utilities";
 
 const fixedNow = () => new Date(2026, 4, 6, 7, 8, 9);
 
 describe("TS app utility domain", () => {
+  test("validates backup filenames with Rust-compatible proleptic dates", () => {
+    expect(isValidBackupFilename("wealthfolio_backup_00000229_000000.db")).toBe(true);
+    expect(isValidBackupFilename("wealthfolio_backup_19000229_000000.db")).toBe(false);
+    expect(isValidBackupFilename("wealthfolio_backup_20260431_000000.db")).toBe(false);
+    expect(isValidBackupFilename("wealthfolio_backup_20260506_240000.db")).toBe(false);
+  });
+
   test("returns app info from runtime options", () => {
     const service = createAppUtilityService({
       appDataDir: "/tmp/wealthfolio-data",

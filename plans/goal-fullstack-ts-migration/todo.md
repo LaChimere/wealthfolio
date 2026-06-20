@@ -5598,6 +5598,10 @@ contract:
   Rust-invalid raw `schemaVersion` float/exponent JSON tokens in stored provider
   settings, message content, and thread config snapshots, and accepting explicit
   `null` for Rust `Option` fields in thread configs.
+- `pr5-backup-filename-proleptic-date`: verification passed: focused app utility
+  tests and full `bun run check`. Coverage includes accepting Rust-compatible
+  year-zero leap-day backup filenames while continuing to reject invalid
+  month/day/time rollovers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
