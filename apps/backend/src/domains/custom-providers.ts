@@ -1206,7 +1206,7 @@ async function buildTestSourceHeaders(
       continue;
     }
     try {
-      headers.set(name, resolved);
+      headers.set(name, toUtf8HeaderByteString(resolved));
     } catch {
       // Rust's HeaderName/HeaderValue parsing skips invalid user headers.
     }
@@ -1223,6 +1223,10 @@ function isRustCompatibleHeaderValue(value: string): boolean {
     const code = char.charCodeAt(0);
     return code === 0x09 || (code >= 0x20 && code !== 0x7f);
   });
+}
+
+function toUtf8HeaderByteString(value: string): string {
+  return Array.from(new TextEncoder().encode(value), (byte) => String.fromCharCode(byte)).join("");
 }
 
 function buildBrowserLikeHeaders(format: CustomProviderSourceFormat, url: string): Headers {
