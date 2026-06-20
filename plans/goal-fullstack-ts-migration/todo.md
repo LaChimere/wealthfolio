@@ -5441,6 +5441,10 @@ contract:
   market-data tests, full `bun run check`, pre-commit checks, and dual
   GPT/Claude xhigh review. Coverage includes rejecting fractional direct
   `syncMarketData` day counts before sync-window execution.
+- `pr5-connect-import-run-pagination-validation`: verification passed: full
+  Connect tests, full `bun run check`, pre-commit checks, and dual GPT/Claude
+  xhigh review. Coverage includes rejecting unsafe direct local import-run
+  `limit`/`offset` values before SQLite reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
