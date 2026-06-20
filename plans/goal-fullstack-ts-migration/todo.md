@@ -5549,6 +5549,11 @@ contract:
   xhigh review. Coverage includes parsed-instant filtering for contribution year
   `10000`, date-only `+10000-01-01` activity inclusion, real FX conversion for
   `+10000-01-01`, and latest FX selection at `+10001`.
+- `pr5-contribution-rfc3339-validation`: verification passed: focused
+  contribution-limit tests, full `bun run check`, and dual GPT/Claude xhigh
+  review. Coverage includes rejecting invalid explicit range date-times such as
+  `+10000-02-30T00:00:00Z`, `2026-04-31T00:00:00Z`, and
+  `2026-01-01T00:00:00+24:00`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
