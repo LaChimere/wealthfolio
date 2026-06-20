@@ -5414,6 +5414,11 @@ contract:
   GPT/Claude xhigh review/refine. Coverage includes rejecting invalid FX
   conversion amount strings while accepting finite Decimal exponent notation
   from internal callers.
+- `pr5-exchange-rate-historical-days-validation`: verification passed: focused
+  exchange-rate tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine. Coverage includes rejecting fractional,
+  non-finite, and Date-range-overflow historical day counts before repository
+  reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

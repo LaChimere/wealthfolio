@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 589
+turns_used: 590
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T14:32:55+08:00"
+updated_at: "2026-06-20T14:41:12+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3792,6 +3792,12 @@ updated_at: "2026-06-20T14:32:55+08:00"
   zero, while still accepting finite Decimal exponent notation produced by
   internal callers. Verified with focused exchange-rate tests, full
   `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+- Turn 590: Tightened FX historical range input validation parity. Historical
+  rate reads now reject fractional, non-finite, or date-range-overflow day
+  counts before constructing invalid JavaScript dates or querying repositories,
+  while preserving normal and negative integer behavior. Verified with focused
+  exchange-rate tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine.
 
 ## Deferred items
 
