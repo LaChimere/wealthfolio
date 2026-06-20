@@ -5301,6 +5301,12 @@ contract:
   `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
   includes Rust composite route response shape `{ success: true }` after
   validating and discarding the cloud complete-pairing response payload.
+- `pr5-device-sync-transfer-approve-before-complete`: verification passed:
+  focused composite pairing tests, full standalone device-sync tests, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
+  includes Rust approve-before-complete ordering plus 400/409 already-approved
+  idempotency for `completePairingWithTransfer`; sync-cycle/snapshot upload
+  orchestration remains a follow-up.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
