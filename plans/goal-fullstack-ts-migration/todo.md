@@ -4461,6 +4461,16 @@ contract:
   `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
   connection validation rejecting scalar/array `brokerage` values while
   preserving missing/null/object behavior and top-level brokerage fallback.
+- `pr5-connect-user-team-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "user info|entitlement user info|authenticated plans"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun test apps/backend/src/runtime.test.ts -t "wires local Connect runtime behavior"`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  user/team info parsing using camelCase Connect API team input fields, ignoring
+  malformed snake-case team fields as unknown input, preserving snake-case
+  mapped output, and updating the runtime Connect fixture to use the
+  Rust-compatible team wire key.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
