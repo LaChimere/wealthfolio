@@ -5335,6 +5335,11 @@ contract:
   Coverage includes Rust-compatible `u32` parsing for price/FX stale-hour config
   fields before service dispatch, with negative and over-u32 values rejected for
   every stale-hour field.
+- `pr5-taxonomy-i32-numeric-fields`: verification passed: focused HTTP tests,
+  full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review.
+  Coverage includes Rust-compatible `i32` parsing for taxonomy/category sort
+  orders, category move positions, and assignment weights before service
+  dispatch, with out-of-range values rejected for each route.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
