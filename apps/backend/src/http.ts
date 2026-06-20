@@ -5916,10 +5916,11 @@ function parseOptionalPortfolioSortOrder(value: unknown): number | Response {
   if (value === undefined) {
     return 0;
   }
-  if (typeof value !== "number" || !Number.isInteger(value)) {
-    return jsonResponse({ code: 400, message: "sortOrder must be an integer" }, 400);
+  const parsed = parseRequiredI32(value, "sortOrder");
+  if (parsed instanceof Response) {
+    return parsed;
   }
-  return value;
+  return parsed;
 }
 
 function parseMarketSyncMode(

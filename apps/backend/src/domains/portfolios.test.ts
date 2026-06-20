@@ -158,6 +158,17 @@ describe("TS portfolios domain", () => {
       await expect(
         service.createPortfolio({ name: "P", accountIds: ["a1", "a1"] }),
       ).rejects.toThrow("Duplicate account ID: a1");
+      await expect(
+        service.createPortfolio({ name: "P", accountIds: ["a1"], sortOrder: 2_147_483_648 }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.updatePortfolio({
+          id: "missing",
+          name: "P",
+          accountIds: ["a1"],
+          sortOrder: 1.5,
+        }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
       await expect(service.createPortfolio({ name: "P", accountIds: ["missing"] })).rejects.toThrow(
         "Account 'missing' does not exist",
       );

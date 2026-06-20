@@ -7876,6 +7876,24 @@ describe("TS backend HTTP portfolios routes", () => {
       ],
       ["delete", "p1"],
     ]);
+
+    const invalidSortResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/portfolios", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          name: "Bad",
+          accountIds: ["a1"],
+          sortOrder: 2_147_483_648,
+        }),
+      }),
+    );
+    expect(invalidSortResponse.status).toBe(400);
+    await expect(invalidSortResponse.json()).resolves.toEqual({
+      code: 400,
+      message: "sortOrder must be an i32 integer",
+    });
+    expect(calls).toHaveLength(5);
   });
 });
 

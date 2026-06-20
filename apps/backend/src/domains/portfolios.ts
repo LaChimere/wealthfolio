@@ -319,7 +319,7 @@ function normalizePortfolioUpdate(portfolio: PortfolioUpdate): Required<Portfoli
 }
 
 function validatePortfolioInput(
-  portfolio: { id?: string; name: string; accountIds: string[] },
+  portfolio: { id?: string; name: string; sortOrder: number; accountIds: string[] },
   requireId = false,
 ): void {
   if (requireId && !portfolio.id?.trim()) {
@@ -330,6 +330,13 @@ function validatePortfolioInput(
   }
   if (portfolio.accountIds.length === 0) {
     throw new Error("Portfolio must contain at least one account");
+  }
+  if (
+    !Number.isInteger(portfolio.sortOrder) ||
+    portfolio.sortOrder < -2_147_483_648 ||
+    portfolio.sortOrder > 2_147_483_647
+  ) {
+    throw new Error("sortOrder must be an integer between -2147483648 and 2147483647");
   }
   const seen = new Set<string>();
   for (const accountId of portfolio.accountIds) {
