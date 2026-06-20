@@ -6595,7 +6595,7 @@ function parseNewCustomProvider(payload: Record<string, unknown>): NewCustomProv
   if (description instanceof Response) {
     return description;
   }
-  const priority = parseOptionalNumberOrNull(payload.priority, "priority");
+  const priority = parseOptionalI32OrNull(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }
@@ -6631,7 +6631,7 @@ function parseUpdateCustomProvider(
   if (enabled instanceof Response) {
     return enabled;
   }
-  const priority = parseOptionalNumberOrNull(payload.priority, "priority");
+  const priority = parseOptionalI32OrNull(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }

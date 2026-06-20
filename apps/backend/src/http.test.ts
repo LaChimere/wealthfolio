@@ -26,6 +26,7 @@ import {
 import {
   createCustomProviderRepository,
   createCustomProviderService,
+  type CustomProviderService,
 } from "./domains/custom-providers";
 import type { DeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
@@ -1696,6 +1697,88 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("rejects non-i32 custom provider priority before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const customProviderService: CustomProviderService = {
+      getAll() {
+        return [];
+      },
+      getSourceByKind() {
+        return null;
+      },
+      create(payload) {
+        calls.push(["create", payload]);
+        return Promise.resolve({
+          id: payload.code,
+          name: payload.name,
+          description: payload.description ?? "",
+          enabled: true,
+          priority: payload.priority ?? 50,
+          sources: [],
+        });
+      },
+      update(providerCode, payload) {
+        calls.push(["update", { providerCode, payload }]);
+        return Promise.resolve({
+          id: providerCode,
+          name: payload.name ?? "Demo",
+          description: payload.description ?? "",
+          enabled: payload.enabled ?? true,
+          priority: payload.priority ?? 50,
+          sources: [],
+        });
+      },
+      delete() {
+        throw new Error("not used");
+      },
+      testSource() {
+        throw new Error("not used");
+      },
+      fetchSourceRows() {
+        throw new Error("not used");
+      },
+    };
+    const handler = createBackendRequestHandler(config, { customProviderService });
+    const headers = {
+      authorization: "Bearer sidecar-token",
+      "content-type": "application/json",
+    };
+    const invalidI32Values = [-2_147_483_649, 2_147_483_648];
+
+    for (const priority of invalidI32Values) {
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            code: "demo",
+            name: "Demo",
+            priority,
+            sources: [
+              {
+                kind: "latest",
+                format: "json",
+                url: "https://example.test/{SYMBOL}",
+                pricePath: "$.price",
+              },
+            ],
+          }),
+        }),
+      );
+      expect(createResponse.status).toBe(400);
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/custom-providers/demo", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ priority }),
+        }),
+      );
+      expect(updateResponse.status).toBe(400);
+    }
+    expect(calls).toEqual([]);
   });
 
   test("routes migrated exchange rate CRUD only when a service is provided", async () => {
