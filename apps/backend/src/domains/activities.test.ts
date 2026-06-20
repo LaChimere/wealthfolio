@@ -3562,6 +3562,17 @@ describe("TS activities import domain", () => {
       });
       expect(readQuoteByAssetDay(db, "MSFT", "2025-01-15", "MANUAL")).toBeNull();
 
+      const prolepticActivity = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "0000-02-29",
+        currency: "USD",
+        amount: "1",
+      }) as Activity;
+      expect(readActivityValue(db, prolepticActivity.id, "activity_date")).toBe(
+        "0000-02-29T00:00:00+00:00",
+      );
+
       service.createActivity?.({
         accountId: "account-1",
         asset: { id: "AAPL" },

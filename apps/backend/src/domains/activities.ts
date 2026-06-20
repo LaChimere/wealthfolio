@@ -6151,7 +6151,9 @@ function normalizeActivityDateInput(value: unknown): string {
 }
 
 function assertValidDateParts(year: number, month: number, day: number): void {
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthEnd = new Date(Date.UTC(2000, 0, 1));
+  monthEnd.setUTCFullYear(year, month, 0);
+  const daysInMonth = monthEnd.getUTCDate();
   if (month < 1 || month > 12 || day < 1 || day > daysInMonth) {
     throw new Error("Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD");
   }
