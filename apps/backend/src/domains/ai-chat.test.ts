@@ -175,20 +175,35 @@ describe("TS AI chat domain", () => {
 
     try {
       seedThread(db, { id: "thread-1", title: "Valid" });
-      expect(service.getThread("thread-1")?.config).toMatchObject({
-        schemaVersion: 1,
-        providerId: "ollama",
-      });
-
-      seedThread(db, { id: "thread-2", title: "Malformed" });
       db.prepare("UPDATE ai_threads SET config_snapshot = ? WHERE id = ?").run(
         JSON.stringify({
-          schemaVersion: 4_294_967_296,
+          schemaVersion: 1,
           providerId: "ollama",
           modelId: "llama3",
           promptTemplateId: "wealthfolio-assistant-v1",
           promptVersion: "1.0.0",
+          locale: null,
+          detailLevel: null,
+          toolsAllowlist: null,
         }),
+        "thread-1",
+      );
+      expect(service.getThread("thread-1")?.config).toMatchObject({
+        schemaVersion: 1,
+        providerId: "ollama",
+      });
+      expect(service.getThread("thread-1")?.config).not.toHaveProperty("locale");
+      expect(service.getThread("thread-1")?.config).not.toHaveProperty("toolsAllowlist");
+
+      seedThread(db, { id: "thread-2", title: "Malformed" });
+      db.prepare("UPDATE ai_threads SET config_snapshot = ? WHERE id = ?").run(
+        `{
+          "schemaVersion": 1.0,
+          "providerId": "ollama",
+          "modelId": "llama3",
+          "promptTemplateId": "wealthfolio-assistant-v1",
+          "promptVersion": "1.0.0"
+        }`,
         "thread-2",
       );
 
@@ -267,8 +282,12 @@ describe("TS AI chat domain", () => {
         id: "message-1",
         threadId: "thread-1",
         role: "assistant",
-        content: { schemaVersion: 4_294_967_296, parts: [] },
+        content: { schemaVersion: 1, parts: [] },
       });
+      db.prepare("UPDATE ai_messages SET content_json = ? WHERE id = ?").run(
+        `{"schemaVersion":1e0,"parts":[]}`,
+        "message-1",
+      );
 
       expect(() => service.getMessages("thread-1")).toThrow("Invalid AI message content JSON");
     } finally {

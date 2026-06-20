@@ -191,15 +191,15 @@ describe("TS AI provider domain", () => {
     const { db, secrets } = createDbAndSecrets();
     db.prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)").run(
       "ai_provider_settings",
-      JSON.stringify({
-        schemaVersion: 4_294_967_296,
-        defaultProvider: "openai",
-        providers: {
-          openai: {
-            enabled: true,
-          },
-        },
-      }),
+      `{
+        "schemaVersion": 1.0,
+        "defaultProvider": "openai",
+        "providers": {
+          "openai": {
+            "enabled": true
+          }
+        }
+      }`,
     );
     const service = createAiProviderService({
       db,

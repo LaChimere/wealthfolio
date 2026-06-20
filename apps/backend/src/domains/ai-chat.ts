@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { rawJsonU32FieldIsValid } from "../json-raw";
 import type { AiProviderService, ResolvedAiChatProviderConfig } from "./ai-providers";
 
 export const AI_CHAT_ERROR_STATUS_BY_CODE: Record<string, number> = {
@@ -2911,28 +2912,42 @@ function threadFromRow(row: AiThreadRow, tags: string[]): AiChatThread {
 }
 
 function parseThreadConfigSnapshot(configSnapshot: string | null): unknown | null {
+  if (configSnapshot === null) {
+    return null;
+  }
   const parsed = parseJsonOrNull(configSnapshot);
   if (!isRecord(parsed)) {
     return null;
   }
+  if (!rawJsonU32FieldIsValid(configSnapshot, "schemaVersion")) {
+    return null;
+  }
   if (
-    typeof parsed.schemaVersion !== "number" ||
-    !Number.isInteger(parsed.schemaVersion) ||
-    parsed.schemaVersion < 0 ||
-    parsed.schemaVersion > U32_MAX ||
     typeof parsed.providerId !== "string" ||
     typeof parsed.modelId !== "string" ||
     typeof parsed.promptTemplateId !== "string" ||
     typeof parsed.promptVersion !== "string" ||
-    (parsed.locale !== undefined && typeof parsed.locale !== "string") ||
-    (parsed.detailLevel !== undefined && typeof parsed.detailLevel !== "string") ||
+    (parsed.locale !== undefined && parsed.locale !== null && typeof parsed.locale !== "string") ||
+    (parsed.detailLevel !== undefined &&
+      parsed.detailLevel !== null &&
+      typeof parsed.detailLevel !== "string") ||
     (parsed.toolsAllowlist !== undefined &&
+      parsed.toolsAllowlist !== null &&
       (!Array.isArray(parsed.toolsAllowlist) ||
         parsed.toolsAllowlist.some((tool) => typeof tool !== "string")))
   ) {
     return null;
   }
-  return parsed;
+  return {
+    schemaVersion: parsed.schemaVersion,
+    providerId: parsed.providerId,
+    modelId: parsed.modelId,
+    promptTemplateId: parsed.promptTemplateId,
+    promptVersion: parsed.promptVersion,
+    ...(typeof parsed.locale === "string" ? { locale: parsed.locale } : {}),
+    ...(typeof parsed.detailLevel === "string" ? { detailLevel: parsed.detailLevel } : {}),
+    ...(Array.isArray(parsed.toolsAllowlist) ? { toolsAllowlist: parsed.toolsAllowlist } : {}),
+  };
 }
 
 function messageFromRow(row: AiMessageRow): AiChatMessage {
@@ -2948,6 +2963,9 @@ function messageFromRow(row: AiMessageRow): AiChatMessage {
 function parseMessageContent(contentJson: string): AiChatMessageContent {
   const parsed = parseJsonOrNull(contentJson);
   if (!isRecord(parsed) || !Array.isArray(parsed.parts)) {
+    throw aiChatError("invalid_input", "Invalid AI message content JSON", 400);
+  }
+  if (!rawJsonU32FieldIsValid(contentJson, "schemaVersion")) {
     throw aiChatError("invalid_input", "Invalid AI message content JSON", 400);
   }
   const schemaVersion = parseContentSchemaVersion(parsed.schemaVersion);

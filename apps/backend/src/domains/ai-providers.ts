@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { rawJsonU32FieldIsValid } from "../json-raw";
 import type { SecretService } from "./secrets";
 
 export interface ModelCapabilities {
@@ -547,6 +548,9 @@ function loadUserSettings(db: Database, catalog: AiProviderCatalog): StoredAiPro
   const raw = getAppSetting(db, AI_PROVIDER_SETTINGS_KEY);
   if (raw) {
     try {
+      if (!rawJsonU32FieldIsValid(raw, "schemaVersion")) {
+        throw new Error("Invalid AI provider settings");
+      }
       return normalizeStoredSettings(JSON.parse(raw));
     } catch {
       return createDefaultSettings(catalog);

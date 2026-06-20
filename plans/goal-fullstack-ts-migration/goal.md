@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 629
+turns_used: 630
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T01:03:01+08:00"
+updated_at: "2026-06-21T01:14:50+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4000,6 +4000,12 @@ updated_at: "2026-06-21T01:03:01+08:00"
   malformed config JSON or non-u32 `schemaVersion`, matching Rust storage's
   best-effort `serde_json::from_str(...).ok()` behavior. Verified with focused
   AI chat tests and full `bun run check`.
+- Turn 630: Resolved AI schema-version review follow-ups. Stored AI provider
+  settings, AI message content, and AI thread config snapshots now validate the
+  raw top-level `schemaVersion` JSON token, rejecting Rust-invalid float or
+  exponent forms such as `1.0`/`1e0`; thread config snapshots also accept
+  explicit `null` for Rust `Option` fields and normalize them as absent.
+  Verified with focused AI provider/AI chat tests and full `bun run check`.
 
 ## Deferred items
 
