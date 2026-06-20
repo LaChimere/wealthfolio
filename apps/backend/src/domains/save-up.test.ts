@@ -34,6 +34,26 @@ describe("TS save-up planning domain", () => {
     expect(overview.trajectory.at(-1)?.date).toBe("2034-01");
   });
 
+  test("projects early proleptic leap-day targets without 1900 remapping", () => {
+    const earlyNow = new Date(2000, 0, 1, 12);
+    earlyNow.setFullYear(0, 1, 28);
+
+    const overview = previewSaveUpOverview(
+      {
+        currentValue: 100,
+        targetAmount: 100.05,
+        targetDate: "0000-02-29",
+        monthlyContribution: 0,
+        expectedAnnualReturn: 0.365,
+      },
+      { now: earlyNow },
+    );
+
+    expect(overview.health).toBe("on_track");
+    expect(overview.projectedValueAtTargetDate).toBeGreaterThan(100.05);
+    expect(overview.trajectory).toEqual([]);
+  });
+
   test("keeps open-ended previews not applicable while still searching completion", () => {
     const overview = previewSaveUpOverview(
       {

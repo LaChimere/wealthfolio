@@ -341,7 +341,8 @@ function generateProjectionSeries(
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthEnd = utcDateFromParts(year, month, 0);
+  return monthEnd.getUTCDate();
 }
 
 function daysBetween(start: PlainDate, end: PlainDate): number {
@@ -376,7 +377,13 @@ function compareDates(left: PlainDate, right: PlainDate): number {
 }
 
 function dayNumber(date: PlainDate): number {
-  return Date.UTC(date.year, date.month - 1, date.day) / MS_PER_DAY;
+  return utcDateFromParts(date.year, date.month - 1, date.day).getTime() / MS_PER_DAY;
+}
+
+function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, monthIndex, day);
+  return date;
 }
 
 function formatDate(date: PlainDate): string {
