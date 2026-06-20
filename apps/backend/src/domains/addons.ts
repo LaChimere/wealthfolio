@@ -921,6 +921,10 @@ function parseAddonManifest(value: unknown): AddonManifestRecord {
     minWealthfolioVersion: optionalManifestString(value.minWealthfolioVersion),
     keywords: parseOptionalStringArray(value.keywords),
     icon: optionalManifestString(value.icon),
+    ...(typeof value.installedAt === "string" ? { installedAt: value.installedAt } : {}),
+    ...(typeof value.updatedAt === "string" ? { updatedAt: value.updatedAt } : {}),
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
+    ...(isSafeU64Number(value.size) ? { size: value.size } : {}),
   };
 }
 
@@ -935,9 +939,17 @@ function installManifest(
   return {
     ...manifest,
     enabled: enableAfterInstall,
-    installedAt: new Date().toISOString(),
+    installedAt: toRustUtcRfc3339(new Date()),
     source: "local",
   };
+}
+
+function toRustUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  if (iso.endsWith(".000Z")) {
+    return `${iso.slice(0, -5)}+00:00`;
+  }
+  return iso.replace(/Z$/u, "+00:00");
 }
 
 function manifestEnabled(manifest: AddonManifestRecord): boolean {
@@ -968,6 +980,10 @@ function parseOptionalStringArray(value: unknown): string[] | null {
     return null;
   }
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function isSafeU64Number(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseAddonPermissions(value: unknown): AddonPermissionRecord[] | null {

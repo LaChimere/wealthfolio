@@ -114,8 +114,10 @@ describe("TS addon domain", () => {
         main: "main.js",
         description: 123,
         enabled: "yes",
-        installedAt: "ignored",
+        installedAt: "2026-05-17T00:00:00+00:00",
+        updatedAt: "2026-05-18T00:00:00+00:00",
         source: "store",
+        size: 123,
         keywords: ["wealth", 123, "local"],
         permissions: [
           {
@@ -144,7 +146,7 @@ describe("TS addon domain", () => {
     if (!metadata) {
       throw new Error("Expected metadata-addon to be installed");
     }
-    expect(metadata).toEqual(
+    expect(metadata).toMatchObject(
       normalizedManifest({
         id: "metadata-addon",
         name: "Metadata Addon",
@@ -174,8 +176,12 @@ describe("TS addon domain", () => {
         ],
       }),
     );
-    expect("installedAt" in metadata).toBe(false);
-    expect("source" in metadata).toBe(false);
+    expect(metadata).toMatchObject({
+      installedAt: "2026-05-17T00:00:00+00:00",
+      updatedAt: "2026-05-18T00:00:00+00:00",
+      source: "store",
+      size: 123,
+    });
   });
 
   test("extracts addon ZIPs with manifest normalization and permission detection", async () => {
@@ -324,7 +330,7 @@ describe("TS addon domain", () => {
       id: "installed-addon",
       enabled: false,
       source: "local",
-      installedAt: expect.any(String),
+      installedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*\+00:00$/),
     });
     expect(
       readFileSync(path.join(appDataDir, "addons", "installed-addon", "main.js"), "utf8"),

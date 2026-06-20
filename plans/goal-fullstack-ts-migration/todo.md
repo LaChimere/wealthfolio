@@ -5660,6 +5660,10 @@ contract:
 - `pr5-addon-store-status-unknown`: verification passed: focused add-on tests
   and full `bun run check`. Coverage includes Rust-compatible
   `<unknown status code>` fallback text for non-standard add-on store statuses.
+- `pr5-addon-runtime-manifest-fields`: verification passed: focused add-on tests
+  and full `bun run check`. Coverage includes preserving valid runtime manifest
+  fields on read and writing Rust-style UTC RFC3339 `installedAt` values on
+  local installs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
