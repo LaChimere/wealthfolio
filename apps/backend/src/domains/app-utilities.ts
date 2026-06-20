@@ -80,6 +80,7 @@ interface ParsedSemver {
   minor: bigint;
   patch: bigint;
   preRelease: string[];
+  build: string[];
 }
 
 type FetchUpdate = (input: string, init?: RequestInit) => Promise<Response>;
@@ -428,6 +429,7 @@ function isUpdateAvailable(current: string, latest: string): boolean {
     minor: 0n,
     patch: 0n,
     preRelease: [],
+    build: [],
   };
   const latestVersion = parseSemver(latest) ?? currentVersion;
   return compareSemver(latestVersion, currentVersion) > 0;
@@ -442,7 +444,23 @@ function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
       return 1;
     }
   }
-  return comparePreRelease(left.preRelease, right.preRelease);
+  const preReleaseOrdering = comparePreRelease(left.preRelease, right.preRelease);
+  return preReleaseOrdering === 0
+    ? compareBuildMetadata(left.build, right.build)
+    : preReleaseOrdering;
+}
+
+function compareBuildMetadata(left: string[], right: string[]): number {
+  if (left.length === 0 && right.length === 0) {
+    return 0;
+  }
+  if (left.length === 0) {
+    return -1;
+  }
+  if (right.length === 0) {
+    return 1;
+  }
+  return compareIdentifiers(left, right);
 }
 
 function comparePreRelease(left: string[], right: string[]): number {
@@ -455,6 +473,10 @@ function comparePreRelease(left: string[], right: string[]): number {
   if (right.length === 0) {
     return -1;
   }
+  return compareIdentifiers(left, right);
+}
+
+function compareIdentifiers(left: string[], right: string[]): number {
   const maxLength = Math.max(left.length, right.length);
   for (let index = 0; index < maxLength; index += 1) {
     const leftIdentifier = left[index];
@@ -486,7 +508,7 @@ function comparePreRelease(left: string[], right: string[]): number {
 
 function parseSemver(value: string): ParsedSemver | null {
   const match =
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
       value,
     );
   if (!match) {
@@ -499,6 +521,7 @@ function parseSemver(value: string): ParsedSemver | null {
     return null;
   }
   const preRelease = match[4]?.split(".") ?? [];
+  const build = match[5]?.split(".") ?? [];
   if (
     preRelease.some(
       (identifier) => /^\d+$/.test(identifier) && identifier.length > 1 && identifier[0] === "0",
@@ -511,6 +534,7 @@ function parseSemver(value: string): ParsedSemver | null {
     minor,
     patch,
     preRelease,
+    build,
   };
 }
 

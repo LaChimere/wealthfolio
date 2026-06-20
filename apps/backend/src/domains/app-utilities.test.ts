@@ -193,6 +193,24 @@ describe("TS app utility domain", () => {
       latestVersion: "18446744073709551616.0.0",
     });
 
+    const buildMetadataService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "1.0.0+1",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "1.0.0+2",
+          platforms: {},
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(buildMetadataService.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: true,
+      latestVersion: "1.0.0+2",
+    });
+
     const malformedPayloadService = createAppUtilityService({
       appDataDir: "/tmp/wealthfolio-data",
       appVersion: "3.4.0",

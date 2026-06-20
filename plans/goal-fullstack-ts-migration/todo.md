@@ -5614,6 +5614,9 @@ contract:
   tests and full `bun run check`. Coverage includes rejecting malformed update
   response screenshots instead of silently filtering non-string entries while
   preserving Rust-compatible required payload fields.
+- `pr5-app-update-semver-build-metadata`: verification passed: focused app
+  utility tests and full `bun run check`. Coverage includes Rust-compatible
+  build metadata ordering for update availability.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
