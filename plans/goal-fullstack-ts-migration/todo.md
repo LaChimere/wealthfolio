@@ -5230,6 +5230,12 @@ contract:
   `{ phase: "syncing", detail: "waiting_snapshot" }` flow after cloud confirm
   when bootstrap is required, overwrite risk is clear, and latest snapshot
   is 404.
+- `pr5-connect-user-info-time-format-i32`: verification passed: focused
+  user-info tests, full Connect tests, full `bun run check`, pre-commit checks,
+  and dual GPT/Claude xhigh review. Coverage includes Rust `Option<i32>` parity
+  for camelCase `timeFormat`, including null/missing handling and rejection of
+  parsed floats, raw fractional integer tokens such as `24.0`, and out-of-range
+  i32 values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
