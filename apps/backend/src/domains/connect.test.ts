@@ -6648,6 +6648,14 @@ describe("TS Connect device sync local service", () => {
         message: "Failed to parse enroll response",
         status: 500,
       });
+
+      enrollResponse =
+        '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[{"id":"device-2","name":"iPhone","platform":"ios","last_seen_at":null,"lastSeenAt":null}]}';
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
     } finally {
       db.close();
     }
@@ -6725,6 +6733,40 @@ describe("TS Connect device sync local service", () => {
         },
       });
       await expect(duplicateService.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+
+      const duplicateTrustedDeviceSecretService = createMemorySecretService();
+      duplicateTrustedDeviceSecretService.entries.set("sync_refresh_token", "refresh-token");
+      initializeResponse =
+        '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[{"id":"device-2","name":"iPhone","name":"iPad","platform":"ios","last_seen_at":null}]}';
+      const duplicateTrustedDeviceService = createLocalConnectDeviceSyncService({
+        db,
+        secretService: duplicateTrustedDeviceSecretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices")) {
+            return Response.json({
+              mode: "BOOTSTRAP",
+              device_id: "device-1",
+              e2ee_key_version: 3,
+            });
+          }
+          if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+            return new Response(initializeResponse, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          throw new Error(`unexpected request: ${url}`);
+        },
+      });
+      await expect(duplicateTrustedDeviceService.enableDeviceSync()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse initialize keys response",
         status: 500,

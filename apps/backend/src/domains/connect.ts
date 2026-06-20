@@ -4537,6 +4537,11 @@ function assertEnrollResponseRawShape(rawJson: string): void {
   assertEnrollRawI32Token(rawJson, "e2ee_key_version");
   assertEnrollRawI32Token(rawJson, "pairingTtlSeconds");
   assertEnrollRawI32Token(rawJson, "pairing_ttl_seconds");
+  assertTrustedDeviceSummariesRawShape(
+    rawJson,
+    ["trustedDevices", "trusted_devices"],
+    "enroll response",
+  );
 }
 
 function assertEnrollRawI32Token(rawJson: string, key: string): void {
@@ -4627,6 +4632,31 @@ function assertInitializeKeysResponseRawShape(rawJson: string): void {
   assertInitializeKeysRawI32Token(rawJson, "e2ee_key_version");
   assertInitializeKeysRawI32Token(rawJson, "pairingTtlSeconds");
   assertInitializeKeysRawI32Token(rawJson, "pairing_ttl_seconds");
+  assertTrustedDeviceSummariesRawShape(
+    rawJson,
+    ["trustedDevices", "trusted_devices"],
+    "initialize keys response",
+  );
+}
+
+function assertTrustedDeviceSummariesRawShape(
+  rawJson: string,
+  aliases: string[],
+  context: string,
+): void {
+  const tokens = rawTokensForAliases(rawJson, aliases);
+  if (tokens.length !== 1 || !tokens[0]?.trim().startsWith("[")) {
+    return;
+  }
+  for (const token of topLevelArrayValueTokens(tokens[0])) {
+    if (token.startsWith("{")) {
+      assertNoDuplicateConnectAliases(
+        token,
+        [["id"], ["name"], ["platform"], ["lastSeenAt", "last_seen_at"]],
+        context,
+      );
+    }
+  }
 }
 
 function assertInitializeKeysRawI32Token(rawJson: string, key: string): void {
