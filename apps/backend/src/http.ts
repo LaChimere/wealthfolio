@@ -3146,7 +3146,10 @@ async function routeAccountRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/accounts") {
-    const includeArchived = url.searchParams.get("includeArchived") === "true";
+    const includeArchived = parseOptionalBooleanQuery(url, "includeArchived", false);
+    if (includeArchived instanceof Response) {
+      return includeArchived;
+    }
     return jsonResponse(
       includeArchived ? accountService.getAllAccounts() : accountService.getNonArchivedAccounts(),
     );

@@ -434,6 +434,17 @@ describe("TS backend HTTP skeleton", () => {
       );
       expect(await includeArchivedResponse.json()).toHaveLength(1);
 
+      const invalidIncludeArchivedResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/accounts?includeArchived=TRUE", {
+          headers: { authorization: "Bearer sidecar-token" },
+        }),
+      );
+      expect(invalidIncludeArchivedResponse.status).toBe(400);
+      await expect(invalidIncludeArchivedResponse.json()).resolves.toEqual({
+        code: 400,
+        message: "includeArchived must be a boolean",
+      });
+
       const deleteResponse = await handler(
         new Request(`http://127.0.0.1/api/v1/accounts/${createdAccount.id}`, {
           method: "DELETE",
