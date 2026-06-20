@@ -187,6 +187,35 @@ describe("TS AI provider domain", () => {
     });
   });
 
+  test("falls back to catalog defaults when stored provider settings schema version is not u32", () => {
+    const { db, secrets } = createDbAndSecrets();
+    db.prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)").run(
+      "ai_provider_settings",
+      JSON.stringify({
+        schemaVersion: 4_294_967_296,
+        defaultProvider: "openai",
+        providers: {
+          openai: {
+            enabled: true,
+          },
+        },
+      }),
+    );
+    const service = createAiProviderService({
+      db,
+      secretService: createMemorySecretService(secrets),
+      catalogJson: testCatalogJson(),
+    });
+
+    expect(service.getAiProviders().defaultProvider).toBe("ollama");
+    expect(
+      service.getAiProviders().providers.find((provider) => provider.id === "openai"),
+    ).toMatchObject({
+      enabled: false,
+      priority: 20,
+    });
+  });
+
   test("sets and clears the default provider with provider validation", () => {
     const { db, secrets } = createDbAndSecrets();
     const service = createAiProviderService({

@@ -199,6 +199,7 @@ const AI_PROVIDER_SETTINGS_SCHEMA_VERSION = 2;
 const DEFAULT_PRIORITY = 100;
 const I32_MIN = -2_147_483_648;
 const I32_MAX = 2_147_483_647;
+const U32_MAX = 4_294_967_295;
 const LEGACY_VISIBLE_DATA_TOOLS = [
   "get_accounts",
   "get_holdings",
@@ -594,10 +595,7 @@ function normalizeStoredSettings(value: unknown): StoredAiProviderSettings {
     throw new Error("Invalid AI provider settings");
   }
   return {
-    schemaVersion:
-      typeof value.schemaVersion === "number"
-        ? value.schemaVersion
-        : AI_PROVIDER_SETTINGS_SCHEMA_VERSION,
+    schemaVersion: normalizeStoredSchemaVersion(value.schemaVersion),
     defaultProvider:
       typeof value.defaultProvider === "string" || value.defaultProvider === null
         ? value.defaultProvider
@@ -610,6 +608,13 @@ function normalizeStoredSettings(value: unknown): StoredAiProviderSettings {
         )
       : {},
   };
+}
+
+function normalizeStoredSchemaVersion(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > U32_MAX) {
+    throw new Error("Invalid AI provider settings");
+  }
+  return value;
 }
 
 function normalizeProviderUserSettings(value: Record<string, unknown>): ProviderUserSettings {

@@ -5581,6 +5581,10 @@ contract:
   and full `bun run check`. Coverage includes rejecting malformed
   `skipTopRows`/`skipBottomRows` values before CSV parsing instead of silently
   dropping them, matching Rust serde `Option<usize>` tool argument behavior.
+- `pr5-ai-provider-settings-schema-u32`: verification passed: focused AI
+  provider tests and full `bun run check`. Coverage includes falling back to
+  catalog defaults when stored `ai_provider_settings.schemaVersion` is malformed
+  or outside Rust `u32`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

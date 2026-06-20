@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 626
+turns_used: 627
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T00:52:03+08:00"
+updated_at: "2026-06-21T00:54:22+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3985,6 +3985,11 @@ updated_at: "2026-06-21T00:52:03+08:00"
   instead of silently dropping them, matching Rust serde behavior for
   `Option<usize>` tool arguments before CSV parsing. Verified with focused AI
   chat tool tests and full `bun run check`.
+- Turn 627: Tightened stored AI provider schema-version parity. TS
+  `ai_provider_settings` loading now treats `schemaVersion` as Rust `u32` and
+  falls back to catalog defaults when stored settings contain malformed
+  schema-version data instead of preserving partially parsed settings. Verified
+  with focused AI provider tests and full `bun run check`.
 
 ## Deferred items
 
