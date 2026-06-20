@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { STATUS_CODES } from "node:http";
 import path from "node:path";
 
 import { unzipSync } from "fflate";
@@ -131,18 +132,6 @@ type FetchStore = (input: string | URL, init?: RequestInit) => Promise<Response>
 const DEFAULT_ADDON_STORE_API_BASE_URL = "https://wealthfolio.app/api/addons";
 const MAX_ADDON_ZIP_ENTRIES = 10_000;
 const MAX_ADDON_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
-const HTTP_STATUS_REASON: Record<number, string> = {
-  400: "Bad Request",
-  401: "Unauthorized",
-  403: "Forbidden",
-  404: "Not Found",
-  410: "Gone",
-  429: "Too Many Requests",
-  500: "Internal Server Error",
-  502: "Bad Gateway",
-  503: "Service Unavailable",
-  504: "Gateway Timeout",
-};
 const PERMISSION_PATTERNS = [
   [
     "portfolio",
@@ -833,7 +822,7 @@ async function safeResponseText(response: Response): Promise<string> {
 }
 
 function formatResponseStatus(response: Response): string {
-  const reason = HTTP_STATUS_REASON[response.status];
+  const reason = STATUS_CODES[response.status];
   return reason ? `${response.status} ${reason}` : String(response.status);
 }
 
