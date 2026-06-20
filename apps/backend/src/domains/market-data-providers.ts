@@ -350,12 +350,20 @@ function parseTimestampOrNull(value: string | null): string | null {
     return null;
   }
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : parsed.toISOString();
+  return Number.isNaN(parsed.valueOf()) ? null : toRustUtcRfc3339(parsed);
 }
 
 function parseTimestampOrNow(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.valueOf()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function toRustUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  if (iso.endsWith(".000Z")) {
+    return `${iso.slice(0, -5)}+00:00`;
+  }
+  return iso.replace(/Z$/u, "+00:00");
 }
 
 function capabilitiesForProvider(providerId: string): ProviderCapabilities | null {
