@@ -5340,6 +5340,11 @@ contract:
   Coverage includes Rust-compatible `i32` parsing for taxonomy/category sort
   orders, category move positions, and assignment weights before service
   dispatch, with out-of-range values rejected for each route.
+- `pr5-addon-rating-integer`: verification passed: focused add-on domain tests,
+  full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review.
+  Coverage includes Rust-compatible integer rating validation in the direct
+  add-on domain service path, so fractional ratings are rejected before store
+  dispatch in addition to HTTP seam validation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
