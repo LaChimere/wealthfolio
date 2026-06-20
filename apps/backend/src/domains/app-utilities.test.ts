@@ -154,6 +154,42 @@ describe("TS app utility domain", () => {
       updateAvailable: false,
       latestVersion: "3.4.1e1",
     });
+
+    const largeVersionService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "9007199254740992.0.0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "9007199254740993.0.0",
+          platforms: {},
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(largeVersionService.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: true,
+      latestVersion: "9007199254740993.0.0",
+    });
+
+    const overflowLatestService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "1.0.0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "18446744073709551616.0.0",
+          platforms: {},
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(overflowLatestService.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: false,
+      latestVersion: "18446744073709551616.0.0",
+    });
   });
 
   test("creates base64 and path backups from the configured app data dir", async () => {

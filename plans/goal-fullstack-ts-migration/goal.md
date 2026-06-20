@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 632
+turns_used: 633
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T01:37:45+08:00"
+updated_at: "2026-06-21T01:49:52+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4017,6 +4017,11 @@ updated_at: "2026-06-21T01:37:45+08:00"
   current builds see stable releases as updates and malformed latest versions do
   not produce false updates. Verified with focused app utility tests and full
   `bun run check`.
+- Turn 633: Resolved update-check semver precision review follow-up. TS semver
+  comparison now stores core version fields as bounded `u64` BigInts and
+  compares numeric prerelease identifiers without JS `number` precision loss,
+  rejecting over-u64 core versions like Rust. Verified with focused app utility
+  tests and full `bun run check`.
 
 ## Deferred items
 

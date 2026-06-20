@@ -5606,6 +5606,10 @@ contract:
   tests and full `bun run check`. Coverage includes Rust-compatible semver
   prerelease ordering and invalid latest-version fallback behavior for update
   availability.
+- `pr5-app-update-semver-precision`: verification passed: focused app utility
+  tests and full `bun run check`. Coverage includes large u64-safe semver core
+  component comparisons, over-u64 latest-version fallback, and numeric
+  prerelease comparison without JS `number` precision loss.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

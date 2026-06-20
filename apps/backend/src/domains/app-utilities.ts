@@ -78,9 +78,9 @@ interface UpdateCheckResponseRaw {
 }
 
 interface ParsedSemver {
-  major: number;
-  minor: number;
-  patch: number;
+  major: bigint;
+  minor: bigint;
+  patch: bigint;
   preRelease: string[];
 }
 
@@ -91,6 +91,7 @@ const DEFAULT_RESTORE_SETTLE_DELAY_MS = 150;
 const DEFAULT_UPDATE_CACHE_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_UPDATE_ENDPOINT_BASE = "https://wealthfolio.app/releases";
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
+const U64_MAX = 18_446_744_073_709_551_615n;
 const BACKUP_FILENAME_PREFIX = "wealthfolio_backup_";
 const BACKUP_FILENAME_SUFFIX = ".db";
 const BACKUP_FILENAME_TIMESTAMP_FORMAT_PATTERN = /^\d{8}_\d{6}$/;
@@ -380,9 +381,9 @@ function normalizeArch(arch: string | undefined): string {
 
 function isUpdateAvailable(current: string, latest: string): boolean {
   const currentVersion = parseSemver(current) ?? {
-    major: 0,
-    minor: 0,
-    patch: 0,
+    major: 0n,
+    minor: 0n,
+    patch: 0n,
     preRelease: [],
   };
   const latestVersion = parseSemver(latest) ?? currentVersion;
@@ -391,9 +392,11 @@ function isUpdateAvailable(current: string, latest: string): boolean {
 
 function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
   for (const key of ["major", "minor", "patch"] as const) {
-    const difference = left[key] - right[key];
-    if (difference !== 0) {
-      return difference;
+    if (left[key] < right[key]) {
+      return -1;
+    }
+    if (left[key] > right[key]) {
+      return 1;
     }
   }
   return comparePreRelease(left.preRelease, right.preRelease);
@@ -425,7 +428,7 @@ function comparePreRelease(left: string[], right: string[]): number {
     const leftNumeric = /^\d+$/.test(leftIdentifier);
     const rightNumeric = /^\d+$/.test(rightIdentifier);
     if (leftNumeric && rightNumeric) {
-      return Number(leftIdentifier) - Number(rightIdentifier);
+      return compareNumericIdentifier(leftIdentifier, rightIdentifier);
     }
     if (leftNumeric) {
       return -1;
@@ -446,6 +449,12 @@ function parseSemver(value: string): ParsedSemver | null {
   if (!match) {
     return null;
   }
+  const major = parseU64Identifier(match[1]);
+  const minor = parseU64Identifier(match[2]);
+  const patch = parseU64Identifier(match[3]);
+  if (major === null || minor === null || patch === null) {
+    return null;
+  }
   const preRelease = match[4]?.split(".") ?? [];
   if (
     preRelease.some(
@@ -455,11 +464,29 @@ function parseSemver(value: string): ParsedSemver | null {
     return null;
   }
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
+    major,
+    minor,
+    patch,
     preRelease,
   };
+}
+
+function parseU64Identifier(value: string | undefined): bigint | null {
+  if (value === undefined) {
+    return null;
+  }
+  const parsed = BigInt(value);
+  return parsed <= U64_MAX ? parsed : null;
+}
+
+function compareNumericIdentifier(left: string, right: string): number {
+  if (left.length !== right.length) {
+    return left.length < right.length ? -1 : 1;
+  }
+  if (left === right) {
+    return 0;
+  }
+  return left < right ? -1 : 1;
 }
 
 function normalizeFilePath(filePath: string): string {
