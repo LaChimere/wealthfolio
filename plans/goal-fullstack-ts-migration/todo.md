@@ -5248,6 +5248,12 @@ contract:
   `#[serde(default)] bool` parity for `isAvailable` and `isComingSoon`,
   including missing-field defaults plus present-null, non-boolean, and duplicate
   raw-key rejection.
+- `pr5-connect-subscription-plan-duplicates`: verification passed: focused
+  subscription-plan tests, full Connect tests, full `bun run check`, pre-commit
+  checks, and dual GPT/Claude xhigh review. Coverage includes raw duplicate-key
+  rejection for known top-level `SubscriptionPlan` fields, nested `PlanPricing`
+  fields, and nested `PlanLimits` fields while preserving ignored unknown-field
+  behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

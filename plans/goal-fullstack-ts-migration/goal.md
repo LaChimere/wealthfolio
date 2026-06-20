@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 557
+turns_used: 558
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T09:07:56+08:00"
+updated_at: "2026-06-20T09:16:49+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3607,6 +3607,12 @@ updated_at: "2026-06-20T09:07:56+08:00"
   non-boolean, or duplicate raw keys reject. Verified with focused/full Connect
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review/refine.
+- Turn 558: Tightened Connect subscription-plan duplicate-key serde parity. Plan
+  response raw validation now rejects duplicate known `SubscriptionPlan`,
+  `PlanPricing`, and `PlanLimits` keys before `JSON.parse` last-wins behavior
+  can mask them, while preserving Rust ignored-unknown-field behavior. Verified
+  with focused/full Connect tests, full `bun run check`, pre-commit checks, and
+  dual GPT/Claude xhigh review.
 
 ## Deferred items
 
