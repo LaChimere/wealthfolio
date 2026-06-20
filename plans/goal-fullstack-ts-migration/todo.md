@@ -5668,6 +5668,10 @@ contract:
   tests and full `bun run check`. Coverage includes clearing runtime-only fields
   from ZIP/package manifest installs and exercising 509/unknown status reason
   parity.
+- `pr5-addon-installed-manifest-read-parity`: verification passed: focused
+  add-on tests and full `bun run check`. Coverage includes clearing runtime-only
+  fields on installed manifest reads like Rust while preserving fresh runtime
+  metadata in install return values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

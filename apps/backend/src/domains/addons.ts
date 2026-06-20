@@ -127,10 +127,6 @@ interface AddonUpdateCheckRecord {
   error: string | null;
 }
 
-interface AddonManifestParseOptions {
-  preserveRuntimeFields?: boolean;
-}
-
 type FetchStore = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 const DEFAULT_ADDON_STORE_API_BASE_URL = "https://wealthfolio.app/api/addons";
@@ -884,7 +880,7 @@ function readManifestIfExists(addonDir: string): AddonManifestRecord | null {
   }
   const content = readFileSync(manifestPath, "utf8");
   try {
-    return parseAddonManifest(JSON.parse(content), { preserveRuntimeFields: true });
+    return parseAddonManifest(JSON.parse(content));
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to parse manifest ${manifestPath}: ${error.message}`);
@@ -901,10 +897,7 @@ function readManifestOrError(addonDir: string): AddonManifestRecord {
   return manifest;
 }
 
-function parseAddonManifest(
-  value: unknown,
-  options: AddonManifestParseOptions = {},
-): AddonManifestRecord {
+function parseAddonManifest(value: unknown): AddonManifestRecord {
   if (!isRecord(value)) {
     throw new Error("manifest is not an object");
   }
@@ -928,16 +921,6 @@ function parseAddonManifest(
     minWealthfolioVersion: optionalManifestString(value.minWealthfolioVersion),
     keywords: parseOptionalStringArray(value.keywords),
     icon: optionalManifestString(value.icon),
-    ...(options.preserveRuntimeFields && typeof value.installedAt === "string"
-      ? { installedAt: value.installedAt }
-      : {}),
-    ...(options.preserveRuntimeFields && typeof value.updatedAt === "string"
-      ? { updatedAt: value.updatedAt }
-      : {}),
-    ...(options.preserveRuntimeFields && typeof value.source === "string"
-      ? { source: value.source }
-      : {}),
-    ...(options.preserveRuntimeFields && isSafeU64Number(value.size) ? { size: value.size } : {}),
   };
 }
 
@@ -993,10 +976,6 @@ function parseOptionalStringArray(value: unknown): string[] | null {
     return null;
   }
   return value.filter((item): item is string => typeof item === "string");
-}
-
-function isSafeU64Number(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseAddonPermissions(value: unknown): AddonPermissionRecord[] | null {

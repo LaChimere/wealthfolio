@@ -176,12 +176,10 @@ describe("TS addon domain", () => {
         ],
       }),
     );
-    expect(metadata).toMatchObject({
-      installedAt: "2026-05-17T00:00:00+00:00",
-      updatedAt: "2026-05-18T00:00:00+00:00",
-      source: "store",
-      size: 123,
-    });
+    expect("installedAt" in metadata).toBe(false);
+    expect("updatedAt" in metadata).toBe(false);
+    expect("source" in metadata).toBe(false);
+    expect("size" in metadata).toBe(false);
   });
 
   test("extracts addon ZIPs with manifest normalization and permission detection", async () => {
