@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 558
+turns_used: 559
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T09:16:49+08:00"
+updated_at: "2026-06-20T09:33:55+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3613,6 +3613,12 @@ updated_at: "2026-06-20T09:16:49+08:00"
   can mask them, while preserving Rust ignored-unknown-field behavior. Verified
   with focused/full Connect tests, full `bun run check`, pre-commit checks, and
   dual GPT/Claude xhigh review.
+- Turn 559: Tightened Connect/device-sync trusted-device summary duplicate-key
+  serde parity. Enroll and initialize-key response validation now rejects
+  duplicate known `TrustedDeviceSummary` fields and `lastSeenAt`/`last_seen_at`
+  aliases before `JSON.parse` can mask them, while preserving ignored unknown
+  fields. Verified with focused/full Connect tests, full `bun run check`,
+  pre-commit checks, and dual GPT/Claude xhigh review.
 
 ## Deferred items
 

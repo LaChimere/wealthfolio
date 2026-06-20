@@ -5254,6 +5254,12 @@ contract:
   rejection for known top-level `SubscriptionPlan` fields, nested `PlanPricing`
   fields, and nested `PlanLimits` fields while preserving ignored unknown-field
   behavior.
+- `pr5-connect-trusted-device-summary-duplicates`: verification passed: focused
+  enroll/initialize-key tests, full Connect tests, full `bun run check`,
+  pre-commit checks, and dual GPT/Claude xhigh review. Coverage includes raw
+  duplicate-key rejection for known `TrustedDeviceSummary` fields and
+  `lastSeenAt`/`last_seen_at` aliases in both enroll `PAIR` and initialize-key
+  `PAIRING_REQUIRED` responses while preserving ignored unknown-field behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
