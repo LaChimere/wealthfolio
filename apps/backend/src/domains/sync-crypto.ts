@@ -76,6 +76,7 @@ export function createSyncCryptoService(options: SyncCryptoServiceOptions = {}):
     },
 
     deriveDek(rootKey, version) {
+      validateU32(version, "version");
       const rootKeyBytes = decodeBase64Bytes(rootKey, "root key", KEY_SIZE);
       const dek = hkdfSha256(rootKeyBytes, textBytes(`v${version}`), textBytes("wealthfolio-dek"));
       return { value: encodeBase64(dek) };
@@ -215,4 +216,10 @@ function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function validateU32(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 4_294_967_295) {
+    throw new Error(`${label} must be a u32 integer`);
+  }
 }

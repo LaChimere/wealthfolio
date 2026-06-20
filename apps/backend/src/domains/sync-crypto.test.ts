@@ -18,6 +18,12 @@ describe("TS sync crypto domain", () => {
     expect(service.deriveDek(sequentialKeyBase64, 8)).not.toEqual(
       service.deriveDek(sequentialKeyBase64, 7),
     );
+    expect(() => service.deriveDek(sequentialKeyBase64, 1.5)).toThrow(
+      "version must be a u32 integer",
+    );
+    expect(() => service.deriveDek(sequentialKeyBase64, 4_294_967_296)).toThrow(
+      "version must be a u32 integer",
+    );
     expect(() => service.deriveDek("not-base64", 1)).toThrow("Invalid root key");
   });
 
