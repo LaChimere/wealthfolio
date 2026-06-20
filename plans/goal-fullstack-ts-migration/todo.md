@@ -5362,6 +5362,11 @@ contract:
   full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review.
   Coverage includes Rust-compatible `i32` parsing for custom-provider
   create/update priority fields before service dispatch.
+- `pr5-custom-provider-domain-priority-i32`: verification passed: focused
+  custom-provider domain tests, full `bun run check`, pre-commit checks, and
+  dual GPT/Claude xhigh review. Coverage includes Rust-compatible `Option<i32>`
+  validation for direct custom-provider create/update calls before repository
+  persistence.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
