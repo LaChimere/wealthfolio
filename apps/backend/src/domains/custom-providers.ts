@@ -1196,9 +1196,15 @@ async function buildTestSourceHeaders(
     if (typeof value !== "string") {
       continue;
     }
+    if (!isRustCompatibleHeaderName(name)) {
+      continue;
+    }
     const resolved = value.startsWith("__SECRET__")
       ? await resolveSecretHeaderValue(value.slice("__SECRET__".length), secretService)
       : value;
+    if (!isRustCompatibleHeaderValue(resolved)) {
+      continue;
+    }
     try {
       headers.set(name, resolved);
     } catch {
@@ -1206,6 +1212,17 @@ async function buildTestSourceHeaders(
     }
   }
   return headers;
+}
+
+function isRustCompatibleHeaderName(value: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u.test(value);
+}
+
+function isRustCompatibleHeaderValue(value: string): boolean {
+  return [...value].every((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 0x20 && code <= 0x7e;
+  });
 }
 
 function buildBrowserLikeHeaders(format: CustomProviderSourceFormat, url: string): Headers {

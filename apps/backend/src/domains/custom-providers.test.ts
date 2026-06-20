@@ -409,6 +409,8 @@ describe("TS custom providers domain", () => {
           "X-Num": 5,
           "Bad Header": "ignored",
           "X-Bad": "line\nbreak",
+          "X-Ctrl": "bad\u001fvalue",
+          "X-Del": "bad\u007fvalue",
         }),
         symbol: "M219",
         currency: "gbp",
@@ -435,6 +437,8 @@ describe("TS custom providers domain", () => {
       expect(calls[0]?.headers.get("accept")).toBe("application/vnd.test");
       expect(calls[0]?.headers.get("x-num")).toBeNull();
       expect(calls[0]?.headers.get("x-bad")).toBeNull();
+      expect(calls[0]?.headers.get("x-ctrl")).toBeNull();
+      expect(calls[0]?.headers.get("x-del")).toBeNull();
       expect(Array.from(calls[0]?.headers.keys() ?? [])).not.toContain("bad header");
       expect(calls[0]?.headers.get("referer")).toBe("https://api.example.test/");
       expect(calls[0]?.headers.get("user-agent")).toContain("Chrome/131.0.0.0");
@@ -625,6 +629,31 @@ describe("TS custom providers domain", () => {
       );
     } finally {
       unknownStatusDb.close();
+    }
+
+    const nodeOnlyStatusDb = createCustomProvidersDb();
+    const nodeOnlyStatusService = createCustomProviderService(
+      createCustomProviderRepository(nodeOnlyStatusDb),
+      {
+        fetchImpl: (() =>
+          Promise.resolve(
+            new Response("node-only", {
+              status: 509,
+              statusText: "Bandwidth Limit Exceeded",
+            }),
+          )) satisfies NonNullable<CustomProviderServiceOptions["fetchImpl"]>,
+      },
+    );
+    try {
+      await expect(
+        nodeOnlyStatusService.testSource(baseTestSourceRequest()),
+      ).resolves.toMatchObject({
+        success: false,
+        statusCode: 509,
+        error: "HTTP 509 <unknown status code>: node-only",
+      });
+    } finally {
+      nodeOnlyStatusDb.close();
     }
 
     const oversizedDb = createCustomProvidersDb();
@@ -910,6 +939,22 @@ describe("TS custom providers domain", () => {
         low: 1900,
         volume: 200,
         date: "2026-05-04",
+      });
+
+      const csvRows = await service.fetchSourceRows({
+        ...baseTestSourceRequest(),
+        format: "csv",
+        pricePath: "close",
+        datePath: "datetime",
+        locale: "de-DE",
+      });
+      expect(csvRows).toMatchObject({
+        statusCode: 200,
+        currency: "USD",
+        rows: [
+          { price: 4.832, date: "2026-05-03" },
+          { price: 1234.56, date: "2026-05-04" },
+        ],
       });
 
       const rustUnsignedColumnResult = await service.testSource({
