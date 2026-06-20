@@ -4432,6 +4432,16 @@ describe("TS backend HTTP skeleton", () => {
       changelogUrl: null,
       screenshots: null,
     });
+    const invalidForceResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/app/check-update?force=TRUE", {
+        headers: { authorization: "Bearer sidecar-token" },
+      }),
+    );
+    expect(invalidForceResponse.status).toBe(400);
+    await expect(invalidForceResponse.json()).resolves.toEqual({
+      code: 400,
+      message: "force must be a boolean",
+    });
 
     const backupResponse = await handler(
       new Request("http://127.0.0.1/api/v1/utilities/database/backup", {

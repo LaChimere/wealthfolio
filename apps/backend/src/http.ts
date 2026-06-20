@@ -1612,7 +1612,11 @@ function routeAppUtilityRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/v1/app/check-update") {
-    return Promise.resolve(appUtilityService.checkUpdate(url.searchParams.get("force") === "true"))
+    const force = parseOptionalBooleanQuery(url, "force", false);
+    if (force instanceof Response) {
+      return force;
+    }
+    return Promise.resolve(appUtilityService.checkUpdate(force))
       .then(jsonResponse)
       .catch(domainErrorResponse);
   }
