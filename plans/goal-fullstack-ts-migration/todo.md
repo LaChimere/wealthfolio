@@ -5350,6 +5350,10 @@ contract:
   GPT/Claude xhigh review/refine. Coverage includes same-day MANUAL-over-BROKER
   holdings quote priority and requested-only metadata key deletion with
   unspecified metadata preservation.
+- `pr5-market-data-provider-priority-i32`: verification passed: focused HTTP
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes Rust-compatible `i32` parsing for market-data
+  provider settings priority before service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
