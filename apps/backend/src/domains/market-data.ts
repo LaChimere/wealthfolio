@@ -6119,7 +6119,7 @@ async function fetchBoerseResolvedQuote(
   url.searchParams.set("isin", isin);
   url.searchParams.set("mic", identity.mic);
 
-  const payload = await fetchBoerseJson(url, fetchImpl);
+  const payload = await fetchBoerseJson(url, fetchImpl, "Search returned HTTP ");
   if (!isRecord(payload)) {
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: invalid price response`);
   }
@@ -6159,7 +6159,7 @@ async function resolveBoerseIsin(
   const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/search`);
   url.searchParams.set("query", trimmedSymbol);
   url.searchParams.set("limit", "5");
-  const payload = await fetchBoerseJson(url, fetchImpl);
+  const payload = await fetchBoerseJson(url, fetchImpl, "Search returned HTTP ");
   if (!Array.isArray(payload)) {
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: Search JSON parse error`);
   }
@@ -6183,7 +6183,11 @@ async function resolveBoerseIsin(
   throw new Error(`Symbol not found: ${trimmedSymbol}@${mic}`);
 }
 
-async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
+async function fetchBoerseJson(
+  url: URL,
+  fetchImpl: typeof fetch,
+  httpStatusPrefix = "HTTP ",
+): Promise<unknown> {
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -6193,7 +6197,9 @@ async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unkno
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
+    throw new Error(
+      `${BOERSE_FRANKFURT_PROVIDER}: ${httpStatusPrefix}${formatRustHttpStatus(response.status)}`,
+    );
   }
   try {
     return await response.json();

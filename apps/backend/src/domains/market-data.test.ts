@@ -1909,6 +1909,54 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("records Boerse Frankfurt search HTTP failures like Rust", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      expect(url).toBe(
+        "https://api.live.deutsche-boerse.com/v1/tradingview/search?query=SAP&limit=5",
+      );
+      expect((init?.headers as Record<string, string>)["User-Agent"]).toContain("Mozilla");
+      return Promise.resolve(
+        new Response("", {
+          status: 509,
+          statusText: "Bandwidth Limit Exceeded",
+        }),
+      );
+    }) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-sap",
+        display_code: "SAP",
+        quote_ccy: "EUR",
+        instrument_symbol: "SAP",
+        instrument_exchange_mic: "XETR",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["asset-sap"] }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        failures: [["SAP", "BOERSE_FRANKFURT: Search returned HTTP 509 <unknown status code>"]],
+      });
+      expect(readSyncState(db, "asset-sap")).toMatchObject({
+        data_source: "BOERSE_FRANKFURT",
+        error_count: 1,
+        last_error: "BOERSE_FRANKFURT: Search returned HTTP 509 <unknown status code>",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("treats Boerse Frankfurt no-data history as a clean zero-quote sync", async () => {
     const db = createMarketDataDb();
     const fetchImpl = boerseTestFetch({

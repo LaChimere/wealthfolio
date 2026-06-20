@@ -5735,6 +5735,11 @@ contract:
 - `pr5-assets-provider-http-status-text`: verification passed: focused asset
   tests. Coverage includes canonical Rust-compatible status reason phrases and
   `<unknown status code>` fallback for asset enrichment provider HTTP failures.
+- `pr5-provider-status-review-fixes`: verification passed: focused
+  market-data/assets tests. Coverage includes Finnhub JSON error bodies for
+  asset enrichment, Boerse Frankfurt search-specific HTTP status wording in
+  market-data and asset profile paths, and canonical Yahoo crumb status
+  formatting.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

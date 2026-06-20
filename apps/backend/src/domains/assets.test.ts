@@ -731,6 +731,51 @@ describe("TS assets domain", () => {
     }
   });
 
+  test("reports Boerse Frankfurt search HTTP failures like Rust", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      warn: (message) => warnings.push(message),
+      fetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        expect(url).toBe(
+          "https://api.live.deutsche-boerse.com/v1/tradingview/search?query=BAS&limit=5",
+        );
+        return Promise.resolve(
+          new Response("", {
+            status: 509,
+            statusText: "Bandwidth Limit Exceeded",
+          }),
+        );
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-boerse-error",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "EUR",
+        instrument_type: "EQUITY",
+        instrument_symbol: "BAS",
+        instrument_exchange_mic: "XETR",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
+
+      await expect(service.enrichAssets(["equity-boerse-error"])).resolves.toEqual({
+        enriched: 0,
+        skipped: 0,
+        failed: 1,
+      });
+      expect(warnings).toEqual([
+        "Failed to enrich asset equity-boerse-error: BOERSE_FRANKFURT: Search returned HTTP 509 <unknown status code>",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("enriches explicit Boerse Frankfurt bond profiles from metadata ISINs", async () => {
     const db = createAssetsDb();
     const fetched: string[] = [];
@@ -917,6 +962,57 @@ describe("TS assets domain", () => {
       expect(readSyncState(db, "equity-finnhub")).toMatchObject({
         profile_enriched_at: "2026-05-22T00:00:00.000Z",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports Finnhub JSON error responses like Rust", async () => {
+    const db = createAssetsDb();
+    const warnings: string[] = [];
+    const service = createAssetService(db, {
+      now: () => "2026-05-22T00:00:00.000Z",
+      warn: (message) => warnings.push(message),
+      secretService: {
+        setSecret() {},
+        getSecret(secretKey) {
+          return secretKey === "FINNHUB" ? "finnhub-key" : null;
+        },
+        deleteSecret() {},
+      },
+      fetch: ((input: RequestInfo | URL) => {
+        expect(String(input)).toBe("https://finnhub.io/api/v1/stock/profile2?symbol=AAPL");
+        return Promise.resolve(
+          Response.json(
+            { error: "Invalid Finnhub symbol" },
+            {
+              status: 500,
+              statusText: "Internal Server Error",
+            },
+          ),
+        );
+      }) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "equity-finnhub-error",
+        kind: "INVESTMENT",
+        quote_mode: "MARKET",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
+      });
+
+      await expect(service.enrichAssets(["equity-finnhub-error"])).resolves.toEqual({
+        enriched: 0,
+        skipped: 0,
+        failed: 1,
+      });
+      expect(warnings).toEqual([
+        "Failed to enrich asset equity-finnhub-error: FINNHUB: Invalid Finnhub symbol",
+      ]);
     } finally {
       db.close();
     }

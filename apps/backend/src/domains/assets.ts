@@ -1253,7 +1253,7 @@ async function resolveBoerseProfileIsin(
   const url = new URL(`${BOERSE_FRANKFURT_BASE_URL}/tradingview/search`);
   url.searchParams.set("query", trimmedSymbol);
   url.searchParams.set("limit", "5");
-  const payload = await fetchBoerseJson(url, fetchImpl);
+  const payload = await fetchBoerseJson(url, fetchImpl, "Search returned HTTP ");
   if (!Array.isArray(payload)) {
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: Search JSON parse error`);
   }
@@ -1274,7 +1274,11 @@ async function resolveBoerseProfileIsin(
   throw new Error(`Symbol not found: ${trimmedSymbol}@${mic}`);
 }
 
-async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unknown> {
+async function fetchBoerseJson(
+  url: URL,
+  fetchImpl: typeof fetch,
+  httpStatusPrefix = "HTTP ",
+): Promise<unknown> {
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -1284,7 +1288,9 @@ async function fetchBoerseJson(url: URL, fetchImpl: typeof fetch): Promise<unkno
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP request failed: ${errorMessage(error)}`);
   }
   if (!response.ok) {
-    throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)}`);
+    throw new Error(
+      `${BOERSE_FRANKFURT_PROVIDER}: ${httpStatusPrefix}${formatRustHttpStatus(response.status)}`,
+    );
   }
   try {
     return await response.json();
@@ -1399,13 +1405,24 @@ async function fetchFinnhubJson(
     throw new Error(`${FINNHUB_PROVIDER}: Access forbidden - check API key: ${text}`);
   }
   if (!response.ok) {
-    throw new Error(`${FINNHUB_PROVIDER}: HTTP ${formatRustHttpStatus(response.status)} - ${text}`);
+    const parsedError = parseFinnhubError(text);
+    throw new Error(
+      `${FINNHUB_PROVIDER}: ${parsedError ?? `HTTP ${formatRustHttpStatus(response.status)} - ${text}`}`,
+    );
   }
   try {
     return JSON.parse(text) as unknown;
   } catch (error) {
     throw new Error(`${FINNHUB_PROVIDER}: Failed to parse response: ${errorMessage(error)}`);
   }
+}
+
+function parseFinnhubError(text: string): string | null {
+  const parsed = parseJsonValue(text);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  return optionalString(parsed.error);
 }
 
 async function fetchYahooSearchProfileFromEndpoint(
@@ -2822,7 +2839,7 @@ async function fetchYahooCrumb(
 
   const cookieResponse = await fetchImpl("https://fc.yahoo.com");
   if (!cookieResponse.ok) {
-    throw new Error(`YAHOO: HTTP ${cookieResponse.status}`);
+    throw new Error(`YAHOO: HTTP ${formatRustHttpStatus(cookieResponse.status)}`);
   }
   const cookie = cookieResponse.headers.get("set-cookie")?.split(";")[0]?.trim();
   if (!cookie) {
@@ -2836,7 +2853,7 @@ async function fetchYahooCrumb(
     },
   });
   if (!crumbResponse.ok) {
-    throw new Error(`YAHOO: HTTP ${crumbResponse.status}`);
+    throw new Error(`YAHOO: HTTP ${formatRustHttpStatus(crumbResponse.status)}`);
   }
   const crumb = (await crumbResponse.text()).trim();
   if (!crumb) {
