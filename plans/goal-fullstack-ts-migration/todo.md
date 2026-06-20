@@ -5475,6 +5475,11 @@ contract:
   includes Rust-compatible `force` query parsing for app update checks: absent
   defaults to false, lowercase `true`/`false` are accepted, and malformed query
   values reject before update-check dispatch.
+- `pr5-account-list-include-archived-bool-parity`: verification passed: focused
+  HTTP tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes Rust-compatible `includeArchived` query parsing for account list
+  reads: absent defaults to false, lowercase `true`/`false` are accepted, and
+  malformed query values reject before account service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
