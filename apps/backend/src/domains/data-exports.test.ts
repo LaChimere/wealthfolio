@@ -5,6 +5,7 @@ import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
 import {
   createDataExportService,
+  exportFileName,
   parseExportDataType,
   parseExportFileFormat,
 } from "./data-exports";
@@ -17,6 +18,20 @@ describe("TS data export domain", () => {
     expect(parseExportDataType("accounts")).toBe("accounts");
     expect(() => parseExportDataType("Accounts")).toThrow("Unsupported export data type: Accounts");
     expect(parseExportFileFormat("CSV")).toBe("csv");
+  });
+
+  test("uses local dates for export filenames like Rust", () => {
+    const localNextDay = {
+      getFullYear: () => 2026,
+      getMonth: () => 5,
+      getDate: () => 20,
+      toISOString: () => "2026-06-19T17:00:00.000Z",
+    } as Date;
+
+    expect(exportFileName("activities", "csv", localNextDay)).toBe("activities_2026-06-20.csv");
+    expect(exportFileName("portfolio-history", "json", localNextDay)).toBe(
+      "portfolio-history_2026-06-20.json",
+    );
   });
 
   test("exports activities from the first search page like Rust", async () => {
