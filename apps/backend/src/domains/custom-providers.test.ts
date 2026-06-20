@@ -179,6 +179,36 @@ describe("TS custom providers domain", () => {
           ],
         }),
       ).rejects.toThrow("Invalid source format 'xml'. Must be one of: json, html, html_table, csv");
+      await expect(
+        service.create({
+          code: "bad-priority",
+          name: "Bad Priority",
+          priority: 4.5,
+          sources: [
+            {
+              kind: "latest",
+              format: "json",
+              url: "https://example.test",
+              pricePath: "$.price",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.create({
+          code: "bad-priority",
+          name: "Bad Priority",
+          priority: 2_147_483_648,
+          sources: [
+            {
+              kind: "latest",
+              format: "json",
+              url: "https://example.test",
+              pricePath: "$.price",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
     } finally {
       db.close();
     }
@@ -237,6 +267,13 @@ describe("TS custom providers domain", () => {
       });
       expect(syncEvents.map((event) => event.operation)).toEqual(["Update", "Update"]);
       expect(syncEvents.every((event) => event.providerUuid === "uuid-demo")).toBe(true);
+      await expect(service.update("demo", { priority: 4.5 })).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
+      await expect(service.update("demo", { priority: -2_147_483_649 })).rejects.toThrow(
+        "Priority must be an integer between -2147483648 and 2147483647",
+      );
+      expect(syncEvents.map((event) => event.operation)).toEqual(["Update", "Update"]);
     } finally {
       db.close();
     }

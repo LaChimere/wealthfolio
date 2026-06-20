@@ -404,6 +404,7 @@ export function createCustomProviderService(
     },
     async create(payload) {
       const code = normalizeNewProviderCode(payload.code);
+      validateOptionalI32Priority(payload.priority);
       validateSourceDefinitions(payload.sources);
       return repository.create({
         ...payload,
@@ -411,6 +412,7 @@ export function createCustomProviderService(
       });
     },
     async update(providerCode, payload) {
+      validateOptionalI32Priority(payload.priority);
       if (payload.sources !== undefined && payload.sources !== null) {
         validateSourceDefinitions(payload.sources);
       }
@@ -1948,6 +1950,17 @@ function validateSourceDefinitions(sources: NewCustomProviderSource[]): void {
         `Invalid input: Invalid source format '${source.format}'. Must be one of: ${VALID_SOURCE_FORMATS.join(", ")}`,
       );
     }
+  }
+}
+
+function validateOptionalI32Priority(priority: number | null | undefined): void {
+  if (priority === undefined || priority === null) {
+    return;
+  }
+  if (!Number.isInteger(priority) || priority < -2_147_483_648 || priority > 2_147_483_647) {
+    throw new Error(
+      "Invalid input: Priority must be an integer between -2147483648 and 2147483647",
+    );
   }
 }
 
