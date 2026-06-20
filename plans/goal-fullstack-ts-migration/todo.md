@@ -5534,6 +5534,11 @@ contract:
   focused custom-provider tests, full `bun run check`, and dual GPT/Claude xhigh
   review. Coverage includes UTC template expansion for `0000-02-29` with
   Rust-compatible `%Y`, `%F`, `%C`, and `%j` outputs.
+- `pr5-contribution-limit-proleptic-year-bounds`: verification passed: focused
+  contribution-limit tests, full `bun run check`, and dual GPT/Claude xhigh
+  review/refine. Coverage includes contribution year `0` UTC boundaries and
+  America/Los_Angeles year-zero activity inclusion/FX dates without JavaScript's
+  1900-year or Intl AD-year remaps.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
