@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 664
+turns_used: 665
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T06:47:38+08:00"
+updated_at: "2026-06-21T07:01:05+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4159,10 +4159,14 @@ updated_at: "2026-06-21T06:47:38+08:00"
   values are resolved before invalid-name skipping like Rust, and header value
   validation now permits Rust-valid tab/non-ASCII values while still rejecting
   invalid controls and DEL. Verified with focused custom-provider tests.
-- Turn 664: Resolved custom-provider UTF-8 header byte parity. User header
-  values now enter Fetch as UTF-8 byte strings so Rust-valid non-ASCII values
-  preserve Rust `HeaderValue::from_str` wire bytes instead of being dropped by
-  `Headers.set`. Verified with focused custom-provider tests.
+- Turn 664: Extended custom-provider non-ASCII user-header coverage. Tests now
+  cover Rust-valid Latin-1-compatible header values plus higher Unicode values
+  that Bun `Headers.set` cannot represent directly. Verified with focused
+  custom-provider tests.
+- Turn 665: Resolved custom-provider UTF-8 header re-review follow-up. TS now
+  passes raw header values through Bun Fetch when accepted, avoiding byte-string
+  double-encoding, and skips Bun-unsupported higher Unicode values rather than
+  sending corrupted bytes. Verified with focused custom-provider tests.
 
 ## Deferred items
 

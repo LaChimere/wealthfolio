@@ -444,9 +444,9 @@ describe("TS custom providers domain", () => {
       expect(calls[0]?.headers.get("x-ctrl")).toBeNull();
       expect(calls[0]?.headers.get("x-del")).toBeNull();
       expect(calls[0]?.headers.get("x-tab")).toBe("ok\tvalue");
-      expect(calls[0]?.headers.get("x-accent")).toBe(utf8HeaderByteString("café"));
-      expect(calls[0]?.headers.get("x-euro")).toBe(utf8HeaderByteString("€"));
-      expect(calls[0]?.headers.get("x-macron")).toBe(utf8HeaderByteString("Ā"));
+      expect(calls[0]?.headers.get("x-accent")).toBe("café");
+      expect(calls[0]?.headers.get("x-euro")).toBeNull();
+      expect(calls[0]?.headers.get("x-macron")).toBeNull();
       expect(Array.from(calls[0]?.headers.keys() ?? [])).not.toContain("bad header");
       expect(calls[0]?.headers.get("referer")).toBe("https://api.example.test/");
       expect(calls[0]?.headers.get("user-agent")).toContain("Chrome/131.0.0.0");
@@ -1295,8 +1295,4 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
       ...init.headers,
     },
   });
-}
-
-function utf8HeaderByteString(value: string): string {
-  return Array.from(new TextEncoder().encode(value), (byte) => String.fromCharCode(byte)).join("");
 }

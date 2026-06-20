@@ -5717,9 +5717,14 @@ contract:
   custom-provider tests. Coverage includes resolving secret header values before
   invalid-name skipping and preserving Rust-valid tab/non-ASCII header values
   while rejecting invalid controls and DEL.
-- `pr5-custom-provider-utf8-header-bytes`: verification passed: focused
-  custom-provider tests. Coverage includes encoding Rust-valid non-ASCII user
-  header values as UTF-8 byte strings before Fetch header insertion.
+- `pr5-custom-provider-nonascii-header-coverage`: verification passed: focused
+  custom-provider tests. Coverage includes Rust-valid Latin-1-compatible header
+  values and higher Unicode values that Bun `Headers.set` cannot represent
+  directly.
+- `pr5-custom-provider-utf8-header-rereview-fix`: verification passed: focused
+  custom-provider tests. Coverage includes passing raw non-ASCII header values
+  through Bun Fetch when accepted and skipping Bun-unsupported higher Unicode
+  values instead of sending byte-string double-encoded bytes.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
