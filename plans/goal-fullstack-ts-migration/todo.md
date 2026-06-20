@@ -5664,6 +5664,10 @@ contract:
   and full `bun run check`. Coverage includes preserving valid runtime manifest
   fields on read and writing Rust-style UTC RFC3339 `installedAt` values on
   local installs.
+- `pr5-addon-runtime-status-review-fixes`: verification passed: focused add-on
+  tests and full `bun run check`. Coverage includes clearing runtime-only fields
+  from ZIP/package manifest installs and exercising 509/unknown status reason
+  parity.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

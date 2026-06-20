@@ -318,6 +318,8 @@ describe("TS addon domain", () => {
         name: "Installed Addon",
         version: "1.0.0",
         main: "main.js",
+        updatedAt: "2026-05-18T00:00:00+00:00",
+        size: 123,
       }),
       "main.js": "export default {};",
     });
@@ -332,6 +334,8 @@ describe("TS addon domain", () => {
       source: "local",
       installedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*\+00:00$/),
     });
+    expect("updatedAt" in installed).toBe(false);
+    expect("size" in installed).toBe(false);
     expect(
       readFileSync(path.join(appDataDir, "addons", "installed-addon", "main.js"), "utf8"),
     ).toBe("export default {};");
@@ -511,6 +515,14 @@ describe("TS addon domain", () => {
         fetchStore: async () => new Response("nope", { status: 520, statusText: "" }),
       }).submitRating({ addonId: "addon/id", rating: 5 }),
     ).rejects.toThrow("Failed to submit rating: HTTP 520 <unknown status code>");
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () =>
+          new Response("nope", { status: 509, statusText: "Bandwidth Limit Exceeded" }),
+      }).submitRating({ addonId: "addon/id", rating: 5 }),
+    ).rejects.toThrow("Failed to submit rating: HTTP 509 <unknown status code>");
 
     await expect(
       createLocalAddonService({
