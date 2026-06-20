@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 644
+turns_used: 645
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T03:22:33+08:00"
+updated_at: "2026-06-21T03:46:32+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4074,6 +4074,11 @@ updated_at: "2026-06-21T03:22:33+08:00"
   `Staged addon file not found for addon: ...` error before reading the ZIP when
   the staged file is absent. Verified with focused add-on tests and full
   `bun run check`.
+- Turn 645: Resolved add-on store status-format review follow-up. TS add-on
+  store errors now format HTTP status codes with canonical reason phrases like
+  Rust `reqwest::StatusCode` instead of trusting Fetch `statusText`, preserving
+  rating/download/update error parity. Verified with focused add-on tests and
+  full `bun run check`.
 
 ## Deferred items
 

@@ -5648,6 +5648,9 @@ contract:
 - `pr5-addon-staged-missing-file`: verification passed: focused add-on tests and
   full `bun run check`. Coverage includes Rust-compatible missing staged ZIP
   errors before filesystem reads.
+- `pr5-addon-store-status-format`: verification passed: focused add-on tests and
+  full `bun run check`. Coverage includes canonical Rust-compatible HTTP reason
+  phrases for add-on store error messages.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
