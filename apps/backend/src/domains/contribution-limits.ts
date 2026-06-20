@@ -709,15 +709,18 @@ function parseActivityInstant(value: string): Date {
 }
 
 function parseDateTime(value: string): Date {
+  if (/^[+-]?\d{4,}-\d{2}-\d{2}T/.test(value)) {
+    const expanded = parseExpandedRfc3339DateTime(value);
+    if (!expanded) {
+      throw new Error(`Invalid date: ${value}`);
+    }
+    return expanded;
+  }
   const parsed = new Date(value);
   if (!Number.isNaN(parsed.valueOf())) {
     return parsed;
   }
-  const expanded = parseExpandedRfc3339DateTime(value);
-  if (!expanded) {
-    throw new Error(`Invalid date: ${value}`);
-  }
-  return expanded;
+  throw new Error(`Invalid date: ${value}`);
 }
 
 function parseRfc3339DateTime(value: string): Date {
@@ -756,10 +759,21 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
   const minute = Number(minuteRaw);
   const second = Number(secondRaw);
   const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
-  const offsetMinutes = zoneRaw === "Z" ? 0 : Number(zoneHourRaw) * 60 + Number(zoneMinuteRaw);
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  const offsetMinutes = zoneRaw === "Z" ? 0 : zoneHour * 60 + zoneMinute;
   const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
-  const utcMs =
-    utcMsFromParts(year, month - 1, day, hour, minute, second, millisecond) - offset * 60_000;
+  const localMs = utcMsFromParts(year, month - 1, day, hour, minute, second, millisecond);
+  const local = new Date(localMs);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const utcMs = localMs - offset * 60_000;
   const parsed = new Date(utcMs);
   if (
     Number.isNaN(parsed.valueOf()) ||
@@ -770,7 +784,9 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
     day > 31 ||
     hour > 23 ||
     minute > 59 ||
-    second > 59
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
   ) {
     return null;
   }

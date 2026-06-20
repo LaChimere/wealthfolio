@@ -446,6 +446,36 @@ describe("TS contribution limits domain", () => {
       await expect(service.calculateDepositsForContributionLimit(dateOnly.id)).rejects.toThrow(
         "Invalid date: 2026-03-31",
       );
+      const invalidExpanded = await service.createContributionLimit(
+        newLimit({
+          accountIds: "acc1",
+          startDate: "+10000-02-30T00:00:00Z",
+          endDate: "+10000-02-30T00:00:00Z",
+        }),
+      );
+      await expect(
+        service.calculateDepositsForContributionLimit(invalidExpanded.id),
+      ).rejects.toThrow("Invalid date: +10000-02-30T00:00:00Z");
+      const invalidFourDigit = await service.createContributionLimit(
+        newLimit({
+          accountIds: "acc1",
+          startDate: "2026-04-31T00:00:00Z",
+          endDate: "2026-04-31T00:00:00Z",
+        }),
+      );
+      await expect(
+        service.calculateDepositsForContributionLimit(invalidFourDigit.id),
+      ).rejects.toThrow("Invalid date: 2026-04-31T00:00:00Z");
+      const invalidOffset = await service.createContributionLimit(
+        newLimit({
+          accountIds: "acc1",
+          startDate: "2026-01-01T00:00:00+24:00",
+          endDate: "2026-01-01T00:00:00+24:00",
+        }),
+      );
+      await expect(service.calculateDepositsForContributionLimit(invalidOffset.id)).rejects.toThrow(
+        "Invalid date: 2026-01-01T00:00:00+24:00",
+      );
 
       seedActivity(db, {
         id: "missing-amount",
