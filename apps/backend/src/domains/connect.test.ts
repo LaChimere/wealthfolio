@@ -8898,8 +8898,12 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 1,
       }),
     );
-    let latestSnapshotMode: "valid" | "missing-schema" | "float-seq" | "duplicate-float-seq" =
-      "valid";
+    let latestSnapshotMode:
+      | "valid"
+      | "missing-schema"
+      | "float-seq"
+      | "duplicate-float-seq"
+      | "unsafe-seq" = "valid";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -8927,6 +8931,12 @@ describe("TS Connect device sync local service", () => {
           if (latestSnapshotMode === "duplicate-float-seq") {
             return new Response(
               '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":99,"oplog_seq":99.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (latestSnapshotMode === "unsafe-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":9007199254740993}}',
               { headers: { "content-type": "application/json" } },
             );
           }
@@ -8994,6 +9004,12 @@ describe("TS Connect device sync local service", () => {
       });
 
       latestSnapshotMode = "duplicate-float-seq";
+      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+
+      latestSnapshotMode = "unsafe-seq";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
@@ -9404,6 +9420,7 @@ describe("TS Connect device sync local service", () => {
     );
     let serverCursor: number | "bad-gc" = 8;
     let latestSnapshotOplogSeq: number | null = null;
+    let latestSnapshotBody: string | null = null;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9421,6 +9438,11 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ cursor: serverCursor });
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (latestSnapshotBody !== null) {
+            return new Response(latestSnapshotBody, {
+              headers: { "content-type": "application/json" },
+            });
+          }
           if (latestSnapshotOplogSeq === null) {
             return Response.json(
               { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
@@ -9467,6 +9489,17 @@ describe("TS Connect device sync local service", () => {
         oplogSeq: 10,
         message: "Latest remote snapshot already covers current cursor",
       });
+      latestSnapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740993,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:snapshot"}';
+      const overSafeResult = await service.generateDeviceSnapshotNow();
+      expect(overSafeResult).toEqual({
+        status: "uploaded",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        oplogSeq: null,
+        message: "Latest remote snapshot already covers current cursor",
+      });
+      expect(() => JSON.stringify(overSafeResult)).not.toThrow();
+      latestSnapshotBody = null;
       latestSnapshotOplogSeq = 9;
       await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
         code: "not_implemented",
@@ -9854,7 +9887,9 @@ describe("TS Connect device sync local service", () => {
         keyVersion: 2,
       }),
     );
-    let remoteCursor = 99;
+    let snapshotBody =
+      '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":42,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":128,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+    let cursorBody = '{"cursor":99,"latest_snapshot":null}';
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9867,18 +9902,10 @@ describe("TS Connect device sync local service", () => {
           return snapshotDownloadResponse();
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
-          return Response.json({
-            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
-            oplog_seq: 42,
-            created_at: "2026-01-01T00:00:00Z",
-            schema_version: 1,
-            covers_tables: [],
-            size_bytes: 128,
-            checksum: "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
-          });
+          return new Response(snapshotBody, { headers: { "content-type": "application/json" } });
         }
         if (String(input).includes("/api/v1/sync/events/cursor")) {
-          return Response.json({ cursor: remoteCursor, latest_snapshot: null });
+          return new Response(cursorBody, { headers: { "content-type": "application/json" } });
         }
         return Response.json({
           id: "device-1",
@@ -9899,7 +9926,18 @@ describe("TS Connect device sync local service", () => {
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
       ).toEqual({ count: 1 });
-      remoteCursor = 40;
+      snapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740992,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+      cursorBody = '{"cursor":9007199254740993,"latest_snapshot":null}';
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        snapshotId: null,
+        cursor: 42,
+      });
+      snapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740993,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+      cursorBody = '{"cursor":9007199254740992,"latest_snapshot":null}';
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
         code: "not_implemented",
         status: 501,
@@ -10998,8 +11036,12 @@ describe("TS Connect device sync local service", () => {
     );
     let latestSchemaVersion = 2;
     let cursorSchemaVersion = 1;
-    let cursorMode: "normal" | "duplicate-latest" | "duplicate-null-latest" | "bad-gc" =
-      "duplicate-latest";
+    let cursorMode:
+      | "normal"
+      | "duplicate-latest"
+      | "duplicate-null-latest"
+      | "bad-gc"
+      | "over-safe-non-strict" = "duplicate-latest";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -11012,6 +11054,12 @@ describe("TS Connect device sync local service", () => {
           return snapshotDownloadResponse();
         }
         if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (cursorMode === "over-safe-non-strict") {
+            return new Response(
+              '{"snapshot_id":"legacy-snapshot-id","oplog_seq":9007199254740992,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:snapshot"}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
           return Response.json({
             snapshot_id: "legacy-snapshot-id",
             oplog_seq: 42,
@@ -11038,6 +11086,12 @@ describe("TS Connect device sync local service", () => {
           if (cursorMode === "bad-gc") {
             return new Response(
               '{"cursor":42,"gc_watermark":1.0,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (cursorMode === "over-safe-non-strict") {
+            return new Response(
+              '{"cursor":9007199254740994,"latest_snapshot":{"snapshot_id":"legacy-cursor-id","schema_version":2,"oplog_seq":9007199254740993}}',
               { headers: { "content-type": "application/json" } },
             );
           }
@@ -11087,6 +11141,14 @@ describe("TS Connect device sync local service", () => {
       });
       latestSchemaVersion = 1;
       cursorSchemaVersion = 2;
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      latestSchemaVersion = 1;
+      cursorSchemaVersion = 1;
+      cursorMode = "over-safe-non-strict";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
         code: "internal_error",
         status: 500,

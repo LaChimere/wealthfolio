@@ -122,6 +122,10 @@ const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2U
 const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
 const DEVICE_ENROLL_DISPLAY_NAME = "Wealthfolio Server";
 const RESET_REASON_REINITIALIZE = "reinitialize";
+const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
+type I64Value = number | bigint;
 
 export function createDisabledConnectService(): ConnectService {
   return {
@@ -6072,7 +6076,7 @@ type LocalLatestSnapshotStatus =
       kind: "present";
       snapshotId: string;
       schemaVersion: number;
-      oplogSeq: number;
+      oplogSeq: I64Value;
       createdAt: string;
       checksum: string | null;
     }
@@ -6125,7 +6129,7 @@ async function localLatestSnapshotStatusBestEffort(
           parsed.schemaVersion ?? parsed.schema_version,
           "snapshot metadata",
         ),
-        oplogSeq: requiredInteger(parsed.oplogSeq ?? parsed.oplog_seq, "snapshot metadata"),
+        oplogSeq: requiredI64FromRawJson(bodyText, ["oplogSeq", "oplog_seq"]),
         createdAt: requiredStringValue(parsed.createdAt ?? parsed.created_at, "snapshot metadata"),
         checksum: optionalString(parsed.checksum),
       };
@@ -6175,7 +6179,7 @@ async function localCursorLatestSnapshotStatusBestEffort(
     if (!isRecord(parsed)) {
       return { kind: "unknown" };
     }
-    if (!validSyncCursorShape(parsed) || !validSyncCursorRawShape(responseText)) {
+    if (!validSyncCursorRawShape(responseText)) {
       return { kind: "unknown" };
     }
     const latestSnapshotRawTokens = [
@@ -6216,11 +6220,7 @@ async function localCursorLatestSnapshotStatusBestEffort(
           (latestSnapshot as Record<string, unknown>).schema_version,
         "cursor latest snapshot",
       ),
-      oplogSeq: requiredInteger(
-        (latestSnapshot as Record<string, unknown>).oplogSeq ??
-          (latestSnapshot as Record<string, unknown>).oplog_seq,
-        "cursor latest snapshot",
-      ),
+      oplogSeq: requiredI64FromRawJson(latestSnapshotRawToken ?? "", ["oplogSeq", "oplog_seq"]),
       createdAt: "",
       checksum: null,
     };
@@ -6251,7 +6251,7 @@ async function localSnapshotSatisfiesFreshnessGate(
     return true;
   }
   const remoteCursor = await localEventsCursorBestEffort(env, fetchImpl, accessToken, deviceId);
-  return remoteCursor !== null && latest.oplogSeq >= remoteCursor;
+  return remoteCursor !== null && compareI64Values(latest.oplogSeq, remoteCursor) >= 0;
 }
 
 async function fetchLocalEventsCursorOrThrow(
@@ -6310,7 +6310,7 @@ async function localEventsCursorBestEffort(
   fetchImpl: typeof fetch,
   accessToken: string,
   deviceId: string,
-): Promise<number | null> {
+): Promise<I64Value | null> {
   try {
     const response = await fetchImpl(
       `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/cursor`,
@@ -6328,10 +6328,10 @@ async function localEventsCursorBestEffort(
     }
     const bodyText = await response.text();
     const parsed = JSON.parse(bodyText) as unknown;
-    if (!isRecord(parsed) || !validSyncCursorShape(parsed) || !validSyncCursorRawShape(bodyText)) {
+    if (!isRecord(parsed) || !validSyncCursorRawShape(bodyText)) {
       return null;
     }
-    return requiredInteger(parsed.cursor, "cursor response");
+    return requiredI64FromRawJson(bodyText, ["cursor"]);
   } catch {
     return null;
   }
@@ -6441,7 +6441,7 @@ function chooseLocalSnapshotStatus(
   if (!isBackendStrictUuid(latestId) && isBackendStrictUuid(cursorId)) {
     return cursorLatest;
   }
-  if (cursorLatest.oplogSeq > latest.oplogSeq) {
+  if (compareI64Values(cursorLatest.oplogSeq, latest.oplogSeq) > 0) {
     return cursorLatest;
   }
   return latest;
@@ -6475,8 +6475,8 @@ function validSnapshotLatestMetadataShape(value: Record<string, unknown>): boole
     isI32Integer(value.schemaVersion ?? value.schema_version) &&
     Array.isArray(coversTables) &&
     coversTables.every((entry) => typeof entry === "string") &&
-    isSafeI64Integer(value.oplogSeq ?? value.oplog_seq) &&
-    isSafeI64Integer(value.sizeBytes ?? value.size_bytes) &&
+    isJsonParsedInteger(value.oplogSeq ?? value.oplog_seq) &&
+    isJsonParsedInteger(value.sizeBytes ?? value.size_bytes) &&
     optionalString(value.checksum) !== null &&
     optionalString(value.createdAt ?? value.created_at) !== null
   );
@@ -6515,7 +6515,7 @@ function validSyncLatestSnapshotRefShape(value: unknown): value is Record<string
   return (
     optionalString(value.snapshotId ?? value.snapshot_id) !== null &&
     isI32Integer(value.schemaVersion ?? value.schema_version) &&
-    isSafeI64Integer(value.oplogSeq ?? value.oplog_seq)
+    isJsonParsedInteger(value.oplogSeq ?? value.oplog_seq)
   );
 }
 
@@ -6540,6 +6540,43 @@ function validSyncCursorRawShape(text: string): boolean {
 
 function isSafeI64Integer(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isJsonParsedInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function requiredI64FromRawJson(rawJson: string, aliases: string[]): I64Value {
+  const tokens = rawTokensForAliases(rawJson, aliases);
+  const parsed = i64FromRawToken(tokens[0] ?? "");
+  if (tokens.length !== 1 || parsed === null) {
+    throw new ConnectServiceError("internal_error", "Failed to parse snapshot metadata", 500);
+  }
+  return parsed;
+}
+
+function i64FromRawToken(token: string): I64Value | null {
+  if (!rawJsonI64TokenIsValid(token)) {
+    return null;
+  }
+  const parsed = BigInt(token.trim());
+  if (parsed >= MIN_SAFE_BIGINT && parsed <= MAX_SAFE_BIGINT) {
+    return Number(parsed);
+  }
+  return parsed;
+}
+
+function i64ToSafeNumberOrNull(value: I64Value | null): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function compareI64Values(left: I64Value, right: I64Value): number {
+  const leftBigInt = typeof left === "bigint" ? left : BigInt(left);
+  const rightBigInt = typeof right === "bigint" ? right : BigInt(right);
+  if (leftBigInt === rightBigInt) {
+    return 0;
+  }
+  return leftBigInt > rightBigInt ? 1 : -1;
 }
 
 function resetAndMarkLocalBootstrapComplete(
@@ -6652,8 +6689,12 @@ async function fetchLocalReconcileReadyStateBestEffort(
         (rawCursorToken !== undefined && !rawJsonI64OptionTokenIsValid(rawCursorToken)) ||
         (cursorValue !== undefined && cursorValue !== null && cursor === null),
       latestSnapshotId: parsedLatestSnapshot.snapshotId,
-      latestSnapshotSeq: parsedLatestSnapshot.oplogSeq,
-      latestSnapshotInvalid: latestSnapshotRawTokens.length > 1 || parsedLatestSnapshot.invalid,
+      latestSnapshotSeq: i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq),
+      latestSnapshotInvalid:
+        latestSnapshotRawTokens.length > 1 ||
+        parsedLatestSnapshot.invalid ||
+        (parsedLatestSnapshot.oplogSeq !== null &&
+          i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq) === null),
     };
   } catch {
     return emptyLocalReconcileReadyState();
@@ -6736,11 +6777,14 @@ async function generateSnapshotIfTrusted(
     session.accessToken,
     deviceId,
   );
-  if (latestSnapshotStatus.kind === "present" && latestSnapshotStatus.oplogSeq >= localCursor) {
+  if (
+    latestSnapshotStatus.kind === "present" &&
+    compareI64Values(latestSnapshotStatus.oplogSeq, localCursor) >= 0
+  ) {
     return {
       status: "uploaded",
       snapshotId: latestSnapshotStatus.snapshotId,
-      oplogSeq: latestSnapshotStatus.oplogSeq,
+      oplogSeq: i64ToSafeNumberOrNull(latestSnapshotStatus.oplogSeq),
       message: "Latest remote snapshot already covers current cursor",
     };
   }
@@ -7006,7 +7050,12 @@ function rawJsonI32OptionTokenIsValid(token: string): boolean {
 }
 
 function rawJsonI64TokenIsValid(token: string): boolean {
-  return /^-?(?:0|[1-9]\d*)$/.test(token.trim());
+  const trimmed = token.trim();
+  if (!/^-?(?:0|[1-9]\d*)$/.test(trimmed)) {
+    return false;
+  }
+  const parsed = BigInt(trimmed);
+  return parsed >= -9_223_372_036_854_775_808n && parsed <= 9_223_372_036_854_775_807n;
 }
 
 function rawJsonI32TokenIsValid(token: string): boolean {
@@ -7030,7 +7079,7 @@ function rawTokensForAliases(text: string, aliases: string[]): string[] {
 function parseLocalReconcileLatestSnapshot(
   value: unknown,
   rawToken: string | undefined,
-): { snapshotId: string | null; oplogSeq: number | null; invalid: boolean } {
+): { snapshotId: string | null; oplogSeq: I64Value | null; invalid: boolean } {
   if (value === undefined || value === null) {
     return { snapshotId: null, oplogSeq: null, invalid: false };
   }
@@ -7039,7 +7088,6 @@ function parseLocalReconcileLatestSnapshot(
   }
   const snapshotIdValue = value.snapshotId ?? value.snapshot_id;
   const schemaVersionValue = value.schemaVersion ?? value.schema_version;
-  const oplogSeqValue = value.oplogSeq ?? value.oplog_seq;
   const snapshotIdRawTokens = [
     ...topLevelJsonPropertyRawTokens(rawToken, "snapshotId"),
     ...topLevelJsonPropertyRawTokens(rawToken, "snapshot_id"),
@@ -7057,7 +7105,7 @@ function parseLocalReconcileLatestSnapshot(
   const oplogSeqRawToken = oplogSeqRawTokens[0];
   const snapshotId = typeof snapshotIdValue === "string" ? snapshotIdValue : null;
   const schemaVersion = isI32Integer(schemaVersionValue) ? schemaVersionValue : null;
-  const oplogSeq = isSafeI64Integer(oplogSeqValue) ? oplogSeqValue : null;
+  const oplogSeq = oplogSeqRawToken === undefined ? null : i64FromRawToken(oplogSeqRawToken);
   const invalid =
     snapshotId === null ||
     schemaVersion === null ||
@@ -7070,7 +7118,7 @@ function parseLocalReconcileLatestSnapshot(
     oplogSeqRawToken === undefined ||
     !rawJsonStringTokenIsValid(snapshotIdRawToken) ||
     !rawJsonI32TokenIsValid(schemaVersionRawToken) ||
-    !rawJsonI64OptionTokenIsValid(oplogSeqRawToken);
+    !rawJsonI64TokenIsValid(oplogSeqRawToken);
   return { snapshotId, oplogSeq, invalid };
 }
 
