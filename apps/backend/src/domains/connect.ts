@@ -909,18 +909,14 @@ function userInfoFromApi(value: unknown, rawJson: string | null = null): unknown
       ? {
           id: requiredStringValue(team.id, "team info"),
           name: optionalString(team.name) ?? "",
-          logo_url: optionalString(team.logoUrl ?? team.logo_url),
+          logo_url: optionalString(team.logoUrl),
           plan: optionalString(team.plan),
-          subscription_status: optionalString(team.subscriptionStatus ?? team.subscription_status),
-          subscription_current_period_end: optionalString(
-            team.subscriptionCurrentPeriodEnd ?? team.subscription_current_period_end,
-          ),
-          subscription_cancel_at_period_end: optionalBoolean(
-            team.subscriptionCancelAtPeriodEnd ?? team.subscription_cancel_at_period_end,
-          ),
-          canceled_at: optionalString(team.canceledAt ?? team.canceled_at),
-          country_code: optionalString(team.countryCode ?? team.country_code),
-          created_at: optionalString(team.createdAt ?? team.created_at),
+          subscription_status: optionalString(team.subscriptionStatus),
+          subscription_current_period_end: optionalString(team.subscriptionCurrentPeriodEnd),
+          subscription_cancel_at_period_end: optionalBoolean(team.subscriptionCancelAtPeriodEnd),
+          canceled_at: optionalString(team.canceledAt),
+          country_code: optionalString(team.countryCode),
+          created_at: optionalString(team.createdAt),
         }
       : null,
   };
@@ -953,14 +949,14 @@ function assertUserInfoRawShape(rawJson: string): void {
       [
         ["id"],
         ["name"],
-        ["logoUrl", "logo_url"],
+        ["logoUrl"],
         ["plan"],
-        ["subscriptionStatus", "subscription_status"],
-        ["subscriptionCurrentPeriodEnd", "subscription_current_period_end"],
-        ["subscriptionCancelAtPeriodEnd", "subscription_cancel_at_period_end"],
-        ["canceledAt", "canceled_at"],
-        ["countryCode", "country_code"],
-        ["createdAt", "created_at"],
+        ["subscriptionStatus"],
+        ["subscriptionCurrentPeriodEnd"],
+        ["subscriptionCancelAtPeriodEnd"],
+        ["canceledAt"],
+        ["countryCode"],
+        ["createdAt"],
       ],
       "team info",
     );
@@ -1044,23 +1040,16 @@ function validateUserTeamFromApi(team: Record<string, unknown>): void {
   for (const field of [
     "name",
     "logoUrl",
-    "logo_url",
     "plan",
     "subscriptionStatus",
-    "subscription_status",
     "subscriptionCurrentPeriodEnd",
-    "subscription_current_period_end",
     "canceledAt",
-    "canceled_at",
     "countryCode",
-    "country_code",
     "createdAt",
-    "created_at",
   ]) {
     assertOptionalConnectStringField(team, field, "team info");
   }
   assertOptionalConnectBooleanField(team, "subscriptionCancelAtPeriodEnd", "team info");
-  assertOptionalConnectBooleanField(team, "subscription_cancel_at_period_end", "team info");
 }
 
 function requiredStringValue(value: unknown, context: string): string {

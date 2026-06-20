@@ -1281,7 +1281,7 @@ describe("TS backend runtime composition", () => {
               id: "team-1",
               name: "Team",
               plan: "pro",
-              subscription_status: "active",
+              subscriptionStatus: "active",
             },
           });
         }

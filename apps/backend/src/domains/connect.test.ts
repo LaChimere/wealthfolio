@@ -656,11 +656,16 @@ describe("TS Connect local session service", () => {
             logoUrl: null,
             plan: "pro",
             subscriptionStatus: "active",
+            subscription_status: 123,
             subscriptionCurrentPeriodEnd: "2026-07-01T00:00:00Z",
+            subscription_current_period_end: 123,
             subscriptionCancelAtPeriodEnd: false,
+            subscription_cancel_at_period_end: "false",
             canceledAt: null,
             countryCode: "US",
+            country_code: 123,
             createdAt: "2026-01-01T00:00:00Z",
+            created_at: 123,
           },
         });
       },
@@ -832,7 +837,7 @@ describe("TS Connect local session service", () => {
         status: 500,
       });
       responseBody =
-        '{"id":"user-1","team":{"id":"team-1","subscriptionStatus":"active","subscription_status":"trialing"}}';
+        '{"id":"user-1","team":{"id":"team-1","subscriptionStatus":"active","subscriptionStatus":"trialing"}}';
       await expect(service.getUserInfo()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse team info",
@@ -2014,7 +2019,7 @@ describe("TS Connect local session service", () => {
         }
         if (String(input).endsWith("/api/v1/user/me")) {
           return new Response(
-            '{"id":"user-1","team":{"id":"team-1","plan":"pro","subscription_status":"canceled","subscriptionStatus":"active"}}',
+            '{"id":"user-1","team":{"id":"team-1","plan":"pro","subscriptionStatus":"canceled","subscriptionStatus":"active"}}',
             { headers: { "content-type": "application/json" } },
           );
         }
