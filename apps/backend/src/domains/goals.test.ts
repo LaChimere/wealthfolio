@@ -982,6 +982,13 @@ describe("TS goals domain", () => {
           })(),
           "personal.currentAge must be a non-negative integer",
         ],
+        [
+          "over-u32-age",
+          validRetirementPlan({
+            personal: { currentAge: 4_294_967_296 },
+          }),
+          "personal.currentAge must be a u32 integer",
+        ],
       ] as const;
 
       for (const [label, settings, message] of cases) {

@@ -5572,6 +5572,11 @@ contract:
   priority values outside Rust `i32` before dispatch/persistence and falling
   back to catalog defaults when stored AI provider settings contain malformed
   priority data.
+- `pr5-retirement-plan-age-u32`: verification passed: focused goals/HTTP tests
+  and full `bun run check`. Coverage includes rejecting nested retirement-plan
+  age values above Rust `u32` before goal-plan persistence or direct retirement
+  route calculations, while preserving existing negative/fraction validation
+  messages.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

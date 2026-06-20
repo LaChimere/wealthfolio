@@ -6864,6 +6864,28 @@ describe("TS backend HTTP skeleton", () => {
       });
       expect(providerCalls).toBe(2);
 
+      const overU32ProjectionResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals/retirement/projection", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: validHttpRetirementPlan({
+              personal: { planningHorizonAge: 4_294_967_296 },
+            }),
+            currentPortfolio: 100_000,
+          }),
+        }),
+      );
+      expect(overU32ProjectionResponse.status).toBe(400);
+      await expect(overU32ProjectionResponse.json()).resolves.toMatchObject({
+        message:
+          "Invalid input: Invalid retirement plan JSON: personal.planningHorizonAge must be a u32 integer",
+      });
+      expect(providerCalls).toBe(2);
+
       const domainErrorResponse = await handler(
         new Request("http://127.0.0.1/api/v1/goals/missing/save-up/overview", {
           headers: { authorization: "Bearer sidecar-token" },

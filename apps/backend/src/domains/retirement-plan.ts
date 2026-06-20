@@ -40,6 +40,7 @@ const RETIREMENT_MIN_ANNUAL_RETURN = -0.2;
 const RETIREMENT_MAX_ANNUAL_RETURN = 0.5;
 const RETIREMENT_MAX_ANNUAL_INVESTMENT_FEE = 0.1;
 const RETIREMENT_MAX_ANNUAL_VOLATILITY = 1;
+const U32_MAX = 4_294_967_295;
 
 export function validateAndNormalizeRetirementPlanSettings(
   settingsJson: string,
@@ -484,6 +485,9 @@ function readRequiredU32(value: Record<string, unknown>, label: string): number 
       `Invalid input: Invalid retirement plan JSON: ${label} must be a non-negative integer`,
     );
   }
+  if ((candidate as number) > U32_MAX) {
+    throw new Error(`Invalid input: Invalid retirement plan JSON: ${label} must be a u32 integer`);
+  }
   return candidate as number;
 }
 
@@ -500,6 +504,9 @@ function readOptionalU32(
     throw new Error(
       `Invalid input: Invalid retirement plan JSON: ${label} must be a non-negative integer`,
     );
+  }
+  if ((candidate as number) > U32_MAX) {
+    throw new Error(`Invalid input: Invalid retirement plan JSON: ${label} must be a u32 integer`);
   }
   return candidate as number;
 }
