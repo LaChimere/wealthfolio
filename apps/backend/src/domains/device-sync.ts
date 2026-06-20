@@ -625,6 +625,9 @@ export function createLocalDeviceSyncService({
       if (db && localBootstrapRequired(db, deviceId)) {
         throw deviceSyncDisabled();
       }
+      if (db && localHasPendingSyncOutbox(db)) {
+        throw deviceSyncDisabled();
+      }
       try {
         await fetchDeviceSyncJsonRaw(
           accessToken,
@@ -2716,6 +2719,34 @@ function localBootstrapRequired(db: Database, deviceId: string): boolean {
       >("SELECT last_cycle_status FROM sync_engine_state WHERE id = 1")
       .get()?.last_cycle_status;
     return cycleStatus === "stale_cursor";
+  } catch {
+    return true;
+  }
+}
+
+function localHasPendingSyncOutbox(db: Database): boolean {
+  if (!sqliteTableExists(db, "sync_outbox")) {
+    return false;
+  }
+  try {
+    if (
+      sqliteColumnExists(db, "sync_outbox", "status") &&
+      sqliteColumnExists(db, "sync_outbox", "sent")
+    ) {
+      const row = db
+        .query<{ count: number }, []>(
+          `
+            SELECT COUNT(*) AS count
+            FROM sync_outbox
+            WHERE status = 'pending'
+              AND sent = 0
+          `,
+        )
+        .get();
+      return (row?.count ?? 0) > 0;
+    }
+    const row = db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get();
+    return (row?.count ?? 0) > 0;
   } catch {
     return true;
   }

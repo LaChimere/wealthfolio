@@ -2574,6 +2574,86 @@ describe("TS local device sync service", () => {
     }
   });
 
+  test("keeps composite pairing transfer gated when local sync outbox is pending", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        id TEXT PRIMARY KEY NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        sent INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_outbox (id, status, sent) VALUES ('sent-event', 'sent', 1);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceId: "device-1" }),
+    );
+    const requests: string[] = [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ success: true });
+      },
+    });
+
+    try {
+      await expect(
+        service.completePairingWithTransfer?.({
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      ).resolves.toEqual({ success: true });
+      expect(requests.map((request) => request.split("/").pop())).toEqual(["approve", "complete"]);
+      requests.length = 0;
+
+      db.prepare(
+        "INSERT INTO sync_outbox (id, status, sent, next_retry_at) VALUES ('future-event', 'pending', 0, '2999-01-01T00:00:00.000Z')",
+      ).run();
+      await expect(
+        service.completePairingWithTransfer?.({
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      expect(requests).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns already complete from bootstrap confirm when no local database exists", async () => {
     const secretService = createMemorySecretService();
     secretService.entries.set(
