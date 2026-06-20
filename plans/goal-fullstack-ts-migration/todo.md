@@ -5242,6 +5242,12 @@ contract:
   parity for `householdSize`, `devices`, numeric `institutionConnections`, and
   optional `yearlyDiscountPercent`, including raw fractional JSON tokens such as
   `4.0` and parsed out-of-range values.
+- `pr5-connect-subscription-plan-default-bool`: verification passed: focused
+  subscription-plan tests, full Connect tests, full `bun run check`, pre-commit
+  checks, and dual GPT/Claude xhigh review/refine. Coverage includes Rust
+  `#[serde(default)] bool` parity for `isAvailable` and `isComingSoon`,
+  including missing-field defaults plus present-null, non-boolean, and duplicate
+  raw-key rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
