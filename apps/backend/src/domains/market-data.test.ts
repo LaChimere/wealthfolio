@@ -4812,6 +4812,17 @@ describe("TS market data domain", () => {
               },
             },
           },
+          "TIME_SERIES_DAILY:ANCIENT.TRT": {
+            "Time Series (Daily)": {
+              "0004-02-29": {
+                "1. open": "4",
+                "2. high": "5",
+                "3. low": "3",
+                "4. close": "4.5",
+                "5. volume": "40",
+              },
+            },
+          },
         },
       }),
       secretService: testSecretService("ALPHA_VANTAGE", "alpha-key"),
@@ -4831,7 +4842,23 @@ describe("TS market data domain", () => {
         price: 26.5,
         resolvedProviderId: "ALPHA_VANTAGE",
       });
-      expect(calls).toEqual(["TIME_SERIES_DAILY:SHOP.TRT:compact"]);
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "ANCIENT",
+          exchangeMic: "XTSE",
+          instrumentType: "EQUITY",
+          quoteCcy: "USD",
+          providerId: "ALPHA_VANTAGE",
+        }),
+      ).resolves.toEqual({
+        currency: "CAD",
+        price: 4.5,
+        resolvedProviderId: "ALPHA_VANTAGE",
+      });
+      expect(calls).toEqual([
+        "TIME_SERIES_DAILY:SHOP.TRT:compact",
+        "TIME_SERIES_DAILY:ANCIENT.TRT:compact",
+      ]);
     } finally {
       db.close();
     }

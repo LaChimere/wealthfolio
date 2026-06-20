@@ -5227,7 +5227,8 @@ function alphaVantageDateTimestamp(date: string): string | null {
     return null;
   }
   const [year, month, day] = date.split("-").map((part) => Number(part));
-  const timestamp = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day ?? 0));
+  const timestamp = new Date(Date.UTC(2000, 0, 1));
+  timestamp.setUTCFullYear(year ?? 0, (month ?? 0) - 1, day ?? 0);
   if (
     Number.isNaN(timestamp.getTime()) ||
     timestamp.getUTCFullYear() !== year ||
