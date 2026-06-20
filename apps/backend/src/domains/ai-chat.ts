@@ -269,6 +269,7 @@ const MAX_TOTAL_ATTACHMENTS_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENT_NAME_CHARS = 255;
 const MAX_ATTACHMENT_CONTENT_TYPE_CHARS = 255;
 const CHAT_CONFIG_SCHEMA_VERSION = 1;
+const U32_MAX = 4_294_967_295;
 const PROMPT_TEMPLATE_ID = "wealthfolio-assistant-v1";
 const PROMPT_VERSION = "1.0.0";
 const ATTACHMENT_MARKER = "📎 ";
@@ -2924,15 +2925,19 @@ function parseMessageContent(contentJson: string): AiChatMessageContent {
   if (!isRecord(parsed) || !Array.isArray(parsed.parts)) {
     throw aiChatError("invalid_input", "Invalid AI message content JSON", 400);
   }
-  const schemaVersion =
-    typeof parsed.schemaVersion === "number" && Number.isInteger(parsed.schemaVersion)
-      ? parsed.schemaVersion
-      : 1;
+  const schemaVersion = parseContentSchemaVersion(parsed.schemaVersion);
   return {
     schemaVersion,
     parts: parsed.parts.filter(isRecord) as AiChatMessagePart[],
     ...(parsed.truncated === true ? { truncated: true } : {}),
   };
+}
+
+function parseContentSchemaVersion(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > U32_MAX) {
+    throw aiChatError("invalid_input", "Invalid AI message content JSON", 400);
+  }
+  return value;
 }
 
 function parseThreadCursor(cursor: string): { isPinned: number; updatedAt: string; id: string } {

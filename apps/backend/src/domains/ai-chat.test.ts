@@ -228,6 +228,25 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("rejects stored message content whose schemaVersion is not u32", () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db);
+
+    try {
+      seedThread(db, { id: "thread-1", title: "Malformed" });
+      seedMessage(db, {
+        id: "message-1",
+        threadId: "thread-1",
+        role: "assistant",
+        content: { schemaVersion: 4_294_967_296, parts: [] },
+      });
+
+      expect(() => service.getMessages("thread-1")).toThrow("Invalid AI message content JSON");
+    } finally {
+      db.close();
+    }
+  });
+
   test("queues AI chat thread, message, and tag sync callbacks for local mutations", async () => {
     const db = createAiChatDb();
     const syncEvents: SyncEvent[] = [];

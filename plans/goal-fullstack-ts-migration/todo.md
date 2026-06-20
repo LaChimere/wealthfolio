@@ -5585,6 +5585,10 @@ contract:
   provider tests and full `bun run check`. Coverage includes falling back to
   catalog defaults when stored `ai_provider_settings.schemaVersion` is malformed
   or outside Rust `u32`.
+- `pr5-ai-message-content-schema-u32`: verification passed: focused AI chat
+  tests and full `bun run check`. Coverage includes rejecting stored
+  `ai_messages.content_json` `schemaVersion` values outside Rust `u32` instead
+  of silently defaulting them.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
