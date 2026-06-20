@@ -5630,6 +5630,10 @@ contract:
 - `pr5-backup-list-rfc3339-timestamp`: verification passed: focused app utility
   tests and full `bun run check`. Coverage includes Rust chrono-compatible UTC
   RFC3339 `modifiedAt` formatting for backup listings.
+- `pr5-backup-review-followups`: verification passed: focused app
+  utility/HTTP/runtime tests and full `bun run check`. Coverage includes runtime
+  `appDataDir` handler wiring for downloads, symlink-skipping backup listings,
+  and bigint mtimeNs-based modifiedAt formatting.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

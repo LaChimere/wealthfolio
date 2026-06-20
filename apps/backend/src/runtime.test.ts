@@ -108,6 +108,7 @@ describe("TS backend runtime composition", () => {
     });
 
     try {
+      expect(runtime.options.appDataDir).toBe(appDataDir);
       expect(runtime.options.appUtilityService?.getAppInfo()).toMatchObject({ version: "9.8.7" });
     } finally {
       await runtime.close();

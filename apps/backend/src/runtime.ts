@@ -535,6 +535,7 @@ function createServicesFromDatabase(
         });
       },
     }),
+    appDataDir,
     appUtilityService: createAppUtilityService({
       appDataDir,
       appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),

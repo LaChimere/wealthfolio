@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -294,6 +301,12 @@ describe("TS app utility domain", () => {
     const modifiedAt = new Date("2026-05-06T07:08:09.123Z");
     utimesSync(backupPath, modifiedAt, modifiedAt);
     writeFileSync(path.join(backupDir, "ignored.txt"), "ignored");
+    if (process.platform !== "win32") {
+      const outsideDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-list-outside-"));
+      const outsideFile = path.join(outsideDir, "outside.db");
+      writeFileSync(outsideFile, "outside");
+      symlinkSync(outsideFile, path.join(backupDir, "wealthfolio_backup_20260507_070809.db"));
+    }
     const service = createAppUtilityService({
       appDataDir,
       appVersion: "3.4.0",

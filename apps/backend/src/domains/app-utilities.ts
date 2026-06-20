@@ -144,12 +144,15 @@ function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
-function toRustUtcRfc3339(date: Date): string {
-  const iso = date.toISOString();
-  if (iso.endsWith(".000Z")) {
-    return `${iso.slice(0, -5)}+00:00`;
+function toRustUtcRfc3339(timestampNs: bigint): string {
+  const seconds = timestampNs / 1_000_000_000n;
+  const nanos = timestampNs % 1_000_000_000n;
+  const base = new Date(Number(seconds) * 1000).toISOString().slice(0, 19);
+  if (nanos === 0n) {
+    return `${base}+00:00`;
   }
-  return iso.replace(/Z$/u, "+00:00");
+  const fractional = nanos.toString().padStart(9, "0").replace(/0+$/u, "");
+  return `${base}.${fractional}+00:00`;
 }
 
 export function createAppUtilityService(options: AppUtilityServiceOptions): AppUtilityService {
@@ -216,7 +219,7 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
       restoreSqliteDatabase(options.appDataDir, normalizedBackupPath, options.env);
     },
     async listDatabaseBackups() {
-      const { readdirSync, statSync } = await import("node:fs");
+      const { lstatSync, readdirSync } = await import("node:fs");
       const backupDir = path.resolve(options.appDataDir, "backups");
 
       let entries: string[];
@@ -238,7 +241,7 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
         const filePath = path.resolve(backupDir, filename);
         let stats;
         try {
-          stats = statSync(filePath);
+          stats = lstatSync(filePath, { bigint: true });
         } catch {
           continue;
         }
@@ -249,8 +252,8 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
 
         backups.push({
           filename,
-          sizeBytes: stats.size,
-          modifiedAt: toRustUtcRfc3339(stats.mtime),
+          sizeBytes: Number(stats.size),
+          modifiedAt: toRustUtcRfc3339(stats.mtimeNs),
         });
       }
 
