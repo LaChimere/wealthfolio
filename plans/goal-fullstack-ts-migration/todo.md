@@ -5400,6 +5400,10 @@ contract:
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review. Coverage includes Rust-compatible `i32` contribution-year parsing
   before create/update service dispatch.
+- `pr5-health-initial-config-validation`: verification passed: focused health
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes constructor-time Rust-compatible u32/finite-f64
+  validation for health config thresholds.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
