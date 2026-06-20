@@ -5558,6 +5558,10 @@ contract:
   tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
   includes rejecting direct fractional and over-u32 DEK versions before key
   derivation.
+- `pr5-device-sync-team-key-version-i32`: verification passed: focused
+  device-sync tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes rejecting direct fractional and over-i32 team-key commit
+  versions before session lookup or cloud requests.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
