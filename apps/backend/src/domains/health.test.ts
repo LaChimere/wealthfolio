@@ -56,6 +56,18 @@ describe("TS health domain", () => {
           fxStaleWarningHours: 0,
         }),
       ).rejects.toThrow("fx_stale_warning_hours must be > 0");
+      expect(() =>
+        createHealthService(createHealthRepository(db), {
+          ...DEFAULT_HEALTH_CONFIG,
+          priceStaleWarningHours: -1,
+        }),
+      ).toThrow("price_stale_warning_hours must be a u32 integer");
+      expect(() =>
+        createHealthService(createHealthRepository(db), {
+          ...DEFAULT_HEALTH_CONFIG,
+          mvEscalationThreshold: Number.POSITIVE_INFINITY,
+        }),
+      ).toThrow("mv_escalation_threshold must be finite");
     } finally {
       db.close();
     }

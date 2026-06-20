@@ -302,6 +302,7 @@ export function createHealthService(
   initialConfig: HealthConfig = DEFAULT_HEALTH_CONFIG,
   options: HealthServiceOptions = {},
 ): HealthService {
+  validateHealthConfig(initialConfig);
   let config = { ...initialConfig };
   let cachedStatuses = new Map<string, { status: HealthStatus; cachedAt: Date }>();
   const now = options.now ?? timestampNowDate;
