@@ -518,7 +518,7 @@ function analyzeUnconfiguredAccounts(
         route: `/accounts/${encodeURIComponent(account.id)}`,
       })),
       dataHash,
-      timestamp: toRustUtcRfc3339(timestamp),
+      timestamp: toRustSerdeUtcRfc3339(timestamp),
     },
   ];
 }
@@ -545,7 +545,7 @@ function analyzeTimezone(
         affectedCount: 1,
         navigateAction: { route: "/settings/general", label: "Open General Settings" },
         dataHash,
-        timestamp: toRustUtcRfc3339(timestamp),
+        timestamp: toRustSerdeUtcRfc3339(timestamp),
       },
     ];
   }
@@ -563,7 +563,7 @@ function analyzeTimezone(
         affectedCount: 1,
         navigateAction: { route: "/settings/general", label: "Open General Settings" },
         dataHash,
-        timestamp: toRustUtcRfc3339(timestamp),
+        timestamp: toRustSerdeUtcRfc3339(timestamp),
       },
     ];
   }
@@ -584,7 +584,7 @@ function analyzeTimezone(
       affectedCount: 1,
       navigateAction: { route: "/settings/general", label: "Open General Settings" },
       dataHash,
-      timestamp: toRustUtcRfc3339(timestamp),
+      timestamp: toRustSerdeUtcRfc3339(timestamp),
     },
   ];
 }
@@ -770,7 +770,7 @@ function buildPriceStalenessIssues(input: {
       fixAction: { id: "sync_prices", label: "Sync Prices", payload: assetIds },
       details: priceStalenessDetails(input.assets, input.latestQuotes),
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1023,7 +1023,7 @@ function buildQuoteSyncIssues(input: {
           : undefined,
       details: quoteSyncDetails(input.errors),
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1239,7 +1239,7 @@ function buildFxIntegrityIssues(input: {
       fixAction: { id: "fetch_fx", label: "Fetch Exchange Rates", payload: pairIds },
       affectedItems: input.pairs.map(fxAffectedItem),
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1456,7 +1456,7 @@ function buildOrphanActivityIssues(input: {
         label: "View Activities",
       },
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1490,7 +1490,7 @@ function buildNegativePositionIssues(input: {
         label: "View Holdings",
       },
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1551,7 +1551,7 @@ function buildNegativeBalanceIssues(input: {
       navigateAction: { route: "/activities", label: "View Activities" },
       details: negativeBalanceDetails(input.issues, input.issueLevel),
       dataHash,
-      timestamp: toRustUtcRfc3339(input.timestamp),
+      timestamp: toRustSerdeUtcRfc3339(input.timestamp),
     },
   ];
 }
@@ -1730,7 +1730,7 @@ function legacyClassificationMigrationIssue(input: {
     fixAction: { id: "migrate_legacy_classifications", label: "Start Migration", payload: null },
     navigateAction: { route: "/settings/taxonomies", label: "View Classifications" },
     dataHash: input.dataHash,
-    timestamp: toRustUtcRfc3339(input.timestamp),
+    timestamp: toRustSerdeUtcRfc3339(input.timestamp),
   };
 }
 
@@ -1776,7 +1776,7 @@ function buildStatus(issues: HealthIssue[], checkedAt: Date): HealthStatus {
     overallSeverity,
     issueCounts,
     issues,
-    checkedAt: toRustUtcRfc3339(checkedAt),
+    checkedAt: toRustSerdeUtcRfc3339(checkedAt),
     isStale: false,
   };
 }
@@ -2046,6 +2046,14 @@ function toRustUtcRfc3339(date: Date): string {
     return `${iso.slice(0, -5)}+00:00`;
   }
   return iso.replace(/Z$/u, "+00:00");
+}
+
+function toRustSerdeUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  if (iso.endsWith(".000Z")) {
+    return `${iso.slice(0, -5)}Z`;
+  }
+  return iso;
 }
 
 function timestampNowDate(): Date {

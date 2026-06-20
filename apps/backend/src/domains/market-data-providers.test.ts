@@ -27,7 +27,7 @@ describe("TS market data provider settings domain", () => {
         requiresApiKey: false,
         hasApiKey: true,
         assetCount: 3,
-        lastSyncedAt: "2026-01-03T00:00:00.120+00:00",
+        lastSyncedAt: "2026-01-03T00:00:00.123456+00:00",
         errorCount: 0,
         uniqueErrors: [],
         capabilities: expect.objectContaining({ coverage: "Global" }),
@@ -129,7 +129,7 @@ export function createMarketDataProvidersDb(): Database {
     )
     VALUES
       ('asset-1', '2026-01-01T00:00:00Z', 'YAHOO', 0, NULL, '2026-01-01T00:00:00Z'),
-      ('asset-2', '2026-01-03T00:00:00.120Z', 'YAHOO', 0, NULL, '2026-01-03T00:00:00Z'),
+      ('asset-2', '2026-01-03T00:00:00.123456Z', 'YAHOO', 0, NULL, '2026-01-03T00:00:00Z'),
       ('asset-3', '2026-01-02T00:00:00Z', 'ALPHA_VANTAGE', 1, 'ALPHA_VANTAGE quota exceeded', '2026-01-04T00:00:00Z'),
       ('asset-4', NULL, 'YAHOO', 2, 'Provider FINNHUB failed', '2026-01-05T00:00:00Z');
   `);

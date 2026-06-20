@@ -5679,6 +5679,10 @@ contract:
   market-data provider tests and full `bun run check`. Coverage includes Rust
   `DateTime<Utc>::to_rfc3339()`-style `lastSyncedAt` values from provider sync
   stats.
+- `pr5-health-provider-timestamp-review-fixes`: verification passed: focused
+  health/provider tests and full `bun run check`. Coverage includes chrono serde
+  `Z` health API timestamps, `+00:00` dismissal storage timestamps, and
+  microsecond-precision provider sync `lastSyncedAt` normalization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

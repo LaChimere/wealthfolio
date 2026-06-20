@@ -349,8 +349,7 @@ function parseTimestampOrNull(value: string | null): string | null {
   if (!value) {
     return null;
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : toRustUtcRfc3339(parsed);
+  return normalizeUtcTimestamp(value);
 }
 
 function parseTimestampOrNow(value: string): string {
@@ -364,6 +363,37 @@ function toRustUtcRfc3339(date: Date): string {
     return `${iso.slice(0, -5)}+00:00`;
   }
   return iso.replace(/Z$/u, "+00:00");
+}
+
+function normalizeUtcTimestamp(value: string): string | null {
+  const utcMatch = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|\+00:00)$/u.exec(
+    value,
+  );
+  if (utcMatch) {
+    const parsed = new Date(`${utcMatch[1]}.${(utcMatch[2] ?? "0").slice(0, 3).padEnd(3, "0")}Z`);
+    if (Number.isNaN(parsed.valueOf())) {
+      return null;
+    }
+    const fractional = normalizeRustFraction(utcMatch[2]);
+    return `${utcMatch[1]}${fractional}+00:00`;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? null : toRustUtcRfc3339(parsed);
+}
+
+function normalizeRustFraction(value: string | undefined): string {
+  if (value === undefined || /^0+$/u.test(value)) {
+    return "";
+  }
+  const nanos = value.padEnd(9, "0");
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
 }
 
 function capabilitiesForProvider(providerId: string): ProviderCapabilities | null {

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 653
+turns_used: 654
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T05:00:50+08:00"
+updated_at: "2026-06-21T05:16:32+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4116,6 +4116,12 @@ updated_at: "2026-06-21T05:00:50+08:00"
   info now formats `lastSyncedAt` from quote sync stats with Rust
   `DateTime<Utc>::to_rfc3339()`-style UTC strings instead of JS `Z` timestamps.
   Verified with focused market-data provider tests and full `bun run check`.
+- Turn 654: Resolved health/provider timestamp review follow-ups. Health API
+  timestamps now match chrono serde's UTC `Z` output while dismissal storage
+  timestamps keep `to_rfc3339()` `+00:00` formatting, and provider sync
+  `lastSyncedAt` preserves UTC microsecond/nanosecond fractional text instead of
+  truncating through JS `Date`. Verified with focused health/provider tests and
+  full `bun run check`.
 
 ## Deferred items
 
