@@ -5285,6 +5285,12 @@ contract:
   raw signed-i64 parsing for `oplogSeq`/`oplog_seq`, `sizeBytes`/`size_bytes`,
   and cursor responses, including over-safe values whose exact comparison would
   be lost through `JSON.parse` number rounding.
+- `pr5-connect-local-snapshot-cursor-i64`: verification passed: focused Connect
+  snapshot/cursor tests, full Connect tests, full `bun run check`, pre-commit
+  checks, and dual GPT/Claude xhigh review/refine. Coverage includes raw
+  signed-i64 parsing for Connect-local snapshot metadata, cursor latest-snapshot
+  fallback, and internal freshness-gate cursor comparison, with safeguards so
+  public JSON outputs stay serializable.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
