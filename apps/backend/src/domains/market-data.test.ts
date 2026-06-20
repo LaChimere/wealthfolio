@@ -120,6 +120,20 @@ describe("TS market data domain", () => {
       await expect(
         service.syncMarketData?.({ type: "refetch_recent", asset_ids: null, days: 7 }),
       ).resolves.toMatchObject(emptySyncResult());
+      await expect(
+        service.syncMarketData?.({
+          type: "refetch_recent",
+          asset_ids: [],
+          days: 1_000_000,
+        }),
+      ).rejects.toThrow("days is outside supported date range");
+      await expect(
+        service.syncMarketData?.({
+          type: "backfill_history",
+          asset_ids: null,
+          days: 100_000_000_000,
+        }),
+      ).rejects.toThrow("days is outside supported date range");
     } finally {
       db.close();
     }

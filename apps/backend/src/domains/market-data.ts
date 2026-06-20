@@ -585,6 +585,8 @@ export function createMarketDataService(
     },
 
     async syncMarketData(marketSyncMode) {
+      const currentTime = now();
+      validateMarketSyncModeDays(marketSyncMode, currentTime);
       if (!marketDataSyncRequiresExecution(marketSyncMode)) {
         return emptyMarketDataSyncResult();
       }
@@ -602,7 +604,7 @@ export function createMarketDataService(
             yahooCrumb = null;
           },
         },
-        now(),
+        currentTime,
         quoteSyncStateExists,
         options.customProviderService,
         options.secretService,
@@ -614,6 +616,32 @@ export function createMarketDataService(
       updatePositionStatusFromHoldings(db, quoteSyncStateExists, currentHoldings, now);
     },
   };
+}
+
+function validateMarketSyncModeDays(marketSyncMode: MarketSyncMode, currentTime: Date): void {
+  if (marketSyncMode.type !== "refetch_recent" && marketSyncMode.type !== "backfill_history") {
+    return;
+  }
+  if (!marketDataDaysSupported(marketSyncMode.days, currentTime)) {
+    throw new Error("Invalid input: days is outside supported date range");
+  }
+}
+
+function marketDataDaysSupported(days: number, currentTime: Date): boolean {
+  const endDate = isoDate(currentTime);
+  return (
+    marketDataStartDateSupported(endDate, days) &&
+    marketDataStartDateSupported(addDays(endDate, -7), days)
+  );
+}
+
+function marketDataStartDateSupported(endDate: string, days: number): boolean {
+  try {
+    const startDate = addDays(endDate, -days);
+    return isIsoDate(startDate);
+  } catch {
+    return false;
+  }
 }
 
 function marketDataSyncRequiresExecution(marketSyncMode: MarketSyncMode): boolean {
