@@ -2631,7 +2631,7 @@ function errorMessage(error: unknown): string {
 }
 
 function listThreads(db: Database, request: AiChatListThreadsRequest): AiChatThreadPage {
-  const limit = Math.min(request.limit ?? DEFAULT_THREAD_LIMIT, MAX_THREAD_LIMIT);
+  const limit = normalizedThreadLimit(request.limit);
   const clauses: string[] = [];
   const params: Array<string | number> = [];
 
@@ -2826,6 +2826,16 @@ function threadTagRowPayload(row: AiThreadTagRow): AiThreadTagRowPayload {
     tag: row.tag,
     createdAt: row.created_at,
   };
+}
+
+function normalizedThreadLimit(limit: number | undefined): number {
+  if (limit === undefined) {
+    return DEFAULT_THREAD_LIMIT;
+  }
+  if (!Number.isInteger(limit) || limit < 0 || limit > 4_294_967_295) {
+    throw aiChatError("invalid_input", "limit must be a u32 integer", 400);
+  }
+  return Math.min(limit, MAX_THREAD_LIMIT);
 }
 
 function loadThreadTags(db: Database, threadIds: string[]): Map<string, string[]> {

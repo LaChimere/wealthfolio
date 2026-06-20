@@ -61,6 +61,11 @@ describe("TS AI chat domain", () => {
       expect(service.listThreads({ search: "budget" })).toMatchObject({
         threads: [{ id: "thread-a" }],
       });
+      expect(() => service.listThreads({ limit: -1 })).toThrow("limit must be a u32 integer");
+      expect(() => service.listThreads({ limit: 1.5 })).toThrow("limit must be a u32 integer");
+      expect(() => service.listThreads({ limit: 4_294_967_296 })).toThrow(
+        "limit must be a u32 integer",
+      );
       expect(service.getThread("thread-pinned")).toMatchObject({
         id: "thread-pinned",
         tags: [],
