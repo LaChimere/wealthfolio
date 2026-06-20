@@ -126,6 +126,55 @@ describe("TS portfolio metrics domain", () => {
     }
   });
 
+  test("counts early proleptic-year stale asset days without 1900 remapping", () => {
+    const db = createPortfolioMetricsDb();
+    const service = createPortfolioMetricsService(db, {
+      baseCurrency: "USD",
+      exchangeRateService: fakeExchangeRateService({}),
+    });
+
+    try {
+      insertAccount(db, { id: "early-account", accountType: "SECURITIES" });
+      insertAsset(db, {
+        id: "early-asset",
+        kind: "INVESTMENT",
+        name: "Early Asset",
+        displayCode: "EARLY",
+        quoteCcy: "USD",
+      });
+      insertSnapshot(db, {
+        accountId: "early-account",
+        date: "0000-05-30",
+        positions: {
+          "early-asset": {
+            quantity: "1",
+            totalCostBasis: "1",
+            currency: "USD",
+            contractMultiplier: "1",
+          },
+        },
+        cashBalances: {},
+      });
+      insertQuote(db, {
+        assetId: "early-asset",
+        day: "0000-02-29",
+        close: "10",
+        currency: "USD",
+      });
+
+      expect(service.getNetWorth("0000-05-30").staleAssets).toEqual([
+        {
+          assetId: "early-asset",
+          name: "Early Asset",
+          valuationDate: "0000-02-29",
+          daysStale: 91,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("uses Rust-compatible local-value fallbacks when FX conversion fails", () => {
     const db = createPortfolioMetricsDb();
     const warnings: string[] = [];

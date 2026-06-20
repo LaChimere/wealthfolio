@@ -2266,7 +2266,9 @@ function isoDate(date: Date): string {
 
 function isoDateToUtcMs(date: string): number {
   const [year, month, day] = date.split("-").map(Number);
-  return Date.UTC(year, month - 1, day);
+  const utcDate = new Date(Date.UTC(2000, 0, 1));
+  utcDate.setUTCFullYear(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  return utcDate.getTime();
 }
 
 function errorMessage(error: unknown): string {
