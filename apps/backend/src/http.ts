@@ -6055,7 +6055,7 @@ function parseGoal(payload: Record<string, unknown>): Goal | Response {
   if (statusHealth instanceof Response) {
     return statusHealth;
   }
-  const priority = parseRequiredInteger(payload.priority, "priority");
+  const priority = parseRequiredI32(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }
@@ -6132,7 +6132,7 @@ function parseGoalOptionals(payload: Record<string, unknown>):
   if (statusHealth instanceof Response) {
     return statusHealth;
   }
-  const priority = parseOptionalIntegerOrNull(payload.priority, "priority");
+  const priority = parseOptionalI32OrNull(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }
@@ -7691,6 +7691,20 @@ function parseOptionalIntegerOrNull(
     return jsonResponse({ code: 400, message: `${field} must be an integer or null` }, 400);
   }
   return value;
+}
+
+function parseOptionalI32OrNull(
+  value: unknown,
+  field: string,
+): number | null | undefined | Response {
+  if (value === undefined || value === null) {
+    return value as undefined | null;
+  }
+  const parsed = parseRequiredI32(value, field);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+  return parsed;
 }
 
 function parseOptionalNumberOrNull(

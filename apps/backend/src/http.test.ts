@@ -29,7 +29,12 @@ import {
 } from "./domains/custom-providers";
 import type { DeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
-import { createGoalRepository, createGoalService } from "./domains/goals";
+import {
+  createGoalRepository,
+  createGoalService,
+  type Goal,
+  type GoalService,
+} from "./domains/goals";
 import { createHealthRepository, createHealthService, type HealthService } from "./domains/health";
 import type { HoldingsService } from "./domains/holdings";
 import type { MarketDataService } from "./domains/market-data";
@@ -6163,6 +6168,112 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("rejects non-i32 goal priority before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const goal: Goal = {
+      id: "goal-1",
+      goalType: "custom_save_up",
+      title: "Emergency Fund",
+      description: null,
+      targetAmount: 5000,
+      statusLifecycle: "active",
+      statusHealth: "not_applicable",
+      priority: 0,
+      coverImageKey: null,
+      currency: "USD",
+      startDate: null,
+      targetDate: null,
+      summaryCurrentValue: null,
+      summaryProgress: null,
+      projectedCompletionDate: null,
+      projectedValueAtTargetDate: null,
+      createdAt: "2026-05-14T09:00:00+00:00",
+      updatedAt: "2026-05-14T09:00:00+00:00",
+      summaryTargetAmount: null,
+    };
+    const goalService: GoalService = {
+      getGoals() {
+        return [];
+      },
+      getGoal() {
+        return goal;
+      },
+      createGoal(newGoal) {
+        calls.push(["create", newGoal]);
+        return Promise.resolve({ ...goal, ...newGoal, id: newGoal.id ?? goal.id, priority: 0 });
+      },
+      updateGoal(updatedGoal) {
+        calls.push(["update", updatedGoal]);
+        return Promise.resolve(updatedGoal);
+      },
+      deleteGoal() {
+        throw new Error("not used");
+      },
+      getGoalFunding() {
+        return [];
+      },
+      saveGoalFunding() {
+        throw new Error("not used");
+      },
+      getGoalPlan() {
+        return null;
+      },
+      saveGoalPlan() {
+        throw new Error("not used");
+      },
+      deleteGoalPlan() {
+        throw new Error("not used");
+      },
+      computeSaveUpOverview() {
+        throw new Error("not used");
+      },
+      computeRetirementOverview() {
+        throw new Error("not used");
+      },
+      prepareRetirementInput() {
+        throw new Error("not used");
+      },
+      refreshGoalSummary() {
+        throw new Error("not used");
+      },
+      getBaseCurrency() {
+        return "USD";
+      },
+    };
+    const handler = createBackendRequestHandler(config, { goalService });
+    const headers = {
+      authorization: "Bearer sidecar-token",
+      "content-type": "application/json",
+    };
+    const invalidI32Values = [-2_147_483_649, 2_147_483_648];
+
+    for (const priority of invalidI32Values) {
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            goalType: "custom_save_up",
+            title: "Emergency Fund",
+            priority,
+          }),
+        }),
+      );
+      expect(createResponse.status).toBe(400);
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/goals", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ ...goal, priority }),
+        }),
+      );
+      expect(updateResponse.status).toBe(400);
+    }
+
+    expect(calls).toEqual([]);
   });
 
   test("routes migrated goal valuation-backed calculations only with a provider", async () => {
