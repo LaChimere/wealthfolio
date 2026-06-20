@@ -5354,6 +5354,10 @@ contract:
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review. Coverage includes Rust-compatible `i32` parsing for market-data
   provider settings priority before service dispatch.
+- `pr5-goal-priority-i32`: verification passed: focused HTTP tests, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review. Coverage
+  includes Rust-compatible `i32` parsing for goal create/update priority fields
+  before service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
