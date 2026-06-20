@@ -915,6 +915,54 @@ describe("TS custom providers domain", () => {
         error: null,
       });
       expect(previewResult.detectedTables?.length).toBe(1);
+
+      const rustUnsignedPathResult = await service.testSource({
+        ...baseTestSourceRequest(),
+        format: "html_table",
+        pricePath: "+00:04",
+        locale: "de-DE",
+      });
+      expect(rustUnsignedPathResult).toMatchObject({
+        success: true,
+        price: 794.7,
+      });
+
+      const exponentPathResult = await service.testSource({
+        ...baseTestSourceRequest(),
+        format: "html_table",
+        pricePath: "0e0:4",
+        locale: "de-DE",
+      });
+      expect(exponentPathResult).toMatchObject({
+        success: true,
+        error: null,
+        price: null,
+      });
+      expect(exponentPathResult.detectedTables?.length).toBe(1);
+
+      const decimalPathResult = await service.testSource({
+        ...baseTestSourceRequest(),
+        format: "html_table",
+        pricePath: "0:4.0",
+        locale: "de-DE",
+      });
+      expect(decimalPathResult).toMatchObject({
+        success: true,
+        error: null,
+        price: null,
+      });
+
+      const whitespacePathResult = await service.testSource({
+        ...baseTestSourceRequest(),
+        format: "html_table",
+        pricePath: " 0:4",
+        locale: "de-DE",
+      });
+      expect(whitespacePathResult).toMatchObject({
+        success: true,
+        error: null,
+        price: null,
+      });
     } finally {
       db.close();
     }

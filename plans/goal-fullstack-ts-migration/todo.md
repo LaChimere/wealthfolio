@@ -5683,6 +5683,10 @@ contract:
   health/provider tests and full `bun run check`. Coverage includes chrono serde
   `Z` health API timestamps, `+00:00` dismissal storage timestamps, and
   microsecond-precision provider sync `lastSyncedAt` normalization.
+- `pr5-custom-provider-table-path-integers`: verification passed: focused
+  custom-provider tests. Coverage includes Rust `usize::parse`-compatible
+  HTML-table path parsing for plus/leading-zero decimal components and rejection
+  of whitespace, decimal, and exponent path components.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

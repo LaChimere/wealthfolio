@@ -1661,17 +1661,20 @@ function parseTablePath(path: string): [number, number] | null {
   if (parts.length !== 2) {
     return null;
   }
-  const tableIndex = Number(parts[0]);
-  const columnIndex = Number(parts[1]);
-  if (
-    !Number.isInteger(tableIndex) ||
-    !Number.isInteger(columnIndex) ||
-    tableIndex < 0 ||
-    columnIndex < 0
-  ) {
+  const tableIndex = parseTablePathIndex(parts[0] ?? "");
+  const columnIndex = parseTablePathIndex(parts[1] ?? "");
+  if (tableIndex === null || columnIndex === null) {
     return null;
   }
   return [tableIndex, columnIndex];
+}
+
+function parseTablePathIndex(value: string): number | null {
+  if (!/^\+?\d+$/u.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function extractCellText($: CheerioAPI, element: Element): string {
