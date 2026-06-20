@@ -5544,6 +5544,11 @@ contract:
   Coverage includes rejecting HTTP out-of-i32 `sortOrder` before service
   dispatch and direct service fractional/out-of-i32 sort orders before account
   checks or persistence.
+- `pr5-expanded-year-contribution-fx-followups`: verification passed: focused
+  exchange-rate/contribution tests, full `bun run check`, and dual GPT/Claude
+  xhigh review. Coverage includes parsed-instant filtering for contribution year
+  `10000`, date-only `+10000-01-01` activity inclusion, real FX conversion for
+  `+10000-01-01`, and latest FX selection at `+10001`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
