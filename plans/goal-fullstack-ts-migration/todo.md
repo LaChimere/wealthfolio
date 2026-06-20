@@ -5517,6 +5517,11 @@ contract:
   tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
   includes accepting `0000-02-29` targets and accruing a one-day projection from
   `0000-02-28` without JavaScript's 1900-year remap.
+- `pr5-date-batch-review-followups`: verification passed: focused
+  save-up/holdings tests, full `bun run check`, and dual GPT/Claude xhigh
+  review. Coverage includes zero-padded early save-up projected completion dates
+  such as `0000-03-28` and explicit documentation of the holdings negative-year
+  synthetic snapshot skip.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
