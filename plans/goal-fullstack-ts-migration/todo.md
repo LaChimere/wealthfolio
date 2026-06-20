@@ -5457,6 +5457,10 @@ contract:
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review. Coverage includes Rust-compatible case-sensitive data type parsing
   while preserving case-insensitive file format parsing.
+- `pr5-data-export-filename-local-date`: verification passed: focused
+  data-export tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine. Coverage includes Rust-compatible local-date
+  export filenames without mutating process timezone in tests.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
