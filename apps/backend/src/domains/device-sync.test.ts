@@ -1351,12 +1351,34 @@ describe("TS local device sync service", () => {
     });
     await expect(
       service.commitInitializeTeamKeys?.({
+        keyVersion: 1.5,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "bad_request",
+      message: "keyVersion must be an i32 integer",
+      status: 400,
+    });
+    await expect(
+      service.commitInitializeTeamKeys?.({
         keyVersion: 1,
         deviceKeyEnvelope: "envelope",
         signature: "signature",
       }),
     ).rejects.toMatchObject({ code: "bad_request" });
     await expect(service.rotateTeamKeys?.()).rejects.toMatchObject({ code: "bad_request" });
+    await expect(
+      service.commitRotateTeamKeys?.({
+        newKeyVersion: 2_147_483_648,
+        envelopes: [{ deviceId: "device-2", deviceKeyEnvelope: "envelope" }],
+        signature: "signature",
+      }),
+    ).rejects.toMatchObject({
+      code: "bad_request",
+      message: "newKeyVersion must be an i32 integer",
+      status: 400,
+    });
     await expect(
       service.commitRotateTeamKeys?.({
         newKeyVersion: 2,

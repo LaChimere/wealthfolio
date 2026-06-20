@@ -384,6 +384,7 @@ export function createLocalDeviceSyncService({
       return initializeKeysResultFromCloud(initializeResponse.value, initializeResponse.bodyText);
     },
     async commitInitializeTeamKeys(request) {
+      validateI32RequestField(request.keyVersion, "keyVersion");
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
         connectService,
         secretService,
@@ -430,6 +431,7 @@ export function createLocalDeviceSyncService({
       return rotateKeysResponseFromCloud(rotateResponse.value, rotateResponse.bodyText);
     },
     async commitRotateTeamKeys(request) {
+      validateI32RequestField(request.newKeyVersion, "newKeyVersion");
       const { accessToken, deviceId } = await requireSessionDeviceIdWithTokenOrDisabled(
         connectService,
         secretService,
@@ -2266,6 +2268,12 @@ function assertOptionalI32Field(record: Record<string, unknown>, key: string): v
   const value = record[key];
   if (value !== undefined && value !== null && !isI32Integer(value)) {
     throw new Error("invalid sync identity");
+  }
+}
+
+function validateI32RequestField(value: unknown, field: string): void {
+  if (!isI32Integer(value)) {
+    throw new DeviceSyncServiceError("bad_request", `${field} must be an i32 integer`, 400);
   }
 }
 
