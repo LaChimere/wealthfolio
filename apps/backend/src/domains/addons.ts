@@ -474,17 +474,22 @@ async function submitAddonRating(
   if (request.review !== undefined) {
     body.review = request.review;
   }
-  return fetchAddonStoreJson<unknown>(
-    context,
+  const response = await context.fetchStore(
     `${context.storeBaseUrl}/${encodeURIComponent(request.addonId)}/ratings`,
-    "Rating submission",
     {
       method: "POST",
       body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json" },
-      requireInstanceId: true,
+      headers: addonStoreHeaders(context, {
+        extraHeaders: { "Content-Type": "application/json" },
+        requireInstanceId: true,
+      }),
     },
   );
+  if (!response.ok) {
+    await safeResponseText(response);
+    throw new Error(`Failed to submit rating: HTTP ${formatResponseStatus(response)}`);
+  }
+  return parseJsonText(await response.text(), "Rating submission API response");
 }
 
 async function fetchAddonRatings(context: AddonStoreContext, addonId: string): Promise<unknown[]> {

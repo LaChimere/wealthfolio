@@ -5641,6 +5641,10 @@ contract:
   and full `bun run check`. Coverage includes typed Rust-shaped
   `AddonUpdateCheckResult` parsing and per-addon fallback errors for malformed
   update-check API responses.
+- `pr5-addon-rating-error-parity`: verification passed: focused add-on tests and
+  full `bun run check`. Coverage includes Rust-compatible non-success rating
+  submission error messages while preserving store request headers and success
+  JSON parsing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

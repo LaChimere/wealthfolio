@@ -481,6 +481,14 @@ describe("TS addon domain", () => {
       createLocalAddonService({
         appDataDir,
         storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => new Response("nope", { status: 500, statusText: "Server Error" }),
+      }).submitRating({ addonId: "addon/id", rating: 5 }),
+    ).rejects.toThrow("Failed to submit rating: HTTP 500 Server Error");
+
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
         fetchStore: async () => Response.json([{ id: "direct-addon" }]),
       }).fetchStoreListings(),
     ).resolves.toEqual([{ id: "direct-addon" }]);
