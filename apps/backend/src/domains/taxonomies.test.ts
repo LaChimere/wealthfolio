@@ -150,6 +150,21 @@ describe("TS taxonomies domain", () => {
           }),
         }),
       );
+      await expect(
+        service.createTaxonomy({
+          id: "bad-priority",
+          name: "Bad Priority",
+          color: "#4385be",
+          description: null,
+          isSystem: false,
+          isSingleSelect: true,
+          sortOrder: 4.5,
+        }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.updateTaxonomy({ ...updated, sortOrder: 2_147_483_648 }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
+      expect(syncEvents).toHaveLength(2);
 
       await expect(service.deleteTaxonomy("strategy")).resolves.toBe(1);
       expect(syncEvents.at(-1)).toEqual({
@@ -251,6 +266,19 @@ describe("TS taxonomies domain", () => {
 
       const moved = await service.moveCategory("custom_groups", "ai", null, 5);
       expect(moved).toMatchObject({ id: "ai", parentId: null, sortOrder: 5 });
+      await expect(
+        service.createCategory({
+          id: "bad-sort",
+          taxonomyId: "custom_groups",
+          name: "Bad Sort",
+          key: "bad-sort",
+          color: "#4385be",
+          sortOrder: 4.5,
+        }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.moveCategory("custom_groups", "ai", null, 2_147_483_648),
+      ).rejects.toThrow("position must be an integer between -2147483648 and 2147483647");
 
       db.prepare(
         `
@@ -278,6 +306,9 @@ describe("TS taxonomies domain", () => {
         name: "Themes",
         sortOrder: 3,
       });
+      await expect(
+        service.updateCategory({ ...parent, sortOrder: -2_147_483_649 }),
+      ).rejects.toThrow("sortOrder must be an integer between -2147483648 and 2147483647");
       await expect(service.deleteCategory("custom_groups", child.id)).resolves.toBe(1);
     } finally {
       db.close();
@@ -340,6 +371,27 @@ describe("TS taxonomies domain", () => {
         expect.objectContaining({ assignmentId: "assignment-1", operation: "Update" }),
         expect.objectContaining({ assignmentId: "assignment-1", operation: "Update" }),
       ]);
+      await expect(
+        service.assignAssetToCategory({
+          id: "bad-weight",
+          assetId: "asset-2",
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 4.5,
+          source: "manual",
+        }),
+      ).rejects.toThrow("weight must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.assignAssetToCategory({
+          id: "bad-weight",
+          assetId: "asset-2",
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 2_147_483_648,
+          source: "manual",
+        }),
+      ).rejects.toThrow("weight must be an integer between -2147483648 and 2147483647");
+      expect(assignmentEvents).toHaveLength(2);
 
       await expect(service.removeAssetAssignment("assignment-1")).resolves.toBe(1);
       expect(assignmentEvents.at(-1)).toEqual({

@@ -642,9 +642,11 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
   return {
     ...createTaxonomyReadService(repository),
     async createTaxonomy(newTaxonomy) {
+      validateI32Field(newTaxonomy.sortOrder, "sortOrder");
       return repository.createTaxonomy(newTaxonomy);
     },
     async updateTaxonomy(taxonomy) {
+      validateI32Field(taxonomy.sortOrder, "sortOrder");
       return repository.updateTaxonomy(taxonomy);
     },
     async deleteTaxonomy(id) {
@@ -655,9 +657,11 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
       return repository.deleteTaxonomy(id);
     },
     async createCategory(newCategory) {
+      validateI32Field(newCategory.sortOrder, "sortOrder");
       return repository.createCategory(newCategory);
     },
     async updateCategory(category) {
+      validateI32Field(category.sortOrder, "sortOrder");
       return repository.updateCategory(category);
     },
     async deleteCategory(taxonomyId, categoryId) {
@@ -677,6 +681,7 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
       return repository.deleteCategory(taxonomyId, categoryId);
     },
     async moveCategory(taxonomyId, categoryId, newParentId, position) {
+      validateI32Field(position, "position");
       const category = repository.getCategory(taxonomyId, categoryId);
       if (!category) {
         throw new Error("Record not found: Category not found");
@@ -691,6 +696,7 @@ export function createTaxonomyService(repository: TaxonomyRepository): TaxonomyS
       return repository.getAssetAssignments(assetId);
     },
     async assignAssetToCategory(assignment) {
+      validateI32Field(assignment.weight, "weight");
       const taxonomy = repository.getTaxonomy(assignment.taxonomyId);
       if (taxonomy?.isSingleSelect) {
         repository.deleteAssetAssignments(assignment.assetId, assignment.taxonomyId);
@@ -1323,6 +1329,14 @@ function buildCountryMapping(): Map<string, string> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function validateI32Field(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < -2_147_483_648 || value > 2_147_483_647) {
+    throw new Error(
+      `Invalid input: ${field} must be an integer between -2147483648 and 2147483647`,
+    );
+  }
 }
 
 function parseTaxonomyJson(jsonStr: string): TaxonomyJson {
