@@ -5419,6 +5419,10 @@ contract:
   GPT/Claude xhigh review/refine. Coverage includes rejecting fractional,
   non-finite, and Date-range-overflow historical day counts before repository
   reads.
+- `pr5-market-sync-day-window-validation`: verification passed: focused HTTP
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review/refine. Coverage includes rejecting market-sync day counts that would
+  produce unsupported or extended-year sync windows before service dispatch.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
