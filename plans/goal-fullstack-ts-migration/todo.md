@@ -5699,6 +5699,9 @@ contract:
   custom-provider tests. Coverage includes production JSON row extraction using
   configured locale like Rust custom scraper sync while preview extraction stays
   locale-free.
+- `pr5-custom-provider-invalid-header-skip`: verification passed: focused
+  custom-provider tests. Coverage includes skipping invalid user header names
+  and values like Rust header parsing while preserving valid/secret headers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -403,7 +403,13 @@ describe("TS custom providers domain", () => {
         currencyPath: "$.body.fundPrice.content[-1:].currencyCode",
         factor: 2,
         invert: true,
-        headers: '{"Authorization":"__SECRET__api_key","Accept":"application/vnd.test","X-Num":5}',
+        headers: JSON.stringify({
+          Authorization: "__SECRET__api_key",
+          Accept: "application/vnd.test",
+          "X-Num": 5,
+          "Bad Header": "ignored",
+          "X-Bad": "line\nbreak",
+        }),
         symbol: "M219",
         currency: "gbp",
         from: "2026-05-01",
@@ -428,6 +434,8 @@ describe("TS custom providers domain", () => {
       expect(calls[0]?.headers.get("authorization")).toBe("resolved-secret");
       expect(calls[0]?.headers.get("accept")).toBe("application/vnd.test");
       expect(calls[0]?.headers.get("x-num")).toBeNull();
+      expect(calls[0]?.headers.get("x-bad")).toBeNull();
+      expect(Array.from(calls[0]?.headers.keys() ?? [])).not.toContain("bad header");
       expect(calls[0]?.headers.get("referer")).toBe("https://api.example.test/");
       expect(calls[0]?.headers.get("user-agent")).toContain("Chrome/131.0.0.0");
 

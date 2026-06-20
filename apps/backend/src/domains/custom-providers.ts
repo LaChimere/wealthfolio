@@ -1198,7 +1198,11 @@ async function buildTestSourceHeaders(
     const resolved = value.startsWith("__SECRET__")
       ? await resolveSecretHeaderValue(value.slice("__SECRET__".length), secretService)
       : value;
-    headers.set(name, resolved);
+    try {
+      headers.set(name, resolved);
+    } catch {
+      // Rust's HeaderName/HeaderValue parsing skips invalid user headers.
+    }
   }
   return headers;
 }
