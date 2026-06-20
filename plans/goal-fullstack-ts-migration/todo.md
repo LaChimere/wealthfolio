@@ -5513,6 +5513,10 @@ contract:
   Coverage includes clamping `0000-05-31` to a synthetic `0000-02-29` snapshot
   and skipping unsupported negative-year synthetic dates instead of writing
   malformed rows.
+- `pr5-save-up-proleptic-date-arithmetic`: verification passed: focused save-up
+  tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes accepting `0000-02-29` targets and accruing a one-day projection from
+  `0000-02-28` without JavaScript's 1900-year remap.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
