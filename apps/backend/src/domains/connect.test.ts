@@ -715,6 +715,47 @@ describe("TS Connect local session service", () => {
     }
   });
 
+  test("rejects duplicate Connect subscription plan keys", async () => {
+    const db = new Database(":memory:");
+    let responseBody =
+      '{"plans":[{"id":"free","name":"Free","name":"Later","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1}}]}';
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        new Response(responseBody, { headers: { "content-type": "application/json" } }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"monthly":1,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1}}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1,"devices":2}}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("fetches authenticated plans and maps user info with restored access tokens", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

@@ -893,24 +893,49 @@ function assertPlansResponseRawShape(rawJson: string): void {
 }
 
 function assertSubscriptionPlanRawShape(rawJson: string): void {
+  assertNoDuplicateConnectAliases(
+    rawJson,
+    [
+      ["id"],
+      ["name"],
+      ["tagline"],
+      ["description"],
+      ["pricing"],
+      ["limits"],
+      ["features"],
+      ["featuresExtended"],
+      ["isAvailable"],
+      ["isComingSoon"],
+      ["badge"],
+      ["yearlyDiscountPercent"],
+    ],
+    "plans response",
+  );
+  const pricingTokens = rawTokensForAliases(rawJson, ["pricing"]);
   const limitsTokens = rawTokensForAliases(rawJson, ["limits"]);
-  if (limitsTokens.length > 1) {
-    throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
-  }
-  assertNoDuplicateConnectAliases(rawJson, [["isAvailable"], ["isComingSoon"]], "plans response");
   const yearlyDiscountPercentTokens = rawTokensForAliases(rawJson, ["yearlyDiscountPercent"]);
   if (
-    yearlyDiscountPercentTokens.length > 1 ||
-    (yearlyDiscountPercentTokens.length === 1 &&
-      !rawJsonI32OptionTokenIsValid(yearlyDiscountPercentTokens[0] ?? ""))
+    yearlyDiscountPercentTokens.length === 1 &&
+    !rawJsonI32OptionTokenIsValid(yearlyDiscountPercentTokens[0] ?? "")
   ) {
     throw new ConnectServiceError("internal_error", "Failed to parse plans response", 500);
   }
-  const limitsToken = limitsTokens[0];
-  if (limitsToken === undefined || !limitsToken.trim().startsWith("{")) {
-    return;
+  const pricingToken = pricingTokens[0];
+  if (pricingToken !== undefined && pricingToken.trim().startsWith("{")) {
+    assertSubscriptionPlanPricingRawShape(pricingToken);
   }
-  assertSubscriptionPlanLimitsRawShape(limitsToken);
+  const limitsToken = limitsTokens[0];
+  if (limitsToken !== undefined && limitsToken.trim().startsWith("{")) {
+    assertSubscriptionPlanLimitsRawShape(limitsToken);
+  }
+}
+
+function assertSubscriptionPlanPricingRawShape(rawJson: string): void {
+  assertNoDuplicateConnectAliases(
+    rawJson,
+    [["monthly"], ["yearly"], ["yearlyPerMonth"]],
+    "plans response",
+  );
 }
 
 function assertSubscriptionPlanLimitsRawShape(rawJson: string): void {
