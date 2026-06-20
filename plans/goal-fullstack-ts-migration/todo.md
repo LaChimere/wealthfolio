@@ -5530,6 +5530,10 @@ contract:
   goals tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
   includes a FIRE retirement summary on `0000-02-29` emitting a zero-padded
   projected completion date without JavaScript's 1900-year remap.
+- `pr5-custom-provider-proleptic-date-placeholders`: verification passed:
+  focused custom-provider tests, full `bun run check`, and dual GPT/Claude xhigh
+  review. Coverage includes UTC template expansion for `0000-02-29` with
+  Rust-compatible `%Y`, `%F`, `%C`, and `%j` outputs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
