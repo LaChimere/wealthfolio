@@ -5539,6 +5539,11 @@ contract:
   review/refine. Coverage includes contribution year `0` UTC boundaries and
   America/Los_Angeles year-zero activity inclusion/FX dates without JavaScript's
   1900-year or Intl AD-year remaps.
+- `pr5-portfolio-sort-order-i32-parity`: verification passed: focused
+  portfolio/http tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes rejecting HTTP out-of-i32 `sortOrder` before service
+  dispatch and direct service fractional/out-of-i32 sort orders before account
+  checks or persistence.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
