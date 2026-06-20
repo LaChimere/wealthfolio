@@ -52,9 +52,11 @@ describe("TS app utility domain", () => {
           version: "3.5.0",
           notes: "Release notes",
           pub_date: "2026-05-06",
+          pubDate: "ignored",
           platforms: { "web-docker-x86_64": { url: "https://example.test/download" } },
           changelog_url: "https://example.test/changelog",
-          screenshots: ["https://example.test/screenshot.png", 123],
+          changelogUrl: "https://example.test/ignored",
+          screenshots: ["https://example.test/screenshot.png"],
         });
       },
       instanceId: () => "instance-1",
@@ -190,6 +192,24 @@ describe("TS app utility domain", () => {
       updateAvailable: false,
       latestVersion: "18446744073709551616.0.0",
     });
+
+    const malformedPayloadService = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json({
+          version: "3.5.0",
+          platforms: {},
+          screenshots: ["https://example.test/screenshot.png", 123],
+        }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+    await expect(malformedPayloadService.checkUpdate(true)).rejects.toThrow(
+      "Failed to parse update response: screenshots must be an array of strings",
+    );
   });
 
   test("creates base64 and path backups from the configured app data dir", async () => {

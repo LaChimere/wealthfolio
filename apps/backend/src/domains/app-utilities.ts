@@ -66,15 +66,13 @@ interface UpdatePlatformInfo {
   url?: string | null;
 }
 
-interface UpdateCheckResponseRaw {
-  version?: unknown;
-  notes?: unknown;
-  pub_date?: unknown;
-  pubDate?: unknown;
-  platforms?: unknown;
-  changelog_url?: unknown;
-  changelogUrl?: unknown;
-  screenshots?: unknown;
+interface ParsedUpdatePayload {
+  version: string;
+  notes: string | null;
+  pubDate: string | null;
+  platforms: Record<string, UpdatePlatformInfo>;
+  changelogUrl: string | null;
+  screenshots: string[] | null;
 }
 
 interface ParsedSemver {
@@ -300,23 +298,72 @@ async function parseUpdateResponse(
     throw new Error(`Failed to query update endpoint: HTTP ${response.status}`);
   }
 
-  const payload = (await response.json()) as UpdateCheckResponseRaw;
-  const latestVersion = typeof payload.version === "string" ? payload.version : currentVersion;
-  const platforms =
-    payload.platforms && typeof payload.platforms === "object"
-      ? (payload.platforms as Record<string, UpdatePlatformInfo>)
-      : {};
+  const payload = parseUpdatePayload(await response.json());
+  const latestVersion = payload.version;
   return {
     updateAvailable: isUpdateAvailable(currentVersion, latestVersion),
     latestVersion,
-    notes: optionalString(payload.notes),
-    pubDate: optionalString(payload.pubDate ?? payload.pub_date),
-    downloadUrl: optionalString(platforms[platformKey]?.url),
-    changelogUrl: optionalString(payload.changelogUrl ?? payload.changelog_url),
-    screenshots: Array.isArray(payload.screenshots)
-      ? payload.screenshots.filter((item): item is string => typeof item === "string")
-      : null,
+    notes: payload.notes,
+    pubDate: payload.pubDate,
+    downloadUrl: payload.platforms[platformKey]?.url ?? null,
+    changelogUrl: payload.changelogUrl,
+    screenshots: payload.screenshots,
   };
+}
+
+function parseUpdatePayload(value: unknown): ParsedUpdatePayload {
+  if (!isRecord(value)) {
+    throw new Error("Failed to parse update response: payload must be an object");
+  }
+  if (typeof value.version !== "string") {
+    throw new Error("Failed to parse update response: version must be a string");
+  }
+  if (!isRecord(value.platforms)) {
+    throw new Error("Failed to parse update response: platforms must be an object");
+  }
+  return {
+    version: value.version,
+    notes: optionalStringField(value.notes, "notes"),
+    pubDate: optionalStringField(value.pub_date, "pub_date"),
+    platforms: parseUpdatePlatforms(value.platforms),
+    changelogUrl: optionalStringField(value.changelog_url, "changelog_url"),
+    screenshots: optionalStringArrayField(value.screenshots, "screenshots"),
+  };
+}
+
+function parseUpdatePlatforms(value: Record<string, unknown>): Record<string, UpdatePlatformInfo> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, platform]) => {
+      if (!isRecord(platform)) {
+        throw new Error(`Failed to parse update response: platforms.${key} must be an object`);
+      }
+      return [key, { url: optionalStringField(platform.url, `platforms.${key}.url`) }];
+    }),
+  );
+}
+
+function optionalStringField(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Failed to parse update response: ${field} must be a string`);
+  }
+  return value;
+}
+
+function optionalStringArrayField(value: unknown, field: string): string[] | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`Failed to parse update response: ${field} must be an array of strings`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function noUpdateResponse(version: string): UpdateCheckResponse {
@@ -342,10 +389,6 @@ function resolveInstanceId(
   instanceId: string | (() => string | undefined) | undefined,
 ): string | undefined {
   return typeof instanceId === "function" ? instanceId() : instanceId;
-}
-
-function optionalString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 function normalizeTarget(target: string | undefined): string {

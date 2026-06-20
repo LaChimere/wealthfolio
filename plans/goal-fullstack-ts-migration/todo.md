@@ -5610,6 +5610,10 @@ contract:
   tests and full `bun run check`. Coverage includes large u64-safe semver core
   component comparisons, over-u64 latest-version fallback, and numeric
   prerelease comparison without JS `number` precision loss.
+- `pr5-app-update-response-serde`: verification passed: focused app utility
+  tests and full `bun run check`. Coverage includes rejecting malformed update
+  response screenshots instead of silently filtering non-string entries while
+  preserving Rust-compatible required payload fields.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
