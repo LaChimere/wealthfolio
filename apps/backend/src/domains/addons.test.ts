@@ -498,6 +498,13 @@ describe("TS addon domain", () => {
         fetchStore: async () => new Response("nope", { status: 418, statusText: "I'm a Teapot" }),
       }).submitRating({ addonId: "addon/id", rating: 5 }),
     ).rejects.toThrow("Failed to submit rating: HTTP 418 I'm a teapot");
+    await expect(
+      createLocalAddonService({
+        appDataDir,
+        storeBaseUrl: "https://store.test/api/addons",
+        fetchStore: async () => new Response("nope", { status: 520, statusText: "" }),
+      }).submitRating({ addonId: "addon/id", rating: 5 }),
+    ).rejects.toThrow("Failed to submit rating: HTTP 520 <unknown status code>");
 
     await expect(
       createLocalAddonService({

@@ -826,8 +826,11 @@ async function safeResponseText(response: Response): Promise<string> {
 }
 
 function formatResponseStatus(response: Response): string {
-  const reason = RUST_STATUS_REASON_OVERRIDES[response.status] ?? STATUS_CODES[response.status];
-  return reason ? `${response.status} ${reason}` : String(response.status);
+  const reason =
+    RUST_STATUS_REASON_OVERRIDES[response.status] ??
+    STATUS_CODES[response.status] ??
+    "<unknown status code>";
+  return `${response.status} ${reason}`;
 }
 
 function ensureAddonsDirectory(appDataDir: string): string {

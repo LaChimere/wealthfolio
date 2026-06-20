@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 647
+turns_used: 648
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T04:00:06+08:00"
+updated_at: "2026-06-21T04:09:14+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4089,6 +4089,10 @@ updated_at: "2026-06-21T04:00:06+08:00"
   as 418 (`I'm a teapot`) and 509 (`<unknown status code>`) to preserve
   byte-level Rust `StatusCode` display parity. Verified with focused add-on
   tests and full `bun run check`.
+- Turn 648: Resolved add-on unknown status fallback follow-up. TS add-on store
+  error formatting now emits `<unknown status code>` for unmapped non-standard
+  statuses like Rust `StatusCode` display instead of returning the bare numeric
+  code. Verified with focused add-on tests and full `bun run check`.
 
 ## Deferred items
 
