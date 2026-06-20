@@ -1447,6 +1447,13 @@ function assertEnrollResponseRawShape(rawJson: string): void {
   assertEnrollRawIntegerToken(rawJson, "e2ee_key_version");
   assertEnrollRawIntegerToken(rawJson, "pairingTtlSeconds");
   assertEnrollRawIntegerToken(rawJson, "pairing_ttl_seconds");
+  if (rawJsonStringTokenValue(modeTokens[0] ?? "") === "PAIR") {
+    assertTrustedDeviceSummariesRawShape(
+      rawJson,
+      ["trustedDevices", "trusted_devices"],
+      enrollResponseParseError,
+    );
+  }
 }
 
 function assertEnrollRawIntegerToken(rawJson: string, key: string): void {
@@ -1878,6 +1885,31 @@ function assertInitializeKeysResponseRawShape(rawJson: string): void {
   assertInitializeKeysRawIntegerToken(rawJson, "e2ee_key_version");
   assertInitializeKeysRawIntegerToken(rawJson, "pairingTtlSeconds");
   assertInitializeKeysRawIntegerToken(rawJson, "pairing_ttl_seconds");
+  if (rawJsonStringTokenValue(modeTokens[0] ?? "") === "PAIRING_REQUIRED") {
+    assertTrustedDeviceSummariesRawShape(
+      rawJson,
+      ["trustedDevices", "trusted_devices"],
+      initializeKeysResponseParseError,
+    );
+  }
+}
+
+function assertTrustedDeviceSummariesRawShape(
+  rawJson: string,
+  aliases: string[],
+  parseError: () => DeviceSyncServiceError,
+): void {
+  const tokens = rawTokensForAliases(rawJson, aliases);
+  if (tokens.length !== 1 || !tokens[0]?.trim().startsWith("[")) {
+    return;
+  }
+  for (const token of topLevelArrayObjectTokens(tokens[0])) {
+    for (const fieldAliases of [["id"], ["name"], ["platform"], ["lastSeenAt", "last_seen_at"]]) {
+      if (rawTokensForAliases(token, fieldAliases).length > 1) {
+        throw parseError();
+      }
+    }
+  }
 }
 
 function assertInitializeKeysRawIntegerToken(rawJson: string, key: string): void {
@@ -2352,6 +2384,18 @@ function isSafeInteger(value: unknown): value is number {
 
 function rawJsonStringTokenIsValid(token: string): boolean {
   return token.trim().startsWith('"');
+}
+
+function rawJsonStringTokenValue(token: string): string | null {
+  if (!rawJsonStringTokenIsValid(token)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(token.trim()) as unknown;
+    return typeof parsed === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function assertRawI32Token(rawJson: string, key: string, allowNull: boolean): void {

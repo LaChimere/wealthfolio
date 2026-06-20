@@ -136,6 +136,23 @@ describe("TS local device sync service", () => {
       message: "Failed to parse enroll response",
       status: 500,
     });
+
+    enrollBody =
+      '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[{"id":"device-2","name":"iPhone","platform":"ios","last_seen_at":null,"lastSeenAt":null}]}';
+    await expect(malformedResponseService.registerDevice(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse enroll response",
+      status: 500,
+    });
+
+    enrollBody =
+      '{"mode":"READY","device_id":"device-1","e2ee_key_version":2,"trust_state":"trusted","trusted_devices":[{"id":"device-2","name":"iPhone","name":"iPad","platform":"ios"}]}';
+    await expect(malformedResponseService.registerDevice(request)).resolves.toEqual({
+      mode: "READY",
+      device_id: "device-1",
+      e2ee_key_version: 2,
+      trust_state: "trusted",
+    });
   });
 
   test("reports missing current device id after restoring Connect session", async () => {
@@ -1498,6 +1515,23 @@ describe("TS local device sync service", () => {
       code: "internal_error",
       message: "Failed to parse initialize keys response",
       status: 500,
+    });
+
+    initializeBody =
+      '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[{"id":"device-2","name":"iPhone","name":"iPad","platform":"ios","last_seen_at":null}]}';
+    await expect(malformedService.initializeTeamKeys?.()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse initialize keys response",
+      status: 500,
+    });
+
+    initializeBody =
+      '{"mode":"BOOTSTRAP","challenge":"challenge-1","nonce":"nonce-1","key_version":2,"trusted_devices":[{"id":"device-2","name":"iPhone","name":"iPad","platform":"ios"}]}';
+    await expect(malformedService.initializeTeamKeys?.()).resolves.toEqual({
+      mode: "BOOTSTRAP",
+      challenge: "challenge-1",
+      nonce: "nonce-1",
+      key_version: 2,
     });
   });
 
