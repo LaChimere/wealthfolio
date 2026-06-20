@@ -3875,7 +3875,7 @@ function parseProviderUpdate(payload: Record<string, unknown>): ProviderUpdate |
   if (providerId instanceof Response) {
     return providerId;
   }
-  const priority = parseRequiredInteger(payload.priority, "priority");
+  const priority = parseRequiredI32(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }

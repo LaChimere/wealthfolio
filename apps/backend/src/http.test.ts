@@ -36,6 +36,7 @@ import type { MarketDataService } from "./domains/market-data";
 import {
   createMarketDataProviderRepository,
   createMarketDataProviderService,
+  type MarketDataProviderService,
 } from "./domains/market-data-providers";
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import type { PortfolioMetricsService } from "./domains/portfolio-metrics";
@@ -2186,6 +2187,35 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("rejects non-i32 market data provider priority before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const marketDataProviderService: MarketDataProviderService = {
+      getProvidersInfo() {
+        return Promise.resolve([]);
+      },
+      updateProviderSettings(providerId, priority, enabled) {
+        calls.push({ providerId, priority, enabled });
+        return Promise.resolve();
+      },
+    };
+    const handler = createBackendRequestHandler(config, { marketDataProviderService });
+
+    for (const priority of [-2_147_483_649, 2_147_483_648]) {
+      const response = await handler(
+        new Request("http://127.0.0.1/api/v1/providers/settings", {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer sidecar-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ providerId: "FINNHUB", priority, enabled: true }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(calls).toEqual([]);
   });
 
   test("routes migrated market data seam only when a service is provided", async () => {
