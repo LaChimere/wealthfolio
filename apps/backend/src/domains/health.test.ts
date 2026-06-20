@@ -134,7 +134,7 @@ describe("TS health domain", () => {
       expect(status).toMatchObject({
         overallSeverity: "WARNING",
         issueCounts: { WARNING: 2 },
-        checkedAt: "2026-05-14T12:00:00.000Z",
+        checkedAt: "2026-05-14T12:00:00+00:00",
         isStale: false,
       });
       expect(status?.issues).toHaveLength(2);
@@ -1582,7 +1582,7 @@ describe("TS health domain", () => {
       const refreshed = await service.runHealthChecks?.("America/Toronto");
       expect(settingsReads).toBe(3);
       expect(refreshed?.isStale).toBe(false);
-      expect(refreshed?.checkedAt).toBe("2026-05-14T12:06:00.000Z");
+      expect(refreshed?.checkedAt).toBe("2026-05-14T12:06:00+00:00");
 
       await service.dismissIssue("not-real", "hash");
       await service.getHealthStatus?.("America/Toronto");

@@ -5672,6 +5672,9 @@ contract:
   add-on tests and full `bun run check`. Coverage includes clearing runtime-only
   fields on installed manifest reads like Rust while preserving fresh runtime
   metadata in install return values.
+- `pr5-health-rfc3339-timestamps`: verification passed: focused health tests and
+  full `bun run check`. Coverage includes Rust chrono-style UTC RFC3339 issue
+  timestamps, status `checkedAt`, and timestamp fallbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
