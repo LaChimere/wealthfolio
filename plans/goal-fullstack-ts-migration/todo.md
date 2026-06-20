@@ -4471,6 +4471,14 @@ contract:
   malformed snake-case team fields as unknown input, preserving snake-case
   mapped output, and updating the runtime Connect fixture to use the
   Rust-compatible team wire key.
+- `pr5-connect-user-info-top-level-alias-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "user info|entitlement user info|authenticated plans"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  user info parsing using camelCase Connect API top-level fields, ignoring
+  malformed snake-case top-level fields as unknown input, and preserving
+  snake-case mapped output.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
