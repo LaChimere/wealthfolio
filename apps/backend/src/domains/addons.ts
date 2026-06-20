@@ -132,6 +132,10 @@ type FetchStore = (input: string | URL, init?: RequestInit) => Promise<Response>
 const DEFAULT_ADDON_STORE_API_BASE_URL = "https://wealthfolio.app/api/addons";
 const MAX_ADDON_ZIP_ENTRIES = 10_000;
 const MAX_ADDON_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+const RUST_STATUS_REASON_OVERRIDES: Record<number, string> = {
+  418: "I'm a teapot",
+  509: "<unknown status code>",
+};
 const PERMISSION_PATTERNS = [
   [
     "portfolio",
@@ -822,7 +826,7 @@ async function safeResponseText(response: Response): Promise<string> {
 }
 
 function formatResponseStatus(response: Response): string {
-  const reason = STATUS_CODES[response.status];
+  const reason = RUST_STATUS_REASON_OVERRIDES[response.status] ?? STATUS_CODES[response.status];
   return reason ? `${response.status} ${reason}` : String(response.status);
 }
 
