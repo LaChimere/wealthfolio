@@ -5554,6 +5554,10 @@ contract:
   review. Coverage includes rejecting invalid explicit range date-times such as
   `+10000-02-30T00:00:00Z`, `2026-04-31T00:00:00Z`, and
   `2026-01-01T00:00:00+24:00`.
+- `pr5-sync-crypto-dek-version-u32`: verification passed: focused sync-crypto
+  tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  includes rejecting direct fractional and over-u32 DEK versions before key
+  derivation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
