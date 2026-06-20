@@ -1383,6 +1383,164 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
+  test("rejects non-i32 taxonomy numeric fields before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const taxonomyService: TaxonomyService = {
+      getTaxonomies() {
+        return [];
+      },
+      getTaxonomy() {
+        return null;
+      },
+      createTaxonomy(taxonomy) {
+        calls.push(["create-taxonomy", taxonomy]);
+        return Promise.resolve({
+          ...taxonomy,
+          description: taxonomy.description ?? null,
+          createdAt: "2026-05-14T09:00:00+00:00",
+          updatedAt: "2026-05-14T09:00:00+00:00",
+        });
+      },
+      updateTaxonomy() {
+        throw new Error("not used");
+      },
+      deleteTaxonomy() {
+        throw new Error("not used");
+      },
+      createCategory(category) {
+        calls.push(["create-category", category]);
+        return Promise.resolve({
+          ...category,
+          id: category.id ?? "category-1",
+          parentId: category.parentId ?? null,
+          description: category.description ?? null,
+          createdAt: "2026-05-14T09:00:00+00:00",
+          updatedAt: "2026-05-14T09:00:00+00:00",
+        });
+      },
+      updateCategory() {
+        throw new Error("not used");
+      },
+      deleteCategory() {
+        throw new Error("not used");
+      },
+      moveCategory(taxonomyId, categoryId, newParentId, position) {
+        calls.push(["move-category", { taxonomyId, categoryId, newParentId, position }]);
+        return Promise.resolve({
+          id: categoryId,
+          taxonomyId,
+          parentId: newParentId,
+          name: "Growth",
+          key: "growth",
+          color: "#4385be",
+          description: null,
+          sortOrder: position,
+          createdAt: "2026-05-14T09:00:00+00:00",
+          updatedAt: "2026-05-14T09:00:00+00:00",
+        });
+      },
+      getAssetAssignments() {
+        return [];
+      },
+      assignAssetToCategory(assignment) {
+        calls.push(["assign", assignment]);
+        return Promise.resolve({
+          ...assignment,
+          id: assignment.id ?? "assignment-1",
+          createdAt: "2026-05-14T09:00:00+00:00",
+          updatedAt: "2026-05-14T09:00:00+00:00",
+        });
+      },
+      removeAssetAssignment() {
+        throw new Error("not used");
+      },
+      importTaxonomyJson() {
+        throw new Error("not used");
+      },
+      exportTaxonomyJson() {
+        throw new Error("not used");
+      },
+      getMigrationStatus() {
+        throw new Error("not used");
+      },
+      getLegacyClassificationMigrationDetails() {
+        throw new Error("not used");
+      },
+      migrateLegacyClassifications() {
+        throw new Error("not used");
+      },
+    };
+    const handler = createBackendRequestHandler(config, { taxonomyService });
+    const headers = {
+      authorization: "Bearer sidecar-token",
+      "content-type": "application/json",
+    };
+    const invalidI32Values = [-2_147_483_649, 2_147_483_648];
+    const cases = [
+      {
+        url: "http://127.0.0.1/api/v1/taxonomies",
+        body: {
+          id: "strategy",
+          name: "Strategy",
+          color: "#4385be",
+          description: null,
+          isSystem: false,
+          isSingleSelect: true,
+          sortOrder: 0,
+        },
+        field: "sortOrder",
+      },
+      {
+        url: "http://127.0.0.1/api/v1/taxonomies/categories",
+        body: {
+          id: "growth",
+          taxonomyId: "strategy",
+          name: "Growth",
+          key: "growth",
+          color: "#4385be",
+          sortOrder: 0,
+        },
+        field: "sortOrder",
+      },
+      {
+        url: "http://127.0.0.1/api/v1/taxonomies/categories/move",
+        body: {
+          taxonomyId: "strategy",
+          categoryId: "growth",
+          newParentId: null,
+          position: 0,
+        },
+        field: "position",
+      },
+      {
+        url: "http://127.0.0.1/api/v1/taxonomies/assignments",
+        body: {
+          id: "assignment-1",
+          assetId: "asset-1",
+          taxonomyId: "strategy",
+          categoryId: "growth",
+          weight: 10_000,
+          source: "manual",
+        },
+        field: "weight",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      for (const value of invalidI32Values) {
+        const response = await handler(
+          new Request(testCase.url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ ...testCase.body, [testCase.field]: value }),
+          }),
+        );
+        expect(response.status).toBe(400);
+      }
+    }
+    expect(calls).toEqual([]);
+  });
+
   test("routes migrated taxonomy import and export only when a service is provided", async () => {
     const db = createTaxonomiesDb();
     const handler = createBackendRequestHandler(config, {

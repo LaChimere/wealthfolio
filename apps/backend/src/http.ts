@@ -6802,7 +6802,7 @@ function parseNewTaxonomy(payload: Record<string, unknown>): NewTaxonomy | Respo
   if (isSingleSelect instanceof Response) {
     return isSingleSelect;
   }
-  const sortOrder = parseRequiredInteger(payload.sortOrder, "sortOrder");
+  const sortOrder = parseRequiredI32(payload.sortOrder, "sortOrder");
   if (sortOrder instanceof Response) {
     return sortOrder;
   }
@@ -6875,7 +6875,7 @@ function parseNewTaxonomyCategory(
   if (description instanceof Response) {
     return description;
   }
-  const sortOrder = parseRequiredInteger(payload.sortOrder, "sortOrder");
+  const sortOrder = parseRequiredI32(payload.sortOrder, "sortOrder");
   if (sortOrder instanceof Response) {
     return sortOrder;
   }
@@ -6939,7 +6939,7 @@ function parseMoveCategoryRequest(payload: Record<string, unknown>):
   if (newParentId instanceof Response) {
     return newParentId;
   }
-  const position = parseRequiredInteger(payload.position, "position");
+  const position = parseRequiredI32(payload.position, "position");
   if (position instanceof Response) {
     return position;
   }
@@ -6970,7 +6970,7 @@ function parseNewAssetTaxonomyAssignment(
   if (categoryId instanceof Response) {
     return categoryId;
   }
-  const weight = parseRequiredInteger(payload.weight, "weight");
+  const weight = parseRequiredI32(payload.weight, "weight");
   if (weight instanceof Response) {
     return weight;
   }
