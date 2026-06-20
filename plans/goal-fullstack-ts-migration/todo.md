@@ -5345,6 +5345,11 @@ contract:
   Coverage includes Rust-compatible integer rating validation in the direct
   add-on domain service path, so fractional ratings are rejected before store
   dispatch in addition to HTTP seam validation.
+- `pr5-alternative-assets-guardrails`: verification passed: focused
+  alternative-assets tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine. Coverage includes same-day MANUAL-over-BROKER
+  holdings quote priority and requested-only metadata key deletion with
+  unspecified metadata preservation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
