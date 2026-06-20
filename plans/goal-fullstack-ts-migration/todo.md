@@ -5499,6 +5499,11 @@ contract:
   resolves periodic-review feedback by accepting Rust-compatible signed `i32`
   pinned cursor values such as `2` and `+1`, rejecting exponent/overflow values,
   and no longer rejecting empty later cursor fields.
+- `pr5-health-price-staleness-proleptic-date-parity`: verification passed:
+  focused health tests, full `bun run check`, and dual GPT/Claude xhigh review.
+  Coverage includes counting early proleptic-year trading days without
+  JavaScript's 1900-year remap so `0004-02-27` to `0004-03-01` remains a
+  one-trading-day warning instead of an over-counted critical issue.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
