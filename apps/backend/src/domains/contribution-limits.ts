@@ -238,11 +238,13 @@ export function createContributionLimitService(
       return repository.getContributionLimits();
     },
     async createContributionLimit(newLimit) {
+      validateContributionLimitNumericFields(newLimit);
       const limit = repository.createContributionLimit(newLimit);
       await options.notifyPortfolioUpdate?.();
       return limit;
     },
     async updateContributionLimit(id, updatedLimit) {
+      validateContributionLimitNumericFields(updatedLimit);
       const limit = repository.updateContributionLimit(id, updatedLimit);
       await options.notifyPortfolioUpdate?.();
       return limit;
@@ -264,6 +266,21 @@ export function createContributionLimitService(
       return await options.calculateDeposits(limit, accountIds, baseCurrency);
     },
   };
+}
+
+function validateContributionLimitNumericFields(limit: NewContributionLimit): void {
+  if (
+    !Number.isInteger(limit.contributionYear) ||
+    limit.contributionYear < -2_147_483_648 ||
+    limit.contributionYear > 2_147_483_647
+  ) {
+    throw new Error(
+      "Invalid input: contributionYear must be an integer between -2147483648 and 2147483647",
+    );
+  }
+  if (!Number.isFinite(limit.limitAmount)) {
+    throw new Error("Invalid input: limitAmount must be a finite number");
+  }
 }
 
 export function parseContributionLimitAccountIds(accountIds: string | null | undefined): string[] {

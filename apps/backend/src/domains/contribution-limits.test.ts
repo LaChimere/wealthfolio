@@ -38,6 +38,21 @@ describe("TS contribution limits domain", () => {
       });
       expect(created.id).not.toBe("client-supplied-id");
       expect(service.getContributionLimits()).toEqual([created]);
+      await expect(
+        service.createContributionLimit({
+          groupName: "Bad Year",
+          contributionYear: 4.5,
+          limitAmount: 1_000,
+        }),
+      ).rejects.toThrow("contributionYear must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.createContributionLimit({
+          groupName: "Bad Amount",
+          contributionYear: 2026,
+          limitAmount: Number.POSITIVE_INFINITY,
+        }),
+      ).rejects.toThrow("limitAmount must be a finite number");
+      expect(service.getContributionLimits()).toEqual([created]);
     } finally {
       db.close();
     }
@@ -77,6 +92,20 @@ describe("TS contribution limits domain", () => {
           newLimit({ groupName: "Missing" }),
         ),
       ).toThrow("Record not found: contribution limit missing-limit");
+      await expect(
+        service.updateContributionLimit(created.id, {
+          groupName: "Bad Year",
+          contributionYear: 2_147_483_648,
+          limitAmount: 1_000,
+        }),
+      ).rejects.toThrow("contributionYear must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.updateContributionLimit(created.id, {
+          groupName: "Bad Amount",
+          contributionYear: 2026,
+          limitAmount: Number.NaN,
+        }),
+      ).rejects.toThrow("limitAmount must be a finite number");
     } finally {
       db.close();
     }
