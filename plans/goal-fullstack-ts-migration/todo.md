@@ -5494,6 +5494,11 @@ contract:
   market-data tests, full `bun run check`, and dual GPT/Claude xhigh review.
   Coverage includes resolving an Alpha Vantage daily quote dated `0004-02-29`
   while preserving existing invalid-date filtering and modern date behavior.
+- `pr5-ai-chat-thread-cursor-i32-parity`: verification passed: focused AI chat
+  tests, full `bun run check`, and dual GPT/Claude xhigh review. Coverage
+  resolves periodic-review feedback by accepting Rust-compatible signed `i32`
+  pinned cursor values such as `2` and `+1`, rejecting exponent/overflow values,
+  and no longer rejecting empty later cursor fields.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
