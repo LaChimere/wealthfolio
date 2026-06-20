@@ -5279,6 +5279,12 @@ contract:
   fields and `lastSeenAt`/`last_seen_at` aliases in enroll `PAIR` and
   initialize-key `PAIRING_REQUIRED` responses while preserving ignored
   unknown-field behavior for non-pair modes.
+- `pr5-device-sync-snapshot-cursor-i64`: verification passed: focused snapshot
+  freshness tests, full standalone device-sync tests, full `bun run check`,
+  pre-commit checks, and dual GPT/Claude xhigh review/refine. Coverage includes
+  raw signed-i64 parsing for `oplogSeq`/`oplog_seq`, `sizeBytes`/`size_bytes`,
+  and cursor responses, including over-safe values whose exact comparison would
+  be lost through `JSON.parse` number rounding.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
