@@ -5740,6 +5740,9 @@ contract:
   asset enrichment, Boerse Frankfurt search-specific HTTP status wording in
   market-data and asset profile paths, and canonical Yahoo crumb status
   formatting.
+- `pr5-provider-status-rereview-fix`: verification passed: focused market-data
+  tests. Coverage includes preserving generic Rust `HTTP ...` status wording for
+  Boerse Frankfurt resolved quote price endpoint failures.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

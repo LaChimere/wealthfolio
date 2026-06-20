@@ -6119,7 +6119,7 @@ async function fetchBoerseResolvedQuote(
   url.searchParams.set("isin", isin);
   url.searchParams.set("mic", identity.mic);
 
-  const payload = await fetchBoerseJson(url, fetchImpl, "Search returned HTTP ");
+  const payload = await fetchBoerseJson(url, fetchImpl);
   if (!isRecord(payload)) {
     throw new Error(`${BOERSE_FRANKFURT_PROVIDER}: invalid price response`);
   }
