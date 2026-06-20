@@ -5236,6 +5236,12 @@ contract:
   for camelCase `timeFormat`, including null/missing handling and rejection of
   parsed floats, raw fractional integer tokens such as `24.0`, and out-of-range
   i32 values.
+- `pr5-connect-subscription-plan-i32`: verification passed: focused
+  subscription-plan tests, full Connect tests, full `bun run check`, pre-commit
+  checks, and dual GPT/Claude xhigh review/refine. Coverage includes Rust `i32`
+  parity for `householdSize`, `devices`, numeric `institutionConnections`, and
+  optional `yearlyDiscountPercent`, including raw fractional JSON tokens such as
+  `4.0` and parsed out-of-range values.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
