@@ -1134,6 +1134,12 @@ function assertBrokerConnectionsRawShape(rawJson: string): void {
       "connection response",
     );
     const brokerageTokens = rawTokensForAliases(connectionToken, ["brokerage"]);
+    if (
+      brokerageTokens.length === 1 &&
+      !brokerActivityOptionalObjectRawTokenIsValid(connectionToken, ["brokerage"])
+    ) {
+      throw new ConnectServiceError("internal_error", "Failed to parse connection response", 500);
+    }
     if (brokerageTokens.length === 1 && brokerageTokens[0]?.trim().startsWith("{")) {
       assertNoDuplicateConnectAliases(
         brokerageTokens[0],
@@ -1175,6 +1181,7 @@ function validateBrokerConnectionFromApi(value: Record<string, unknown>): void {
     assertOptionalConnectStringField(value, field, "connection response");
   }
   assertOptionalConnectBooleanField(value, "disabled", "connection response");
+  assertOptionalConnectObjectField(value, "brokerage", "connection response");
 }
 
 function brokerageFromApi(value: Record<string, unknown>): unknown | null {
@@ -3363,6 +3370,17 @@ function assertDefaultConnectBooleanField(
 ): void {
   const value = record[key];
   if (value !== undefined && typeof value !== "boolean") {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+}
+
+function assertOptionalConnectObjectField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && !isRecord(value)) {
     throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
   }
 }

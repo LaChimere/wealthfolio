@@ -1125,6 +1125,8 @@ describe("TS Connect local session service", () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"connections":[{"id":"connection-1","authorization_id":123,"disabled":"false"}]}';
     const service = createLocalConnectService({
       db,
       secretService,
@@ -1133,9 +1135,7 @@ describe("TS Connect local session service", () => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
         }
-        return Response.json({
-          connections: [{ id: "connection-1", authorization_id: 123, disabled: "false" }],
-        });
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
       },
       accountService: { getAllAccounts: () => [] },
       activityService: {
@@ -1145,6 +1145,12 @@ describe("TS Connect local session service", () => {
     });
 
     try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+      responseBody = '{"connections":[{"id":"connection-1","brokerage":"snaptrade"}]}';
       await expect(service.listBrokerConnections()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse connection response",
