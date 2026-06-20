@@ -1174,24 +1174,32 @@ describe("TS local device sync service", () => {
   });
 
   test("rejects malformed optional fields in cloud device listing", async () => {
+    let responseBody = JSON.stringify([
+      {
+        id: "device-1",
+        user_id: "user-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "trusted",
+        created_at: "2026-01-01T00:00:00Z",
+        last_seen_at: 123,
+      },
+    ]);
     const service = createLocalDeviceSyncService({
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
       fetch: async () =>
-        Response.json([
-          {
-            id: "device-1",
-            user_id: "user-1",
-            display_name: "MacBook",
-            platform: "mac",
-            trust_state: "trusted",
-            created_at: "2026-01-01T00:00:00Z",
-            last_seen_at: 123,
-          },
-        ]),
+        new Response(responseBody, { headers: { "content-type": "application/json" } }),
     });
 
+    await expect(service.listDevices()).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to parse device response",
+      status: 500,
+    });
+    responseBody =
+      '[{"id":"device-1","user_id":"user-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","created_at":"2026-01-01T00:00:00Z","trusted_key_version":1e999}]';
     await expect(service.listDevices()).rejects.toMatchObject({
       code: "internal_error",
       message: "Failed to parse device response",

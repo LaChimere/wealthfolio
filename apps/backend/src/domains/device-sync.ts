@@ -2321,7 +2321,7 @@ function optionalNumber(value: unknown): number | null {
   if (value === undefined || value === null) {
     return null;
   }
-  if (typeof value !== "number") {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new DeviceSyncServiceError("internal_error", "Failed to parse device response", 500);
   }
   return value;
