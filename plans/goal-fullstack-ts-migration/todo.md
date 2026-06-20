@@ -5330,6 +5330,11 @@ contract:
   GPT/Claude xhigh review/refine. Coverage includes Rust-compatible latest quote
   selection for holdings (`day <= local today`) so future-dated alternative
   asset valuation/payoff rows do not affect current holdings.
+- `pr5-health-config-u32-hours`: verification passed: focused HTTP tests, full
+  `bun run check`, pre-commit checks, and dual GPT/Claude xhigh review/refine.
+  Coverage includes Rust-compatible `u32` parsing for price/FX stale-hour config
+  fields before service dispatch, with negative and over-u32 values rejected for
+  every stale-hour field.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
