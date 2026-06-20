@@ -217,6 +217,38 @@ describe("TS alternative assets domain", () => {
     }
   });
 
+  test("ignores future-dated alternative asset quotes for current holdings", async () => {
+    const db = createAlternativeAssetsDb();
+    const service = createAlternativeAssetService(db, { now: fixedNow });
+
+    try {
+      const created = await service.createAlternativeAsset({
+        kind: "liability",
+        name: "Mortgage",
+        currency: "USD",
+        currentValue: "-500000.00",
+        valueDate: "2026-05-01",
+        purchasePrice: "-550000.00",
+        purchaseDate: "2025-01-01",
+      });
+      await service.updateValuation(created.assetId, {
+        value: "0",
+        date: "2041-01-01",
+        notes: "Projected payoff",
+      });
+
+      await expect(Promise.resolve(service.getAlternativeHoldings())).resolves.toEqual([
+        expect.objectContaining({
+          id: created.assetId,
+          marketValue: "-500000",
+          valuationDate: "2026-05-01T12:00:00+00:00",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("queues quote update sync callbacks when valuation reuses an existing UUID quote", async () => {
     const db = createAlternativeAssetsDb();
     const quoteEvents: AlternativeQuoteSyncEvent[] = [];

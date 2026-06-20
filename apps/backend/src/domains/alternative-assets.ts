@@ -458,6 +458,7 @@ export function createAlternativeAssetService(
       const quotes = latestQuotesByAssetId(
         db,
         assets.map((asset) => asset.id),
+        localDateString(now()),
       );
       return assets.flatMap((asset) => {
         const quote = quotes.get(asset.id);
@@ -707,7 +708,11 @@ function readLatestQuoteByAssetId(db: Database, assetId: string): AlternativeQuo
     .get(assetId);
 }
 
-function latestQuotesByAssetId(db: Database, assetIds: string[]): Map<string, AlternativeQuoteRow> {
+function latestQuotesByAssetId(
+  db: Database,
+  assetIds: string[],
+  asOfDay: string,
+): Map<string, AlternativeQuoteRow> {
   if (assetIds.length === 0) {
     return new Map();
   }
@@ -724,6 +729,7 @@ function latestQuotesByAssetId(db: Database, assetIds: string[]): Map<string, Al
             ) AS rn
           FROM quotes q
           WHERE q.asset_id IN (${placeholders})
+            AND q.day <= ?
         )
         SELECT id, asset_id, day, source, open, high, low, close, adjclose, volume,
           currency, notes, created_at, timestamp
@@ -732,7 +738,7 @@ function latestQuotesByAssetId(db: Database, assetIds: string[]): Map<string, Al
         ORDER BY asset_id
       `,
     )
-    .all(...assetIds);
+    .all(...assetIds, asOfDay);
   return new Map(rows.map((row) => [row.asset_id, row]));
 }
 
@@ -847,6 +853,13 @@ function parseDateOnly(value: string, label: string): string {
     throw new Error(`Invalid input: Invalid ${label} format`);
   }
   return value;
+}
+
+function localDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function dateToNoonUtcTimestamp(date: string): string {
