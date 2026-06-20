@@ -86,6 +86,13 @@ describe("TS goals domain", () => {
           priority: 2_147_483_648,
         }),
       ).rejects.toThrow("Priority must be an integer between -2147483648 and 2147483647");
+      await expect(
+        service.createGoal({
+          goalType: "custom_save_up",
+          title: "Bad Target",
+          targetAmount: Number.POSITIVE_INFINITY,
+        }),
+      ).rejects.toThrow("targetAmount must be a finite number");
       expect(syncEvents).toHaveLength(1);
     } finally {
       db.close();
@@ -168,6 +175,12 @@ describe("TS goals domain", () => {
       await expect(service.updateGoal({ ...updated, priority: -2_147_483_649 })).rejects.toThrow(
         "Priority must be an integer between -2147483648 and 2147483647",
       );
+      await expect(service.updateGoal({ ...updated, targetAmount: Number.NaN })).rejects.toThrow(
+        "targetAmount must be a finite number",
+      );
+      await expect(
+        service.updateGoal({ ...updated, summaryProgress: Number.POSITIVE_INFINITY }),
+      ).rejects.toThrow("summaryProgress must be a finite number");
     } finally {
       db.close();
     }

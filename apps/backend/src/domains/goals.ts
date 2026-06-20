@@ -541,6 +541,7 @@ export function createGoalService(
     async createGoal(newGoal) {
       const isRetirement = newGoal.goalType === "retirement";
       validateOptionalI32GoalPriority(newGoal.priority);
+      validateNewGoalFiniteNumbers(newGoal);
       if (newGoal.statusLifecycle !== undefined && newGoal.statusLifecycle !== null) {
         validateGoalLifecycle(newGoal.statusLifecycle);
       }
@@ -560,6 +561,7 @@ export function createGoalService(
         throw new Error("Invalid input: Goal type cannot be changed after creation");
       }
       validateI32GoalPriority(goal.priority);
+      validateGoalFiniteNumbers(goal);
       validateGoalLifecycle(goal.statusLifecycle);
       if (goal.goalType === "retirement" && goal.statusLifecycle !== GOAL_LIFECYCLE_ARCHIVED) {
         assertSingleRetirementGoal(repository.loadGoals(), goal.id);
@@ -941,6 +943,27 @@ function validateI32GoalPriority(priority: number): void {
     throw new Error(
       "Invalid input: Priority must be an integer between -2147483648 and 2147483647",
     );
+  }
+}
+
+function validateNewGoalFiniteNumbers(goal: NewGoal): void {
+  validateOptionalFiniteGoalNumber(goal.targetAmount, "targetAmount");
+}
+
+function validateGoalFiniteNumbers(goal: Goal): void {
+  validateOptionalFiniteGoalNumber(goal.targetAmount, "targetAmount");
+  validateOptionalFiniteGoalNumber(goal.summaryCurrentValue, "summaryCurrentValue");
+  validateOptionalFiniteGoalNumber(goal.summaryProgress, "summaryProgress");
+  validateOptionalFiniteGoalNumber(goal.projectedValueAtTargetDate, "projectedValueAtTargetDate");
+  validateOptionalFiniteGoalNumber(goal.summaryTargetAmount, "summaryTargetAmount");
+}
+
+function validateOptionalFiniteGoalNumber(value: number | null | undefined, field: string): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!Number.isFinite(value)) {
+    throw new Error(`Invalid input: ${field} must be a finite number`);
   }
 }
 
