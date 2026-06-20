@@ -433,19 +433,19 @@ export function createExchangeRateService(
       return decimalToString(exchangeRateForDate(fromCurrency, toCurrency, date));
     },
     convertCurrency(amount, fromCurrency, toCurrency) {
+      const decimalAmount = parseDecimalInput(amount, "amount");
       if (fromCurrency === toCurrency) {
-        return decimalToString(decimalOrZero(amount));
+        return decimalToString(decimalAmount);
       }
-      return decimalToString(
-        decimalOrZero(amount).mul(latestExchangeRate(fromCurrency, toCurrency)),
-      );
+      return decimalToString(decimalAmount.mul(latestExchangeRate(fromCurrency, toCurrency)));
     },
     convertCurrencyForDate(amount, fromCurrency, toCurrency, date) {
+      const decimalAmount = parseDecimalInput(amount, "amount");
       if (fromCurrency === toCurrency) {
-        return decimalToString(decimalOrZero(amount));
+        return decimalToString(decimalAmount);
       }
       return decimalToString(
-        decimalOrZero(amount).mul(exchangeRateForDate(fromCurrency, toCurrency, date)),
+        decimalAmount.mul(exchangeRateForDate(fromCurrency, toCurrency, date)),
       );
     },
     getLatestExchangeRates() {
@@ -991,9 +991,25 @@ function validateCurrency(currency: string, field: string): void {
 }
 
 function validateRate(rate: string): void {
-  if (!isDecimalString(rate)) {
-    throw new Error("Invalid input: rate must be a decimal string");
+  validateDecimalString(rate, "rate");
+}
+
+function validateDecimalString(value: string, field: string): void {
+  if (!isDecimalString(value)) {
+    throw new Error(`Invalid input: ${field} must be a decimal string`);
   }
+}
+
+function parseDecimalInput(value: string, field: string): Decimal {
+  const trimmed = value.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+    throw new Error(`Invalid input: ${field} must be a decimal string`);
+  }
+  const decimal = new Decimal(trimmed);
+  if (!decimal.isFinite()) {
+    throw new Error(`Invalid input: ${field} must be a decimal string`);
+  }
+  return decimal;
 }
 
 function validateIsoCurrencyCode(currency: string): void {

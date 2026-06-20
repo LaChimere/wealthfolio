@@ -278,8 +278,16 @@ describe("TS exchange rates domain", () => {
       expect(service.getExchangeRateForDate("USD", "CAD", "2023-10-25")).toBe("1.2");
       expect(service.getLatestExchangeRate("CAD", "USD")).toBe("0.6666666666666666666666666667");
       expect(service.getExchangeRateForDate("USD", "CHF", "2023-10-26")).toBe("2");
+      expect(service.convertCurrency("1e-7", "USD", "USD")).toBe("1e-7");
       expect(service.convertCurrencyForDate("10", "USD", "CHF", "2023-10-26")).toBe("20");
+      expect(service.convertCurrencyForDate("1e-7", "USD", "CHF", "2023-10-26")).toBe("2e-7");
       expect(service.convertCurrency("6", "EUR", "GBP")).toBe("18");
+      expect(() => service.convertCurrency("not-a-number", "USD", "CAD")).toThrow(
+        "amount must be a decimal string",
+      );
+      expect(() =>
+        service.convertCurrencyForDate("not-a-number", "USD", "CAD", "2023-10-26"),
+      ).toThrow("amount must be a decimal string");
       expect(() => service.convertCurrency("1", "USD", "NOK")).toThrow("Exchange rate not found");
       expect(warnings).toEqual(["Exchange rate not available for USD/NOK"]);
     } finally {
