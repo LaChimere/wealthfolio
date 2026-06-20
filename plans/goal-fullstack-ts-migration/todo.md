@@ -5725,6 +5725,9 @@ contract:
   custom-provider tests. Coverage includes passing raw non-ASCII header values
   through Bun Fetch when accepted and skipping Bun-unsupported higher Unicode
   values instead of sending byte-string double-encoded bytes.
+- `pr5-yahoo-http-status-text`: verification passed: focused market-data tests.
+  Coverage includes canonical Rust-compatible status reason phrases and
+  `<unknown status code>` fallback for Yahoo provider HTTP errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

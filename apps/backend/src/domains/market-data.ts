@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
+import { STATUS_CODES } from "node:http";
 import { join } from "node:path";
 import Decimal from "decimal.js";
 
@@ -6692,10 +6693,18 @@ function parseYahooDividends(payload: unknown, symbol: string): YahooDividend[] 
 }
 
 function yahooStatusMessage(response: Response): string {
-  const reason = response.statusText.trim();
-  return reason
-    ? `Yahoo returned ${response.status} ${reason}`
-    : `Yahoo returned ${response.status}`;
+  return `Yahoo returned ${formatRustHttpStatus(response.status)}`;
+}
+
+const RUST_HTTP_STATUS_REASON_OVERRIDES: Record<number, string> = {
+  418: "I'm a teapot",
+  509: "<unknown status code>",
+};
+
+function formatRustHttpStatus(status: number): string {
+  const reason =
+    RUST_HTTP_STATUS_REASON_OVERRIDES[status] ?? STATUS_CODES[status] ?? "<unknown status code>";
+  return `${status} ${reason}`;
 }
 
 function yahooProviderError(message: string): Error {

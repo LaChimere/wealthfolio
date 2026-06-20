@@ -3585,6 +3585,51 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("formats Yahoo HTTP status errors like Rust", async () => {
+    for (const { status, statusText, expected } of [
+      {
+        status: 418,
+        statusText: "Custom Teapot",
+        expected: "Provider error: YAHOO - Yahoo returned 418 I'm a teapot",
+      },
+      {
+        status: 509,
+        statusText: "Bandwidth Limit Exceeded",
+        expected: "Provider error: YAHOO - Yahoo returned 509 <unknown status code>",
+      },
+      {
+        status: 520,
+        statusText: "Custom Unknown",
+        expected: "Provider error: YAHOO - Yahoo returned 520 <unknown status code>",
+      },
+    ]) {
+      const db = createMarketDataDb();
+      const fetchImpl = ((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(new Response("", { headers: { "set-cookie": "B=yahoo-cookie" } }));
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          return Promise.resolve(new Response("crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+          return Promise.resolve(new Response("", { status, statusText }));
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as typeof fetch;
+      const service = createMarketDataService(db, {
+        fetch: fetchImpl,
+        now: () => new Date("2026-01-01T00:00:00Z"),
+      });
+
+      try {
+        await expect(service.fetchYahooDividends?.("AAPL")).rejects.toThrow(expected);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
   test("searches existing assets and Yahoo raw results with canonical dedupe", async () => {
     const db = createMarketDataDb();
     const calls: string[] = [];
