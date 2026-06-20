@@ -5589,6 +5589,10 @@ contract:
   tests and full `bun run check`. Coverage includes rejecting stored
   `ai_messages.content_json` `schemaVersion` values outside Rust `u32` instead
   of silently defaulting them.
+- `pr5-ai-thread-config-snapshot-parse`: verification passed: focused AI chat
+  tests and full `bun run check`. Coverage includes returning `null` for
+  malformed stored `ai_threads.config_snapshot` JSON or non-u32 `schemaVersion`,
+  matching Rust best-effort config deserialization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -169,6 +169,35 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("nulls malformed thread config snapshots like Rust storage", () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db);
+
+    try {
+      seedThread(db, { id: "thread-1", title: "Valid" });
+      expect(service.getThread("thread-1")?.config).toMatchObject({
+        schemaVersion: 1,
+        providerId: "ollama",
+      });
+
+      seedThread(db, { id: "thread-2", title: "Malformed" });
+      db.prepare("UPDATE ai_threads SET config_snapshot = ? WHERE id = ?").run(
+        JSON.stringify({
+          schemaVersion: 4_294_967_296,
+          providerId: "ollama",
+          modelId: "llama3",
+          promptTemplateId: "wealthfolio-assistant-v1",
+          promptVersion: "1.0.0",
+        }),
+        "thread-2",
+      );
+
+      expect(service.getThread("thread-2")?.config).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads messages and merges tool result patches", () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
@@ -2356,7 +2385,13 @@ function seedThread(
   ).run(
     thread.id,
     thread.title,
-    JSON.stringify({ schemaVersion: 1, providerId: "ollama" }),
+    JSON.stringify({
+      schemaVersion: 1,
+      providerId: "ollama",
+      modelId: "llama3",
+      promptTemplateId: "wealthfolio-assistant-v1",
+      promptVersion: "1.0.0",
+    }),
     thread.isPinned ? 1 : 0,
     createdAt,
     thread.updatedAt ?? createdAt,

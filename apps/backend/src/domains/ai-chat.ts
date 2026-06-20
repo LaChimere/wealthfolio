@@ -2904,10 +2904,35 @@ function threadFromRow(row: AiThreadRow, tags: string[]): AiChatThread {
     title: row.title,
     isPinned: intToBool(row.is_pinned),
     tags,
-    config: parseJsonOrNull(row.config_snapshot),
+    config: parseThreadConfigSnapshot(row.config_snapshot),
     createdAt: parseTimestampOrNow(row.created_at),
     updatedAt: parseTimestampOrNow(row.updated_at),
   };
+}
+
+function parseThreadConfigSnapshot(configSnapshot: string | null): unknown | null {
+  const parsed = parseJsonOrNull(configSnapshot);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  if (
+    typeof parsed.schemaVersion !== "number" ||
+    !Number.isInteger(parsed.schemaVersion) ||
+    parsed.schemaVersion < 0 ||
+    parsed.schemaVersion > U32_MAX ||
+    typeof parsed.providerId !== "string" ||
+    typeof parsed.modelId !== "string" ||
+    typeof parsed.promptTemplateId !== "string" ||
+    typeof parsed.promptVersion !== "string" ||
+    (parsed.locale !== undefined && typeof parsed.locale !== "string") ||
+    (parsed.detailLevel !== undefined && typeof parsed.detailLevel !== "string") ||
+    (parsed.toolsAllowlist !== undefined &&
+      (!Array.isArray(parsed.toolsAllowlist) ||
+        parsed.toolsAllowlist.some((tool) => typeof tool !== "string")))
+  ) {
+    return null;
+  }
+  return parsed;
 }
 
 function messageFromRow(row: AiMessageRow): AiChatMessage {
