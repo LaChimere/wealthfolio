@@ -492,6 +492,68 @@ describe("TS health domain", () => {
     }
   });
 
+  test("counts early proleptic-year price staleness trading days without 1900 remapping", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(
+      createHealthRepository(db),
+      {
+        ...DEFAULT_HEALTH_CONFIG,
+        priceStaleWarningHours: 24,
+        priceStaleCriticalHours: 48,
+        mvEscalationThreshold: 1,
+      },
+      {
+        accountProvider: {
+          getActiveAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: () => [
+            holding({
+              assetId: "asset-early",
+              symbol: "EARLY",
+              marketValue: 100,
+              pricingMode: "MARKET",
+            }),
+          ],
+        },
+        marketDataQuoteProvider: {
+          getLatestQuotes: () => ({
+            "asset-early": {
+              quote: null,
+              isStale: true,
+              effectiveMarketDate: "0004-03-01",
+              quoteDate: "0004-02-27",
+            },
+          }),
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+      },
+    );
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          severity: "WARNING",
+          category: "PRICE_STALENESS",
+          title: "Price update needed for 1 holding",
+          affectedItems: [
+            {
+              id: "asset-early",
+              name: "EARLY",
+              symbol: "EARLY",
+              route: "/holdings/asset-early",
+            },
+          ],
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps price staleness checks nonfatal when latest quote loading fails", async () => {
     const db = createHealthDb();
     const warnings: string[] = [];

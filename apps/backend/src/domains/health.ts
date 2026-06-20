@@ -842,18 +842,33 @@ function tradingDaysBetween(fromDate: string, toDate: string): number {
 }
 
 function parseDateOnlyUtc(value: string): Date {
-  const parts = value.split("-");
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
     throw new Error(`Invalid date: ${value}`);
   }
-  return new Date(Date.UTC(year, month - 1, day));
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = utcDateFromParts(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid date: ${value}`);
+  }
+  return date;
 }
 
 function addUtcDays(date: Date, days: number): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+  return utcDateFromParts(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days);
+}
+
+function utcDateFromParts(year: number, monthIndex: number, day: number): Date {
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, monthIndex, day);
+  return date;
 }
 
 interface QuoteSyncHealthError {
