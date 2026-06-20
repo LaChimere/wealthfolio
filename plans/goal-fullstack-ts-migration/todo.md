@@ -5409,6 +5409,11 @@ contract:
   `bun run check`, pre-commit checks, and dual GPT/Claude xhigh re-review.
   Coverage fixes the milestone-review finding that local-date as-of quote tests
   could fail or use stale quotes in negative timezones.
+- `pr5-exchange-rate-conversion-amount-validation`: verification passed: focused
+  exchange-rate tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review/refine. Coverage includes rejecting invalid FX
+  conversion amount strings while accepting finite Decimal exponent notation
+  from internal callers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
