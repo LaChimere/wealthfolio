@@ -1799,8 +1799,14 @@ function routeHoldingsRequest(
     if (assetId instanceof Response) {
       return assetId;
     }
-    const includeSnapshotPositions =
-      url.searchParams.get("includeSnapshotPositions")?.toLowerCase() === "true";
+    const includeSnapshotPositions = parseOptionalBooleanQuery(
+      url,
+      "includeSnapshotPositions",
+      false,
+    );
+    if (includeSnapshotPositions instanceof Response) {
+      return includeSnapshotPositions;
+    }
     return Promise.resolve(holdingsService.getAssetLots(assetId, includeSnapshotPositions))
       .then(jsonResponse)
       .catch(domainErrorResponse);
@@ -7267,6 +7273,24 @@ function parseRequiredQueryString(url: URL, field: string): string | Response {
     return jsonResponse({ code: 400, message: `${field} must be a string` }, 400);
   }
   return value;
+}
+
+function parseOptionalBooleanQuery(
+  url: URL,
+  field: string,
+  defaultValue: boolean,
+): boolean | Response {
+  const value = url.searchParams.get(field);
+  if (value === null) {
+    return defaultValue;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return jsonResponse({ code: 400, message: `${field} must be a boolean` }, 400);
 }
 
 function parseRepeatedQueryStrings(url: URL, fields: string[]): string[] | undefined {

@@ -3210,6 +3210,17 @@ describe("TS backend HTTP skeleton", () => {
         },
       ),
     );
+    const invalidLotsBooleanResponse = await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/holdings/lots?assetId=asset-1&includeSnapshotPositions=TRUE",
+        { headers: authHeaders },
+      ),
+    );
+    expect(invalidLotsBooleanResponse.status).toBe(400);
+    await expect(invalidLotsBooleanResponse.json()).resolves.toEqual({
+      code: 400,
+      message: "includeSnapshotPositions must be a boolean",
+    });
     await handler(
       new Request(
         "http://127.0.0.1/api/v1/valuations/history?accountId=acc-1&startDate=2026-05-01&endDate=2026-05-14",
