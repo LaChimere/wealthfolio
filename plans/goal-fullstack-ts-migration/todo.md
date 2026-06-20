@@ -5314,6 +5314,12 @@ contract:
   includes fail-closed 501 behavior before approve/complete cloud mutations when
   local snapshot bootstrap is still required; full sync-cycle/snapshot upload
   orchestration remains a follow-up.
+- `pr5-device-sync-transfer-outbox-gate`: verification passed: focused composite
+  pairing tests, full standalone device-sync tests, full `bun run check`,
+  pre-commit checks, and dual GPT/Claude xhigh review/refine. Coverage includes
+  fail-closed 501 behavior before approve/complete cloud mutations when modern
+  `sync_outbox` has unsent pending rows, while sent rows do not gate; full
+  sync-cycle/snapshot upload orchestration remains a follow-up.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
