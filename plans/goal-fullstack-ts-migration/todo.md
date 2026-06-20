@@ -4453,6 +4453,14 @@ contract:
   shared Connect optional-number validation rejecting non-finite parsed values
   such as broker account `balance.total.amount: 1e999` while preserving existing
   malformed-string rejection.
+- `pr5-connect-broker-connection-brokerage-object-validation`: verification
+  passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker connections|connection aliases|connection fields|brokerage fields"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  connection validation rejecting scalar/array `brokerage` values while
+  preserving missing/null/object behavior and top-level brokerage fallback.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
