@@ -643,19 +643,20 @@ describe("TS Connect local session service", () => {
 
   test("rejects malformed subscription plan optional scalar fields", async () => {
     const db = new Database(":memory:");
+    let responseBody = JSON.stringify({
+      plans: [
+        {
+          ...connectSubscriptionPlan("free"),
+          tagline: 123,
+          isAvailable: "yes",
+        },
+      ],
+    });
     const service = createLocalConnectService({
       db,
       env: { CONNECT_API_URL: "https://api.example.test/" },
       fetch: async () =>
-        Response.json({
-          plans: [
-            {
-              ...connectSubscriptionPlan("free"),
-              tagline: 123,
-              isAvailable: "yes",
-            },
-          ],
-        }),
+        new Response(responseBody, { headers: { "content-type": "application/json" } }),
       accountService: { getAllAccounts: () => [] },
       activityService: {
         getBrokerSyncProfile: () => null,
@@ -664,6 +665,46 @@ describe("TS Connect local session service", () => {
     });
 
     try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("free"),
+            isAvailable: null,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("free"),
+            isComingSoon: null,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1},"isAvailable":true,"isAvailable":false}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1},"isComingSoon":false,"isComingSoon":true}]}';
       await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
         code: "internal_error",
         message: "Failed to parse plans response",
