@@ -7011,9 +7011,9 @@ function parseNewContributionLimit(
   if (typeof groupName !== "string") {
     return jsonResponse({ code: 400, message: "groupName must be a string" }, 400);
   }
-  const contributionYear = payload.contributionYear;
-  if (typeof contributionYear !== "number" || !Number.isInteger(contributionYear)) {
-    return jsonResponse({ code: 400, message: "contributionYear must be an integer" }, 400);
+  const contributionYear = parseRequiredI32(payload.contributionYear, "contributionYear");
+  if (contributionYear instanceof Response) {
+    return contributionYear;
   }
   const limitAmount = payload.limitAmount;
   if (typeof limitAmount !== "number" || !Number.isFinite(limitAmount)) {

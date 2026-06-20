@@ -22,6 +22,7 @@ import type {
 import {
   createContributionLimitRepository,
   createContributionLimitService,
+  type ContributionLimitService,
 } from "./domains/contribution-limits";
 import {
   createCustomProviderRepository,
@@ -1188,6 +1189,76 @@ describe("TS backend HTTP skeleton", () => {
     } finally {
       db.close();
     }
+  });
+
+  test("rejects non-i32 contribution years before service dispatch", async () => {
+    const calls: unknown[] = [];
+    const limit = {
+      id: "limit-1",
+      groupName: "TFSA",
+      contributionYear: 2026,
+      limitAmount: 7_000,
+      accountIds: null,
+      createdAt: "2026-05-14T09:00:00+00:00",
+      updatedAt: "2026-05-14T09:00:00+00:00",
+      startDate: null,
+      endDate: null,
+    };
+    const contributionLimitService: ContributionLimitService = {
+      getContributionLimits() {
+        return [];
+      },
+      createContributionLimit(newLimit) {
+        calls.push(["create", newLimit]);
+        return Promise.resolve({ ...limit, ...newLimit, id: newLimit.id ?? limit.id });
+      },
+      updateContributionLimit(id, updatedLimit) {
+        calls.push(["update", { id, updatedLimit }]);
+        return Promise.resolve({ ...limit, ...updatedLimit, id });
+      },
+      deleteContributionLimit() {
+        throw new Error("not used");
+      },
+      calculateDepositsForContributionLimit() {
+        throw new Error("not used");
+      },
+    };
+    const handler = createBackendRequestHandler(config, { contributionLimitService });
+    const headers = {
+      authorization: "Bearer sidecar-token",
+      "content-type": "application/json",
+    };
+    const invalidYears = [4.5, -2_147_483_649, 2_147_483_648];
+
+    for (const contributionYear of invalidYears) {
+      const createResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/limits", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            groupName: "TFSA",
+            contributionYear,
+            limitAmount: 7_000,
+          }),
+        }),
+      );
+      expect(createResponse.status).toBe(400);
+
+      const updateResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/limits/limit-1", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            groupName: "TFSA",
+            contributionYear,
+            limitAmount: 7_500,
+          }),
+        }),
+      );
+      expect(updateResponse.status).toBe(400);
+    }
+
+    expect(calls).toEqual([]);
   });
 
   test("routes migrated taxonomy read domain only when a service is provided", async () => {
