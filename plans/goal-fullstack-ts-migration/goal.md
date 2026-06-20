@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 580
+turns_used: 581
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-20T12:57:40+08:00"
+updated_at: "2026-06-20T13:06:01+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -3739,6 +3739,12 @@ updated_at: "2026-06-20T12:57:40+08:00"
   service-boundary semantics beyond the HTTP seam. Verified with focused goal
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review.
+- Turn 581: Tightened direct taxonomy numeric validation parity. The taxonomy
+  service now rejects fractional and out-of-i32 sort orders, move positions, and
+  assignment weights before repository persistence or single-select side
+  effects, matching Rust `i32` service-boundary semantics beyond the HTTP seam.
+  Verified with focused taxonomy tests, full `bun run check`, pre-commit checks,
+  and dual GPT/Claude xhigh review.
 
 ## Deferred items
 
