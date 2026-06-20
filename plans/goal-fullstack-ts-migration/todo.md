@@ -4445,6 +4445,14 @@ contract:
   nested brokerage validation and mapping using Rust intermediate API brokerage
   fields (`display_name`, `aws_s3_logo_url`, `aws_s3_square_logo_url`) in snake
   case only while treating camel brokerage keys as ignored unknown fields.
+- `pr5-connect-optional-number-finite-validation`: verification passed:
+  `bun test apps/backend/src/domains/connect.test.ts -t "broker account nested|subscription plan optional|authenticated subscription|user info"`,
+  `bun test apps/backend/src/domains/connect.test.ts`,
+  `bun run --cwd apps/backend type-check`, `bun test apps/backend/src`, full
+  `bun run check`, and dual GPT/Claude xhigh review/refine. Coverage includes
+  shared Connect optional-number validation rejecting non-finite parsed values
+  such as broker account `balance.total.amount: 1e999` while preserving existing
+  malformed-string rejection.
 - `pr5-device-sync-composite-confirm-already-complete`: verification passed:
   `bun test apps/backend/src/domains/device-sync.test.ts`,
   `bun run --cwd apps/backend type-check`, `bun run test:backend`, full
