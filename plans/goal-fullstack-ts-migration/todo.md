@@ -5291,6 +5291,11 @@ contract:
   signed-i64 parsing for Connect-local snapshot metadata, cursor latest-snapshot
   fallback, and internal freshness-gate cursor comparison, with safeguards so
   public JSON outputs stay serializable.
+- `pr5-connect-token-expires-i64`: verification passed: focused token restore
+  tests, full Connect tests, full `bun run check`, pre-commit checks, and dual
+  GPT/Claude xhigh review. Coverage includes Rust `Option<i64>` parity for
+  refresh-token response `expires_in`, accepting raw signed-i64 values such as
+  `9223372036854775807` without producing BigInt output.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
