@@ -197,6 +197,8 @@ interface StoredAiProviderSettings {
 const AI_PROVIDER_SETTINGS_KEY = "ai_provider_settings";
 const AI_PROVIDER_SETTINGS_SCHEMA_VERSION = 2;
 const DEFAULT_PRIORITY = 100;
+const I32_MIN = -2_147_483_648;
+const I32_MAX = 2_147_483_647;
 const LEGACY_VISIBLE_DATA_TOOLS = [
   "get_accounts",
   "get_holdings",
@@ -250,7 +252,8 @@ export function createAiProviderService(
       if ("customUrl" in request && request.customUrl !== undefined) {
         providerSettings.customUrl = request.customUrl.trim() ? request.customUrl : undefined;
       }
-      if ("priority" in request) {
+      if (request.priority !== undefined) {
+        validateI32Priority(request.priority);
         providerSettings.priority = request.priority;
       }
       if ("favoriteModels" in request && request.favoriteModels !== undefined) {
@@ -623,7 +626,10 @@ function normalizeProviderUserSettings(value: Record<string, unknown>): Provider
   if (typeof value.customUrl === "string") {
     settings.customUrl = value.customUrl;
   }
-  if (typeof value.priority === "number" && Number.isInteger(value.priority)) {
+  if (value.priority !== undefined) {
+    if (typeof value.priority !== "number" || !isI32Integer(value.priority)) {
+      throw new Error("Invalid AI provider settings");
+    }
     settings.priority = value.priority;
   }
   if (isStringArray(value.favoriteModels)) {
@@ -697,6 +703,18 @@ function normalizeTuningOverrideUpdate(
   }
   const overrides = parseTuningOverrides(update);
   return tuningOverridesEmpty(overrides) ? undefined : overrides;
+}
+
+function validateI32Priority(priority: number): void {
+  if (!isI32Integer(priority)) {
+    throw new Error(
+      "Invalid input: Priority must be an integer between -2147483648 and 2147483647",
+    );
+  }
+}
+
+function isI32Integer(value: number): boolean {
+  return Number.isInteger(value) && value >= I32_MIN && value <= I32_MAX;
 }
 
 function parseTuningOverrides(value: Record<string, unknown>): ProviderTuningOverrides {

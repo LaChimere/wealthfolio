@@ -3937,7 +3937,7 @@ function parseAiProviderSettingsUpdate(
   if (customUrl !== undefined && customUrl !== null) {
     parsed.customUrl = customUrl;
   }
-  const priority = parseOptionalIntegerOrNull(payload.priority, "priority");
+  const priority = parseOptionalI32OrNull(payload.priority, "priority");
   if (priority instanceof Response) {
     return priority;
   }

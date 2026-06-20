@@ -146,9 +146,45 @@ describe("TS AI provider domain", () => {
     expect(() =>
       service.updateProviderSettings({
         providerId: "openai",
+        priority: 2_147_483_648,
+      }),
+    ).toThrow("Priority must be an integer between -2147483648 and 2147483647");
+    expect(() =>
+      service.updateProviderSettings({
+        providerId: "openai",
         tuningOverrides: { extraOptionOverrides: { nested: [] as unknown as string } },
       }),
     ).toThrow("arrays and objects are not user-editable");
+  });
+
+  test("falls back to catalog defaults when stored provider priority is not i32", () => {
+    const { db, secrets } = createDbAndSecrets();
+    db.prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)").run(
+      "ai_provider_settings",
+      JSON.stringify({
+        schemaVersion: 2,
+        defaultProvider: "openai",
+        providers: {
+          openai: {
+            enabled: true,
+            priority: 2_147_483_648,
+          },
+        },
+      }),
+    );
+    const service = createAiProviderService({
+      db,
+      secretService: createMemorySecretService(secrets),
+      catalogJson: testCatalogJson(),
+    });
+
+    expect(service.getAiProviders().defaultProvider).toBe("ollama");
+    expect(
+      service.getAiProviders().providers.find((provider) => provider.id === "openai"),
+    ).toMatchObject({
+      enabled: false,
+      priority: 20,
+    });
   });
 
   test("sets and clears the default provider with provider validation", () => {

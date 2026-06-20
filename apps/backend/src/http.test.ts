@@ -3677,6 +3677,22 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(invalidResponse.status).toBe(400);
+    const invalidPriorityResponse = await handler(
+      new Request("http://127.0.0.1/api/v1/ai/providers/settings", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer sidecar-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ providerId: "openai", priority: 2_147_483_648 }),
+      }),
+    );
+    expect(invalidPriorityResponse.status).toBe(400);
+    expect(await invalidPriorityResponse.json()).toEqual({
+      code: 400,
+      message: "priority must be an i32 integer",
+    });
+    expect(updates).toHaveLength(1);
   });
 
   test("routes migrated AI chat seam only when a service is provided", async () => {

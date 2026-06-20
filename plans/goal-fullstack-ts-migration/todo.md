@@ -5567,6 +5567,11 @@ contract:
   Coverage includes Rust-style `+00:00` start-boundary rows, mixed
   `9999`/`+10000` historical ranges, and invalid-offset quote exclusion during
   converter initialization.
+- `pr5-ai-provider-priority-i32`: verification passed: focused AI provider/HTTP
+  tests and full `bun run check`. Coverage includes rejecting HTTP/direct
+  priority values outside Rust `i32` before dispatch/persistence and falling
+  back to catalog defaults when stored AI provider settings contain malformed
+  priority data.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
