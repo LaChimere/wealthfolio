@@ -2571,6 +2571,36 @@ describe("TS backend HTTP skeleton", () => {
           new Request("http://127.0.0.1/api/v1/market-data/sync", {
             method: "POST",
             headers: jsonHeaders,
+            body: JSON.stringify({
+              assetIds: null,
+              refetchAll: false,
+              refetchRecentDays: 100_000_000_000,
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/sync", {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({
+              assetIds: null,
+              refetchAll: false,
+              refetchRecentDays: 1_000_000,
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/market-data/sync", {
+            method: "POST",
+            headers: jsonHeaders,
             body: JSON.stringify({ assetIds: ["asset-2"] }),
           }),
         )
@@ -2776,6 +2806,26 @@ describe("TS backend HTTP skeleton", () => {
       valuationMode: "full",
       sinceDate: null,
     });
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/portfolio/recalculate", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer sidecar-token",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              marketSyncMode: {
+                type: "backfill_history",
+                asset_ids: null,
+                days: 1_000_000,
+              },
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
 
     const deferredEventsResponse = await handler(
       new Request("http://127.0.0.1/api/v1/events/stream", {

@@ -5569,6 +5569,16 @@ function parseMarketDataSyncRequest(payload: Record<string, unknown>): MarketSyn
   if (refetchRecentDays instanceof Response) {
     return refetchRecentDays;
   }
+  if (
+    refetchRecentDays !== undefined &&
+    refetchRecentDays !== null &&
+    !marketSyncDaysSupported(refetchRecentDays)
+  ) {
+    return jsonResponse(
+      { code: 400, message: "refetchRecentDays is outside supported date range" },
+      400,
+    );
+  }
 
   if (refetchRecentDays !== undefined && refetchRecentDays !== null) {
     return { type: "refetch_recent", asset_ids: assetIds ?? null, days: refetchRecentDays };
@@ -5912,11 +5922,48 @@ function parseMarketSyncMode(
       if (days instanceof Response) {
         return days;
       }
+      if (!marketSyncDaysSupported(days)) {
+        return jsonResponse(
+          { code: 400, message: `${field}.days is outside supported date range` },
+          400,
+        );
+      }
       return { type, asset_ids: assetIds ?? null, days };
     }
     default:
       return jsonResponse({ code: 400, message: `${field}.type is not supported` }, 400);
   }
+}
+
+function marketSyncDaysSupported(days: number): boolean {
+  const endDate = utcDateOnly(new Date());
+  return (
+    marketSyncStartDateSupported(endDate, days) &&
+    marketSyncStartDateSupported(addUtcDays(endDate, -7), days)
+  );
+}
+
+function marketSyncStartDateSupported(endDate: string, days: number): boolean {
+  const start = new Date(`${endDate}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - days);
+  if (Number.isNaN(start.valueOf())) {
+    return false;
+  }
+  try {
+    return /^\d{4}-\d{2}-\d{2}$/.test(start.toISOString().slice(0, 10));
+  } catch {
+    return false;
+  }
+}
+
+function addUtcDays(date: string, days: number): string {
+  const current = new Date(`${date}T00:00:00Z`);
+  current.setUTCDate(current.getUTCDate() + days);
+  return utcDateOnly(current);
+}
+
+function utcDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function parseSettingsUpdate(payload: Record<string, unknown>): SettingsUpdate | Response {
