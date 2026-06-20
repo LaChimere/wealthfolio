@@ -5453,6 +5453,10 @@ contract:
   data-export tests, full `bun run check`, pre-commit checks, and dual
   GPT/Claude xhigh review. Coverage includes Rust-compatible page-zero activity
   search for data exports so exported activity rows are not skipped.
+- `pr5-data-export-parser-case-parity`: verification passed: focused data-export
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes Rust-compatible case-sensitive data type parsing
+  while preserving case-insensitive file format parsing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
