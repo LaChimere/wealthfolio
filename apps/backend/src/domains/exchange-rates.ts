@@ -416,10 +416,11 @@ export function createExchangeRateService(
       initializeConverter();
     },
     getHistoricalRates(fromCurrency, toCurrency, days) {
+      validateIntegerDays(days);
       const normalizedFrom = normalizeCurrencyCode(fromCurrency);
       const normalizedTo = normalizeCurrencyCode(toCurrency);
       const end = now();
-      const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+      const start = historicalStartDate(end, days);
       return repository.getHistoricalRatesBySymbol(
         makeInstrumentKey(normalizedFrom, normalizedTo),
         start,
@@ -1010,6 +1011,24 @@ function parseDecimalInput(value: string, field: string): Decimal {
     throw new Error(`Invalid input: ${field} must be a decimal string`);
   }
   return decimal;
+}
+
+function validateIntegerDays(days: number): void {
+  if (!Number.isInteger(days)) {
+    throw new Error("Invalid input: days must be an integer");
+  }
+}
+
+function historicalStartDate(end: Date, days: number): Date {
+  const startMs = end.getTime() - days * 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(startMs)) {
+    throw new Error("Invalid input: days is outside supported date range");
+  }
+  const start = new Date(startMs);
+  if (Number.isNaN(start.valueOf())) {
+    throw new Error("Invalid input: days is outside supported date range");
+  }
+  return start;
 }
 
 function validateIsoCurrencyCode(currency: string): void {

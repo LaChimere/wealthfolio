@@ -402,6 +402,15 @@ describe("TS exchange rates domain", () => {
         "1.20",
         "1.30",
       ]);
+      expect(() => service.getHistoricalRates("USD", "CAD", 1.5)).toThrow(
+        "days must be an integer",
+      );
+      expect(() => service.getHistoricalRates("USD", "CAD", Number.POSITIVE_INFINITY)).toThrow(
+        "days must be an integer",
+      );
+      expect(() => service.getHistoricalRates("USD", "CAD", 100_000_000_000)).toThrow(
+        "days is outside supported date range",
+      );
     } finally {
       db.close();
     }
