@@ -4447,6 +4447,14 @@ describe("TS backend HTTP skeleton", () => {
       restoreDatabase(backupFilePath) {
         calls.push(["restore", backupFilePath]);
       },
+      listDatabaseBackups() {
+        calls.push(["list-backups", null]);
+        return [];
+      },
+      deleteDatabaseBackup(filename) {
+        calls.push(["delete-backup", filename]);
+        throw Object.assign(new Error("Backup not found"), { status: 404 });
+      },
     };
     const handler = createBackendRequestHandler(config, { appUtilityService });
 
@@ -4545,12 +4553,26 @@ describe("TS backend HTTP skeleton", () => {
       }),
     );
     expect(invalidResponse.status).toBe(400);
+    const missingDeleteResponse = await handler(
+      new Request(
+        "http://127.0.0.1/api/v1/utilities/database/backups/wealthfolio_backup_20260506_070809.db",
+        {
+          method: "DELETE",
+          headers: { authorization: "Bearer sidecar-token" },
+        },
+      ),
+    );
+    expect(missingDeleteResponse.status).toBe(404);
+    await expect(missingDeleteResponse.json()).resolves.toMatchObject({
+      message: "Backup not found",
+    });
     expect(calls).toEqual([
       ["info", null],
       ["check-update", true],
       ["backup", null],
       ["backup-to-path", "/tmp/backups"],
       ["restore", "/tmp/backups/wealthfolio_backup.db"],
+      ["delete-backup", "wealthfolio_backup_20260506_070809.db"],
     ]);
   });
 

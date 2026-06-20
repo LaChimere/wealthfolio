@@ -258,16 +258,47 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
       const backupDir = path.resolve(options.appDataDir, "backups");
       const filePath = path.resolve(backupDir, filename);
 
-      const canonicalDir = realpathSync(backupDir);
-      const canonicalFile = realpathSync(filePath);
+      let canonicalDir: string;
+      let canonicalFile: string;
+      try {
+        canonicalDir = realpathSync(backupDir);
+        canonicalFile = realpathSync(filePath);
+      } catch (error) {
+        if (isFsNotFoundError(error)) {
+          throw httpStatusError(404, "Backup not found");
+        }
+        throw error;
+      }
 
       if (!canonicalFile.startsWith(canonicalDir + path.sep)) {
         throw new Error("Invalid backup filename");
       }
 
-      unlinkSync(canonicalFile);
+      try {
+        unlinkSync(canonicalFile);
+      } catch (error) {
+        if (isFsNotFoundError(error)) {
+          throw httpStatusError(404, "Backup not found");
+        }
+        throw error;
+      }
     },
   };
+}
+
+function httpStatusError(status: number, message: string): Error & { status: number } {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+function isFsNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 function backupFilename(now: Date): string {

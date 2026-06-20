@@ -5620,6 +5620,10 @@ contract:
 - `pr5-app-update-semver-build-leading-zero`: verification passed: focused app
   utility tests and full `bun run check`. Coverage includes Rust-compatible
   numeric build metadata ordering for leading-zero identifiers such as `+00`.
+- `pr5-backup-delete-not-found`: verification passed: focused app utility/HTTP
+  tests and full `bun run check`. Coverage includes mapping missing backup
+  directories/files to 404 style errors and catching synchronous DELETE service
+  failures in the route.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

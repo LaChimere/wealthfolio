@@ -343,4 +343,21 @@ describe("TS app utility domain", () => {
       "Backup file not found",
     );
   });
+
+  test("maps missing backup deletes to Rust-compatible not found errors", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-app-utils-delete-"));
+    const service = createAppUtilityService({
+      appDataDir,
+      appVersion: "3.4.0",
+      dbPath: path.join(appDataDir, "app.db"),
+      logsDir: path.join(appDataDir, "logs"),
+    });
+
+    try {
+      await service.deleteDatabaseBackup("wealthfolio_backup_20260506_070809.db");
+      throw new Error("expected delete to fail");
+    } catch (error) {
+      expect(error).toMatchObject({ message: "Backup not found", status: 404 });
+    }
+  });
 });

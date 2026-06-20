@@ -1650,9 +1650,13 @@ function routeAppUtilityRequest(
   );
   if (backupFilenameMatch && request.method === "DELETE") {
     const filename = decodeURIComponent(backupFilenameMatch[1]);
-    return Promise.resolve(appUtilityService.deleteDatabaseBackup(filename))
-      .then(() => new Response(null, { status: 204 }))
-      .catch(domainErrorResponse);
+    try {
+      return Promise.resolve(appUtilityService.deleteDatabaseBackup(filename))
+        .then(() => new Response(null, { status: 204 }))
+        .catch(domainErrorResponse);
+    } catch (error) {
+      return domainErrorResponse(error);
+    }
   }
 
   const backupDownloadMatch = url.pathname.match(
