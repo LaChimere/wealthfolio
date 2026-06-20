@@ -5423,6 +5423,10 @@ contract:
   tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
   review/refine. Coverage includes rejecting market-sync day counts that would
   produce unsupported or extended-year sync windows before service dispatch.
+- `pr5-assets-treasury-detail-validation`: verification passed: focused assets
+  tests, full `bun run check`, pre-commit checks, and dual GPT/Claude xhigh
+  review. Coverage includes ignoring invalid Treasury bond detail payloads
+  before non-finite numeric values can be serialized into asset metadata.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
