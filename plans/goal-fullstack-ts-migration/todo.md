@@ -5260,6 +5260,12 @@ contract:
   duplicate-key rejection for known `TrustedDeviceSummary` fields and
   `lastSeenAt`/`last_seen_at` aliases in both enroll `PAIR` and initialize-key
   `PAIRING_REQUIRED` responses while preserving ignored unknown-field behavior.
+- `pr5-connect-device-finite-number`: verification passed: focused device
+  response tests, full Connect tests, full `bun run check`, pre-commit checks,
+  and dual GPT/Claude xhigh review. Coverage includes Rust `Option<f64>` parity
+  for device `trustedKeyVersion` / `trusted_key_version`, rejecting raw
+  out-of-range numeric tokens such as `1e999` that `JSON.parse` converts to
+  `Infinity`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
