@@ -622,6 +622,19 @@ export function createLocalDeviceSyncService({
           connectService,
           secretService,
         );
+      try {
+        await fetchDeviceSyncJsonRaw(
+          accessToken,
+          env,
+          fetchImpl,
+          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(request.pairingId)}/approve`,
+          { method: "POST", deviceId },
+        ).then(({ value, bodyText }) => successResponseFromCloud(value, bodyText));
+      } catch (error) {
+        if (!isPairingAlreadyApprovedError(error)) {
+          throw error;
+        }
+      }
       await fetchDeviceSyncJsonRaw(
         accessToken,
         env,
@@ -2326,6 +2339,17 @@ function isPairingAlreadyConfirmedError(error: unknown): boolean {
     (message.includes("already_confirmed") ||
       message.includes("already confirmed") ||
       message.includes("already completed"))
+  );
+}
+
+function isPairingAlreadyApprovedError(error: unknown): boolean {
+  if (!(error instanceof DeviceSyncServiceError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    /api error \((400|409)\)/.test(message) &&
+    (message.includes("already_approved") || message.includes("already approved"))
   );
 }
 

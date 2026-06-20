@@ -2406,6 +2406,7 @@ describe("TS local device sync service", () => {
     const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
       [];
     let pairingCompleteNotifications = 0;
+    let approveAlreadyDone = false;
     const service = createLocalDeviceSyncService({
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test/" },
@@ -2423,6 +2424,12 @@ describe("TS local device sync service", () => {
           body: typeof init?.body === "string" ? init.body : null,
           deviceId: headers.get("x-wf-device-id") ?? "",
         });
+        if (String(input).endsWith("/approve") && approveAlreadyDone) {
+          return Response.json(
+            { code: "PAIRING_ALREADY_APPROVED", message: "Pairing already approved" },
+            { status: 409 },
+          );
+        }
         return Response.json({ success: true, remote_seed_present: false });
       },
     });
@@ -2438,6 +2445,12 @@ describe("TS local device sync service", () => {
     expect(pairingCompleteNotifications).toBe(1);
     expect(requests).toEqual([
       {
+        url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
+        method: "POST",
+        body: null,
+        deviceId: "device-1",
+      },
+      {
         url: "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/complete",
         method: "POST",
         body: JSON.stringify({
@@ -2447,6 +2460,20 @@ describe("TS local device sync service", () => {
         }),
         deviceId: "device-1",
       },
+    ]);
+    requests.length = 0;
+    approveAlreadyDone = true;
+    await expect(
+      service.completePairingWithTransfer?.({
+        pairingId: "pairing-1",
+        encryptedKeyBundle: "bundle",
+        sasProof: { ok: true },
+        signature: "signature",
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/approve",
+      "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/complete",
     ]);
   });
 
