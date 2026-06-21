@@ -546,7 +546,7 @@ function capabilitiesForProvider(providerId: string): ProviderCapabilities | nul
       return {
         instruments: "Metals",
         coverage: "USD only",
-        features: ["Real-time"],
+        features: ["Real-time", "Historical"],
       };
     case "FINNHUB":
       return {

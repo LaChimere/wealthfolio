@@ -4478,6 +4478,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 738: Strengthened Rust provider-settings evidence for Finnhub capability
   metadata. Added a focused Rust test pinning Finnhub `Stocks • Crypto • Forex`
   capability text and core features.
+- Turn 739: Aligned Metal Price API provider capability metadata. Rust and TS
+  provider settings now advertise both `Real-time` and `Historical`, matching
+  the existing Metal Price API timeframe sync support. Verified with focused
+  Rust and TS provider-settings tests.
 
 ## Deferred items
 

@@ -18,6 +18,7 @@ describe("TS market data provider settings domain", () => {
 
       expect(providers.map((provider) => provider.id)).toEqual([
         "YAHOO",
+        "METAL_PRICE_API",
         "ALPHA_VANTAGE",
         "FINNHUB",
       ]);
@@ -33,6 +34,15 @@ describe("TS market data provider settings domain", () => {
         capabilities: expect.objectContaining({ coverage: "Global" }),
       });
       expect(providers[1]).toMatchObject({
+        id: "METAL_PRICE_API",
+        requiresApiKey: true,
+        hasApiKey: false,
+        capabilities: expect.objectContaining({
+          instruments: "Metals",
+          features: ["Real-time", "Historical"],
+        }),
+      });
+      expect(providers[2]).toMatchObject({
         id: "ALPHA_VANTAGE",
         requiresApiKey: true,
         hasApiKey: true,
@@ -41,7 +51,7 @@ describe("TS market data provider settings domain", () => {
         lastSyncError: "ALPHA_VANTAGE quota exceeded",
         uniqueErrors: ["ALPHA_VANTAGE quota exceeded"],
       });
-      expect(providers[2]).toMatchObject({
+      expect(providers[3]).toMatchObject({
         id: "FINNHUB",
         requiresApiKey: true,
         hasApiKey: false,
@@ -157,6 +167,7 @@ export function createMarketDataProvidersDb(): Database {
     )
     VALUES
       ('YAHOO', 'Yahoo Finance', 'Yahoo provider', 'https://finance.yahoo.com/', 1, 1, 'yahoo-finance.png', 'builtin'),
+      ('METAL_PRICE_API', 'Metal Price API', 'Metal provider', 'https://metalpriceapi.com/', 2, 0, 'metal-price-api.png', 'builtin'),
       ('ALPHA_VANTAGE', 'Alpha Vantage', 'Alpha provider', 'https://www.alphavantage.co/', 3, 1, 'alpha-vantage.png', 'builtin'),
       ('FINNHUB', 'Finnhub', 'Finnhub provider', 'https://finnhub.io/', 4, 0, 'finnhub.png', 'builtin');
 

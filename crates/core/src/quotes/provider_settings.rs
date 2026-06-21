@@ -79,7 +79,7 @@ impl ProviderCapabilities {
             "METAL_PRICE_API" => Some(Self {
                 instruments: "Metals".to_string(),
                 coverage: "USD only".to_string(),
-                features: vec!["Real-time".to_string()],
+                features: vec!["Real-time".to_string(), "Historical".to_string()],
             }),
             "FINNHUB" => Some(Self {
                 instruments: "Stocks • Crypto • Forex".to_string(),
@@ -143,5 +143,14 @@ mod tests {
         assert_eq!(capabilities.coverage, "Global");
         assert!(capabilities.features.contains(&"Real-time".to_string()));
         assert!(capabilities.features.contains(&"Historical".to_string()));
+    }
+
+    #[test]
+    fn metal_price_api_capabilities_include_historical() {
+        let capabilities = ProviderCapabilities::for_provider("METAL_PRICE_API").unwrap();
+
+        assert_eq!(capabilities.instruments, "Metals");
+        assert_eq!(capabilities.coverage, "USD only");
+        assert_eq!(capabilities.features, ["Real-time", "Historical"]);
     }
 }

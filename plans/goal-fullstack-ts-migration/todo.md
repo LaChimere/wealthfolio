@@ -5969,6 +5969,10 @@ contract:
 - `pr5-finnhub-provider-settings-rust-test`: verification passed: focused Rust
   provider-settings test. Coverage pins Finnhub `Stocks • Crypto • Forex`
   capability text and core features in Rust provider-settings metadata.
+- `pr5-metal-provider-capability-metadata`: verification passed: focused Rust
+  and TS provider-settings tests. Coverage includes Metal Price API advertising
+  both `Real-time` and `Historical` capability features after existing timeframe
+  sync support.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
