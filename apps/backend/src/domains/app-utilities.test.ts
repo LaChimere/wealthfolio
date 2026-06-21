@@ -127,6 +127,35 @@ describe("TS app utility domain", () => {
     });
   });
 
+  test("parses non-404 update responses regardless of HTTP status like Rust", async () => {
+    const service = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      arch: "x64",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () =>
+        Response.json(
+          {
+            version: "3.5.0",
+            notes: "Release notes",
+            pub_date: "2026-05-06",
+            platforms: { "web-docker-x86_64": { url: "https://example.test/download" } },
+          },
+          { status: 500 },
+        ),
+      logsDir: "/tmp/wealthfolio-data/logs",
+      target: "web-docker",
+    });
+
+    await expect(service.checkUpdate(true)).resolves.toMatchObject({
+      updateAvailable: true,
+      latestVersion: "3.5.0",
+      notes: "Release notes",
+      pubDate: "2026-05-06",
+      downloadUrl: "https://example.test/download",
+    });
+  });
+
   test("compares update versions with Rust semver fallback semantics", async () => {
     const prereleaseService = createAppUtilityService({
       appDataDir: "/tmp/wealthfolio-data",

@@ -343,9 +343,6 @@ async function parseUpdateResponse(
   if (response.status === 404) {
     return noUpdateResponse(currentVersion);
   }
-  if (!response.ok) {
-    throw new Error(`Failed to query update endpoint: HTTP ${response.status}`);
-  }
 
   const payload = parseUpdatePayload(await response.json());
   const latestVersion = payload.version;
