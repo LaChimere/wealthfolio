@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 680
+turns_used: 681
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T09:14:15+08:00"
+updated_at: "2026-06-21T09:26:34+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4233,6 +4233,12 @@ updated_at: "2026-06-21T09:14:15+08:00"
   timestamp output now uses chrono serde-style `Z` serialization with AutoSi
   fractional precision instead of JS millisecond `toISOString()` truncation.
   Verified with focused exchange-rate tests.
+- Turn 681: Resolved FX timestamp re-review follow-ups. Direct latest FX lookups
+  now trust raw timestamp ordering like Rust `ORDER BY timestamp DESC`, tied
+  latest quote selection keeps the last raw max row like Rust collection
+  behavior, and parsed instants now include millisecond components for range
+  comparisons while output still preserves full fractional precision. Verified
+  with focused exchange-rate tests.
 
 ## Deferred items
 

@@ -5776,6 +5776,10 @@ contract:
   exchange-rate tests. Coverage includes Rust-compatible raw `MAX(timestamp)`
   latest FX quote selection and chrono serde-style `Z` timestamp output with
   microsecond precision.
+- `pr5-exchange-rate-timestamp-rereview-fixes`: verification passed: focused
+  exchange-rate tests. Coverage includes direct latest FX raw timestamp
+  ordering, tied raw max replacement parity, and millisecond-aware parsed
+  instants with full fractional output preservation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

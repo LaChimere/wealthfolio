@@ -91,6 +91,13 @@ describe("TS exchange rates domain", () => {
           quoteTimestamp: "2026-01-03T18:30:00.123456+02:30",
         },
       ]);
+      expect(createExchangeRateRepository(db).getLatestExchangeRate("EUR", "USD")).toMatchObject({
+        rate: "1.30",
+        source: "YAHOO",
+      });
+      expect(createExchangeRateRepository(db).getLatestExchangeRate("USD", "CAD")).toMatchObject({
+        timestamp: "2026-01-03T16:00:00.123456Z",
+      });
     } finally {
       db.close();
     }

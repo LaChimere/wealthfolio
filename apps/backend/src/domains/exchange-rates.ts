@@ -758,7 +758,7 @@ function latestFxQuotesByAssetId(db: Database): Map<string, QuoteRow> {
   const latest = new Map<string, QuoteRow>();
   for (const row of rows) {
     const existing = latest.get(row.asset_id);
-    if (!existing || row.timestamp > existing.timestamp) {
+    if (!existing || row.timestamp >= existing.timestamp) {
       latest.set(row.asset_id, row);
     }
   }
@@ -826,13 +826,7 @@ function getLatestExchangeRateByAssetIdentity(db: Database, identity: string): E
       `,
     )
     .all(identity, identity);
-  const row = rows.reduce<QuoteWithAssetRow | null>(
-    (latest, candidate) =>
-      latest && timestampSortValue(latest.timestamp) >= timestampSortValue(candidate.timestamp)
-        ? latest
-        : candidate,
-    null,
-  );
+  const row = rows[0] ?? null;
   return row ? exchangeRateFromQuoteWithAsset(row) : null;
 }
 
@@ -1201,7 +1195,8 @@ function parseTimestampResult(value: string): ParsedTimestamp | null {
   const zoneMinute = Number(zoneMinuteRaw);
   const offsetMinutes = zoneRaw === "Z" ? 0 : zoneHour * 60 + zoneMinute;
   const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
-  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, 0));
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
   local.setUTCFullYear(year, month - 1, day);
   if (
     Number.isNaN(local.valueOf()) ||
