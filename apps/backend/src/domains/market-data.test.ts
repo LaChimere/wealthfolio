@@ -100,7 +100,7 @@ describe("TS market data domain", () => {
     try {
       service.updateQuote("asset-1", {
         dataSource: "MANUAL",
-        timestamp: "2026-01-02T18:30:00.123456+02:30",
+        timestamp: "2026-01-02T18:30:00.123456+0230",
         close: "12.34",
         currency: "USD",
         createdAt: "2026-01-02T18:31:00.123456Z",
@@ -3536,6 +3536,14 @@ describe("TS market data domain", () => {
       expect(() =>
         service.updateQuote?.("asset-1", {
           timestamp: "2026-01-01",
+          dataSource: "MANUAL",
+          close: 10,
+          currency: "USD",
+        }),
+      ).toThrow("Invalid timestamp");
+      expect(() =>
+        service.updateQuote?.("asset-1", {
+          timestamp: "2026-01-01T00:00:00+00",
           dataSource: "MANUAL",
           close: 10,
           currency: "USD",

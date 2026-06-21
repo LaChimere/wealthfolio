@@ -7370,7 +7370,7 @@ function toRustUtcSerdeRfc3339(date: Date): string {
 
 function parseQuoteTimestamp(value: string): { utcSecond: string; fraction: string } | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):?(\d{2}))$/u.exec(
       value,
     );
   if (!match) {

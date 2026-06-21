@@ -5853,6 +5853,10 @@ contract:
   market-data tests. Coverage includes rejecting malformed/date-only/calendar
   rollover manual quote timestamps, accepting chrono-compatible leap seconds,
   and preserving microsecond fractions in DB storage plus quote-history reads.
+- `pr5-market-data-quote-offset-review-fix`: verification passed: focused
+  market-data tests. Coverage includes accepting chrono/Rust-serde-compatible
+  `+HHMM` quote timestamp offsets while still rejecting unsupported `+HH`
+  offsets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
