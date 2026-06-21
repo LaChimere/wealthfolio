@@ -155,6 +155,23 @@ describe("adapter command parity", () => {
       categoryId: "EQUITY",
     });
   });
+
+  it("encodes AI provider model-list route parameters", async () => {
+    const response = new Response(JSON.stringify({ models: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(invoke("list_ai_models", { providerId: "open/ai" })).resolves.toEqual({
+      models: [],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/ai/providers/open%2Fai/models");
+    expect(init.method).toBe("GET");
+  });
 });
 
 // ─── Scope routing coverage ───────────────────────────────────────────────────

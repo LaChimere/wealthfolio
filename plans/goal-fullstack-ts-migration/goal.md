@@ -4644,6 +4644,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   tests now cover server-side backup/list/delete/download URL behavior and
   desktop/native-only backup helper rejection. Verified with focused frontend
   web settings adapter tests.
+- Turn 776: Strengthened shared AI provider adapter coverage. Shared adapter
+  tests now cover provider reads/mutations/model listing and failure surfacing,
+  while the web command parity test pins provider-id URL encoding for
+  `list_ai_models`. Verified with focused frontend adapter tests.
 
 ## Deferred items
 

@@ -6109,6 +6109,10 @@ contract:
   frontend web settings adapter tests. Coverage includes server-side
   backup/list/delete/download URL behavior and desktop/native-only backup helper
   rejection.
+- `pr5-ai-provider-adapter-coverage`: verification passed: focused frontend
+  adapter tests. Shared AI provider adapter coverage includes provider
+  reads/mutations/model listing/failure surfacing, and web command parity pins
+  provider-id URL encoding for `list_ai_models`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
