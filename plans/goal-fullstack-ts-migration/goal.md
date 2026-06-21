@@ -4570,6 +4570,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   the TS sidecar backup routes, and the command-surface guard no longer marks
   them web-only. Verified with focused Electron command, frontend Electron
   settings adapter, and backend-contract guard tests.
+- Turn 758: Cleaned stale Health Center HTTP fix-route evidence. The migrated
+  health HTTP smoke now proves `/api/v1/health/fix` reaches `executeFix` and
+  returns the Rust-shaped unavailable-provider domain error instead of treating
+  the route as deferred 404. Verified with the focused HTTP health route test.
 
 ## Deferred items
 

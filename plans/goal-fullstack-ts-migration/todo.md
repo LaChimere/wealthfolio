@@ -6044,6 +6044,10 @@ contract:
   command tests, frontend Electron settings adapter tests, and backend-contract
   guard tests. Electron now proxies backup list/delete commands through the TS
   sidecar instead of keeping them web-only.
+- `pr5-health-http-fix-route-evidence`: verification passed: focused HTTP health
+  route test. The health HTTP smoke now covers `/api/v1/health/fix` `executeFix`
+  dispatch and Rust-shaped unavailable-provider errors instead of asserting a
+  stale deferred route 404.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

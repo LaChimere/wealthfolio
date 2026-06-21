@@ -2020,7 +2020,7 @@ describe("TS backend HTTP skeleton", () => {
     }
   });
 
-  test("routes migrated health dismissals and config only when a service is provided", async () => {
+  test("routes migrated health dismissals, fixes, and config only when a service is provided", async () => {
     const db = createHealthDb();
     const handler = createBackendRequestHandler(config, {
       healthService: createHealthService(createHealthRepository(db)),
@@ -2123,7 +2123,7 @@ describe("TS backend HTTP skeleton", () => {
         issues: [],
       });
 
-      const deferredFixResponse = await handler(
+      const fixResponse = await handler(
         new Request("http://127.0.0.1/api/v1/health/fix", {
           method: "POST",
           headers: {
@@ -2133,7 +2133,11 @@ describe("TS backend HTTP skeleton", () => {
           body: JSON.stringify({ id: "sync_prices", label: "Sync Prices", payload: ["asset-1"] }),
         }),
       );
-      expect(deferredFixResponse.status).toBe(404);
+      expect(fixResponse.status).toBe(404);
+      await expect(fixResponse.json()).resolves.toEqual({
+        code: "not_found",
+        message: "Market data sync is not available for health fixes",
+      });
     } finally {
       db.close();
     }
