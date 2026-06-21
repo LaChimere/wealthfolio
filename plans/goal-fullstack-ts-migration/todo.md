@@ -6002,12 +6002,16 @@ contract:
   from the old provider when a fallback provider is selected.
 - `pr5-ai-chat-nonvision-attachment-parity`: verification passed: focused AI
   chat tests. Coverage includes image/PDF attachments on non-vision models
-  returning Rust-shaped invalid-input errors while unsupported media/provider
-  combinations keep explicit 501 gates.
+  returning Rust-shaped invalid-input errors before provider/media support
+  checks.
 - `pr5-ai-chat-unsupported-media-review-fix`: verification passed: focused AI
-  chat tests. Coverage includes unsupported provider/media combinations such as
-  Ollama PDF remaining explicit 501 gates even when the selected model lacks
-  vision.
+  chat tests. Coverage includes unsupported image/PDF subtypes and Ollama PDFs
+  returning invalid-input on non-vision models, while vision-enabled unsupported
+  provider/media combinations keep explicit 501 gates.
+- `pr5-ai-chat-invalid-input-frontend-message`: verification passed: focused
+  frontend AI type tests. Coverage includes backend `invalid_input` chat errors
+  preserving raw actionable messages while other known codes keep friendly
+  frontend text.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

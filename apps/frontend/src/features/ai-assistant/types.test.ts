@@ -113,6 +113,18 @@ describe("parseErrorCode", () => {
     expect(result.message).toBe(ERROR_CODE_MAP.missingApiKey.message);
   });
 
+  it("should preserve backend invalid_input messages", () => {
+    const message =
+      "The current model does not support image/PDF attachments (scan.png). Please switch to a vision-capable model.";
+    const result = parseErrorCode("invalid_input", message);
+
+    expect(result).toMatchObject({
+      code: "invalid_input",
+      message,
+      retryable: false,
+    });
+  });
+
   it("should map backend snake_case error codes to user-friendly messages", () => {
     expect(parseErrorCode("provider_not_configured")).toMatchObject({
       code: "provider_not_configured",

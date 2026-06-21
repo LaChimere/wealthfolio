@@ -415,7 +415,11 @@ const ERROR_CODE_ALIASES: Record<string, keyof typeof ERROR_CODE_MAP> = {
 export function parseErrorCode(code: string, rawMessage?: string): ChatError {
   const mapped = ERROR_CODE_MAP[ERROR_CODE_ALIASES[code] ?? code];
   if (mapped) {
-    return { code, message: mapped.message, retryable: mapped.retryable };
+    return {
+      code,
+      message: code === "invalid_input" && rawMessage ? rawMessage : mapped.message,
+      retryable: mapped.retryable,
+    };
   }
   // Fallback for unknown error codes
   return {

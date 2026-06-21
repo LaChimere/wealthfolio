@@ -2256,7 +2256,26 @@ describe("TS AI chat domain", () => {
             { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
           ],
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+        message:
+          "The current model does not support image/PDF attachments (statement.pdf). Please switch to a vision-capable model.",
+      });
+      await expect(
+        visionDisabledService.sendMessage({
+          content: "Read these",
+          attachments: [
+            { name: "data.bin", contentType: "application/octet-stream", data: "abc" },
+            { name: "diagram.svg", contentType: "image/svg+xml", data: "aGVsbG8=" },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+        message:
+          "The current model does not support image/PDF attachments (diagram.svg). Please switch to a vision-capable model.",
+      });
     } finally {
       visionDisabledDb.close();
       unsupportedTypeDb.close();

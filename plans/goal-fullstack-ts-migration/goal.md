@@ -4517,12 +4517,17 @@ updated_at: "2026-06-21T16:04:16+08:00"
   the newly selected fallback provider.
 - Turn 746: Tightened AI chat non-vision attachment parity. Image/PDF
   attachments sent to a model without vision now return Rust-shaped
-  invalid-input errors instead of TS-runtime-specific 501s, while unsupported
-  media/provider combinations remain explicitly gated. Verified with focused AI
-  chat tests.
-- Turn 747: Resolved AI attachment review follow-up. Non-vision 400s now apply
-  only when the provider/media combination is otherwise supported; unsupported
-  provider/media combinations such as Ollama PDF remain explicit 501 gates.
+  invalid-input errors instead of TS-runtime-specific 501s. Unsupported
+  media/provider combinations remain explicitly gated only when the selected
+  model has vision. Verified with focused AI chat tests.
+- Turn 747: Resolved AI attachment review follow-up. Non-vision validation now
+  scans all attachments for image/PDF before provider/media support checks, so
+  unsupported image/PDF subtypes and Ollama PDFs also return Rust-shaped
+  invalid-input errors when the selected model lacks vision.
+- Turn 748: Preserved actionable AI invalid-input messages in the frontend.
+  Backend snake_case `invalid_input` chat errors now surface their raw message
+  (for example, the vision-capable-model guidance) instead of being replaced by
+  a generic invalid-input label. Verified with focused frontend AI type tests.
 
 ## Deferred items
 

@@ -321,23 +321,20 @@ export function createAiChatService(
         modelId: request.config?.model ?? request.modelId,
         thinking: request.config?.thinking,
       });
+      const nonVisionBinaryAttachment = providerConfig.capabilities.vision
+        ? undefined
+        : attachments.find(isBinaryAttachment);
+      if (nonVisionBinaryAttachment) {
+        throw aiChatError(
+          "invalid_input",
+          `The current model does not support image/PDF attachments (${nonVisionBinaryAttachment.name}). Please switch to a vision-capable model.`,
+          400,
+        );
+      }
       const unsupportedAttachment = attachments.find(
         (attachment) => !isSupportedAttachmentForProvider(attachment, providerConfig),
       );
       if (unsupportedAttachment) {
-        if (
-          multimodalAttachmentSupportedByProvider(
-            unsupportedAttachment,
-            providerConfig.providerId,
-          ) &&
-          !providerConfig.capabilities.vision
-        ) {
-          throw aiChatError(
-            "invalid_input",
-            `The current model does not support image/PDF attachments (${unsupportedAttachment.name}). Please switch to a vision-capable model.`,
-            400,
-          );
-        }
         throw aiChatError(
           "not_implemented",
           `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}' in the TS backend runtime`,
