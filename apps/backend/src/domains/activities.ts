@@ -4393,7 +4393,7 @@ function updateActivityAssetQuoteMode(db: Database, assetId: string, quoteMode: 
     .query<{ id: string }, [string, string, string]>(
       `
         UPDATE assets
-        SET quote_mode = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        SET quote_mode = ?
         WHERE id = ? AND UPPER(COALESCE(quote_mode, '')) <> UPPER(?)
         RETURNING id
       `,

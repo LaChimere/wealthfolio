@@ -5046,6 +5046,9 @@ describe("TS activities import domain", () => {
         "AAPL",
         "2025-01-01T00:00:00Z",
       );
+      const aaplUpdatedAt = db
+        .query<{ updated_at: string }, []>("SELECT updated_at FROM assets WHERE id = 'AAPL'")
+        .get()?.updated_at;
 
       const created = service.createActivity?.({
         accountId: "account-1",
@@ -5066,6 +5069,7 @@ describe("TS activities import domain", () => {
           payload: expect.objectContaining({
             id: "AAPL",
             quote_mode: "MANUAL",
+            updated_at: aaplUpdatedAt,
           }),
         }),
         expect.objectContaining({
@@ -5082,6 +5086,11 @@ describe("TS activities import domain", () => {
           >("SELECT COUNT(*) AS count FROM quote_sync_state WHERE asset_id = 'AAPL'")
           .get()?.count,
       ).toBe(0);
+      expect(
+        db
+          .query<{ updated_at: string }, []>("SELECT updated_at FROM assets WHERE id = 'AAPL'")
+          .get()?.updated_at,
+      ).toBe(aaplUpdatedAt);
 
       syncEvents.length = 0;
       insertAsset(db, {

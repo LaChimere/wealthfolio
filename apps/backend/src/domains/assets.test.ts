@@ -157,6 +157,7 @@ describe("TS assets domain", () => {
         kind: "INVESTMENT",
         quote_mode: "MARKET",
         quote_ccy: "USD",
+        updated_at: "2026-01-01T00:00:00Z",
       });
       db.query(
         "INSERT INTO quote_sync_state (asset_id, updated_at) VALUES ('asset-1', '2026-01-01T00:00:00Z')",
@@ -169,7 +170,10 @@ describe("TS assets domain", () => {
       const updated = service.updateQuoteMode("asset-1", "MANUAL");
 
       expect(updated.quoteMode).toBe("MANUAL");
-      expect(readAsset(db, "asset-1").quote_mode).toBe("MANUAL");
+      expect(readAsset(db, "asset-1")).toMatchObject({
+        quote_mode: "MANUAL",
+        updated_at: "2026-01-01T00:00:00Z",
+      });
       expect(
         db
           .query<
@@ -330,16 +334,15 @@ describe("TS assets domain", () => {
       const createPayload = syncEvents[0].payload as { createdAt: string; updatedAt: string };
       expect(createPayload.createdAt).not.toEndWith("Z");
       expect(createPayload.updatedAt).not.toEndWith("Z");
+      const profileUpdatedAt = (syncEvents[1].payload as { updatedAt: string }).updatedAt;
       expect(syncEvents[1].payload).toMatchObject({
         notes: "updated",
         quoteCcy: "CAD",
         instrumentExchangeMic: "XTSE",
         updatedAt: expect.stringMatching(/\+00:00$/),
       });
-      expect(syncEvents[2].payload).toMatchObject({
-        quoteMode: "MANUAL",
-        updatedAt: expect.stringMatching(/\+00:00$/),
-      });
+      expect(syncEvents[2].payload).toMatchObject({ quoteMode: "MANUAL" });
+      expect((syncEvents[2].payload as { updatedAt: string }).updatedAt).toBe(profileUpdatedAt);
       expect(syncEvents[3].payload).toEqual({ id: created.id });
       expect("instrumentKey" in syncEvents[0].payload).toBe(false);
       expect("instrumentKey" in syncEvents[1].payload).toBe(false);
