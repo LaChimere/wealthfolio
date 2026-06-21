@@ -6013,6 +6013,10 @@ contract:
   frontend AI type tests. Coverage includes backend `invalid_input` chat errors
   preserving raw actionable messages while other known codes keep friendly
   frontend text.
+- `pr5-ai-chat-uppercase-error-aliases`: verification passed: focused frontend
+  AI type tests. Coverage includes Rust-style uppercase AI error codes mapping
+  to friendly frontend categories while `INVALID_INPUT` preserves raw actionable
+  messages.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

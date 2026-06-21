@@ -144,6 +144,24 @@ describe("parseErrorCode", () => {
       retryable: false,
     });
   });
+
+  it("should map Rust-style uppercase backend error codes", () => {
+    const invalidMessage = "Invalid attachment";
+
+    expect(parseErrorCode("INVALID_INPUT", invalidMessage)).toMatchObject({
+      code: "INVALID_INPUT",
+      message: invalidMessage,
+      retryable: false,
+    });
+    expect(parseErrorCode("MISSING_API_KEY")).toMatchObject({
+      message: ERROR_CODE_MAP.missingApiKey.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("PROVIDER_ERROR")).toMatchObject({
+      message: ERROR_CODE_MAP.providerError.message,
+      retryable: true,
+    });
+  });
 });
 
 describe("ERROR_CODE_MAP", () => {

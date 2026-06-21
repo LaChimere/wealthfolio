@@ -396,6 +396,16 @@ export const ERROR_CODE_MAP: Record<string, { message: string; retryable: boolea
 };
 
 const ERROR_CODE_ALIASES: Record<string, keyof typeof ERROR_CODE_MAP> = {
+  INVALID_INPUT: "invalidInput",
+  MISSING_API_KEY: "missingApiKey",
+  PROVIDER_ERROR: "providerError",
+  TOOL_NOT_FOUND: "toolNotFound",
+  TOOL_NOT_ALLOWED: "toolNotAllowed",
+  TOOL_EXECUTION_FAILED: "toolExecutionError",
+  THREAD_NOT_FOUND: "threadNotFound",
+  INVALID_CURSOR: "invalidInput",
+  INTERNAL_ERROR: "internal",
+  CORE_ERROR: "internal",
   provider_not_configured: "providerNotConfigured",
   missing_api_key: "missingApiKey",
   model_not_found: "modelNotFound",
@@ -417,7 +427,10 @@ export function parseErrorCode(code: string, rawMessage?: string): ChatError {
   if (mapped) {
     return {
       code,
-      message: code === "invalid_input" && rawMessage ? rawMessage : mapped.message,
+      message:
+        (code === "invalid_input" || code === "INVALID_INPUT") && rawMessage
+          ? rawMessage
+          : mapped.message,
       retryable: mapped.retryable,
     };
   }

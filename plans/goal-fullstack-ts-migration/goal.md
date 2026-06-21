@@ -4529,6 +4529,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   Backend snake_case `invalid_input` chat errors now surface their raw message
   (for example, the vision-capable-model guidance) instead of being replaced by
   a generic invalid-input label. Verified with focused frontend AI type tests.
+- Turn 749: Added frontend handling for Rust-style uppercase AI error codes.
+  Frontend chat error parsing now maps codes such as `INVALID_INPUT`,
+  `MISSING_API_KEY`, and `PROVIDER_ERROR`, while still preserving actionable
+  `INVALID_INPUT` raw messages. Verified with focused frontend AI type tests.
 
 ## Deferred items
 
