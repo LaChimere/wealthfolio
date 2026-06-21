@@ -4435,6 +4435,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   check timestamp, matching Rust's `QuoteDB -> Quote` parse-failure `Utc::now()`
   fallback, so malformed present rows stay fresh/classifiable instead of
   becoming missing rates. Verified with focused health and exchange-rate tests.
+- Turn 729: Cleaned stale Electron migration architecture wording. The data-root
+  compatibility section no longer mentions desktop `DATABASE_URL` behavior and
+  now describes packaged Electron reusing the legacy Tauri `app.db` root before
+  starting the TypeScript backend.
 
 ## Deferred items
 

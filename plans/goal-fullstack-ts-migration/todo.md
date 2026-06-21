@@ -5931,6 +5931,9 @@ contract:
   exchange-rate tests. Coverage includes malformed present FX quote timestamps
   falling back to fresh/classifiable behavior like Rust `QuoteDB -> Quote`
   `Utc::now()` fallback instead of becoming missing-rate issues.
+- `pr5-electron-data-root-doc-cleanup`: verification passed: Markdown format
+  check. Scope is a docs-only cleanup removing stale desktop `DATABASE_URL`
+  wording from the Electron migration architecture data-root section.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

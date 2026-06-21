@@ -66,9 +66,9 @@ secret storage no longer uses `WF_SECRET_FILE` in desktop mode.
 ## Data root compatibility
 
 The existing Tauri desktop app stores its SQLite database under
-`app_handle.path().app_data_dir()`, and storage code appends `app.db` unless
-`DATABASE_URL` is set. Packaged Electron builds must resolve and reuse that same
-root before starting the sidecar so installed users keep their existing data.
+`app_handle.path().app_data_dir()` with `app.db` inside that root. Packaged
+Electron builds must resolve and reuse that same root before starting the
+TypeScript backend so installed users keep their existing data.
 
 The Tauri app identifier is `com.teymz.wealthfolio`.
 
