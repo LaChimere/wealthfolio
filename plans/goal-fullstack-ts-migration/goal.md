@@ -4591,6 +4591,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   renderer adapter now has a focused test proving `File` bytes, including BOM
   bytes, are forwarded to the `parse_csv` Electron command with the parse
   config. Verified with focused frontend Electron activities adapter tests.
+- Turn 763: Strengthened Electron settings adapter coverage. Backup, backup to
+  path, restore, update command, and platform-info adapter paths now have
+  focused sidecar-bridge tests. Verified with focused frontend Electron settings
+  adapter tests.
 
 ## Deferred items
 

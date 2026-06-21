@@ -6062,6 +6062,9 @@ contract:
 - `pr5-electron-activity-parse-adapter-coverage`: verification passed: focused
   frontend Electron activities adapter tests. Coverage proves `File` bytes and
   parse config are forwarded to the `parse_csv` Electron command.
+- `pr5-electron-settings-adapter-coverage`: verification passed: focused
+  frontend Electron settings adapter tests. Coverage includes backup, backup to
+  path, restore, update commands, and platform-info sidecar/runtime delegation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
