@@ -517,6 +517,52 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("starts a fresh error count when fallback provider fails", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: yahooHistoryFetchBySymbol({}),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "alpha-option-fallback-failure",
+        display_code: "AAPL option",
+        quote_ccy: "USD",
+        instrument_type: "OPTION",
+        instrument_symbol: "AAPL260117C00100000",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+      insertSyncState(db, {
+        asset_id: "alpha-option-fallback-failure",
+        data_source: "ALPHA_VANTAGE",
+        error_count: 10,
+        last_error: "old provider failure",
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["alpha-option-fallback-failure"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 1,
+        skipped: 0,
+        quotesSynced: 0,
+      });
+
+      expect(readSyncState(db, "alpha-option-fallback-failure")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 1,
+        last_error: expect.stringContaining("unexpected chart symbol: AAPL260117C00100000"),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs targeted custom provider latest quotes with source overrides", async () => {
     const db = createMarketDataDb();
     const yahooCalls: string[] = [];

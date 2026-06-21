@@ -4445,7 +4445,11 @@ function updateQuoteSyncStateAfterFailure(
       VALUES (?, NULL, ?, 1, 1, ?, ?, ?)
       ON CONFLICT(asset_id) DO UPDATE SET
         data_source = excluded.data_source,
-        error_count = quote_sync_state.error_count + 1,
+        error_count = CASE
+          WHEN quote_sync_state.data_source = excluded.data_source
+            THEN quote_sync_state.error_count + 1
+          ELSE 1
+        END,
         last_error = excluded.last_error,
         updated_at = excluded.updated_at
     `,
