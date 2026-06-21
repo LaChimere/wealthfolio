@@ -5883,6 +5883,9 @@ contract:
 - `pr5-market-data-sync-state-timestamps`: verification passed: focused
   market-data tests. Coverage includes Rust `+00:00` timestamp storage for
   active/inactive/open quote sync state lifecycle writes.
+- `pr5-activity-import-template-timestamps`: verification passed: focused
+  activity tests. Coverage includes Rust `NaiveDateTime` JSON-shaped timestamps
+  in import template and import-account-template sync payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

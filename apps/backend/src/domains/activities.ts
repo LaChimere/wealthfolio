@@ -6613,7 +6613,7 @@ function chunkForSqlite<T>(items: T[]): T[][] {
 }
 
 function sqliteNow(): string {
-  return new Date().toISOString().slice(0, 19).replace("T", " ");
+  return new Date().toISOString().slice(0, 19);
 }
 
 function activityTimestampNow(): string {

@@ -5424,12 +5424,16 @@ describe("TS activities import domain", () => {
         kind: "CSV_HOLDINGS",
         source_system: "",
         config_version: 1,
+        created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[1]?.payload).toMatchObject({
         account_id: "account-2",
         context_kind: "CSV_HOLDINGS",
         source_system: "",
         template_id: "custom",
+        created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[2]?.payload).toMatchObject({
         account_id: "account-2",
@@ -5584,10 +5588,14 @@ describe("TS activities import domain", () => {
         scope: "USER",
         kind: "BROKER_ACTIVITY",
         source_system: "snaptrade",
+        created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[1]?.payload).toMatchObject({
         account_id: "account-1",
         context_kind: "BROKER_ACTIVITY",
+        created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
         source_system: "snaptrade",
         template_id: "broker_snaptrade_account-1",
       });
