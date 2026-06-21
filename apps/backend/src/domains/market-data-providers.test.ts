@@ -48,6 +48,7 @@ describe("TS market data provider settings domain", () => {
         errorCount: 1,
         lastSyncError: "Provider FINNHUB failed",
         uniqueErrors: ["Provider FINNHUB failed"],
+        capabilities: expect.objectContaining({ instruments: "Stocks • Crypto • Forex" }),
       });
     } finally {
       db.close();

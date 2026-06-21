@@ -550,7 +550,7 @@ function capabilitiesForProvider(providerId: string): ProviderCapabilities | nul
       };
     case "FINNHUB":
       return {
-        instruments: "Stocks",
+        instruments: "Stocks • Crypto • Forex",
         coverage: "Global",
         features: ["Real-time", "Historical", "Search", "Profiles"],
       };

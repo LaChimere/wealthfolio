@@ -4465,6 +4465,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   Finnhub FX and CRYPTO quote resolves now call `/quote` with Rust
   provider-style `OANDA:<from>_<to>` and `BINANCE:<base><quote>` symbols and
   return provider summaries. Verified with focused Finnhub market-data tests.
+- Turn 736: Aligned Finnhub provider capability metadata. TS provider settings
+  now advertise Finnhub as `Stocks • Crypto • Forex`, matching the Rust provider
+  capability expansion and the new FX/crypto sync/resolve behavior. Verified
+  with focused provider-settings tests.
 
 ## Deferred items
 
