@@ -4500,14 +4500,19 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 743: Extended quote-sync fallback for unsupported preferred providers.
   Preferred providers whose fetch capabilities do not cover the asset instrument
   (including `MARKETDATA_APP` non-equities, `ALPHA_VANTAGE` OPTION historical
-  sync, `METAL_PRICE_API` non-metals, `FINNHUB` metals/options/bonds, and
-  `BOERSE_FRANKFURT` non-equity/bond assets) now fall back to Yahoo quote sync
-  instead of failing before another fetch-capable provider can handle the asset.
-  Verified with focused market-data tests.
+  sync, `METAL_PRICE_API` non-metals, `FINNHUB` metals/options/bonds,
+  `BOERSE_FRANKFURT` non-equity/bond assets, and US Treasury bonds with
+  unsupported preferred providers) now fall back to a fetch-capable quote
+  provider instead of failing before provider fallback can occur. Verified with
+  focused market-data tests.
 - Turn 744: Resolved Alpha Vantage capability review feedback. Capability text
   now explicitly marks Alpha Vantage options as real-time only, preserving the
   historical-support feature for other instrument types while avoiding an
   implied historical option capability.
+- Turn 745: Resolved provider-fallback review follow-ups. The stale Alpha
+  Vantage provider-specific test no longer expects an option-history failure,
+  and unsupported preferred providers now preserve the US Treasury calculated
+  default for Treasury bonds instead of hard-falling back to Yahoo.
 
 ## Deferred items
 

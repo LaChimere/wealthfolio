@@ -5989,11 +5989,16 @@ contract:
 - `pr5-unsupported-preferred-provider-fallback`: verification passed: focused
   market-data tests. Coverage includes preferred `MARKETDATA_APP` non-equity,
   `ALPHA_VANTAGE` OPTION historical sync, `METAL_PRICE_API` non-metal, `FINNHUB`
-  metal, and `BOERSE_FRANKFURT` crypto assets falling back to Yahoo instead of
-  failing before provider fallback can occur.
+  metal, `BOERSE_FRANKFURT` crypto assets, and US Treasury bonds with
+  unsupported preferred providers falling back to a fetch-capable provider
+  instead of failing before provider fallback can occur.
 - `pr5-alpha-option-capability-review-fix`: verification passed: focused Rust
   and TS provider-settings tests. Coverage clarifies Alpha Vantage option
   capability text as real-time-only after review feedback.
+- `pr5-provider-fallback-review-fix`: verification passed: focused market-data
+  tests. Coverage removes the stale Alpha Vantage option-history failure
+  assertion and preserves US Treasury calculated fallback for Treasury bonds
+  with unsupported preferred providers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -2530,30 +2530,17 @@ describe("TS market data domain", () => {
           overrides: { ALPHA_VANTAGE: { type: "crypto_pair", symbol: "BTC", market: "CAD" } },
         }),
       });
-      insertAsset(db, {
-        id: "alpha-option",
-        display_code: "AAPL option",
-        instrument_type: "OPTION",
-        instrument_symbol: "AAPL260117C00100000",
-        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
-      });
-
       await expect(
         service.syncMarketData?.({
           type: "incremental",
-          asset_ids: ["alpha-equity", "alpha-fx", "alpha-crypto", "alpha-option"],
+          asset_ids: ["alpha-equity", "alpha-fx", "alpha-crypto"],
         }),
       ).resolves.toMatchObject({
         synced: 3,
-        failed: 1,
+        failed: 0,
         skipped: 0,
         quotesSynced: 3,
-        failures: [
-          [
-            "AAPL option",
-            "Operation 'historical_quotes' not supported by provider 'ALPHA_VANTAGE'",
-          ],
-        ],
+        failures: [],
       });
 
       expect(calls).toEqual([
@@ -2585,11 +2572,6 @@ describe("TS market data domain", () => {
         close: "154",
         volume: "7",
         currency: "CAD",
-      });
-      expect(readSyncState(db, "alpha-option")).toMatchObject({
-        data_source: "ALPHA_VANTAGE",
-        error_count: 1,
-        last_error: "Operation 'historical_quotes' not supported by provider 'ALPHA_VANTAGE'",
       });
     } finally {
       db.close();
@@ -2893,6 +2875,72 @@ describe("TS market data domain", () => {
         volume: null,
       });
       expect(readSyncState(db, "treasury-note")).toMatchObject({
+        data_source: "US_TREASURY_CALC",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back from unsupported preferred provider to US Treasury calculated sync", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: usTreasuryTestFetch({
+        calls,
+        responses: {
+          "2026": treasuryCurveXml([
+            {
+              date: "2026-01-05",
+              yields: { BC_1YEAR: 4, BC_2YEAR: 4, BC_5YEAR: 4, BC_10YEAR: 4 },
+            },
+          ]),
+        },
+      }),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "treasury-marketdata-preferred",
+        display_code: "T 5%",
+        quote_ccy: "USD",
+        instrument_type: "BOND",
+        instrument_symbol: "US912810TH12",
+        provider_config: JSON.stringify({ preferred_provider: "MARKETDATA_APP" }),
+        metadata: JSON.stringify({
+          bond: {
+            maturityDate: "2031-01-05",
+            couponRate: 0.05,
+            faceValue: 1000,
+            couponFrequency: "SEMI_ANNUAL",
+          },
+        }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "refetch_recent",
+          asset_ids: ["treasury-marketdata-preferred"],
+          days: 2,
+        }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        failures: [],
+      });
+
+      expect(calls).toEqual(["2026"]);
+      expect(readQuoteByDay(db, "treasury-marketdata-preferred", "2026-01-05")).toMatchObject({
+        source: "US_TREASURY_CALC",
+        currency: "USD",
+      });
+      expect(readSyncState(db, "treasury-marketdata-preferred")).toMatchObject({
         data_source: "US_TREASURY_CALC",
         error_count: 0,
         last_error: null,
