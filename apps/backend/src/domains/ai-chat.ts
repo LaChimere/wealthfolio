@@ -337,7 +337,7 @@ export function createAiChatService(
       if (unsupportedAttachment) {
         throw aiChatError(
           "not_implemented",
-          `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}' in the TS backend runtime`,
+          `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}'`,
           501,
         );
       }

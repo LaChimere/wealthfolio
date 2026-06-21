@@ -4574,6 +4574,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   health HTTP smoke now proves `/api/v1/health/fix` reaches `executeFix` and
   returns the Rust-shaped unavailable-provider domain error instead of treating
   the route as deferred 404. Verified with the focused HTTP health route test.
+- Turn 759: Cleaned stale AI attachment error wording. Vision-enabled
+  unsupported attachment/provider errors no longer mention the TS backend
+  runtime while preserving explicit `not_implemented` 501 behavior. Verified
+  with focused AI chat attachment tests.
 
 ## Deferred items
 

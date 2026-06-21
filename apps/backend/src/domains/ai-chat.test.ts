@@ -2240,7 +2240,12 @@ describe("TS AI chat domain", () => {
           content: "Read this",
           attachments: [{ name: "scan.svg", contentType: "image/svg+xml", data: "aGVsbG8=" }],
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+        message:
+          "AI chat image/svg+xml attachments are not available for provider 'anthropic' model 'claude-vision'",
+      });
       await expect(
         ollamaPdfService.sendMessage({
           content: "Read PDF",
@@ -2248,7 +2253,12 @@ describe("TS AI chat domain", () => {
             { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
           ],
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+        message:
+          "AI chat application/pdf attachments are not available for provider 'ollama' model 'llava'",
+      });
       await expect(
         ollamaPdfNoVisionService.sendMessage({
           content: "Read PDF",
