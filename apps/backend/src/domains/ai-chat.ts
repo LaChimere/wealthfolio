@@ -325,6 +325,13 @@ export function createAiChatService(
         (attachment) => !isSupportedAttachmentForProvider(attachment, providerConfig),
       );
       if (unsupportedAttachment) {
+        if (isBinaryAttachment(unsupportedAttachment) && !providerConfig.capabilities.vision) {
+          throw aiChatError(
+            "invalid_input",
+            `The current model does not support image/PDF attachments (${unsupportedAttachment.name}). Please switch to a vision-capable model.`,
+            400,
+          );
+        }
         throw aiChatError(
           "not_implemented",
           `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}' in the TS backend runtime`,

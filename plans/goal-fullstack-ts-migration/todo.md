@@ -5999,6 +5999,10 @@ contract:
   tests. Coverage removes the stale Alpha Vantage option-history failure
   assertion and preserves US Treasury calculated fallback for Treasury bonds
   with unsupported preferred providers.
+- `pr5-ai-chat-nonvision-attachment-parity`: verification passed: focused AI
+  chat tests. Coverage includes image/PDF attachments on non-vision models
+  returning Rust-shaped invalid-input errors while unsupported media/provider
+  combinations keep explicit 501 gates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

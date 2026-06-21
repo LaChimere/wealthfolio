@@ -2168,8 +2168,10 @@ describe("TS AI chat domain", () => {
           attachments: [{ name: "scan.png", contentType: "image/png", data: "aGVsbG8=" }],
         }),
       ).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "invalid_input",
+        status: 400,
+        message:
+          "The current model does not support image/PDF attachments (scan.png). Please switch to a vision-capable model.",
       });
       expect(service.listThreads({ limit: 10 })).toMatchObject({ threads: [] });
     } finally {
@@ -2217,7 +2219,12 @@ describe("TS AI chat domain", () => {
           content: "Read this",
           attachments: [{ name: "scan.png", contentType: "image/png", data: "aGVsbG8=" }],
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        status: 400,
+        message:
+          "The current model does not support image/PDF attachments (scan.png). Please switch to a vision-capable model.",
+      });
       await expect(
         unsupportedTypeService.sendMessage({
           content: "Read this",

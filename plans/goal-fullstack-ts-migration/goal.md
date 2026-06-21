@@ -4513,6 +4513,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   Vantage provider-specific test no longer expects an option-history failure,
   and unsupported preferred providers now preserve the US Treasury calculated
   default for Treasury bonds instead of hard-falling back to Yahoo.
+- Turn 746: Tightened AI chat non-vision attachment parity. Image/PDF
+  attachments sent to a model without vision now return Rust-shaped
+  invalid-input errors instead of TS-runtime-specific 501s, while unsupported
+  media/provider combinations remain explicitly gated. Verified with focused AI
+  chat tests.
 
 ## Deferred items
 
