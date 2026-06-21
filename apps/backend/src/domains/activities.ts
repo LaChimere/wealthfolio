@@ -4426,11 +4426,11 @@ function upsertManualQuoteFromActivity(
   input: { assetId: string; activityDate: string; unitPrice: Decimal; currency: string },
 ): void {
   const timestamp = activityQuoteTimestamp(input.activityDate);
-  const day = timestamp.slice(0, 10);
+  const day = datePartFromRfc3339Timestamp(timestamp);
   const quoteId = `${input.assetId}_${day}_${MANUAL_QUOTE_SOURCE}`;
   const price = decimalToStorage(input.unitPrice);
   const optionalPrice = input.unitPrice.isZero() ? null : price;
-  const now = activityTimestampNow();
+  const now = activityStorageTimestampNow();
 
   db.query(
     `
@@ -4473,6 +4473,11 @@ function activityQuoteTimestamp(activityDate: string): string {
     return `${activityDate}T12:00:00+00:00`;
   }
   return normalizeRfc3339ActivityDate(activityDate) ?? activityDate;
+}
+
+function datePartFromRfc3339Timestamp(timestamp: string): string {
+  const match = /^([+-]?\d{4,}-\d{2}-\d{2})T/u.exec(timestamp);
+  return match?.[1] ?? timestamp.slice(0, 10);
 }
 
 function activityQuoteDateInput(value: unknown, normalizedActivityDate: string): string {
@@ -5312,7 +5317,7 @@ function computeActivityIdempotencyKey(input: {
   hash.update("|");
   hash.update(input.activityType);
   hash.update("|");
-  hash.update(input.activityDate.slice(0, 10));
+  hash.update(datePartFromRfc3339Timestamp(input.activityDate));
   hash.update("|");
   if (input.assetId !== null) {
     hash.update(input.assetId);

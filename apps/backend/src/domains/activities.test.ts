@@ -3571,6 +3571,7 @@ describe("TS activities import domain", () => {
         adjclose: "10.5",
         volume: null,
         currency: "USD",
+        created_at: expect.stringMatching(/\+00:00$/),
         timestamp: "2025-01-15T12:00:00+00:00",
       });
 
@@ -3603,6 +3604,23 @@ describe("TS activities import domain", () => {
         timestamp: "2025-01-17T08:00:00.123456+00:00",
       });
       expect(fractionalManualQuote.activityDate).toBe("2025-01-17T08:00:00.123456+00:00");
+
+      const expandedYearManualQuote = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "0000-01-01T00:30:00+01:00",
+        quantity: "1",
+        unitPrice: "14",
+        amount: "14",
+        currency: "USD",
+      }) as Activity;
+      expect(expandedYearManualQuote.activityDate).toBe("-0001-12-31T23:30:00+00:00");
+      expect(readQuoteByAssetDay(db, "AAPL", "-0001-12-31", "MANUAL")).toMatchObject({
+        id: "AAPL_-0001-12-31_MANUAL",
+        close: "14",
+        timestamp: "-0001-12-31T23:30:00+00:00",
+      });
 
       service.createActivity?.({
         accountId: "account-1",

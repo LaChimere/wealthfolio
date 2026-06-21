@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 686
+turns_used: 687
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T10:14:54+08:00"
+updated_at: "2026-06-21T10:33:53+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4259,6 +4259,11 @@ updated_at: "2026-06-21T10:14:54+08:00"
   import run rows now store Rust-style `to_rfc3339()` `+00:00` timestamps for
   started/finished/applied/created/updated fields instead of JS `Z` strings,
   matching the sync outbox DB payload shape. Verified with focused activities
+  tests.
+- Turn 687: Tightened activity manual quote date extraction parity. Manual quote
+  rows created from activity timestamps now derive `day` and IDs with
+  signed/expanded-year-aware date extraction, and quote `created_at` uses
+  Rust-style `to_rfc3339()` storage formatting. Verified with focused activities
   tests.
 
 ## Deferred items
