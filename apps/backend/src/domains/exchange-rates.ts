@@ -1152,10 +1152,6 @@ function chronoYearString(year: number): string {
 }
 
 function parseTimestampDate(value: string): Date | null {
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.valueOf())) {
-    return parsed;
-  }
   return parseExpandedRfc3339DateTime(value);
 }
 

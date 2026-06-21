@@ -5769,6 +5769,9 @@ contract:
   tests. Coverage includes strict Rust-compatible stored thread/message
   timestamp parsing, non-UTC offset normalization with microsecond precision,
   and invalid timestamp fallback.
+- `pr5-exchange-rate-timestamp-strict-parse`: verification passed: focused
+  exchange-rate tests. Coverage includes rejecting invalid calendar-rollover FX
+  quote timestamps for ordering while preserving valid offset normalization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

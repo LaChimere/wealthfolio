@@ -41,6 +41,22 @@ describe("TS exchange rates domain", () => {
         close: "1.20",
         source: "MANUAL",
       });
+      seedQuote(db, {
+        id: "invalid-rollover",
+        assetId: "eur-usd",
+        day: "2026-02-30",
+        close: "1.30",
+        source: "YAHOO",
+        timestamp: "2026-02-30T16:00:00Z",
+      });
+      seedQuote(db, {
+        id: "offset",
+        assetId: "usd-cad",
+        day: "2026-01-03",
+        close: "1.40",
+        source: "MANUAL",
+        timestamp: "2026-01-03T18:30:00+02:30",
+      });
 
       expect(service.getLatestExchangeRates()).toEqual([
         expect.objectContaining({
@@ -54,8 +70,9 @@ describe("TS exchange rates domain", () => {
           id: "usd-cad",
           fromCurrency: "USD",
           toCurrency: "CAD",
-          rate: "0",
-          source: "YAHOO",
+          rate: "1.40",
+          source: "MANUAL",
+          timestamp: "2026-01-03T16:00:00.000Z",
         }),
       ]);
       expect(service.getLatestFxRateSnapshots()).toEqual([
@@ -71,7 +88,7 @@ describe("TS exchange rates domain", () => {
           fromCurrency: "USD",
           toCurrency: "CAD",
           instrumentKey: "FX:USD/CAD",
-          quoteTimestamp: null,
+          quoteTimestamp: "2026-01-03T18:30:00+02:30",
         },
       ]);
     } finally {
