@@ -369,7 +369,7 @@ export function createTaxonomyRepository(
           boolToInt(taxonomy.isSystem),
           boolToInt(taxonomy.isSingleSelect),
           taxonomy.sortOrder,
-          taxonomy.createdAt,
+          toStorageNaiveUtcDateTime(taxonomy.createdAt),
           updatedAt,
           taxonomy.id,
         );
@@ -593,7 +593,7 @@ export function createTaxonomyRepository(
           category.color,
           category.description ?? null,
           category.sortOrder,
-          category.createdAt,
+          toStorageNaiveUtcDateTime(category.createdAt),
           updatedAt,
           category.taxonomyId,
           category.id,
@@ -1543,5 +1543,114 @@ function timestampNow(): string {
 }
 
 function toApiDate(value: string): string {
-  return value.includes(" ") ? value.replace(" ", "T") : value;
+  return normalizeNaiveUtcDateTime(value) ?? normalizeNaiveUtcDateTime(timestampNow()) ?? value;
+}
+
+function toStorageNaiveUtcDateTime(value: string): string {
+  const naive = normalizeNaiveUtcDateTime(value);
+  return naive === null ? value : `${naive}Z`;
+}
+
+function normalizeNaiveUtcDateTime(value: string): string | null {
+  const naiveMatch = /^([+-]?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?$/u.exec(value);
+  if (naiveMatch) {
+    return `${naiveMatch[1]}${normalizeRustSerdeFraction(naiveMatch[2])}`;
+  }
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
+  }
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes =
+    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  return `${chronoYearString(parsed.getUTCFullYear())}-${String(parsed.getUTCMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(parsed.getUTCDate()).padStart(2, "0")}T${String(parsed.getUTCHours()).padStart(
+    2,
+    "0",
+  )}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${String(parsed.getUTCSeconds()).padStart(
+    2,
+    "0",
+  )}${normalizeRustSerdeFraction(fractionRaw)}`;
+}
+
+function normalizeRustSerdeFraction(value: string | undefined): string {
+  if (value === undefined) {
+    return "";
+  }
+  const nanos = value.slice(0, 9).padEnd(9, "0");
+  if (/^0+$/u.test(nanos)) {
+    return "";
+  }
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
+}
+
+function chronoYearString(year: number): string {
+  if (year >= 0 && year <= 9999) {
+    return year.toString().padStart(4, "0");
+  }
+  if (year > 9999) {
+    return `+${year}`;
+  }
+  const absolute = Math.abs(year);
+  return `-${absolute < 10_000 ? absolute.toString().padStart(4, "0") : absolute}`;
 }

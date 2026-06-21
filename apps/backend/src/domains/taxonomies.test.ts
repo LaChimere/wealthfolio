@@ -32,13 +32,17 @@ describe("TS taxonomies domain", () => {
         isSingleSelect: true,
         sortOrder: 10,
       });
+      db.prepare("UPDATE taxonomies SET created_at = ? WHERE id = ?").run(
+        "2026-01-01T02:30:00.123456+02:30",
+        "custom_groups",
+      );
 
       expect(service.getTaxonomies()).toEqual([
         expect.objectContaining({
           id: "custom_groups",
           isSystem: false,
           isSingleSelect: true,
-          createdAt: "2026-01-01T00:00:00Z",
+          createdAt: "2026-01-01T00:00:00.123456",
         }),
         expect.objectContaining({
           id: "regions",
@@ -130,14 +134,14 @@ describe("TS taxonomies domain", () => {
       const updated = await service.updateTaxonomy({
         ...created,
         name: "Strategies",
-        createdAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00",
         isSingleSelect: false,
         sortOrder: 20,
       });
       expect(updated).toMatchObject({
         id: "strategy",
         name: "Strategies",
-        createdAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00",
         isSingleSelect: false,
         sortOrder: 20,
       });
@@ -296,13 +300,13 @@ describe("TS taxonomies domain", () => {
       await expect(
         service.updateCategory({
           ...parent,
-          createdAt: "2025-01-01T00:00:00Z",
+          createdAt: "2025-01-01T00:00:00",
           name: "Themes",
           sortOrder: 3,
         }),
       ).resolves.toMatchObject({
         id: "theme",
-        createdAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00",
         name: "Themes",
         sortOrder: 3,
       });

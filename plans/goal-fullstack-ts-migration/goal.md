@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 687
+turns_used: 688
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T10:33:53+08:00"
+updated_at: "2026-06-21T10:57:46+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4265,6 +4265,11 @@ updated_at: "2026-06-21T10:33:53+08:00"
   signed/expanded-year-aware date extraction, and quote `created_at` uses
   Rust-style `to_rfc3339()` storage formatting. Verified with focused activities
   tests.
+- Turn 688: Tightened taxonomy timestamp serialization parity. Taxonomy,
+  category, and assignment timestamps now normalize RFC3339 storage strings into
+  Rust `NaiveDateTime` JSON shape without timezone suffixes, preserve AutoSi
+  fractions, and write update-created timestamps back in Rust-compatible `...Z`
+  storage form. Verified with focused taxonomy tests.
 
 ## Deferred items
 

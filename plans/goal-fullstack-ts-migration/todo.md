@@ -5798,6 +5798,10 @@ contract:
 - `pr5-activity-manual-quote-expanded-date`: verification passed: focused
   activities tests. Coverage includes signed/expanded-year-aware manual quote
   day extraction and Rust-style quote `created_at` storage formatting.
+- `pr5-taxonomy-naive-timestamp-serialization`: verification passed: focused
+  taxonomy tests. Coverage includes Rust `NaiveDateTime` JSON shape without
+  timezone suffixes, offset/fraction normalization, and update-created timestamp
+  storage in Rust-compatible `...Z` form.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
