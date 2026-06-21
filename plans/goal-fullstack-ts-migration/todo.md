@@ -5864,6 +5864,9 @@ contract:
   Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00` storage and
   sync payload timestamps for asset create/update while preserving
   `NaiveDateTime` API reads.
+- `pr5-holdings-manual-quote-parity`: verification passed: focused holdings
+  tests. Coverage includes Rust manual snapshot quote IDs
+  (`YYYYMMDD_ASSETIDUPPER`) and `+00:00` DB timestamp formatting.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

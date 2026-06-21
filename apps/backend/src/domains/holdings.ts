@@ -1182,7 +1182,7 @@ function upsertManualQuote(
       VALUES (?, ?, ?, 'MANUAL', ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
     `,
   ).run(
-    `${assetId}_${day}_MANUAL`,
+    manualSnapshotQuoteId(assetId, day),
     assetId,
     day,
     close.toString(),
@@ -1191,9 +1191,17 @@ function upsertManualQuote(
     close.toString(),
     close.toString(),
     currency,
-    now,
-    `${day}T12:00:00.000Z`,
+    toRustUtcRfc3339(now),
+    `${day}T12:00:00+00:00`,
   );
+}
+
+function manualSnapshotQuoteId(assetId: string, day: string): string {
+  return `${day.replaceAll("-", "")}_${assetId.toUpperCase()}`;
+}
+
+function toRustUtcRfc3339(value: string): string {
+  return value.endsWith(".000Z") ? `${value.slice(0, -5)}+00:00` : value.replace(/Z$/u, "+00:00");
 }
 
 function upsertHoldingsSnapshot(

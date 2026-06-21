@@ -319,6 +319,7 @@ describe("TS holdings domain", () => {
           .query<
             {
               id: string;
+              created_at: string;
               open: string | null;
               high: string | null;
               low: string | null;
@@ -331,14 +332,15 @@ describe("TS holdings domain", () => {
             [string]
           >(
             `
-              SELECT id, open, high, low, close, adjclose, volume, currency, timestamp
+              SELECT id, created_at, open, high, low, close, adjclose, volume, currency, timestamp
               FROM quotes
               WHERE asset_id = ?
             `,
           )
           .get(asset?.id ?? ""),
       ).toEqual({
-        id: `${asset?.id}_2026-02-15_MANUAL`,
+        id: `20260215_${asset?.id.toUpperCase()}`,
+        created_at: expect.stringMatching(/\+00:00$/),
         open: "6",
         high: "6",
         low: "6",
@@ -346,7 +348,7 @@ describe("TS holdings domain", () => {
         adjclose: "6",
         volume: null,
         currency: "USD",
-        timestamp: "2026-02-15T12:00:00.000Z",
+        timestamp: "2026-02-15T12:00:00+00:00",
       });
 
       expect(service.getSnapshotByDate("a1", "2026-02-15")).toEqual([
