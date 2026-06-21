@@ -5907,6 +5907,9 @@ contract:
 - `pr5-addon-detected-permission-timestamps`: verification passed: focused
   add-on tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00`
   timestamps for statically detected add-on permissions.
+- `pr5-device-sync-leap-second-timestamps`: verification passed: focused
+  device-sync tests. Coverage includes chrono-compatible leap-second parsing
+  with Rust millisecond `Z` normalization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

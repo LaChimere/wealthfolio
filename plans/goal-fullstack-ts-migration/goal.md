@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 721
+turns_used: 722
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T15:37:45+08:00"
+updated_at: "2026-06-21T15:43:37+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4405,6 +4405,10 @@ updated_at: "2026-06-21T15:37:45+08:00"
   permission detection now records Rust `Utc::now().to_rfc3339()` style `+00:00`
   `detectedAt` values instead of JS `Z` timestamps. Verified with focused add-on
   tests.
+- Turn 722: Tightened device-sync datetime parser leap-second parity. Shared
+  `normalizeSyncDatetime` now accepts chrono-compatible RFC3339/offset leap
+  seconds and preserves Rust millisecond `Z` output. Verified with focused
+  device-sync tests.
 
 ## Deferred items
 

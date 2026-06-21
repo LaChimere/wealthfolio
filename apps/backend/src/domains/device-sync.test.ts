@@ -26,6 +26,13 @@ describe("device-sync time parsing", () => {
     expect(normalizeSyncDatetime("2026-03-03t03:02:46.288162z")).toBe("2026-03-03T03:02:46.288Z");
     expect(normalizeSyncDatetime("2026-03-03 03:02:46.288162z")).toBe("2026-03-03T03:02:46.288Z");
   });
+
+  test("accepts chrono-compatible leap seconds", () => {
+    expect(normalizeSyncDatetime("2015-06-30T23:59:60Z")).toBe("2015-06-30T23:59:60.000Z");
+    expect(normalizeSyncDatetime("2015-07-01T01:59:60.288162+02:00")).toBe(
+      "2015-06-30T23:59:60.288Z",
+    );
+  });
 });
 
 describe("TS local device sync service", () => {

@@ -48,11 +48,12 @@ function parseRfc3339LikeDatetime(value: string): string | null {
   if (!validDateParts(parts)) {
     return null;
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+  const zone = match[9] ?? "Z";
+  const parsed = utcDateFromParts(parts, zone);
+  if (parsed === null) {
     return null;
   }
-  return parsed.toISOString();
+  return formatSyncDatetime(parsed, parts.second === 60);
 }
 
 function parseNaiveUtcDatetime(value: string): string | null {
@@ -64,17 +65,8 @@ function parseNaiveUtcDatetime(value: string): string | null {
   if (!validDateParts(parts)) {
     return null;
   }
-  return new Date(
-    Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
-      parts.ms,
-    ),
-  ).toISOString();
+  const parsed = utcDateFromParts(parts, "Z");
+  return parsed === null ? null : formatSyncDatetime(parsed, parts.second === 60);
 }
 
 function datetimePartsFromMatch(match: RegExpExecArray): {
@@ -111,7 +103,7 @@ function validDateParts(parts: {
     parts.month > 12 ||
     parts.hour > 23 ||
     parts.minute > 59 ||
-    parts.second > 59
+    parts.second > 60
   ) {
     return false;
   }
@@ -122,7 +114,7 @@ function validDateParts(parts: {
       parts.day,
       parts.hour,
       parts.minute,
-      parts.second,
+      Math.min(parts.second, 59),
       parts.ms,
     ),
   );
@@ -131,7 +123,53 @@ function validDateParts(parts: {
     date.getUTCMonth() === parts.month - 1 &&
     date.getUTCDate() === parts.day &&
     date.getUTCHours() === parts.hour &&
-    date.getUTCMinutes() === parts.minute &&
-    date.getUTCSeconds() === parts.second
+    date.getUTCMinutes() === parts.minute
   );
+}
+
+function utcDateFromParts(
+  parts: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second: number;
+    ms: number;
+  },
+  zone: string,
+): Date | null {
+  const local = new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      Math.min(parts.second, 59),
+      parts.ms,
+    ),
+  );
+  if (Number.isNaN(local.getTime())) {
+    return null;
+  }
+  if (zone === "Z") {
+    return local;
+  }
+  const zoneMatch = /^([+-])(\d{2}):(\d{2})$/.exec(zone);
+  if (!zoneMatch) {
+    return null;
+  }
+  const zoneHour = Number(zoneMatch[2]);
+  const zoneMinute = Number(zoneMatch[3]);
+  if (zoneHour > 23 || zoneMinute > 59) {
+    return null;
+  }
+  const offsetMinutes = Number(`${zoneMatch[1]}1`) * (zoneHour * 60 + zoneMinute);
+  return new Date(local.getTime() - offsetMinutes * 60_000);
+}
+
+function formatSyncDatetime(value: Date, isLeapSecond: boolean): string {
+  const iso = value.toISOString();
+  return isLeapSecond ? `${iso.slice(0, 17)}60${iso.slice(19)}` : iso;
 }
