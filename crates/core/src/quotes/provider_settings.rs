@@ -130,3 +130,18 @@ pub struct UpdateMarketDataProviderSetting {
     pub priority: Option<i32>,
     pub enabled: Option<bool>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderCapabilities;
+
+    #[test]
+    fn finnhub_capabilities_include_crypto_and_forex() {
+        let capabilities = ProviderCapabilities::for_provider("FINNHUB").unwrap();
+
+        assert_eq!(capabilities.instruments, "Stocks • Crypto • Forex");
+        assert_eq!(capabilities.coverage, "Global");
+        assert!(capabilities.features.contains(&"Real-time".to_string()));
+        assert!(capabilities.features.contains(&"Historical".to_string()));
+    }
+}

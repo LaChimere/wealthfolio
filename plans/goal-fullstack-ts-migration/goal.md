@@ -4475,6 +4475,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `FxPair`/`CryptoPair` paths, and Rust/TS Finnhub historical sync routes FX and
   CRYPTO candles to `/forex/candle` and `/crypto/candle` instead of the stock
   endpoint. Verified with focused Rust resolver/provider and TS Finnhub tests.
+- Turn 738: Strengthened Rust provider-settings evidence for Finnhub capability
+  metadata. Added a focused Rust test pinning Finnhub `Stocks • Crypto • Forex`
+  capability text and core features.
 
 ## Deferred items
 
