@@ -4459,6 +4459,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   FX and CRYPTO assets now use Rust provider-style `OANDA:<from>_<to>` and
   `BINANCE:<base><quote>` symbols for candle backfill while preserving explicit
   provider overrides. Verified with focused Finnhub market-data tests.
+- Turn 735: Extended Finnhub latest quote resolution beyond equities. Preferred
+  Finnhub FX and CRYPTO quote resolves now call `/quote` with Rust
+  provider-style `OANDA:<from>_<to>` and `BINANCE:<base><quote>` symbols and
+  return provider summaries. Verified with focused Finnhub market-data tests.
 
 ## Deferred items
 

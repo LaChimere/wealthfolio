@@ -2828,15 +2828,16 @@ async function resolveSymbolQuote(
     return defaultResolvedQuote();
   }
   if (preferredProvider === FINNHUB_PROVIDER) {
-    if (instrumentType !== "EQUITY") {
-      return defaultResolvedQuote();
-    }
     const apiKey = await marketDataProviderApiKey(secretService, FINNHUB_PROVIDER);
     if (apiKey === null) {
       return defaultResolvedQuote();
     }
     const currency = providerCurrencyFromExchange(exchangeMic, requestedQuoteCcy, exchangeCatalog);
-    for (const candidate of symbolResolutionCandidates(trimmedSymbol)) {
+    const candidates =
+      instrumentType === "EQUITY"
+        ? symbolResolutionCandidates(trimmedSymbol)
+        : finnhubResolveSymbols(trimmedSymbol, instrumentType, requestedQuoteCcy);
+    for (const candidate of candidates) {
       try {
         const quote = await fetchFinnhubLatestQuote(
           `_QUOTE_RESOLVE_${candidate}`,
@@ -6091,6 +6092,25 @@ function finnhubSyncSymbol(asset: AssetMarketSyncRow): string | null {
     return quoteCcy ? `BINANCE:${symbol.toUpperCase()}${quoteCcy}` : null;
   }
   return null;
+}
+
+function finnhubResolveSymbols(
+  symbol: string,
+  instrumentType: string,
+  quoteCcy: string | null,
+): string[] {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const normalizedQuote = quoteCcy?.trim().toUpperCase() ?? "";
+  if (!normalizedSymbol) {
+    return [];
+  }
+  if (instrumentType === "FX" && normalizedQuote) {
+    return [`OANDA:${normalizedSymbol}_${normalizedQuote}`];
+  }
+  if (instrumentType === "CRYPTO" && normalizedQuote) {
+    return [`BINANCE:${normalizedSymbol}${normalizedQuote}`];
+  }
+  return [];
 }
 
 function parseFinnhubError(text: string): string | null {

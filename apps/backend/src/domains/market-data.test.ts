@@ -5427,6 +5427,20 @@ describe("TS market data domain", () => {
             l: 24.5,
             t: 1767657600,
           },
+          "OANDA:EUR_USD": {
+            c: 1.15,
+            o: 1.1,
+            h: 1.2,
+            l: 1.0,
+            t: 1767657600,
+          },
+          "BINANCE:BTCUSDT": {
+            c: 44000,
+            o: 43000,
+            h: 45000,
+            l: 42000,
+            t: 1767657600,
+          },
         },
       }),
       secretService: testSecretService("FINNHUB", "finnhub-key"),
@@ -5446,7 +5460,35 @@ describe("TS market data domain", () => {
         price: 25.5,
         resolvedProviderId: "FINNHUB",
       });
-      expect(calls).toEqual(["https://finnhub.io/api/v1/quote?symbol=SHOP"]);
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "EUR",
+          instrumentType: "FX",
+          quoteCcy: "USD",
+          providerId: "FINNHUB",
+        }),
+      ).resolves.toEqual({
+        currency: "USD",
+        price: 1.15,
+        resolvedProviderId: "FINNHUB",
+      });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "BTC",
+          instrumentType: "CRYPTO",
+          quoteCcy: "USDT",
+          providerId: "FINNHUB",
+        }),
+      ).resolves.toEqual({
+        currency: "USDT",
+        price: 44000,
+        resolvedProviderId: "FINNHUB",
+      });
+      expect(calls.map((call) => new URL(call).searchParams.get("symbol"))).toEqual([
+        "SHOP",
+        "OANDA:EUR_USD",
+        "BINANCE:BTCUSDT",
+      ]);
     } finally {
       db.close();
     }
