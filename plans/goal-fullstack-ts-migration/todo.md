@@ -5819,6 +5819,9 @@ contract:
 - `pr5-activity-event-earliest-timestamp`: verification passed: focused
   activities tests. Coverage includes chrono serde-style `Z` output and
   microsecond precision for `activities_changed.earliest_activity_at_utc`.
+- `pr5-activity-event-earliest-rereview-fix`: verification passed: focused
+  activities tests. Coverage includes nanosecond-aware earliest event comparison
+  and chrono-compatible leap-second parsing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

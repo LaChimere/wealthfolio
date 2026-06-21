@@ -4333,7 +4333,7 @@ describe("TS activities import domain", () => {
       ]);
 
       events.length = 0;
-      service.createActivity?.({
+      const fractionalCreated = service.createActivity?.({
         accountId: "account-1",
         asset: { id: "AAPL" },
         activityType: "BUY",
@@ -4349,6 +4349,26 @@ describe("TS activities import domain", () => {
           assetIds: ["AAPL"],
           currencies: ["USD"],
           earliest: "2025-01-15T15:00:00.123456Z",
+        }),
+      ]);
+      events.length = 0;
+      service.updateActivity?.({
+        id: (fractionalCreated as Activity).id,
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15T10:00:00.123123-05:00",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "12",
+        currency: "USD",
+      });
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: ["AAPL"],
+          currencies: ["USD"],
+          earliest: "2025-01-15T15:00:00.123123Z",
         }),
       ]);
 

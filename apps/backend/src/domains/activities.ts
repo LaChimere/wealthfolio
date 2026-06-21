@@ -1509,10 +1509,15 @@ function activityEventRecordFromCreate(activity: ActivityCreateRowInput): Activi
 }
 
 function earliestActivityAtUtc(activities: ActivityEventRecord[]): string | null {
-  let earliest: { time: number; text: string } | null = null;
+  let earliest: { seconds: number; nanos: number; text: string } | null = null;
   for (const activity of activities) {
     const parsed = parseActivityEventTimestamp(activity.activityDate);
-    if (parsed && (earliest === null || parsed.time < earliest.time)) {
+    if (
+      parsed &&
+      (earliest === null ||
+        parsed.seconds < earliest.seconds ||
+        (parsed.seconds === earliest.seconds && parsed.nanos < earliest.nanos))
+    ) {
       earliest = parsed;
     }
   }
@@ -6197,13 +6202,12 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
   const hour = Number(hourRaw);
   const minute = Number(minuteRaw);
   const second = Number(secondRaw);
-  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
   const zoneHour = Number(zoneHourRaw);
   const zoneMinute = Number(zoneMinuteRaw);
-  if (hour > 23 || minute > 59 || second > 59 || zoneHour > 23 || zoneMinute > 59) {
+  if (hour > 23 || minute > 59 || second > 60 || zoneHour > 23 || zoneMinute > 59) {
     return null;
   }
-  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), 0));
   local.setUTCFullYear(year, month - 1, day);
   if (
     Number.isNaN(local.valueOf()) ||
@@ -6223,13 +6227,15 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
     parsed.getUTCMonth() + 1,
   ).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}T${String(
     parsed.getUTCHours(),
-  ).padStart(2, "0")}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${String(
-    parsed.getUTCSeconds(),
-  ).padStart(2, "0")}`;
+  ).padStart(2, "0")}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${
+    second === 60 ? "60" : String(parsed.getUTCSeconds()).padStart(2, "0")
+  }`;
   return `${base}${normalizeRustFraction(fractionRaw)}+00:00`;
 }
 
-function parseActivityEventTimestamp(value: string): { time: number; text: string } | null {
+function parseActivityEventTimestamp(
+  value: string,
+): { seconds: number; nanos: number; text: string } | null {
   const normalized = /^\d{4}-\d{2}-\d{2}$/u.test(value)
     ? `${value}T00:00:00+00:00`
     : normalizeRfc3339ActivityDate(value);
@@ -6249,13 +6255,18 @@ function parseActivityEventTimestamp(value: string): { time: number; text: strin
   const hour = Number(hourRaw);
   const minute = Number(minuteRaw);
   const second = Number(secondRaw);
-  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
-  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), millisecond));
+  const nanos = Number((fractionRaw ?? "").slice(0, 9).padEnd(9, "0"));
+  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), 0));
   date.setUTCFullYear(year, month - 1, day);
   if (Number.isNaN(date.valueOf())) {
     return null;
   }
-  return { time: date.getTime(), text: normalized.replace(/\+00:00$/u, "Z") };
+  const seconds = Math.trunc(date.getTime() / 1000);
+  return {
+    seconds,
+    nanos: second === 60 ? nanos + 1_000_000_000 : nanos,
+    text: normalized.replace(/\+00:00$/u, "Z"),
+  };
 }
 
 function normalizeRustFraction(value: string | undefined): string {
