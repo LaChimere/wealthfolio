@@ -1566,7 +1566,7 @@ function normalizeNaiveUtcDateTime(value: string): string | null {
     const hour = Number(hourRaw);
     const minute = Number(minuteRaw);
     const second = Number(secondRaw);
-    if (!validDateParts(year, month, day) || hour > 23 || minute > 59 || second > 59) {
+    if (!validDateParts(year, month, day) || hour > 23 || minute > 59 || second > 60) {
       return null;
     }
     return `${yearRaw}-${monthRaw}-${dayRaw}T${hourRaw}:${minuteRaw}:${secondRaw}${normalizeRustSerdeFraction(

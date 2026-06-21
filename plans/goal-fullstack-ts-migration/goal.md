@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 691
+turns_used: 692
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T11:46:49+08:00"
+updated_at: "2026-06-21T12:02:04+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4283,6 +4283,10 @@ updated_at: "2026-06-21T11:46:49+08:00"
   taxonomy RFC3339 parsers now accept chrono-compatible leap seconds, and
   taxonomy update storage now rejects invalid NaiveDateTime inputs instead of
   writing invalid strings. Verified with focused asset/taxonomy tests.
+- Turn 692: Resolved NaiveDateTime bare leap-second follow-up. Asset SQLite/ISO
+  naive timestamp parsing and taxonomy update-created NaiveDateTime parsing now
+  accept `:60` seconds like chrono, preserving leap-second values instead of
+  falling back or rejecting. Verified with focused asset/taxonomy tests.
 
 ## Deferred items
 

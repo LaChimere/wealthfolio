@@ -139,14 +139,14 @@ describe("TS taxonomies domain", () => {
       const updated = await service.updateTaxonomy({
         ...created,
         name: "Strategies",
-        createdAt: "2025-01-01T00:00:00",
+        createdAt: "2015-06-30T23:59:60",
         isSingleSelect: false,
         sortOrder: 20,
       });
       expect(updated).toMatchObject({
         id: "strategy",
         name: "Strategies",
-        createdAt: "2025-01-01T00:00:00",
+        createdAt: "2015-06-30T23:59:60",
         isSingleSelect: false,
         sortOrder: 20,
       });
