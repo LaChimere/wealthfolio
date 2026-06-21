@@ -6083,6 +6083,10 @@ contract:
   adapter tests. Web and Electron adapters now cover zip byte payload
   conversion, compatibility aliases, enabled/installed reads, and rating bounds
   before submit.
+- `pr5-fire-planner-adapter-coverage`: verification passed: focused frontend
+  FIRE planner adapter tests. Web/Electron adapters now cover projection, Monte
+  Carlo defaults/seed, and sequence-of-returns payloads; stale web desktop-only
+  comment removed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

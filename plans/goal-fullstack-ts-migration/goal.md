@@ -4616,6 +4616,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   adapters now have focused tests for zip byte payload conversion, compatibility
   aliases, enabled/installed reads, and rating bounds before submit. Verified
   with focused frontend add-on adapter tests.
+- Turn 769: Strengthened FIRE planner adapter parity coverage. Web/Electron
+  adapters now have focused tests for projection, Monte Carlo defaults/seed, and
+  sequence-of-returns payloads; the stale web "desktop-only" comment was
+  removed. Verified with focused frontend FIRE planner adapter tests.
 
 ## Deferred items
 

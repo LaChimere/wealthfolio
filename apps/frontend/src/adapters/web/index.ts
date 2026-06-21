@@ -413,7 +413,7 @@ export {
   updateAddon,
 } from "./addons";
 
-// FIRE Planner (desktop-only — stubs throw at runtime)
+// FIRE Planner
 export {
   calculateRetirementProjection,
   runRetirementDecisionSensitivityMap,
