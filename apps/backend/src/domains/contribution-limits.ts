@@ -337,8 +337,8 @@ function contributionLimitRowPayload(row: ContributionLimitRow): ContributionLim
     contributionYear: row.contribution_year,
     limitAmount: row.limit_amount,
     accountIds: row.account_ids,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: toApiDate(row.created_at),
+    updatedAt: toApiDate(row.updated_at),
     startDate: row.start_date,
     endDate: row.end_date,
   };

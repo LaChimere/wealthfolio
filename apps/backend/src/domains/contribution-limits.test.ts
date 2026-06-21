@@ -180,6 +180,7 @@ describe("TS contribution limits domain", () => {
         createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
         updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
+
       expect(syncEvents[1]?.payload).toMatchObject({
         id: created.id,
         groupName: "FHSA",
@@ -192,6 +193,41 @@ describe("TS contribution limits domain", () => {
         updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[2]?.payload).toEqual({ id: created.id });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("normalizes legacy contribution-limit timestamps in sync payloads", async () => {
+    const db = createContributionLimitsDb();
+    const syncEvents: ContributionLimitSyncEvent[] = [];
+    const service = createContributionLimitService(
+      createContributionLimitRepository(db, {
+        queueSyncEvent: (event) => syncEvents.push(event),
+      }),
+    );
+
+    try {
+      db.query(
+        `
+          INSERT INTO contribution_limits (
+            id, group_name, contribution_year, limit_amount, created_at, updated_at
+          )
+          VALUES ('legacy-limit', 'Legacy', 2026, 1000, '2026-02-12 00:00:00', '2026-02-12 00:00:00')
+        `,
+      ).run();
+
+      await service.updateContributionLimit(
+        "legacy-limit",
+        newLimit({ groupName: "Legacy Updated", contributionYear: 2026, limitAmount: 2000 }),
+      );
+
+      expect(syncEvents).toHaveLength(1);
+      expect(syncEvents[0]?.payload).toMatchObject({
+        id: "legacy-limit",
+        createdAt: "2026-02-12T00:00:00",
+        updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+      });
     } finally {
       db.close();
     }
