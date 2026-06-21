@@ -349,12 +349,11 @@ function parseTimestampOrNull(value: string | null): string | null {
   if (!value) {
     return null;
   }
-  return normalizeUtcTimestamp(value);
+  return normalizeUtcTimestamp(value, false);
 }
 
 function parseTimestampOrNow(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? new Date().toISOString() : parsed.toISOString();
+  return normalizeUtcTimestamp(value, true) ?? new Date().toISOString();
 }
 
 function toRustUtcRfc3339(date: Date): string {
@@ -365,11 +364,14 @@ function toRustUtcRfc3339(date: Date): string {
   return iso.replace(/Z$/u, "+00:00");
 }
 
-function normalizeUtcTimestamp(value: string): string | null {
+function normalizeUtcTimestamp(value: string, allowOffset: boolean): string | null {
   const utcMatch = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|\+00:00)$/u.exec(
     value,
   );
   if (utcMatch) {
+    if (parseRustRfc3339Timestamp(value) === null) {
+      return null;
+    }
     const parsed = new Date(`${utcMatch[1]}.${(utcMatch[2] ?? "0").slice(0, 3).padEnd(3, "0")}Z`);
     if (Number.isNaN(parsed.valueOf())) {
       return null;
@@ -378,8 +380,71 @@ function normalizeUtcTimestamp(value: string): string | null {
     return `${utcMatch[1]}${fractional}+00:00`;
   }
 
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : toRustUtcRfc3339(parsed);
+  if (!allowOffset) {
+    return null;
+  }
+  const parsed = parseRustRfc3339Timestamp(value);
+  return parsed === null ? null : toRustUtcRfc3339(parsed);
+}
+
+function parseRustRfc3339Timestamp(value: string): Date | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
+  }
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes =
+    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
 function normalizeRustFraction(value: string | undefined): string {

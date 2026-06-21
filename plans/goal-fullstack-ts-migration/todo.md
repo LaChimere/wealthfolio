@@ -5755,6 +5755,10 @@ contract:
 - `pr5-health-dismissal-rfc3339-parse`: verification passed: focused health
   tests. Coverage includes strict Rust-compatible stored dismissal timestamp
   parsing with fallback for date-only and calendar-rollover strings.
+- `pr5-provider-sync-timestamp-rfc3339-parse`: verification passed: focused
+  market-data provider tests. Coverage includes rejecting malformed
+  `last_synced_at` values and strict RFC3339 parsing/fallback for sync-error
+  `updated_at`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

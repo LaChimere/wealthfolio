@@ -54,6 +54,32 @@ describe("TS market data provider settings domain", () => {
     }
   });
 
+  test("parses provider sync timestamps like Rust", async () => {
+    const db = createMarketDataProvidersDb();
+    const service = createMarketDataProviderService(createMarketDataProviderRepository(db));
+
+    try {
+      db.query("UPDATE quote_sync_state SET last_synced_at = ? WHERE asset_id = ?").run(
+        "2026-02-30T00:00:00Z",
+        "asset-2",
+      );
+      db.query("UPDATE quote_sync_state SET updated_at = ? WHERE asset_id = ?").run(
+        "2026-01-05T04:30:00+02:30",
+        "asset-4",
+      );
+
+      const providers = await service.getProvidersInfo();
+      expect(providers.find((provider) => provider.id === "YAHOO")).toMatchObject({
+        lastSyncedAt: null,
+      });
+      expect(providers.find((provider) => provider.id === "FINNHUB")).toMatchObject({
+        lastSyncError: "Provider FINNHUB failed",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("updates priority and enabled state then refreshes the quote client", async () => {
     const db = createMarketDataProvidersDb();
     let refreshCount = 0;
