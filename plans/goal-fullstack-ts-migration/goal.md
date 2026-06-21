@@ -4608,6 +4608,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `get_import_runs` command alias now has focused route/query and malformed
   payload coverage alongside `get_data_import_runs`. Verified with focused
   Electron Connect command tests.
+- Turn 767: Strengthened web activity CSV parse adapter coverage. The web
+  adapter now has focused tests for multipart file/config POST behavior and
+  backend JSON/text parse error surfacing. Verified with focused frontend web
+  activities adapter tests.
 
 ## Deferred items
 

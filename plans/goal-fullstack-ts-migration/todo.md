@@ -6076,6 +6076,9 @@ contract:
 - `pr5-electron-connect-import-runs-alias-coverage`: verification passed:
   focused Electron Connect command tests. Coverage includes `get_import_runs`
   alias route/query serialization and malformed numeric query validation.
+- `pr5-web-activity-parse-adapter-coverage`: verification passed: focused
+  frontend web activities adapter tests. Coverage includes multipart file/config
+  POST behavior and backend JSON/text parse error surfacing.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
