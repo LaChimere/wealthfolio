@@ -4428,8 +4428,8 @@ updated_at: "2026-06-21T16:04:16+08:00"
   wired past empty-export responses. Verified with runtime tests and full check.
 - Turn 727: Resolved health FX parser review follow-up. FX integrity checks now
   accept chrono-compatible leap-second, lowercase `t/z`, space-separated, and
-  compact-offset RFC3339 quote timestamps before stale/fresh comparison.
-  Verified with focused health tests.
+  colon-offset RFC3339 quote timestamps before stale/fresh comparison. Verified
+  with focused health tests.
 - Turn 728: Resolved Claude health FX malformed-timestamp review follow-up. A
   present FX quote row with a malformed timestamp now falls back to the health
   check timestamp, matching Rust's `QuoteDB -> Quote` parse-failure `Utc::now()`
@@ -4442,6 +4442,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 730: Refreshed roadmap backend runtime wording. The Phase 3 REST API item
   now names the Bun/TypeScript backend as current while noting the legacy Axum
   reference remains retained.
+- Turn 731: Resolved GPT health FX compact-offset review follow-up. Compact
+  `+HHMM` quote timestamps now follow Rust `QuoteDB` strict `parse_from_rfc3339`
+  behavior by falling back fresh/classifiable instead of parsing as stale/fresh
+  timestamps. Verified with focused health and exchange-rate tests.
 
 ## Deferred items
 

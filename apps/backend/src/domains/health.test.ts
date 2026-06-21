@@ -1096,7 +1096,7 @@ describe("TS health domain", () => {
     }
   });
 
-  test.each(["not-a-date", "2026-02-30T16:00:00Z"])(
+  test.each(["not-a-date", "2026-02-30T16:00:00Z", "2026-05-14T00:00:00+0000"])(
     "does not treat malformed present FX quote timestamp %p as missing",
     async (quoteTimestamp) => {
       const db = createHealthDb();
@@ -1139,50 +1139,48 @@ describe("TS health domain", () => {
     },
   );
 
-  test.each([
-    "2026-05-18T11:59:60Z",
-    "2026-05-18t12:00:00z",
-    "2026-05-18 12:00:00Z",
-    "2026-05-18T12:00:00+0000",
-  ])("does not treat chrono-valid FX quote timestamp %p as missing", async (quoteTimestamp) => {
-    const db = createHealthDb();
-    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
-      accountProvider: {
-        getActiveAccounts: () => [account({ id: "account-a" })],
-        getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
-      },
-      holdingsProvider: {
-        getHoldings: () => [
-          holding({
-            assetId: "asset-cad",
-            symbol: "CADSEC",
-            marketValue: 10,
-            localCurrency: "CAD",
-            baseCurrency: "USD",
-          }),
-        ],
-      },
-      exchangeRateProvider: {
-        ensureFxPairs: async () => [],
-        getLatestFxRateSnapshots: () => [
-          fxSnapshot({
-            fromCurrency: "CAD",
-            toCurrency: "USD",
-            quoteTimestamp,
-          }),
-        ],
-      },
-      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
-      now: () => new Date("2026-05-18T12:00:00.000Z"),
-    });
+  test.each(["2026-05-18T11:59:60Z", "2026-05-18t12:00:00z", "2026-05-18 12:00:00Z"])(
+    "does not treat chrono-valid FX quote timestamp %p as missing",
+    async (quoteTimestamp) => {
+      const db = createHealthDb();
+      const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+        accountProvider: {
+          getActiveAccounts: () => [account({ id: "account-a" })],
+          getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+        },
+        holdingsProvider: {
+          getHoldings: () => [
+            holding({
+              assetId: "asset-cad",
+              symbol: "CADSEC",
+              marketValue: 10,
+              localCurrency: "CAD",
+              baseCurrency: "USD",
+            }),
+          ],
+        },
+        exchangeRateProvider: {
+          ensureFxPairs: async () => [],
+          getLatestFxRateSnapshots: () => [
+            fxSnapshot({
+              fromCurrency: "CAD",
+              toCurrency: "USD",
+              quoteTimestamp,
+            }),
+          ],
+        },
+        settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+        now: () => new Date("2026-05-18T12:00:00.000Z"),
+      });
 
-    try {
-      const status = await service.runHealthChecks?.("UTC");
-      expect(status?.issues.filter((issue) => issue.category === "FX_INTEGRITY")).toEqual([]);
-    } finally {
-      db.close();
-    }
-  });
+      try {
+        const status = await service.runHealthChecks?.("UTC");
+        expect(status?.issues.filter((issue) => issue.category === "FX_INTEGRITY")).toEqual([]);
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   test("adds bounded data consistency issues for negative account balances", async () => {
     const db = createHealthDb();

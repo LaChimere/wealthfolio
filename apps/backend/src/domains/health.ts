@@ -2042,7 +2042,7 @@ function timestampNow(): string {
 
 function parseRustRfc3339Timestamp(value: string): Date | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?([Zz]|([+-])(\d{2}):?(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
     );
   if (!match) {
@@ -2070,7 +2070,7 @@ function parseRustRfc3339Timestamp(value: string): Date | null {
   const second = Number(secondRaw);
   const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
   const zoneHour = Number(zoneHourRaw);
-  const zoneMinute = Number(zoneMinuteRaw ?? "0");
+  const zoneMinute = Number(zoneMinuteRaw);
   if (
     month < 1 ||
     month > 12 ||
