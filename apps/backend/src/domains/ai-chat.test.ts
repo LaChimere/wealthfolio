@@ -2212,6 +2212,16 @@ describe("TS AI chat domain", () => {
         capabilities: { tools: false, thinking: false, vision: true, streaming: true },
       }),
     });
+    const ollamaPdfNoVisionDb = createAiChatDb();
+    const ollamaPdfNoVisionService = createAiChatService(ollamaPdfNoVisionDb, {
+      aiProviderService: createProviderResolver({
+        providerId: "ollama",
+        modelId: "llama3",
+        providerType: "local",
+        baseUrl: "http://localhost:11434/v1",
+        capabilities: { tools: false, thinking: false, vision: false, streaming: true },
+      }),
+    });
 
     try {
       await expect(
@@ -2239,10 +2249,19 @@ describe("TS AI chat domain", () => {
           ],
         }),
       ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      await expect(
+        ollamaPdfNoVisionService.sendMessage({
+          content: "Read PDF",
+          attachments: [
+            { name: "statement.pdf", contentType: "application/pdf", data: "JVBERi0=" },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
     } finally {
       visionDisabledDb.close();
       unsupportedTypeDb.close();
       ollamaPdfDb.close();
+      ollamaPdfNoVisionDb.close();
     }
   });
 

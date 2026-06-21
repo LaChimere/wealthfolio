@@ -5998,11 +5998,16 @@ contract:
 - `pr5-provider-fallback-review-fix`: verification passed: focused market-data
   tests. Coverage removes the stale Alpha Vantage option-history failure
   assertion and preserves US Treasury calculated fallback for Treasury bonds
-  with unsupported preferred providers.
+  with unsupported preferred providers. It also ignores stale high error counts
+  from the old provider when a fallback provider is selected.
 - `pr5-ai-chat-nonvision-attachment-parity`: verification passed: focused AI
   chat tests. Coverage includes image/PDF attachments on non-vision models
   returning Rust-shaped invalid-input errors while unsupported media/provider
   combinations keep explicit 501 gates.
+- `pr5-ai-chat-unsupported-media-review-fix`: verification passed: focused AI
+  chat tests. Coverage includes unsupported provider/media combinations such as
+  Ollama PDF remaining explicit 501 gates even when the selected model lacks
+  vision.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

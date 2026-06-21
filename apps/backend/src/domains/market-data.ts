@@ -923,7 +923,7 @@ async function syncMarketDataExecution(
         }
         continue;
       }
-      if ((states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS) {
+      if (quoteSyncErrorCount(state, quoteSource) >= MAX_SYNC_ERRORS) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
       }
@@ -986,7 +986,7 @@ async function syncMarketDataExecution(
       }
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1051,7 +1051,7 @@ async function syncMarketDataExecution(
       }
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1125,7 +1125,7 @@ async function syncMarketDataExecution(
       }
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1197,7 +1197,7 @@ async function syncMarketDataExecution(
       }
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1277,7 +1277,7 @@ async function syncMarketDataExecution(
       }
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1337,7 +1337,7 @@ async function syncMarketDataExecution(
     if (provider === BOERSE_FRANKFURT_PROVIDER) {
       if (
         marketSyncMode.type !== "backfill_history" &&
-        (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+        quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
       ) {
         addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
         continue;
@@ -1399,7 +1399,7 @@ async function syncMarketDataExecution(
     }
     if (
       marketSyncMode.type !== "backfill_history" &&
-      (states.get(asset.id)?.error_count ?? 0) >= MAX_SYNC_ERRORS
+      quoteSyncErrorCount(state, provider) >= MAX_SYNC_ERRORS
     ) {
       addMarketSyncSkip(result, asset.id, "Too many consecutive sync failures");
       continue;
@@ -4190,6 +4190,21 @@ function quoteFetchProvider(provider: string, asset: AssetMarketSyncRow): string
 
 function defaultQuoteFetchProvider(asset: AssetMarketSyncRow): string {
   return isUsTreasuryBondAsset(asset) ? US_TREASURY_CALC_PROVIDER : DEFAULT_MARKET_DATA_PROVIDER;
+}
+
+function quoteSyncErrorCount(state: QuoteSyncStateRow | null, provider: string): number {
+  return quoteSyncStateProviderMatches(state, provider) ? (state?.error_count ?? 0) : 0;
+}
+
+function quoteSyncStateProviderMatches(state: QuoteSyncStateRow | null, provider: string): boolean {
+  const stateProvider = optionalString(state?.data_source);
+  if (stateProvider === null) {
+    return false;
+  }
+  if (isCustomProviderSync(provider) || isCustomProviderSync(stateProvider)) {
+    return stateProvider.trim() === provider.trim();
+  }
+  return stateProvider.trim().toUpperCase() === provider.trim().toUpperCase();
 }
 
 function isCustomProviderSync(provider: string): boolean {

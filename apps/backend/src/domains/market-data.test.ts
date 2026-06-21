@@ -402,6 +402,12 @@ describe("TS market data domain", () => {
         instrument_symbol: "BTC",
         provider_config: JSON.stringify({ preferred_provider: "MARKETDATA_APP" }),
       });
+      insertSyncState(db, {
+        asset_id: "marketdata-crypto",
+        data_source: "MARKETDATA_APP",
+        error_count: 10,
+        last_error: "old provider failure",
+      });
       insertAsset(db, {
         id: "alpha-option",
         display_code: "AAPL option",
@@ -409,6 +415,12 @@ describe("TS market data domain", () => {
         instrument_type: "OPTION",
         instrument_symbol: "AAPL260117C00100000",
         provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+      insertSyncState(db, {
+        asset_id: "alpha-option",
+        data_source: "ALPHA_VANTAGE",
+        error_count: 10,
+        last_error: "old provider failure",
       });
       insertAsset(db, {
         id: "metal-api-equity",
@@ -2919,6 +2931,12 @@ describe("TS market data domain", () => {
             couponFrequency: "SEMI_ANNUAL",
           },
         }),
+      });
+      insertSyncState(db, {
+        asset_id: "treasury-marketdata-preferred",
+        data_source: "MARKETDATA_APP",
+        error_count: 10,
+        last_error: "old provider failure",
       });
 
       await expect(

@@ -4512,12 +4512,17 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 745: Resolved provider-fallback review follow-ups. The stale Alpha
   Vantage provider-specific test no longer expects an option-history failure,
   and unsupported preferred providers now preserve the US Treasury calculated
-  default for Treasury bonds instead of hard-falling back to Yahoo.
+  default for Treasury bonds instead of hard-falling back to Yahoo. Stale
+  high-error sync states from the previously selected provider no longer block
+  the newly selected fallback provider.
 - Turn 746: Tightened AI chat non-vision attachment parity. Image/PDF
   attachments sent to a model without vision now return Rust-shaped
   invalid-input errors instead of TS-runtime-specific 501s, while unsupported
   media/provider combinations remain explicitly gated. Verified with focused AI
   chat tests.
+- Turn 747: Resolved AI attachment review follow-up. Non-vision 400s now apply
+  only when the provider/media combination is otherwise supported; unsupported
+  provider/media combinations such as Ollama PDF remain explicit 501 gates.
 
 ## Deferred items
 

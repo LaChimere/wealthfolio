@@ -325,7 +325,13 @@ export function createAiChatService(
         (attachment) => !isSupportedAttachmentForProvider(attachment, providerConfig),
       );
       if (unsupportedAttachment) {
-        if (isBinaryAttachment(unsupportedAttachment) && !providerConfig.capabilities.vision) {
+        if (
+          multimodalAttachmentSupportedByProvider(
+            unsupportedAttachment,
+            providerConfig.providerId,
+          ) &&
+          !providerConfig.capabilities.vision
+        ) {
           throw aiChatError(
             "invalid_input",
             `The current model does not support image/PDF attachments (${unsupportedAttachment.name}). Please switch to a vision-capable model.`,
@@ -620,8 +626,17 @@ function isSupportedAttachmentForProvider(
   }
   return (
     providerConfig.capabilities.vision &&
-    providerSupportsMultimodalAttachments(providerConfig.providerId) &&
-    multimodalAttachmentMediaType(attachment, providerConfig.providerId) !== null
+    multimodalAttachmentSupportedByProvider(attachment, providerConfig.providerId)
+  );
+}
+
+function multimodalAttachmentSupportedByProvider(
+  attachment: AiChatAttachment,
+  providerId: string,
+): boolean {
+  return (
+    providerSupportsMultimodalAttachments(providerId) &&
+    multimodalAttachmentMediaType(attachment, providerId) !== null
   );
 }
 
