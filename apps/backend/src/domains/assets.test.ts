@@ -322,11 +322,19 @@ describe("TS assets domain", () => {
         instrumentSymbol: "AAPL",
         instrumentExchangeMic: "XNAS",
         providerConfig: JSON.stringify({ preferred_provider: "YAHOO" }),
+        createdAt: expect.stringMatching(/\+00:00$/),
+        updatedAt: expect.stringMatching(/\+00:00$/),
       });
+      expect(created.createdAt).not.toEndWith("Z");
+      expect(created.updatedAt).not.toEndWith("Z");
+      const createPayload = syncEvents[0].payload as { createdAt: string; updatedAt: string };
+      expect(createPayload.createdAt).not.toEndWith("Z");
+      expect(createPayload.updatedAt).not.toEndWith("Z");
       expect(syncEvents[1].payload).toMatchObject({
         notes: "updated",
         quoteCcy: "CAD",
         instrumentExchangeMic: "XTSE",
+        updatedAt: expect.stringMatching(/\+00:00$/),
       });
       expect(syncEvents[2].payload).toMatchObject({ quoteMode: "MANUAL" });
       expect(syncEvents[3].payload).toEqual({ id: created.id });

@@ -5860,6 +5860,10 @@ contract:
 - `pr5-data-export-http-route-coverage`: verification passed: focused HTTP
   tests. Coverage includes data-export auth gating, Rust-shaped response
   headers, 204 empty responses, invalid parameter 400s, and route miss 404s.
+- `pr5-assets-write-timestamps`: verification passed: focused asset tests.
+  Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00` storage and
+  sync payload timestamps for asset create/update while preserving
+  `NaiveDateTime` API reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
