@@ -987,7 +987,7 @@ async function persistHoldingsSnapshot(
 
   await ensureSnapshotFxPairs(db, request, options);
 
-  const now = new Date().toISOString();
+  const now = holdingsNaiveUtcTimestampNow();
   const positions: Record<string, SnapshotPosition> = {};
   const assetSyncOperations = new Map<string, HoldingsAssetSyncOperation>();
   const snapshotSyncEvents: HoldingsSnapshotSyncEvent[] = [];
@@ -1210,6 +1210,11 @@ function toRustUtcRfc3339(value: string): string {
 
 function holdingsRustTimestampNow(): string {
   return toRustUtcRfc3339(new Date().toISOString());
+}
+
+function holdingsNaiveUtcTimestampNow(): string {
+  const iso = new Date().toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}Z` : iso;
 }
 
 function upsertHoldingsSnapshot(

@@ -455,6 +455,9 @@ describe("TS holdings domain", () => {
             net_contribution_base: "0",
             cash_total_account_currency: "0",
             cash_total_base_currency: "0",
+            calculated_at: expect.stringMatching(
+              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/,
+            ),
           }),
         }),
         expect.objectContaining({
