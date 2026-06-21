@@ -1548,13 +1548,30 @@ function toApiDate(value: string): string {
 
 function toStorageNaiveUtcDateTime(value: string): string {
   const naive = normalizeNaiveUtcDateTime(value);
-  return naive === null ? value : `${naive}Z`;
+  if (naive === null) {
+    throw new Error("Invalid input: timestamp must be RFC3339 or NaiveDateTime");
+  }
+  return `${naive}Z`;
 }
 
 function normalizeNaiveUtcDateTime(value: string): string | null {
-  const naiveMatch = /^([+-]?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?$/u.exec(value);
+  const naiveMatch = /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/u.exec(
+    value,
+  );
   if (naiveMatch) {
-    return `${naiveMatch[1]}${normalizeRustSerdeFraction(naiveMatch[2])}`;
+    const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, fractionRaw] = naiveMatch;
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    const second = Number(secondRaw);
+    if (!validDateParts(year, month, day) || hour > 23 || minute > 59 || second > 59) {
+      return null;
+    }
+    return `${yearRaw}-${monthRaw}-${dayRaw}T${hourRaw}:${minuteRaw}:${secondRaw}${normalizeRustSerdeFraction(
+      fractionRaw,
+    )}`;
   }
   const match =
     /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
@@ -1593,13 +1610,13 @@ function normalizeNaiveUtcDateTime(value: string): string | null {
     day > 31 ||
     hour > 23 ||
     minute > 59 ||
-    second > 59 ||
+    second > 60 ||
     zoneHour > 23 ||
     zoneMinute > 59
   ) {
     return null;
   }
-  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), millisecond));
   local.setUTCFullYear(year, month - 1, day);
   if (
     Number.isNaN(local.valueOf()) ||
@@ -1621,10 +1638,24 @@ function normalizeNaiveUtcDateTime(value: string): string | null {
   )}-${String(parsed.getUTCDate()).padStart(2, "0")}T${String(parsed.getUTCHours()).padStart(
     2,
     "0",
-  )}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${String(parsed.getUTCSeconds()).padStart(
-    2,
-    "0",
-  )}${normalizeRustSerdeFraction(fractionRaw)}`;
+  )}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${
+    second === 60 ? "60" : String(parsed.getUTCSeconds()).padStart(2, "0")
+  }${normalizeRustSerdeFraction(fractionRaw)}`;
+}
+
+function validDateParts(year: number, month: number, day: number): boolean {
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, month - 1, day);
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= 31 &&
+    !Number.isNaN(date.valueOf()) &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function normalizeRustSerdeFraction(value: string | undefined): string {

@@ -104,6 +104,18 @@ describe("TS assets domain", () => {
         updatedAt: "-0001-12-31T19:00:00",
       });
       insertAsset(db, {
+        id: "asset-leap-second",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+        created_at: "2015-06-30T23:59:60Z",
+        updated_at: "2015-07-01T00:59:60+01:00",
+      });
+      expect(service.getAssetProfile("asset-leap-second")).toMatchObject({
+        createdAt: "2015-06-30T23:59:60",
+        updatedAt: "2015-06-30T23:59:60",
+      });
+      insertAsset(db, {
         id: "asset-invalid-time",
         kind: "INVESTMENT",
         quote_mode: "MANUAL",

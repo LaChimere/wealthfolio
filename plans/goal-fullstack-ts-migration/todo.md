@@ -5810,6 +5810,9 @@ contract:
   asset/taxonomy tests. Coverage includes chrono-compatible RFC3339 space
   separators, lowercase `t`/`z`, and signed/expanded-year formatting for asset
   timestamp UTC rollovers.
+- `pr5-naive-timestamp-leap-storage-fixes`: verification passed: focused
+  asset/taxonomy tests. Coverage includes chrono-compatible RFC3339 leap seconds
+  and rejecting invalid taxonomy update-created timestamp storage inputs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

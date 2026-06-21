@@ -2583,13 +2583,13 @@ function normalizeRfc3339NaiveTimestamp(value: string): string | null {
     day > 31 ||
     hour > 23 ||
     minute > 59 ||
-    second > 59 ||
+    second > 60 ||
     zoneHour > 23 ||
     zoneMinute > 59
   ) {
     return null;
   }
-  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), millisecond));
   local.setUTCFullYear(year, month - 1, day);
   if (
     Number.isNaN(local.valueOf()) ||
@@ -2605,7 +2605,7 @@ function normalizeRfc3339NaiveTimestamp(value: string): string | null {
   if (Number.isNaN(parsed.valueOf())) {
     return null;
   }
-  return naiveTimestampFromDate(parsed, fractionRaw);
+  return naiveTimestampFromDate(parsed, fractionRaw, second === 60 ? "60" : undefined);
 }
 
 function normalizeNaiveTimestamp(value: string): string | null {
@@ -2635,17 +2635,20 @@ function normalizeNaiveTimestamp(value: string): string | null {
   )}`;
 }
 
-function naiveTimestampFromDate(date: Date, fractionRaw: string | undefined): string {
+function naiveTimestampFromDate(
+  date: Date,
+  fractionRaw: string | undefined,
+  secondOverride?: string,
+): string {
   return `${chronoYearString(date.getUTCFullYear())}-${String(date.getUTCMonth() + 1).padStart(
     2,
     "0",
   )}-${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(
     2,
     "0",
-  )}:${String(date.getUTCMinutes()).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(
-    2,
-    "0",
-  )}${normalizeRustFraction(fractionRaw)}`;
+  )}:${String(date.getUTCMinutes()).padStart(2, "0")}:${
+    secondOverride ?? String(date.getUTCSeconds()).padStart(2, "0")
+  }${normalizeRustFraction(fractionRaw)}`;
 }
 
 function validDateParts(year: number, month: number, day: number): boolean {

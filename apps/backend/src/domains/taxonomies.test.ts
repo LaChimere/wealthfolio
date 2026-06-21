@@ -37,7 +37,7 @@ describe("TS taxonomies domain", () => {
         "custom_groups",
       );
       db.prepare("UPDATE taxonomies SET updated_at = ? WHERE id = ?").run(
-        "2026-01-01t00:00:00z",
+        "2015-06-30t23:59:60z",
         "custom_groups",
       );
 
@@ -47,7 +47,7 @@ describe("TS taxonomies domain", () => {
           isSystem: false,
           isSingleSelect: true,
           createdAt: "2026-01-01T00:00:00.123456",
-          updatedAt: "2026-01-01T00:00:00",
+          updatedAt: "2015-06-30T23:59:60",
         }),
         expect.objectContaining({
           id: "regions",
@@ -150,6 +150,12 @@ describe("TS taxonomies domain", () => {
         isSingleSelect: false,
         sortOrder: 20,
       });
+      expect(() =>
+        service.updateTaxonomy({
+          ...created,
+          createdAt: "2025-02-30T00:00:00",
+        }),
+      ).toThrow("timestamp must be RFC3339 or NaiveDateTime");
       expect(syncEvents.at(-1)).toEqual(
         expect.objectContaining({
           taxonomyId: "strategy",
