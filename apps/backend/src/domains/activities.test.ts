@@ -2836,6 +2836,18 @@ describe("TS activities import domain", () => {
       });
       expect(created.id).not.toBe("client-temp-id");
 
+      const fractionalDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-15T10:30:00.123456+02:30",
+        amount: "42",
+        currency: "USD",
+      }) as Activity;
+      expect(fractionalDate.activityDate).toBe("2025-01-15T08:00:00.123456+00:00");
+      expect(readActivityValue(db, fractionalDate.id, "activity_date")).toBe(
+        "2025-01-15T08:00:00.123456+00:00",
+      );
+
       expect(() =>
         service.createActivity?.({
           accountId: "account-1",

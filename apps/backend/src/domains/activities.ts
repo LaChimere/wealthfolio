@@ -6143,11 +6143,11 @@ function normalizeActivityDateInput(value: unknown): string {
   }
   const [, year, month, day] = rfc3339;
   assertValidDateParts(Number(year), Number(month), Number(day));
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
+  const normalized = normalizeRfc3339ActivityDate(raw);
+  if (normalized === null) {
     throw new Error("Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD");
   }
-  return dateToUtcRfc3339(date);
+  return normalized;
 }
 
 function assertValidDateParts(year: number, month: number, day: number): void {
@@ -6162,6 +6162,74 @@ function assertValidDateParts(year: number, month: number, day: number): void {
 function dateToUtcRfc3339(date: Date): string {
   const iso = date.toISOString();
   return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace("Z", "+00:00");
+}
+
+function normalizeRfc3339ActivityDate(value: string): string | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (hour > 23 || minute > 59 || second > 59 || zoneHour > 23 || zoneMinute > 59) {
+    return null;
+  }
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes =
+    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  const base = parsed.toISOString().slice(0, 19);
+  return `${base}${normalizeRustFraction(fractionRaw)}+00:00`;
+}
+
+function normalizeRustFraction(value: string | undefined): string {
+  if (value === undefined || /^0+$/u.test(value)) {
+    return "";
+  }
+  const nanos = value.padEnd(9, "0");
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
 }
 
 function parseOptionalDecimal(value: unknown, field: string): Decimal | null {
