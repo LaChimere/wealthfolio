@@ -4612,6 +4612,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   adapter now has focused tests for multipart file/config POST behavior and
   backend JSON/text parse error surfacing. Verified with focused frontend web
   activities adapter tests.
+- Turn 768: Strengthened add-on frontend adapter coverage. Web and Electron
+  adapters now have focused tests for zip byte payload conversion, compatibility
+  aliases, enabled/installed reads, and rating bounds before submit. Verified
+  with focused frontend add-on adapter tests.
 
 ## Deferred items
 

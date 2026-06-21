@@ -6079,6 +6079,10 @@ contract:
 - `pr5-web-activity-parse-adapter-coverage`: verification passed: focused
   frontend web activities adapter tests. Coverage includes multipart file/config
   POST behavior and backend JSON/text parse error surfacing.
+- `pr5-addon-adapter-coverage`: verification passed: focused frontend add-on
+  adapter tests. Web and Electron adapters now cover zip byte payload
+  conversion, compatibility aliases, enabled/installed reads, and rating bounds
+  before submit.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
