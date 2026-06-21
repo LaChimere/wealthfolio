@@ -5877,6 +5877,9 @@ contract:
 - `pr5-taxonomies-write-timestamps`: verification passed: focused taxonomy
   tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00` storage
   for taxonomy writes while preserving `NaiveDateTime` API reads.
+- `pr5-direct-asset-create-timestamps`: verification passed: focused activity
+  and holdings tests. Coverage includes Rust `+00:00` `created_at`/`updated_at`
+  storage for activity-created and holdings-created direct asset inserts.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

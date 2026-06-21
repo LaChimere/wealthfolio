@@ -4935,8 +4935,8 @@ describe("TS activities import domain", () => {
             instrument_symbol: "NVDA",
             instrument_exchange_mic: "XNAS",
             provider_config: '{"preferred_provider":"YAHOO"}',
-            created_at: expect.any(String),
-            updated_at: expect.any(String),
+            created_at: expect.stringMatching(/\+00:00$/),
+            updated_at: expect.stringMatching(/\+00:00$/),
           }),
         },
         expect.objectContaining({
@@ -4976,6 +4976,8 @@ describe("TS activities import domain", () => {
             id: "NFLX-ASSET",
             display_code: "NFLX",
             instrument_symbol: "NFLX",
+            created_at: expect.stringMatching(/\+00:00$/),
+            updated_at: expect.stringMatching(/\+00:00$/),
           }),
         }),
         expect.objectContaining({

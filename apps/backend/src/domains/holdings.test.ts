@@ -309,11 +309,26 @@ describe("TS holdings domain", () => {
 
       const asset = db
         .query<
-          { id: string; quote_mode: string; quote_ccy: string },
+          {
+            id: string;
+            quote_mode: string;
+            quote_ccy: string;
+            created_at: string;
+            updated_at: string;
+          },
           [string]
-        >("SELECT id, quote_mode, quote_ccy FROM assets WHERE display_code = ?")
+        >(
+          "SELECT id, quote_mode, quote_ccy, created_at, updated_at FROM assets WHERE display_code = ?",
+        )
         .get("MAN");
-      expect(asset).toEqual(expect.objectContaining({ quote_mode: "MANUAL", quote_ccy: "USD" }));
+      expect(asset).toEqual(
+        expect.objectContaining({
+          quote_mode: "MANUAL",
+          quote_ccy: "USD",
+          created_at: expect.stringMatching(/\+00:00$/),
+          updated_at: expect.stringMatching(/\+00:00$/),
+        }),
+      );
       expect(
         db
           .query<

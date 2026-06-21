@@ -4862,7 +4862,10 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
     "instrument_type",
     "instrument_symbol",
     "instrument_exchange_mic",
+    "created_at",
+    "updated_at",
   ];
+  const now = activityStorageTimestampNow();
   const values: Array<string | number | null> = [
     asset.id,
     asset.kind,
@@ -4875,6 +4878,8 @@ function insertPendingActivityAssetRow(db: Database, asset: PendingActivityAsset
     asset.instrumentType,
     asset.instrumentSymbol,
     asset.instrumentExchangeMic,
+    now,
+    now,
   ];
   if (assetTableColumns(db).has("provider_config")) {
     columns.push("provider_config");

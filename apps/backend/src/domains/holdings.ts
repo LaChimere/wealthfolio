@@ -1137,13 +1137,15 @@ function getOrCreateManualSnapshotAsset(
   const assetKind = holding.assetKind === "OTHER" ? "OTHER" : "INVESTMENT";
   const quoteMode = holding.dataSource === "MANUAL" ? "MANUAL" : "MARKET";
   const symbol = holding.symbol.trim();
+  const now = holdingsRustTimestampNow();
   db.prepare(
     `
       INSERT INTO assets (
         id, kind, name, display_code, metadata, is_active, quote_mode, quote_ccy,
-        instrument_type, instrument_symbol, instrument_exchange_mic, provider_config
+        instrument_type, instrument_symbol, instrument_exchange_mic, provider_config,
+        created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     assetId,
@@ -1157,6 +1159,8 @@ function getOrCreateManualSnapshotAsset(
     symbol || null,
     holding.exchangeMic ?? null,
     quoteMode === "MARKET" ? JSON.stringify({ preferred_provider: "YAHOO" }) : null,
+    now,
+    now,
   );
   const created = readAssetsById(db, [assetId]).get(assetId);
   if (!created) {
@@ -1202,6 +1206,10 @@ function manualSnapshotQuoteId(assetId: string, day: string): string {
 
 function toRustUtcRfc3339(value: string): string {
   return value.endsWith(".000Z") ? `${value.slice(0, -5)}+00:00` : value.replace(/Z$/u, "+00:00");
+}
+
+function holdingsRustTimestampNow(): string {
+  return toRustUtcRfc3339(new Date().toISOString());
 }
 
 function upsertHoldingsSnapshot(
