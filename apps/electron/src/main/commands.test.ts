@@ -911,6 +911,14 @@ describe("Electron sidecar command proxy", () => {
     ).resolves.toEqual([{ path: "/api/v1/connect/import-runs" }]);
     await expect(
       invokeSidecarCommand({
+        command: "get_import_runs",
+        payload: { runType: "manual", limit: 2 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/import-runs" }]);
+    await expect(
+      invokeSidecarCommand({
         command: "get_broker_sync_profile",
         payload: { accountId: "acct/1", sourceSystem: "ibkr" },
         sidecar,
@@ -951,6 +959,11 @@ describe("Electron sidecar command proxy", () => {
       ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
       [
         "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=broker&limit=5&offset=10",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=manual&limit=2",
         "GET",
         undefined,
       ],
@@ -996,6 +1009,14 @@ describe("Electron sidecar command proxy", () => {
         fetchImpl,
       }),
     ).rejects.toThrow('requires number payload field "limit"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_import_runs",
+        payload: { offset: "10" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "offset"');
     await expect(
       invokeSidecarCommand({
         command: "get_broker_sync_profile",

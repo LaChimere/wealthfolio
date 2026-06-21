@@ -4604,6 +4604,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   backup list/delete command parity. The guard now reflects 252 Electron
   commands, 234 shared commands, and one remaining web-only backend command.
   Verified with focused backend-contract command-surface tests.
+- Turn 766: Strengthened Electron Connect import-run alias coverage. The
+  `get_import_runs` command alias now has focused route/query and malformed
+  payload coverage alongside `get_data_import_runs`. Verified with focused
+  Electron Connect command tests.
 
 ## Deferred items
 

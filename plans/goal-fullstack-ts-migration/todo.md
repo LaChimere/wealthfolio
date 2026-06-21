@@ -6073,6 +6073,9 @@ contract:
   backend-contract command-surface tests. Guard counts now reflect Electron
   backup list/delete command parity: 252 Electron commands, 234 shared commands,
   and one remaining web-only backend command.
+- `pr5-electron-connect-import-runs-alias-coverage`: verification passed:
+  focused Electron Connect command tests. Coverage includes `get_import_runs`
+  alias route/query serialization and malformed numeric query validation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
