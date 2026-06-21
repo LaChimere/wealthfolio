@@ -5934,6 +5934,9 @@ contract:
 - `pr5-electron-data-root-doc-cleanup`: verification passed: Markdown format
   check. Scope is a docs-only cleanup removing stale desktop `DATABASE_URL`
   wording from the Electron migration architecture data-root section.
+- `pr5-roadmap-backend-runtime-wording`: verification passed: Markdown format
+  check. Scope is a docs-only cleanup naming the Bun/TypeScript REST API server
+  in the roadmap while preserving the legacy Axum reference note.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4439,6 +4439,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   compatibility section no longer mentions desktop `DATABASE_URL` behavior and
   now describes packaged Electron reusing the legacy Tauri `app.db` root before
   starting the TypeScript backend.
+- Turn 730: Refreshed roadmap backend runtime wording. The Phase 3 REST API item
+  now names the Bun/TypeScript backend as current while noting the legacy Axum
+  reference remains retained.
 
 ## Deferred items
 
