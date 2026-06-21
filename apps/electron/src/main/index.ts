@@ -117,11 +117,15 @@ function registerIpcHandlers(): void {
       }
 
       const sidecar = await getReadySidecarHandle();
-      return await invokeSidecarCommand({
+      const result = await invokeSidecarCommand({
         command: validatedRequest.command,
         payload: validatedRequest.payload,
         sidecar,
       });
+      if (validatedRequest.command === "restore_database") {
+        sendRendererEvent("database:restored", null);
+      }
+      return result;
     },
   );
   ipcMain.handle(IPC_CHANNELS.startAiChatStream, async (event, request: unknown): Promise<void> => {

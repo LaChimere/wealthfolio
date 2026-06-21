@@ -6055,6 +6055,10 @@ contract:
   Connect feature-gate tests. Broker activity mapping and disabled broker sync
   profile errors keep explicit `not_implemented` behavior without saying TS
   backend runtime.
+- `pr5-electron-database-restore-event`: verification passed: focused Electron
+  event adapter tests and Electron type-check. Successful `restore_database`
+  sidecar commands now emit `database:restored`, and the Electron adapter
+  forwards it to the existing global refresh/toast listener.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

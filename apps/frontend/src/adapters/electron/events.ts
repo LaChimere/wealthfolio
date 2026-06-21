@@ -5,8 +5,6 @@ import {
   type WealthfolioElectronApi,
 } from "@wealthfolio/electron/shared/ipc";
 
-const noopUnlisten: UnlistenFn = () => Promise.resolve();
-
 function getElectronApi(): WealthfolioElectronApi {
   if (typeof window === "undefined" || !window[ELECTRON_API_KEY]) {
     throw new Error("Electron preload API is unavailable.");
@@ -28,10 +26,6 @@ const listenElectronEvent = async <T>(
   });
 };
 
-const listenPendingElectronBridge = <T>(_handler: EventCallback<T>): Promise<UnlistenFn> => {
-  return Promise.resolve(noopUnlisten);
-};
-
 export const listenFileDropHover = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent(ELECTRON_FILE_DROP_EVENTS.hover, handler);
 };
@@ -49,7 +43,9 @@ export const listenPortfolioUpdateComplete = <T>(
 ): Promise<UnlistenFn> => {
   return listenElectronEvent("portfolio:update-complete", handler);
 };
-export const listenDatabaseRestored = listenPendingElectronBridge;
+export const listenDatabaseRestored = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
+  return listenElectronEvent("database:restored", handler);
+};
 export const listenPortfolioUpdateError = <T>(handler: EventCallback<T>): Promise<UnlistenFn> => {
   return listenElectronEvent("portfolio:update-error", handler);
 };

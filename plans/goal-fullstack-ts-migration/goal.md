@@ -4582,6 +4582,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   and disabled broker sync profile errors now keep explicit `not_implemented`
   behavior without referring to the TS backend runtime. Verified with focused
   Connect feature-gate tests.
+- Turn 761: Wired Electron database-restore completion events. Successful
+  `restore_database` sidecar commands now emit the existing `database:restored`
+  renderer event, and the Electron adapter listener forwards it to the global
+  cache invalidation/toast path. Verified with focused Electron event adapter
+  tests and Electron type-check.
 
 ## Deferred items
 

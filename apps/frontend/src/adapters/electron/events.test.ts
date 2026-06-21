@@ -6,6 +6,7 @@ import {
   listenFileDrop,
   listenFileDropCancelled,
   listenFileDropHover,
+  listenDatabaseRestored,
   listenNavigateToRoute,
   listenMarketSyncComplete,
   listenPortfolioUpdateStart,
@@ -46,6 +47,23 @@ describe("electron event adapter", () => {
       event: "portfolio:update-start",
       id: 1,
       payload: { ok: true },
+    });
+  });
+
+  it("delegates database restore listeners through preload", async () => {
+    const listen = vi.fn().mockResolvedValue(vi.fn());
+    installElectronApi({ listen });
+
+    const restoredHandler = vi.fn();
+    await listenDatabaseRestored(restoredHandler);
+
+    expect(listen).toHaveBeenCalledWith("database:restored", expect.any(Function));
+    const [, bridgeHandler] = listen.mock.calls[0];
+    bridgeHandler({ event: "database:restored", id: 5, payload: null });
+    expect(restoredHandler).toHaveBeenCalledWith({
+      event: "database:restored",
+      id: 5,
+      payload: null,
     });
   });
 
