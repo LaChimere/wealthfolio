@@ -1559,10 +1559,15 @@ describe("TS market data domain", () => {
         source: "YAHOO",
         close: "22.5",
       });
+      expect(readSyncState(db, "catalog-asset")).toMatchObject({
+        created_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
+      });
       expect(readSyncState(db, "inactive-asset")).toMatchObject({
         data_source: "YAHOO",
         error_count: 0,
         last_error: null,
+        updated_at: expect.stringMatching(/\+00:00$/),
       });
     } finally {
       db.close();
@@ -1624,8 +1629,9 @@ describe("TS market data domain", () => {
         data_source: "YAHOO",
         error_count: 0,
         last_error: null,
+        last_synced_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
       });
-      expect(readSyncState(db, "asset-1")?.last_synced_at).not.toBeNull();
     } finally {
       db.close();
     }

@@ -4012,7 +4012,7 @@ function markQuoteSyncStatesActive(db: Database, assetIds: string[], now: () => 
   if (assetIds.length === 0) {
     return;
   }
-  const timestamp = now().toISOString();
+  const timestamp = toRustUtcRfc3339(now());
   const placeholders = assetIds.map(() => "?").join(", ");
   db.query(
     `
@@ -4027,8 +4027,8 @@ function markQuoteSyncStatesInactive(db: Database, assetIds: string[], now: () =
   if (assetIds.length === 0) {
     return;
   }
-  const currentDate = now().toISOString().slice(0, 10);
-  const timestamp = now().toISOString();
+  const currentTimestamp = toRustUtcRfc3339(now());
+  const currentDate = currentTimestamp.slice(0, 10);
   const placeholders = assetIds.map(() => "?").join(", ");
   db.query(
     `
@@ -4036,14 +4036,14 @@ function markQuoteSyncStatesInactive(db: Database, assetIds: string[], now: () =
       SET position_closed_date = ?, sync_priority = 50, updated_at = ?
       WHERE asset_id IN (${placeholders})
     `,
-  ).run(currentDate, timestamp, ...assetIds);
+  ).run(currentDate, currentTimestamp, ...assetIds);
 }
 
 function createOpenQuoteSyncStates(db: Database, assetIds: string[], now: () => Date): void {
   if (assetIds.length === 0) {
     return;
   }
-  const timestamp = now().toISOString();
+  const timestamp = toRustUtcRfc3339(now());
   const statement = db.query(
     `
       INSERT INTO quote_sync_state (
