@@ -100,10 +100,10 @@ describe("TS market data domain", () => {
     try {
       service.updateQuote("asset-1", {
         dataSource: "MANUAL",
-        timestamp: "2026-01-02T18:30:00.123Z",
+        timestamp: "2026-01-02T18:30:00.123456+02:30",
         close: "12.34",
         currency: "USD",
-        createdAt: "2026-01-02T18:31:00Z",
+        createdAt: "2026-01-02T18:31:00.123456Z",
       });
 
       const row = db
@@ -113,12 +113,26 @@ describe("TS market data domain", () => {
         >("SELECT timestamp, created_at FROM quotes WHERE asset_id = 'asset-1'")
         .get();
       expect(row).toEqual({
-        timestamp: "2026-01-02T18:30:00.123+00:00",
-        created_at: "2026-01-02T18:31:00+00:00",
+        timestamp: "2026-01-02T16:00:00.123456+00:00",
+        created_at: "2026-01-02T18:31:00.123456+00:00",
       });
       expect(service.getQuoteHistory?.("asset-1")[0]).toMatchObject({
-        timestamp: "2026-01-02T18:30:00.123Z",
-        createdAt: "2026-01-02T18:31:00Z",
+        timestamp: "2026-01-02T16:00:00.123456Z",
+        createdAt: "2026-01-02T18:31:00.123456Z",
+      });
+
+      service.updateQuote("asset-1", {
+        dataSource: "MANUAL",
+        timestamp: "2015-07-01T01:59:60+02:00",
+        close: "12.35",
+        currency: "USD",
+        createdAt: "2015-06-30T23:59:60Z",
+      });
+      expect(
+        service.getQuoteHistory?.("asset-1").find((quote) => quote.timestamp.includes(":60")),
+      ).toMatchObject({
+        timestamp: "2015-06-30T23:59:60Z",
+        createdAt: "2015-06-30T23:59:60Z",
       });
     } finally {
       db.close();
@@ -3506,6 +3520,22 @@ describe("TS market data domain", () => {
       expect(() =>
         service.updateQuote?.("asset-1", {
           timestamp: "not-a-date",
+          dataSource: "MANUAL",
+          close: 10,
+          currency: "USD",
+        }),
+      ).toThrow("Invalid timestamp");
+      expect(() =>
+        service.updateQuote?.("asset-1", {
+          timestamp: "2026-02-30T00:00:00Z",
+          dataSource: "MANUAL",
+          close: 10,
+          currency: "USD",
+        }),
+      ).toThrow("Invalid timestamp");
+      expect(() =>
+        service.updateQuote?.("asset-1", {
+          timestamp: "2026-01-01",
           dataSource: "MANUAL",
           close: 10,
           currency: "USD",

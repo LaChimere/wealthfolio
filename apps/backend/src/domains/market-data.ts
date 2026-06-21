@@ -7340,18 +7340,18 @@ function decimalToNumber(value: string | null): number {
 }
 
 function normalizeQuoteTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const parsed = parseQuoteTimestamp(value);
+  if (parsed === null) {
     throw new Error(`Invalid input: Invalid timestamp '${value}'`);
   }
-  return toRustUtcRfc3339(date);
+  return `${parsed.utcSecond}${parsed.fraction}+00:00`;
 }
 
 function normalizeStoredTimestamp(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
+  const parsed = parseQuoteTimestamp(value);
+  return parsed === null
     ? toRustUtcSerdeRfc3339(new Date())
-    : toRustUtcSerdeRfc3339(date);
+    : `${parsed.utcSecond}${parsed.fraction}Z`;
 }
 
 function timestampNow(): string {
@@ -7366,6 +7366,102 @@ function toRustUtcRfc3339(date: Date): string {
 function toRustUtcSerdeRfc3339(date: Date): string {
   const iso = date.toISOString();
   return iso.endsWith(".000Z") ? iso.slice(0, -5) + "Z" : iso;
+}
+
+function parseQuoteTimestamp(value: string): { utcSecond: string; fraction: string } | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 60 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
+  }
+
+  const local = new Date(
+    Date.UTC(
+      2000,
+      0,
+      1,
+      hour,
+      minute,
+      Math.min(second, 59),
+      timestampFractionMilliseconds(fractionRaw),
+    ),
+  );
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const offsetMinutes =
+    zoneRaw === "Z" || zoneRaw === "z"
+      ? 0
+      : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const utc = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (Number.isNaN(utc.valueOf())) {
+    return null;
+  }
+  return {
+    utcSecond:
+      second === 60 ? `${utc.toISOString().slice(0, 17)}60` : utc.toISOString().slice(0, 19),
+    fraction: normalizeQuoteTimestampFraction(fractionRaw),
+  };
+}
+
+function timestampFractionMilliseconds(value: string | undefined): number {
+  return Number((value ?? "").padEnd(3, "0").slice(0, 3) || "0");
+}
+
+function normalizeQuoteTimestampFraction(value: string | undefined): string {
+  if (value === undefined || /^0+$/u.test(value)) {
+    return "";
+  }
+  const nanos = value.slice(0, 9).padEnd(9, "0");
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
 }
 
 function dedupe(values: string[]): string[] {
