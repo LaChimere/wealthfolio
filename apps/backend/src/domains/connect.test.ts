@@ -2382,7 +2382,7 @@ describe("TS Connect local session service", () => {
           .get(),
       ).toEqual({
         sync_status: "FAILED",
-        last_error: "Broker activity mapping is not yet available in the TS backend runtime",
+        last_error: "Broker activity mapping is not available in this build.",
         last_attempted_at: expect.stringMatching(/\+00:00$/),
         updated_at: expect.stringMatching(/\+00:00$/),
       });
@@ -5414,7 +5414,7 @@ describe("TS Connect local session service", () => {
           .get(),
       ).toEqual({
         sync_status: "FAILED",
-        last_error: "Broker activity mapping is not yet available in the TS backend runtime",
+        last_error: "Broker activity mapping is not available in this build.",
       });
     } finally {
       db.close();
@@ -6205,7 +6205,7 @@ describe("TS Connect local session service", () => {
           .get(),
       ).toEqual({
         sync_status: "FAILED",
-        last_error: "Broker activity mapping is not yet available in the TS backend runtime",
+        last_error: "Broker activity mapping is not available in this build.",
       });
     } finally {
       db.close();

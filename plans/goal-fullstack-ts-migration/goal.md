@@ -4578,6 +4578,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   unsupported attachment/provider errors no longer mention the TS backend
   runtime while preserving explicit `not_implemented` 501 behavior. Verified
   with focused AI chat attachment tests.
+- Turn 760: Cleaned stale Connect feature-gate wording. Broker activity mapping
+  and disabled broker sync profile errors now keep explicit `not_implemented`
+  behavior without referring to the TS backend runtime. Verified with focused
+  Connect feature-gate tests.
 
 ## Deferred items
 

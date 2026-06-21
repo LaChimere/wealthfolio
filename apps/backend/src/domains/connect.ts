@@ -111,7 +111,7 @@ const CLOUD_SYNC_DISABLED_MESSAGE = "Cloud sync features are disabled in this bu
 const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this build.";
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
 const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
-  "Broker sync profile persistence is not yet available in the TS backend runtime";
+  "Broker sync profile persistence is not available in this build.";
 const BROKER_ACTIVITY_MAX_PAGES = 10_000;
 const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
@@ -1785,7 +1785,7 @@ async function syncEmptyTransactionActivityPages(
         }
       }
       if (hasUnsupportedMappableActivity) {
-        const message = "Broker activity mapping is not yet available in the TS backend runtime";
+        const message = "Broker activity mapping is not available in this build.";
         upsertBrokerSyncFailure(db, account.id, message);
         throw new ConnectNotImplementedError(message);
       }
