@@ -6025,6 +6025,9 @@ contract:
   focused runtime tests. Coverage includes SQLite-backed standalone runtime
   TOTAL valuations exported through
   `/api/v1/utilities/export/portfolio-history/json`.
+- `pr5-data-export-runtime-goal-smoke`: verification passed: focused runtime
+  tests. Coverage includes SQLite-backed standalone runtime goals exported
+  through `/api/v1/utilities/export/goals/json`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4545,6 +4545,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   TOTAL account valuations exported through
   `/api/v1/utilities/export/portfolio-history/json`. Verified with focused
   runtime tests.
+- Turn 752: Strengthened standalone runtime data-export coverage for goals. The
+  SQLite-backed TS server now has end-to-end coverage for persisted goals
+  exported through `/api/v1/utilities/export/goals/json`. Verified with focused
+  runtime tests.
 
 ## Deferred items
 

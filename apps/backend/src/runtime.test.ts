@@ -1336,6 +1336,50 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("exports runtime goals through SQLite-backed data export route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-goal-export-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() =>
+        Promise.reject(new Error("unexpected market data fetch"))) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const { goalService } = runtime.options;
+    if (!goalService) {
+      await runtime.close();
+      throw new Error("Runtime goal export test requires goal service");
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const goal = await goalService.createGoal({
+        goalType: "custom_save_up",
+        title: "Runtime Export Goal",
+        targetAmount: 5000,
+        currency: "USD",
+      });
+
+      const goalExportResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/export/goals/json`,
+      );
+      expect(goalExportResponse.status).toBe(200);
+      expect(goalExportResponse.headers.get("content-type")).toBe(
+        "application/json; charset=utf-8",
+      );
+      await expect(goalExportResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          id: goal.id,
+          title: "Runtime Export Goal",
+          targetAmount: 5000,
+        }),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires local Connect runtime behavior with disabled cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
     const publicPlanRequests: string[] = [];
