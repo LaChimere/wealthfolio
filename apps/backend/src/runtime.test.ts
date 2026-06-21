@@ -300,6 +300,11 @@ describe("TS backend runtime composition", () => {
       expect(incomeSummaryResponse.status).toBe(200);
       await expect(incomeSummaryResponse.json()).resolves.toEqual([]);
 
+      const emptyAccountExportResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/export/accounts/csv`,
+      );
+      expect(emptyAccountExportResponse.status).toBe(204);
+
       const simplePerformanceResponse = await fetch(
         `${server.baseUrl}/api/v1/performance/accounts/simple`,
         {

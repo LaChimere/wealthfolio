@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 724
+turns_used: 725
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T15:59:33+08:00"
+updated_at: "2026-06-21T16:04:16+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4417,6 +4417,10 @@ updated_at: "2026-06-21T15:59:33+08:00"
   now use strict Rust-like RFC3339 parsing before timestamp comparison, so
   calendar-rollover strings such as `2026-02-30T16:00:00Z` classify as missing
   rates instead of stale/fresh rates. Verified with focused health tests.
+- Turn 725: Added standalone runtime data-export route smoke coverage. The
+  SQLite-backed TS server now has coverage proving `/api/v1/utilities/export` is
+  wired through runtime composition and returns Rust-compatible 204 responses
+  for empty exports. Verified with runtime tests.
 
 ## Deferred items
 
