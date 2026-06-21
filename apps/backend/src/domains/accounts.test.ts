@@ -330,6 +330,8 @@ describe("TS accounts domain", () => {
         providerAccountId: "provider-account-1",
         isArchived: false,
         trackingMode: "TRANSACTIONS",
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[1]?.payload).toMatchObject({
         id: created.id,
@@ -346,6 +348,8 @@ describe("TS accounts domain", () => {
         providerAccountId: "provider-account-1",
         isArchived: true,
         trackingMode: "HOLDINGS",
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[2]?.payload).toEqual({ id: created.id });
     } finally {

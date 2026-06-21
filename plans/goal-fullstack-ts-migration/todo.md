@@ -5898,6 +5898,9 @@ contract:
 - `pr5-contribution-limit-timestamps`: verification passed: focused
   contribution-limit tests. Coverage includes Rust `NaiveDateTime` JSON-shaped
   timestamps in contribution-limit create/update sync payloads.
+- `pr5-account-sync-payload-timestamps`: verification passed: focused account
+  tests. Coverage includes Rust `NaiveDateTime` JSON-shaped timestamps in
+  account create/update sync payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
