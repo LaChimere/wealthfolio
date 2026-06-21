@@ -360,15 +360,15 @@ export function createAssetService(db: Database, options: AssetServiceOptions = 
       const normalizedQuoteMode = normalizeQuoteMode(quoteMode);
       const updateAssetQuoteMode = db.transaction(() => {
         const updated = db
-          .query<AssetRow, [string, string]>(
+          .query<AssetRow, [string, string, string]>(
             `
               UPDATE assets
-              SET quote_mode = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+              SET quote_mode = ?, updated_at = ?
               WHERE id = ?
               RETURNING *
             `,
           )
-          .get(normalizedQuoteMode, assetId);
+          .get(normalizedQuoteMode, timestampNow(), assetId);
         if (!updated) {
           throw new Error(`Record not found: asset ${assetId}`);
         }

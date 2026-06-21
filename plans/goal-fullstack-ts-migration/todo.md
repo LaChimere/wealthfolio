@@ -5867,6 +5867,9 @@ contract:
 - `pr5-holdings-manual-quote-parity`: verification passed: focused holdings
   tests. Coverage includes Rust manual snapshot quote IDs
   (`YYYYMMDD_ASSETIDUPPER`) and `+00:00` DB timestamp formatting.
+- `pr5-assets-quote-mode-timestamp-review-fix`: verification passed: focused
+  asset tests. Coverage includes Rust `+00:00` write timestamps for quote-mode
+  updates and sync payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

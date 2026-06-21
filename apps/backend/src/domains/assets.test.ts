@@ -336,7 +336,10 @@ describe("TS assets domain", () => {
         instrumentExchangeMic: "XTSE",
         updatedAt: expect.stringMatching(/\+00:00$/),
       });
-      expect(syncEvents[2].payload).toMatchObject({ quoteMode: "MANUAL" });
+      expect(syncEvents[2].payload).toMatchObject({
+        quoteMode: "MANUAL",
+        updatedAt: expect.stringMatching(/\+00:00$/),
+      });
       expect(syncEvents[3].payload).toEqual({ id: created.id });
       expect("instrumentKey" in syncEvents[0].payload).toBe(false);
       expect("instrumentKey" in syncEvents[1].payload).toBe(false);
