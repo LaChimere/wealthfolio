@@ -2032,12 +2032,73 @@ function dismissalFromRow(row: DismissalRow): IssueDismissal {
 }
 
 function parseTimestampOrNow(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? timestampNow() : toRustUtcRfc3339(parsed);
+  const parsed = parseRustRfc3339Timestamp(value);
+  return parsed === null ? timestampNow() : toRustUtcRfc3339(parsed);
 }
 
 function timestampNow(): string {
   return toRustUtcRfc3339(new Date());
+}
+
+function parseRustRfc3339Timestamp(value: string): Date | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
+  }
+  const localMs = Date.UTC(2000, 0, 1, hour, minute, second, millisecond);
+  const local = new Date(localMs);
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes =
+    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
 function toRustUtcRfc3339(date: Date): string {

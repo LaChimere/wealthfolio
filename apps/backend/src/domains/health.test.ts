@@ -26,6 +26,31 @@ describe("TS health domain", () => {
     }
   });
 
+  test("parses stored dismissal timestamps like Rust RFC3339", () => {
+    const db = createHealthDb();
+    const repository = createHealthRepository(db);
+    try {
+      db.query(
+        `
+          INSERT INTO health_issue_dismissals (issue_id, dismissed_at, data_hash)
+          VALUES
+            ('valid-offset', '2026-05-06T07:08:09+02:30', 'hash-1'),
+            ('date-only', '2026-05-06', 'hash-2'),
+            ('calendar-rollover', '2026-02-30T00:00:00+00:00', 'hash-3')
+        `,
+      ).run();
+
+      const dismissals = Object.fromEntries(
+        repository.getDismissals().map((dismissal) => [dismissal.issueId, dismissal.dismissedAt]),
+      );
+      expect(dismissals["valid-offset"]).toBe("2026-05-06T04:38:09+00:00");
+      expect(dismissals["date-only"]).not.toBe("2026-05-06T00:00:00+00:00");
+      expect(dismissals["calendar-rollover"]).not.toBe("2026-03-02T00:00:00+00:00");
+    } finally {
+      db.close();
+    }
+  });
+
   test("reads and validates in-memory health config", async () => {
     const db = createHealthDb();
     const service = createHealthService(createHealthRepository(db));

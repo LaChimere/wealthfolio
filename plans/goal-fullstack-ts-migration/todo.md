@@ -5752,6 +5752,9 @@ contract:
 - `pr5-app-update-request-error`: verification passed: focused app-utilities
   tests. Coverage includes wrapping update endpoint fetch failures with
   Rust-compatible `Failed to query update endpoint` errors.
+- `pr5-health-dismissal-rfc3339-parse`: verification passed: focused health
+  tests. Coverage includes strict Rust-compatible stored dismissal timestamp
+  parsing with fallback for date-only and calendar-rollover strings.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
