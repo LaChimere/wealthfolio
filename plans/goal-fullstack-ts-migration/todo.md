@@ -5874,6 +5874,9 @@ contract:
 - `pr5-assets-sync-state-reset-timestamps`: verification passed: focused asset
   tests. Coverage includes Rust `+00:00` `updated_at` storage when asset profile
   changes reset quote sync state.
+- `pr5-taxonomies-write-timestamps`: verification passed: focused taxonomy
+  tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00` storage
+  for taxonomy writes while preserving `NaiveDateTime` API reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -125,6 +125,17 @@ describe("TS taxonomies domain", () => {
         isSystem: false,
         isSingleSelect: true,
       });
+      expect(
+        db
+          .query<
+            { created_at: string; updated_at: string },
+            []
+          >("SELECT created_at, updated_at FROM taxonomies WHERE id = 'strategy'")
+          .get(),
+      ).toEqual({
+        created_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
+      });
       expect(syncEvents).toEqual([
         expect.objectContaining({
           taxonomyId: "strategy",
