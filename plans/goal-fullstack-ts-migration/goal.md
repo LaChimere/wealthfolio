@@ -4498,10 +4498,12 @@ updated_at: "2026-06-21T16:04:16+08:00"
   matching Rust provider capability filtering. Verified with focused market-data
   tests.
 - Turn 743: Extended quote-sync fallback for unsupported preferred providers.
-  Preferred `MARKETDATA_APP` non-equities and `ALPHA_VANTAGE` OPTION historical
-  syncs now fall back to Yahoo quote sync instead of failing before another
-  fetch-capable provider can handle the asset. Verified with focused market-data
-  tests.
+  Preferred providers whose fetch capabilities do not cover the asset instrument
+  (including `MARKETDATA_APP` non-equities, `ALPHA_VANTAGE` OPTION historical
+  sync, `METAL_PRICE_API` non-metals, `FINNHUB` metals/options/bonds, and
+  `BOERSE_FRANKFURT` non-equity/bond assets) now fall back to Yahoo quote sync
+  instead of failing before another fetch-capable provider can handle the asset.
+  Verified with focused market-data tests.
 - Turn 744: Resolved Alpha Vantage capability review feedback. Capability text
   now explicitly marks Alpha Vantage options as real-time only, preserving the
   historical-support feature for other instrument types while avoiding an

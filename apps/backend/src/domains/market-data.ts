@@ -4165,14 +4165,23 @@ function effectiveMarketDataProvider(
 }
 
 function quoteFetchProvider(provider: string, asset: AssetMarketSyncRow): string {
-  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined);
+  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined) ?? "";
   if (provider === OPENFIGI_PROVIDER) {
     return isUsTreasuryBondAsset(asset) ? US_TREASURY_CALC_PROVIDER : DEFAULT_MARKET_DATA_PROVIDER;
+  }
+  if (provider === ALPHA_VANTAGE_PROVIDER && !["EQUITY", "CRYPTO", "FX"].includes(instrumentType)) {
+    return DEFAULT_MARKET_DATA_PROVIDER;
   }
   if (provider === MARKETDATA_APP_PROVIDER && instrumentType !== "EQUITY") {
     return DEFAULT_MARKET_DATA_PROVIDER;
   }
-  if (provider === ALPHA_VANTAGE_PROVIDER && instrumentType === "OPTION") {
+  if (provider === METAL_PRICE_API_PROVIDER && instrumentType !== "METAL") {
+    return DEFAULT_MARKET_DATA_PROVIDER;
+  }
+  if (provider === FINNHUB_PROVIDER && !["EQUITY", "CRYPTO", "FX"].includes(instrumentType)) {
+    return DEFAULT_MARKET_DATA_PROVIDER;
+  }
+  if (provider === BOERSE_FRANKFURT_PROVIDER && !["EQUITY", "BOND"].includes(instrumentType)) {
     return DEFAULT_MARKET_DATA_PROVIDER;
   }
   return provider;

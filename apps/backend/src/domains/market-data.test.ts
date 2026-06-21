@@ -366,6 +366,27 @@ describe("TS market data domain", () => {
               indicators: { quote: [{ close: [12.34] }] },
             },
           },
+          AAPL: {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [10.5] }] },
+            },
+          },
+          XAU: {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [2000] }] },
+            },
+          },
+          "ETH-USD": {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [3500] }] },
+            },
+          },
         },
         (symbol) => chartSymbols.push(symbol),
       ),
@@ -389,21 +410,51 @@ describe("TS market data domain", () => {
         instrument_symbol: "AAPL260117C00100000",
         provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
       });
+      insertAsset(db, {
+        id: "metal-api-equity",
+        display_code: "AAPL",
+        quote_ccy: "USD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AAPL",
+        provider_config: JSON.stringify({ preferred_provider: "METAL_PRICE_API" }),
+      });
+      insertAsset(db, {
+        id: "finnhub-metal",
+        display_code: "XAU",
+        quote_ccy: "USD",
+        instrument_type: "METAL",
+        instrument_symbol: "XAU",
+        provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
+      });
+      insertAsset(db, {
+        id: "boerse-crypto",
+        display_code: "ETH-USD",
+        quote_ccy: "USD",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "ETH",
+        provider_config: JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+      });
 
       await expect(
         service.syncMarketData?.({
           type: "incremental",
-          asset_ids: ["marketdata-crypto", "alpha-option"],
+          asset_ids: [
+            "marketdata-crypto",
+            "alpha-option",
+            "metal-api-equity",
+            "finnhub-metal",
+            "boerse-crypto",
+          ],
         }),
       ).resolves.toMatchObject({
-        synced: 2,
+        synced: 5,
         failed: 0,
         skipped: 0,
-        quotesSynced: 2,
+        quotesSynced: 5,
         skippedReasons: [],
       });
 
-      expect(chartSymbols).toEqual(["BTC-USD", "AAPL260117C00100000"]);
+      expect(chartSymbols).toEqual(["BTC-USD", "AAPL260117C00100000", "AAPL", "XAU", "ETH-USD"]);
       expect(readQuoteByDay(db, "marketdata-crypto", "2026-01-05")).toMatchObject({
         source: "YAHOO",
         close: "65000",
@@ -412,12 +463,39 @@ describe("TS market data domain", () => {
         source: "YAHOO",
         close: "12.34",
       });
+      expect(readQuoteByDay(db, "metal-api-equity", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "10.5",
+      });
+      expect(readQuoteByDay(db, "finnhub-metal", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "2000",
+      });
+      expect(readQuoteByDay(db, "boerse-crypto", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "3500",
+      });
       expect(readSyncState(db, "marketdata-crypto")).toMatchObject({
         data_source: "YAHOO",
         error_count: 0,
         last_error: null,
       });
       expect(readSyncState(db, "alpha-option")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "metal-api-equity")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "finnhub-metal")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "boerse-crypto")).toMatchObject({
         data_source: "YAHOO",
         error_count: 0,
         last_error: null,

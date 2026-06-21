@@ -5986,8 +5986,9 @@ contract:
   tests. Coverage includes preferred `OPENFIGI` profile/search assets falling
   back to Yahoo quote sync instead of being skipped as provider-not-implemented.
 - `pr5-unsupported-preferred-provider-fallback`: verification passed: focused
-  market-data tests. Coverage includes preferred `MARKETDATA_APP` non-equity and
-  `ALPHA_VANTAGE` OPTION historical sync falling back to Yahoo instead of
+  market-data tests. Coverage includes preferred `MARKETDATA_APP` non-equity,
+  `ALPHA_VANTAGE` OPTION historical sync, `METAL_PRICE_API` non-metal, `FINNHUB`
+  metal, and `BOERSE_FRANKFURT` crypto assets falling back to Yahoo instead of
   failing before provider fallback can occur.
 - `pr5-alpha-option-capability-review-fix`: verification passed: focused Rust
   and TS provider-settings tests. Coverage clarifies Alpha Vantage option
