@@ -4557,6 +4557,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   command proxy now has focused tests for empty export responses and fallback
   filenames when the backend omits `Content-Disposition`. Verified with focused
   Electron command tests.
+- Turn 755: Resolved runtime data-export review cleanup. The activity and
+  portfolio-history export smokes now close SQLite-backed runtime services even
+  if seeding fails before the HTTP server starts. Verified with focused runtime
+  export tests.
 
 ## Deferred items
 

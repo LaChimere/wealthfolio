@@ -6034,6 +6034,9 @@ contract:
 - `pr5-data-export-electron-proxy-coverage`: verification passed: focused
   Electron command tests. Coverage includes empty export responses and fallback
   filenames when backend `Content-Disposition` is absent.
+- `pr5-data-export-runtime-lifecycle-cleanup`: verification passed: focused
+  runtime export tests. Activity and portfolio-history export smokes now close
+  runtime services even if test seeding fails before server startup.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

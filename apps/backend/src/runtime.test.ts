@@ -1267,28 +1267,30 @@ describe("TS backend runtime composition", () => {
       repositoryRoot,
       secretKey: config.secretKey,
     });
-    const db = openSqliteDatabase(runtime.dbPath);
     try {
-      seedRuntimeTransactionActivityInput(db);
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(db);
+      } finally {
+        db.close();
+      }
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const activityExportResponse = await fetch(
+          `${server.baseUrl}/api/v1/utilities/export/activities/json`,
+        );
+        expect(activityExportResponse.status).toBe(200);
+        expect(activityExportResponse.headers.get("content-type")).toBe(
+          "application/json; charset=utf-8",
+        );
+        await expect(activityExportResponse.json()).resolves.toEqual([
+          expect.objectContaining({ id: "tx-buy", activityType: "BUY" }),
+          expect.objectContaining({ id: "tx-deposit", activityType: "DEPOSIT" }),
+        ]);
+      } finally {
+        server.stop();
+      }
     } finally {
-      db.close();
-    }
-    const server = startBackendServer(config, runtime.options);
-
-    try {
-      const activityExportResponse = await fetch(
-        `${server.baseUrl}/api/v1/utilities/export/activities/json`,
-      );
-      expect(activityExportResponse.status).toBe(200);
-      expect(activityExportResponse.headers.get("content-type")).toBe(
-        "application/json; charset=utf-8",
-      );
-      await expect(activityExportResponse.json()).resolves.toEqual([
-        expect.objectContaining({ id: "tx-buy", activityType: "BUY" }),
-        expect.objectContaining({ id: "tx-deposit", activityType: "DEPOSIT" }),
-      ]);
-    } finally {
-      server.stop();
       await runtime.close();
     }
   });
@@ -1302,36 +1304,38 @@ describe("TS backend runtime composition", () => {
       repositoryRoot,
       secretKey: config.secretKey,
     });
-    const db = openSqliteDatabase(runtime.dbPath);
     try {
-      seedRuntimeValuation(db, {
-        accountId: "TOTAL",
-        date: "2026-05-14",
-        totalValue: "1234.56",
-        fxRateToBase: "1",
-      });
-    } finally {
-      db.close();
-    }
-    const server = startBackendServer(config, runtime.options);
-
-    try {
-      const historyExportResponse = await fetch(
-        `${server.baseUrl}/api/v1/utilities/export/portfolio-history/json`,
-      );
-      expect(historyExportResponse.status).toBe(200);
-      expect(historyExportResponse.headers.get("content-type")).toBe(
-        "application/json; charset=utf-8",
-      );
-      await expect(historyExportResponse.json()).resolves.toEqual([
-        expect.objectContaining({
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeValuation(db, {
           accountId: "TOTAL",
-          valuationDate: "2026-05-14",
-          totalValue: 1234.56,
-        }),
-      ]);
+          date: "2026-05-14",
+          totalValue: "1234.56",
+          fxRateToBase: "1",
+        });
+      } finally {
+        db.close();
+      }
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const historyExportResponse = await fetch(
+          `${server.baseUrl}/api/v1/utilities/export/portfolio-history/json`,
+        );
+        expect(historyExportResponse.status).toBe(200);
+        expect(historyExportResponse.headers.get("content-type")).toBe(
+          "application/json; charset=utf-8",
+        );
+        await expect(historyExportResponse.json()).resolves.toEqual([
+          expect.objectContaining({
+            accountId: "TOTAL",
+            valuationDate: "2026-05-14",
+            totalValue: 1234.56,
+          }),
+        ]);
+      } finally {
+        server.stop();
+      }
     } finally {
-      server.stop();
       await runtime.close();
     }
   });
