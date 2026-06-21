@@ -2478,7 +2478,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1"],
           assetIds: [assetId],
           currencies: ["USD"],
-          earliest: "2025-01-15T00:00:00.000Z",
+          earliest: "2025-01-15T00:00:00Z",
         }),
       ]);
     } finally {
@@ -4328,7 +4328,27 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1"],
           assetIds: ["AAPL"],
           currencies: ["USD"],
-          earliest: "2025-01-15T15:00:00.000Z",
+          earliest: "2025-01-15T15:00:00Z",
+        }),
+      ]);
+
+      events.length = 0;
+      service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-15T10:00:00.123456-05:00",
+        quantity: "1",
+        unitPrice: "10",
+        amount: "11",
+        currency: "USD",
+      });
+      expect(events).toEqual([
+        activitiesChangedEvent({
+          accountIds: ["account-1"],
+          assetIds: ["AAPL"],
+          currencies: ["USD"],
+          earliest: "2025-01-15T15:00:00.123456Z",
         }),
       ]);
 
@@ -4364,7 +4384,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1"],
           assetIds: [createdWithSymbol.assetId ?? ""],
           currencies: ["USD"],
-          earliest: "2025-01-16T00:00:00.000Z",
+          earliest: "2025-01-16T00:00:00Z",
         }),
       ]);
       events.length = 0;
@@ -4386,7 +4406,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1", "account-2"],
           assetIds: ["AAPL", "MSFT"],
           currencies: ["CAD", "USD"],
-          earliest: "2025-01-14T00:00:00.000Z",
+          earliest: "2025-01-14T00:00:00Z",
         }),
       ]);
 
@@ -4397,7 +4417,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-2"],
           assetIds: ["MSFT"],
           currencies: ["CAD"],
-          earliest: "2025-01-14T00:00:00.000Z",
+          earliest: "2025-01-14T00:00:00Z",
         }),
       ]);
 
@@ -4420,7 +4440,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1", "account-2"],
           assetIds: [],
           currencies: ["USD"],
-          earliest: "2025-01-10T00:00:00.000Z",
+          earliest: "2025-01-10T00:00:00Z",
         }),
       ]);
       events.length = 0;
@@ -4430,7 +4450,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1", "account-2"],
           assetIds: [],
           currencies: ["USD"],
-          earliest: "2025-01-10T00:00:00.000Z",
+          earliest: "2025-01-10T00:00:00Z",
         }),
       ]);
 
@@ -4490,7 +4510,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1", "account-2"],
           assetIds: ["AAPL", "MSFT"],
           currencies: ["CAD", "USD"],
-          earliest: "2024-01-02T00:00:00.000Z",
+          earliest: "2024-01-02T00:00:00Z",
         }),
       ]);
 
@@ -4549,7 +4569,7 @@ describe("TS activities import domain", () => {
           accountIds: ["account-1"],
           assetIds: ["AAPL"],
           currencies: ["USD"],
-          earliest: "2025-03-02T00:00:00.000Z",
+          earliest: "2025-03-02T00:00:00Z",
         }),
       ]);
 

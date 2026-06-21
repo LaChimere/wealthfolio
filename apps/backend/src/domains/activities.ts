@@ -1509,14 +1509,14 @@ function activityEventRecordFromCreate(activity: ActivityCreateRowInput): Activi
 }
 
 function earliestActivityAtUtc(activities: ActivityEventRecord[]): string | null {
-  let earliest: number | null = null;
+  let earliest: { time: number; text: string } | null = null;
   for (const activity of activities) {
-    const timestamp = new Date(activity.activityDate).getTime();
-    if (!Number.isNaN(timestamp) && (earliest === null || timestamp < earliest)) {
-      earliest = timestamp;
+    const parsed = parseActivityEventTimestamp(activity.activityDate);
+    if (parsed && (earliest === null || parsed.time < earliest.time)) {
+      earliest = parsed;
     }
   }
-  return earliest === null ? null : new Date(earliest).toISOString();
+  return earliest?.text ?? null;
 }
 
 function uniqueSortedStrings(values: string[]): string[] {
@@ -6227,6 +6227,35 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
     parsed.getUTCSeconds(),
   ).padStart(2, "0")}`;
   return `${base}${normalizeRustFraction(fractionRaw)}+00:00`;
+}
+
+function parseActivityEventTimestamp(value: string): { time: number; text: string } | null {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/u.test(value)
+    ? `${value}T00:00:00+00:00`
+    : normalizeRfc3339ActivityDate(value);
+  if (normalized === null) {
+    return null;
+  }
+  const match = /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?\+00:00$/u.exec(
+    normalized,
+  );
+  if (!match) {
+    return null;
+  }
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, fractionRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const date = new Date(Date.UTC(2000, 0, 1, hour, minute, Math.min(second, 59), millisecond));
+  date.setUTCFullYear(year, month - 1, day);
+  if (Number.isNaN(date.valueOf())) {
+    return null;
+  }
+  return { time: date.getTime(), text: normalized.replace(/\+00:00$/u, "Z") };
 }
 
 function normalizeRustFraction(value: string | undefined): string {

@@ -5816,6 +5816,9 @@ contract:
 - `pr5-naive-timestamp-bare-leap-fix`: verification passed: focused
   asset/taxonomy tests. Coverage includes chrono-compatible bare
   `NaiveDateTime`/SQLite timestamp leap seconds.
+- `pr5-activity-event-earliest-timestamp`: verification passed: focused
+  activities tests. Coverage includes chrono serde-style `Z` output and
+  microsecond precision for `activities_changed.earliest_activity_at_utc`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
