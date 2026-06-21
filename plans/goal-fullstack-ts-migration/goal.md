@@ -4496,6 +4496,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   during TS market sync instead of being skipped as provider-not-implemented,
   matching Rust provider capability filtering. Verified with focused market-data
   tests.
+- Turn 743: Extended quote-sync fallback for unsupported preferred providers.
+  Preferred `MARKETDATA_APP` non-equities and `ALPHA_VANTAGE` OPTION historical
+  syncs now fall back to Yahoo quote sync instead of failing before another
+  fetch-capable provider can handle the asset. Verified with focused market-data
+  tests.
 
 ## Deferred items
 

@@ -345,6 +345,88 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("falls back from unsupported preferred quote providers to Yahoo sync", async () => {
+    const db = createMarketDataDb();
+    const chartSymbols: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: yahooHistoryFetchBySymbol(
+        {
+          "BTC-USD": {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [65000] }] },
+            },
+          },
+          AAPL260117C00100000: {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [12.34] }] },
+            },
+          },
+        },
+        (symbol) => chartSymbols.push(symbol),
+      ),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "marketdata-crypto",
+        display_code: "BTC-USD",
+        quote_ccy: "USD",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "BTC",
+        provider_config: JSON.stringify({ preferred_provider: "MARKETDATA_APP" }),
+      });
+      insertAsset(db, {
+        id: "alpha-option",
+        display_code: "AAPL option",
+        quote_ccy: "USD",
+        instrument_type: "OPTION",
+        instrument_symbol: "AAPL260117C00100000",
+        provider_config: JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["marketdata-crypto", "alpha-option"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 2,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+        skippedReasons: [],
+      });
+
+      expect(chartSymbols).toEqual(["BTC-USD", "AAPL260117C00100000"]);
+      expect(readQuoteByDay(db, "marketdata-crypto", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "65000",
+      });
+      expect(readQuoteByDay(db, "alpha-option", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "12.34",
+      });
+      expect(readSyncState(db, "marketdata-crypto")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+      expect(readSyncState(db, "alpha-option")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs targeted custom provider latest quotes with source overrides", async () => {
     const db = createMarketDataDb();
     const yahooCalls: string[] = [];

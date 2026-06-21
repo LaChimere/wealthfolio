@@ -5984,6 +5984,10 @@ contract:
 - `pr5-openfigi-quote-fetch-fallback`: verification passed: focused market-data
   tests. Coverage includes preferred `OPENFIGI` profile/search assets falling
   back to Yahoo quote sync instead of being skipped as provider-not-implemented.
+- `pr5-unsupported-preferred-provider-fallback`: verification passed: focused
+  market-data tests. Coverage includes preferred `MARKETDATA_APP` non-equity and
+  `ALPHA_VANTAGE` OPTION historical sync falling back to Yahoo instead of
+  failing before provider fallback can occur.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
