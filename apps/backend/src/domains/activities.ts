@@ -6225,10 +6225,13 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
 }
 
 function normalizeRustFraction(value: string | undefined): string {
-  if (value === undefined || /^0+$/u.test(value)) {
+  if (value === undefined) {
     return "";
   }
   const nanos = value.slice(0, 9).padEnd(9, "0");
+  if (/^0+$/u.test(nanos)) {
+    return "";
+  }
   if (nanos.endsWith("000000")) {
     return `.${nanos.slice(0, 3)}`;
   }

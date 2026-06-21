@@ -5789,6 +5789,9 @@ contract:
 - `pr5-activity-date-rfc3339-review-fixes`: verification passed: focused
   activities tests. Coverage includes chrono-compatible truncation of fractional
   seconds beyond nanoseconds and valid boundary-year offset formatting.
+- `pr5-activity-date-subnanosecond-review-fix`: verification passed: focused
+  activities tests. Coverage includes omitting fractional output when
+  sub-nanosecond input truncates to zero nanoseconds like chrono.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

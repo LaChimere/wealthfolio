@@ -2863,6 +2863,14 @@ describe("TS activities import domain", () => {
         currency: "USD",
       }) as Activity;
       expect(boundaryYearDate.activityDate).toBe("-0001-12-31T23:30:00+00:00");
+      const subNanosecondDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-15T10:30:00.0000000001Z",
+        amount: "45",
+        currency: "USD",
+      }) as Activity;
+      expect(subNanosecondDate.activityDate).toBe("2025-01-15T10:30:00+00:00");
 
       expect(() =>
         service.createActivity?.({
