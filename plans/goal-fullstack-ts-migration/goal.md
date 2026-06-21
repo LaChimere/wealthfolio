@@ -4426,6 +4426,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   and exporting non-empty account data through
   `/api/v1/utilities/export/accounts/json`, proving the data-export route is
   wired past empty-export responses. Verified with runtime tests and full check.
+- Turn 727: Resolved health FX parser review follow-up. FX integrity checks now
+  accept chrono-compatible leap-second, lowercase `t/z`, space-separated, and
+  compact-offset RFC3339 quote timestamps before stale/fresh comparison while
+  still treating malformed/calendar-rollover timestamps as missing rates.
+  Verified with focused health tests.
 
 ## Deferred items
 

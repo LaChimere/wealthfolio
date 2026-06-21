@@ -5923,6 +5923,10 @@ contract:
   and full check. Coverage includes SQLite-backed standalone runtime account
   creation followed by non-empty `/api/v1/utilities/export/accounts/json`
   responses.
+- `pr5-health-fx-parser-review-fix`: verification passed: focused health tests.
+  Coverage includes chrono-compatible leap-second, lowercase `t/z`,
+  space-separated, and compact-offset RFC3339 FX quote timestamps staying
+  stale/fresh-classifiable instead of being treated as missing rates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
