@@ -515,7 +515,7 @@ function analyzeUnconfiguredAccounts(
       affectedItems: accounts.map((account) => ({
         id: account.id,
         name: account.name,
-        route: `/accounts/${encodeURIComponent(account.id)}`,
+        route: `/accounts/${rustUrlEncode(account.id)}`,
       })),
       dataHash,
       timestamp: toRustSerdeUtcRfc3339(timestamp),
@@ -799,7 +799,7 @@ function priceStalenessAffectedItem(asset: PriceHealthHolding): AffectedItem {
     id: asset.assetId,
     name: asset.name ?? asset.symbol,
     symbol: asset.symbol,
-    route: `/holdings/${encodeURIComponent(asset.assetId)}`,
+    route: `/holdings/${rustUrlEncode(asset.assetId)}`,
   };
 }
 
@@ -1045,7 +1045,7 @@ function quoteSyncAffectedItem(error: QuoteSyncHealthError): AffectedItem {
     id: error.assetId,
     name: error.symbol,
     symbol: error.symbol,
-    route: `/holdings/${encodeURIComponent(error.assetId)}`,
+    route: `/holdings/${rustUrlEncode(error.assetId)}`,
   };
 }
 
@@ -1571,7 +1571,7 @@ function negativeBalanceAffectedItem(issue: NegativeBalanceIssue): AffectedItem 
   return {
     id: issue.recordId,
     name: issue.description,
-    route: `/accounts/${encodeURIComponent(issue.recordId)}`,
+    route: `/accounts/${rustUrlEncode(issue.recordId)}`,
   };
 }
 
@@ -1667,7 +1667,7 @@ async function analyzeLegacyClassificationMigration(
       id: asset.id,
       name: asset.name ?? asset.symbol,
       symbol: asset.symbol,
-      route: `/holdings/${encodeURIComponent(asset.id)}`,
+      route: `/holdings/${rustUrlEncode(asset.id)}`,
     }));
     return [
       legacyClassificationMigrationIssue({
@@ -1839,6 +1839,13 @@ function timezoneOffset(timezone: string, date: Date): string {
     .formatToParts(date)
     .find((part) => part.type === "timeZoneName")?.value;
   return timeZoneName ?? "";
+}
+
+function rustUrlEncode(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 function computeDataHash(values: string[]): string {

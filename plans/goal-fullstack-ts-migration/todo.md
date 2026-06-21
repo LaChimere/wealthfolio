@@ -6037,6 +6037,9 @@ contract:
 - `pr5-data-export-runtime-lifecycle-cleanup`: verification passed: focused
   runtime export tests. Activity and portfolio-history export smokes now close
   runtime services even if test seeding fails before server startup.
+- `pr5-health-affected-route-encoding`: verification passed: full health domain
+  tests. Health affected-item account/holding routes now use Rust-compatible
+  `urlencoding::encode` semantics for JS-reserved route characters.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

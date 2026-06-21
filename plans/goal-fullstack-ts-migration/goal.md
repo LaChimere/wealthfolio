@@ -4561,6 +4561,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   portfolio-history export smokes now close SQLite-backed runtime services even
   if seeding fails before the HTTP server starts. Verified with focused runtime
   export tests.
+- Turn 756: Tightened Health Center affected-item route encoding parity. TS
+  health issue routes now percent-encode account/holding IDs like Rust
+  `urlencoding::encode`, including JS-reserved characters that
+  `encodeURIComponent` leaves bare. Verified with full health domain tests.
 
 ## Deferred items
 

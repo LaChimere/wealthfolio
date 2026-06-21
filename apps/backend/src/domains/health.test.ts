@@ -186,6 +186,68 @@ describe("TS health domain", () => {
     }
   });
 
+  test("encodes affected item routes like Rust urlencoding", async () => {
+    const db = createHealthDb();
+    const accountId = "account!'()*";
+    const assetId = "asset!'()*";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "portfolio-account" })],
+        getActiveNonArchivedAccounts: () => [
+          account({ id: accountId, name: "Needs Setup", trackingMode: "NOT_SET" }),
+        ],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId, symbol: "BANG", marketValue: 10 })],
+      },
+      marketDataQuoteProvider: {
+        getLatestQuotes: () => ({}),
+        getQuoteSyncErrorSnapshots: () => [
+          quoteSyncError({ assetId, symbol: "BANG", errorCount: 6 }),
+        ],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+
+      expect(status?.issues.find((issue) => issue.id.startsWith("unconfigured_accounts:"))).toEqual(
+        expect.objectContaining({
+          affectedItems: [
+            expect.objectContaining({
+              id: accountId,
+              route: "/accounts/account%21%27%28%29%2A",
+            }),
+          ],
+        }),
+      );
+      expect(status?.issues.find((issue) => issue.id.startsWith("price_stale:error:"))).toEqual(
+        expect.objectContaining({
+          affectedItems: [
+            expect.objectContaining({
+              id: assetId,
+              route: "/holdings/asset%21%27%28%29%2A",
+            }),
+          ],
+        }),
+      );
+      expect(status?.issues.find((issue) => issue.id.startsWith("quote_sync:error:"))).toEqual(
+        expect.objectContaining({
+          affectedItems: [
+            expect.objectContaining({
+              id: assetId,
+              route: "/holdings/asset%21%27%28%29%2A",
+            }),
+          ],
+        }),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds bounded legacy classification migration issue from taxonomy status", async () => {
     const db = createHealthDb();
     const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
