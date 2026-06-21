@@ -5836,6 +5836,10 @@ contract:
   Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00` storage for
   newly written thread metadata and tag timestamps through the shared AI chat
   timestamp helper.
+- `pr5-market-data-quote-timestamps`: verification passed: focused market-data
+  tests. Coverage includes Rust `DateTime<Utc>::to_rfc3339()` style `+00:00`
+  quote `timestamp`/`created_at` formatting for manual quote writes and
+  quote-history reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

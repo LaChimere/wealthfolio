@@ -53,7 +53,7 @@ describe("TS market data domain", () => {
         volume: null,
         currency: "USD",
         notes: null,
-        created_at: "2026-01-01 10:00:00",
+        created_at: "2026-01-01T10:00:00Z",
         timestamp: "2026-01-01T16:00:00Z",
       });
       insertQuote(db, {
@@ -75,8 +75,8 @@ describe("TS market data domain", () => {
         {
           id: "asset-1_2026-01-01_YAHOO",
           assetId: "asset-1",
-          createdAt: "2026-01-01T10:00:00.000Z",
-          timestamp: "2026-01-01T16:00:00.000Z",
+          createdAt: "2026-01-01T10:00:00+00:00",
+          timestamp: "2026-01-01T16:00:00+00:00",
           dataSource: "YAHOO",
           open: 0,
           high: 11.5,
@@ -88,6 +88,38 @@ describe("TS market data domain", () => {
           notes: null,
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("stores manual quote timestamps like Rust", () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db);
+
+    try {
+      service.updateQuote("asset-1", {
+        dataSource: "MANUAL",
+        timestamp: "2026-01-02T18:30:00.123Z",
+        close: "12.34",
+        currency: "USD",
+        createdAt: "2026-01-02T18:31:00Z",
+      });
+
+      const row = db
+        .query<
+          { timestamp: string; created_at: string },
+          []
+        >("SELECT timestamp, created_at FROM quotes WHERE asset_id = 'asset-1'")
+        .get();
+      expect(row).toEqual({
+        timestamp: "2026-01-02T18:30:00.123+00:00",
+        created_at: "2026-01-02T18:31:00+00:00",
+      });
+      expect(service.getQuoteHistory?.("asset-1")[0]).toMatchObject({
+        timestamp: "2026-01-02T18:30:00.123+00:00",
+        createdAt: "2026-01-02T18:31:00+00:00",
+      });
     } finally {
       db.close();
     }

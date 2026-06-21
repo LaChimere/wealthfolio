@@ -7344,16 +7344,21 @@ function normalizeQuoteTimestamp(value: string): string {
   if (Number.isNaN(date.getTime())) {
     throw new Error(`Invalid input: Invalid timestamp '${value}'`);
   }
-  return date.toISOString();
+  return toRustUtcRfc3339(date);
 }
 
 function normalizeStoredTimestamp(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? timestampNow() : date.toISOString();
+  return Number.isNaN(date.getTime()) ? timestampNow() : toRustUtcRfc3339(date);
 }
 
 function timestampNow(): string {
-  return new Date().toISOString();
+  return toRustUtcRfc3339(new Date());
+}
+
+function toRustUtcRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
 }
 
 function dedupe(values: string[]): string[] {
