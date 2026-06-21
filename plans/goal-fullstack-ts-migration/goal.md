@@ -4428,9 +4428,13 @@ updated_at: "2026-06-21T16:04:16+08:00"
   wired past empty-export responses. Verified with runtime tests and full check.
 - Turn 727: Resolved health FX parser review follow-up. FX integrity checks now
   accept chrono-compatible leap-second, lowercase `t/z`, space-separated, and
-  compact-offset RFC3339 quote timestamps before stale/fresh comparison while
-  still treating malformed/calendar-rollover timestamps as missing rates.
+  compact-offset RFC3339 quote timestamps before stale/fresh comparison.
   Verified with focused health tests.
+- Turn 728: Resolved Claude health FX malformed-timestamp review follow-up. A
+  present FX quote row with a malformed timestamp now falls back to the health
+  check timestamp, matching Rust's `QuoteDB -> Quote` parse-failure `Utc::now()`
+  fallback, so malformed present rows stay fresh/classifiable instead of
+  becoming missing rates. Verified with focused health and exchange-rate tests.
 
 ## Deferred items
 

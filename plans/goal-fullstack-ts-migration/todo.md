@@ -5927,6 +5927,10 @@ contract:
   Coverage includes chrono-compatible leap-second, lowercase `t/z`,
   space-separated, and compact-offset RFC3339 FX quote timestamps staying
   stale/fresh-classifiable instead of being treated as missing rates.
+- `pr5-health-fx-malformed-review-fix`: verification passed: focused health and
+  exchange-rate tests. Coverage includes malformed present FX quote timestamps
+  falling back to fresh/classifiable behavior like Rust `QuoteDB -> Quote`
+  `Utc::now()` fallback instead of becoming missing-rate issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

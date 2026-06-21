@@ -1097,7 +1097,7 @@ describe("TS health domain", () => {
   });
 
   test.each(["not-a-date", "2026-02-30T16:00:00Z"])(
-    "treats invalid FX quote timestamp %p as a missing rate",
+    "does not treat malformed present FX quote timestamp %p as missing",
     async (quoteTimestamp) => {
       const db = createHealthDb();
       const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
@@ -1132,13 +1132,7 @@ describe("TS health domain", () => {
 
       try {
         const status = await service.runHealthChecks?.("UTC");
-        expect(status?.issues).toEqual([
-          expect.objectContaining({
-            category: "FX_INTEGRITY",
-            title: "Missing exchange rate for CAD",
-            fixAction: expect.objectContaining({ payload: ["CAD:USD"] }),
-          }),
-        ]);
+        expect(status?.issues.filter((issue) => issue.category === "FX_INTEGRITY")).toEqual([]);
       } finally {
         db.close();
       }

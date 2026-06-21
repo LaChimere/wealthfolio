@@ -1164,12 +1164,7 @@ function analyzeFxIntegrityFromPairs(
       missingMarketValue += pair.affectedMarketValue;
       continue;
     }
-    const quoteTime = parseRustRfc3339Timestamp(pair.latestQuoteTimestamp);
-    if (quoteTime === null) {
-      missingPairs.push(pair);
-      missingMarketValue += pair.affectedMarketValue;
-      continue;
-    }
+    const quoteTime = parseRustRfc3339Timestamp(pair.latestQuoteTimestamp) ?? context.timestamp;
     if (quoteTime < criticalThreshold) {
       staleErrorPairs.push(pair);
       staleErrorMarketValue += pair.affectedMarketValue;
