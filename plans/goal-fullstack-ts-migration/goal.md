@@ -4628,6 +4628,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   have focused tests for credentialed EventSource setup, JSON/null/raw payload
   parsing, shared connection cleanup, EventSource-unavailable errors, and web
   no-op desktop-only listeners. Verified with focused frontend web event tests.
+- Turn 772: Aligned backend event contract tests with current colon-delimited
+  runtime events. Backend SSE tests and the add-on host canary fixture now use
+  `portfolio:update-*` and `market:sync-*` names instead of stale legacy names.
+  Verified with focused backend event and backend-contract tests.
 
 ## Deferred items
 

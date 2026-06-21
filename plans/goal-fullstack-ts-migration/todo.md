@@ -6095,6 +6095,9 @@ contract:
   web event tests. Coverage includes credentialed EventSource setup,
   JSON/null/raw payload parsing, shared connection cleanup, EventSource
   unavailable errors, and web no-op desktop-only listeners.
+- `pr5-event-contract-name-alignment`: verification passed: focused backend
+  event and backend-contract tests. Backend SSE tests and add-on host canary
+  fixture now use current `portfolio:update-*` and `market:sync-*` event names.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

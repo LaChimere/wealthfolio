@@ -3603,10 +3603,10 @@ describe("TS backend HTTP skeleton", () => {
 
     const reader = response.body?.getReader();
     expect(reader).toBeDefined();
-    eventBus.publish({ name: "portfolio_update_start", payload: { accountId: "acc-1" } });
+    eventBus.publish({ name: "portfolio:update-start", payload: { accountId: "acc-1" } });
     const event = await reader?.read();
     expect(new TextDecoder().decode(event?.value)).toBe(
-      'event: portfolio_update_start\ndata: {"accountId":"acc-1"}\n\n',
+      'event: portfolio:update-start\ndata: {"accountId":"acc-1"}\n\n',
     );
     await reader?.cancel();
   });

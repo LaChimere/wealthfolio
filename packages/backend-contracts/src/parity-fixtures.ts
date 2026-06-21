@@ -17,5 +17,5 @@ export const ADDON_HOST_CANARY_CONTRACT: AddonHostCanaryContract = {
     "get_settings",
     "list_installed_addons",
   ],
-  requiredEvents: ["portfolio:updated", "market-sync:completed"],
+  requiredEvents: ["portfolio:update-complete", "market:sync-complete"],
 };
