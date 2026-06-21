@@ -80,6 +80,30 @@ describe("TS assets domain", () => {
         updatedAt: "2026-01-03T00:00:00",
       });
       insertAsset(db, {
+        id: "asset-chrono-rfc3339",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+        created_at: "2026-01-02 05:34:05.123456+02:30",
+        updated_at: "2026-01-02t03:04:05z",
+      });
+      expect(service.getAssetProfile("asset-chrono-rfc3339")).toMatchObject({
+        createdAt: "2026-01-02T03:04:05.123456",
+        updatedAt: "2026-01-02T03:04:05",
+      });
+      insertAsset(db, {
+        id: "asset-expanded-year",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+        created_at: "9999-12-31T23:59:59-05:00",
+        updated_at: "0000-01-01T00:00:00+05:00",
+      });
+      expect(service.getAssetProfile("asset-expanded-year")).toMatchObject({
+        createdAt: "+10000-01-01T04:59:59",
+        updatedAt: "-0001-12-31T19:00:00",
+      });
+      insertAsset(db, {
         id: "asset-invalid-time",
         kind: "INVESTMENT",
         quote_mode: "MANUAL",

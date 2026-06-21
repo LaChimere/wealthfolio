@@ -2547,7 +2547,7 @@ function normalizeTimestamp(value: string): string {
 
 function normalizeRfc3339NaiveTimestamp(value: string): string | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
     );
   if (!match) {
@@ -2600,7 +2600,7 @@ function normalizeRfc3339NaiveTimestamp(value: string): string | null {
     return null;
   }
   const offsetMinutes =
-    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+    zoneRaw.toUpperCase() === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
   const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
   if (Number.isNaN(parsed.valueOf())) {
     return null;
@@ -2636,13 +2636,16 @@ function normalizeNaiveTimestamp(value: string): string | null {
 }
 
 function naiveTimestampFromDate(date: Date, fractionRaw: string | undefined): string {
-  return `${date.getUTCFullYear().toString().padStart(4, "0")}-${String(
-    date.getUTCMonth() + 1,
-  ).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}T${String(
-    date.getUTCHours(),
-  ).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}:${String(
-    date.getUTCSeconds(),
-  ).padStart(2, "0")}${normalizeRustFraction(fractionRaw)}`;
+  return `${chronoYearString(date.getUTCFullYear())}-${String(date.getUTCMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(
+    2,
+    "0",
+  )}:${String(date.getUTCMinutes()).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(
+    2,
+    "0",
+  )}${normalizeRustFraction(fractionRaw)}`;
 }
 
 function validDateParts(year: number, month: number, day: number): boolean {
@@ -2675,6 +2678,17 @@ function normalizeRustFraction(value: string | undefined): string {
     return `.${nanos.slice(0, 6)}`;
   }
   return `.${nanos}`;
+}
+
+function chronoYearString(year: number): string {
+  if (year >= 0 && year <= 9999) {
+    return year.toString().padStart(4, "0");
+  }
+  if (year > 9999) {
+    return `+${year}`;
+  }
+  const absolute = Math.abs(year);
+  return `-${absolute < 10_000 ? absolute.toString().padStart(4, "0") : absolute}`;
 }
 
 function currentTimestamp(options: AssetServiceOptions): string {

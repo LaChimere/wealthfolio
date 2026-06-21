@@ -5806,6 +5806,10 @@ contract:
   tests. Coverage includes Rust `text_to_datetime` read semantics for RFC3339
   offsets/fractions, SQLite current-timestamp strings, date-only strings, and
   invalid fallback with `NaiveDateTime` JSON output.
+- `pr5-naive-timestamp-review-fixes`: verification passed: focused
+  asset/taxonomy tests. Coverage includes chrono-compatible RFC3339 space
+  separators, lowercase `t`/`z`, and signed/expanded-year formatting for asset
+  timestamp UTC rollovers.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

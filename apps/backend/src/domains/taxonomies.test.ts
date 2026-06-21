@@ -33,7 +33,11 @@ describe("TS taxonomies domain", () => {
         sortOrder: 10,
       });
       db.prepare("UPDATE taxonomies SET created_at = ? WHERE id = ?").run(
-        "2026-01-01T02:30:00.123456+02:30",
+        "2026-01-01 02:30:00.123456+02:30",
+        "custom_groups",
+      );
+      db.prepare("UPDATE taxonomies SET updated_at = ? WHERE id = ?").run(
+        "2026-01-01t00:00:00z",
         "custom_groups",
       );
 
@@ -43,6 +47,7 @@ describe("TS taxonomies domain", () => {
           isSystem: false,
           isSingleSelect: true,
           createdAt: "2026-01-01T00:00:00.123456",
+          updatedAt: "2026-01-01T00:00:00",
         }),
         expect.objectContaining({
           id: "regions",
