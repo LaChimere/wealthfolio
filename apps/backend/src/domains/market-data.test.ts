@@ -75,8 +75,8 @@ describe("TS market data domain", () => {
         {
           id: "asset-1_2026-01-01_YAHOO",
           assetId: "asset-1",
-          createdAt: "2026-01-01T10:00:00+00:00",
-          timestamp: "2026-01-01T16:00:00+00:00",
+          createdAt: "2026-01-01T10:00:00Z",
+          timestamp: "2026-01-01T16:00:00Z",
           dataSource: "YAHOO",
           open: 0,
           high: 11.5,
@@ -117,8 +117,8 @@ describe("TS market data domain", () => {
         created_at: "2026-01-02T18:31:00+00:00",
       });
       expect(service.getQuoteHistory?.("asset-1")[0]).toMatchObject({
-        timestamp: "2026-01-02T18:30:00.123+00:00",
-        createdAt: "2026-01-02T18:31:00+00:00",
+        timestamp: "2026-01-02T18:30:00.123Z",
+        createdAt: "2026-01-02T18:31:00Z",
       });
     } finally {
       db.close();

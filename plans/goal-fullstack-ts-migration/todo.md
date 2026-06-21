@@ -5840,6 +5840,9 @@ contract:
   tests. Coverage includes Rust `DateTime<Utc>::to_rfc3339()` style `+00:00`
   quote `timestamp`/`created_at` formatting for manual quote writes and
   quote-history reads.
+- `pr5-market-data-quote-read-shape-review-fix`: verification passed: focused
+  market-data tests. Coverage distinguishes Rust DB storage `+00:00` quote
+  timestamps from Rust API serde `Z` quote-history read timestamps.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

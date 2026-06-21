@@ -7349,7 +7349,9 @@ function normalizeQuoteTimestamp(value: string): string {
 
 function normalizeStoredTimestamp(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? timestampNow() : toRustUtcRfc3339(date);
+  return Number.isNaN(date.getTime())
+    ? toRustUtcSerdeRfc3339(new Date())
+    : toRustUtcSerdeRfc3339(date);
 }
 
 function timestampNow(): string {
@@ -7359,6 +7361,11 @@ function timestampNow(): string {
 function toRustUtcRfc3339(date: Date): string {
   const iso = date.toISOString();
   return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
+}
+
+function toRustUtcSerdeRfc3339(date: Date): string {
+  const iso = date.toISOString();
+  return iso.endsWith(".000Z") ? iso.slice(0, -5) + "Z" : iso;
 }
 
 function dedupe(values: string[]): string[] {
