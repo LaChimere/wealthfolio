@@ -4553,6 +4553,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   focused tests for backend-provided filenames, empty 204 exports, and
   unauthorized/error propagation through `exportDataFile`. Verified with focused
   frontend adapter tests.
+- Turn 754: Added Electron main export proxy coverage. The Electron sidecar
+  command proxy now has focused tests for empty export responses and fallback
+  filenames when the backend omits `Content-Disposition`. Verified with focused
+  Electron command tests.
 
 ## Deferred items
 

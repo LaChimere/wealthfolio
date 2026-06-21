@@ -6031,6 +6031,9 @@ contract:
 - `pr5-data-export-web-adapter-coverage`: verification passed: focused frontend
   adapter tests. Coverage includes backend filename downloads, 204 empty
   exports, and unauthorized/error propagation in the web export adapter.
+- `pr5-data-export-electron-proxy-coverage`: verification passed: focused
+  Electron command tests. Coverage includes empty export responses and fallback
+  filenames when backend `Content-Disposition` is absent.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

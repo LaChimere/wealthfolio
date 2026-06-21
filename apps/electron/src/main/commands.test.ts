@@ -364,6 +364,45 @@ describe("Electron sidecar command proxy", () => {
     ]);
   });
 
+  test("proxies export empty responses and fallback filenames", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/goals/json")) {
+        return Promise.resolve(new Response(new Uint8Array([123, 125])));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "goals", format: "JSON" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      status: "content",
+      filename: expect.stringMatching(/^goals_\d{4}-\d{2}-\d{2}\.json$/),
+      data: [123, 125],
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "activities", format: "JSON" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ status: "empty" });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/utilities/export/goals/json", "GET"],
+      ["http://127.0.0.1:18444/api/v1/utilities/export/activities/json", "GET"],
+    ]);
+  });
+
   test("rejects malformed utility command payloads before fetch", async () => {
     let called = false;
     const fetchImpl: FetchLike = () => {
