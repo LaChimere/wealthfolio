@@ -1063,7 +1063,7 @@ async function syncMarketDataExecution(
         apiKey === null
           ? `${provider} API key not configured`
           : asset.instrument_type?.toUpperCase() === "OPTION"
-            ? "Alpha Vantage options not supported in the TS sync runtime"
+            ? "Operation 'historical_quotes' not supported by provider 'ALPHA_VANTAGE'"
             : instrument === null
               ? "Asset cannot be mapped to an Alpha Vantage symbol"
               : null;

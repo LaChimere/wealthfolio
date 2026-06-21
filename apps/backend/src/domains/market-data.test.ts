@@ -2334,7 +2334,12 @@ describe("TS market data domain", () => {
         failed: 1,
         skipped: 0,
         quotesSynced: 3,
-        failures: [["AAPL option", "Alpha Vantage options not supported in the TS sync runtime"]],
+        failures: [
+          [
+            "AAPL option",
+            "Operation 'historical_quotes' not supported by provider 'ALPHA_VANTAGE'",
+          ],
+        ],
       });
 
       expect(calls).toEqual([
@@ -2370,7 +2375,7 @@ describe("TS market data domain", () => {
       expect(readSyncState(db, "alpha-option")).toMatchObject({
         data_source: "ALPHA_VANTAGE",
         error_count: 1,
-        last_error: "Alpha Vantage options not supported in the TS sync runtime",
+        last_error: "Operation 'historical_quotes' not supported by provider 'ALPHA_VANTAGE'",
       });
     } finally {
       db.close();

@@ -4451,6 +4451,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   info when an update is available instead of returning an empty string, while
   no-update responses avoid the extra app-info call. Verified with focused
   frontend adapter tests.
+- Turn 733: Cleaned stale Alpha Vantage option sync messaging. Historical option
+  sync failures now use the Rust provider-style unsupported-operation message
+  instead of saying the limitation is TS-runtime-specific. Verified with focused
+  market-data tests.
 
 ## Deferred items
 

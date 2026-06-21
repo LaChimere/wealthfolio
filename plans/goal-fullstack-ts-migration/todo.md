@@ -5945,6 +5945,10 @@ contract:
   adapter tests. Coverage includes update-available responses populating
   `UpdateInfo.currentVersion` from backend app info instead of an empty string,
   while no-update responses skip the extra app-info call.
+- `pr5-alpha-vantage-option-sync-message`: verification passed: focused
+  market-data tests. Coverage includes historical OPTION sync failures reporting
+  Rust provider-style unsupported `historical_quotes` operation text instead of
+  TS-runtime-specific wording.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
