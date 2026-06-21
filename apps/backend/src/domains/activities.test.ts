@@ -2847,6 +2847,22 @@ describe("TS activities import domain", () => {
       expect(readActivityValue(db, fractionalDate.id, "activity_date")).toBe(
         "2025-01-15T08:00:00.123456+00:00",
       );
+      const longFractionDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-15T10:30:00.123456789123+02:30",
+        amount: "43",
+        currency: "USD",
+      }) as Activity;
+      expect(longFractionDate.activityDate).toBe("2025-01-15T08:00:00.123456789+00:00");
+      const boundaryYearDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "0000-01-01T00:30:00+01:00",
+        amount: "44",
+        currency: "USD",
+      }) as Activity;
+      expect(boundaryYearDate.activityDate).toBe("-0001-12-31T23:30:00+00:00");
 
       expect(() =>
         service.createActivity?.({

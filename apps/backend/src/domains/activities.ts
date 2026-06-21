@@ -6166,7 +6166,7 @@ function dateToUtcRfc3339(date: Date): string {
 
 function normalizeRfc3339ActivityDate(value: string): string | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
     );
   if (!match) {
@@ -6214,7 +6214,13 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
   if (Number.isNaN(parsed.valueOf())) {
     return null;
   }
-  const base = parsed.toISOString().slice(0, 19);
+  const base = `${chronoYearString(parsed.getUTCFullYear())}-${String(
+    parsed.getUTCMonth() + 1,
+  ).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}T${String(
+    parsed.getUTCHours(),
+  ).padStart(2, "0")}:${String(parsed.getUTCMinutes()).padStart(2, "0")}:${String(
+    parsed.getUTCSeconds(),
+  ).padStart(2, "0")}`;
   return `${base}${normalizeRustFraction(fractionRaw)}+00:00`;
 }
 
@@ -6222,7 +6228,7 @@ function normalizeRustFraction(value: string | undefined): string {
   if (value === undefined || /^0+$/u.test(value)) {
     return "";
   }
-  const nanos = value.padEnd(9, "0");
+  const nanos = value.slice(0, 9).padEnd(9, "0");
   if (nanos.endsWith("000000")) {
     return `.${nanos.slice(0, 3)}`;
   }
@@ -6230,6 +6236,17 @@ function normalizeRustFraction(value: string | undefined): string {
     return `.${nanos.slice(0, 6)}`;
   }
   return `.${nanos}`;
+}
+
+function chronoYearString(year: number): string {
+  if (year >= 0 && year <= 9999) {
+    return year.toString().padStart(4, "0");
+  }
+  if (year > 9999) {
+    return `+${year}`;
+  }
+  const absolute = Math.abs(year);
+  return `-${absolute < 10_000 ? absolute.toString().padStart(4, "0") : absolute}`;
 }
 
 function parseOptionalDecimal(value: unknown, field: string): Decimal | null {
