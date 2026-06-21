@@ -55,11 +55,23 @@ export interface DatabaseBackup {
   modifiedAt: string;
 }
 
-export const listDatabaseBackups = (): Promise<DatabaseBackup[]> =>
-  Promise.reject(new Error("Listing server-side database backups is only supported in web mode"));
+export const listDatabaseBackups = async (): Promise<DatabaseBackup[]> => {
+  try {
+    return await invoke<DatabaseBackup[]>("list_database_backups");
+  } catch (error) {
+    logger.error("Error listing database backups.");
+    throw error;
+  }
+};
 
-export const deleteDatabaseBackup = (_filename: string): Promise<void> =>
-  Promise.reject(new Error("Deleting server-side database backups is only supported in web mode"));
+export const deleteDatabaseBackup = async (filename: string): Promise<void> => {
+  try {
+    await invoke<void>("delete_database_backup", { filename });
+  } catch (error) {
+    logger.error("Error deleting database backup.");
+    throw error;
+  }
+};
 
 export const getDatabaseBackupDownloadUrl = (_filename: string): string => {
   throw new Error("Downloading server-side database backups is only supported in web mode");

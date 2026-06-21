@@ -118,6 +118,14 @@ export const ELECTRON_COMMANDS = {
     method: "POST",
     path: "/api/v1/utilities/database/backup-to-path",
   },
+  list_database_backups: {
+    method: "GET",
+    path: "/api/v1/utilities/database/backups",
+  },
+  delete_database_backup: {
+    method: "DELETE",
+    path: "/api/v1/utilities/database/backups",
+  },
   export_data_file: {
     method: "GET",
     path: "/api/v1/utilities/export",

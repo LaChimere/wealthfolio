@@ -6040,6 +6040,10 @@ contract:
 - `pr5-health-affected-route-encoding`: verification passed: full health domain
   tests. Health affected-item account/holding routes now use Rust-compatible
   `urlencoding::encode` semantics for JS-reserved route characters.
+- `pr5-electron-backup-list-delete-proxy`: verification passed: focused Electron
+  command tests, frontend Electron settings adapter tests, and backend-contract
+  guard tests. Electron now proxies backup list/delete commands through the TS
+  sidecar instead of keeping them web-only.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

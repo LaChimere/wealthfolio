@@ -28,11 +28,7 @@ export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
   "sync_hmac_sha256",
 ] as const;
 
-export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = [
-  "check_update",
-  "delete_database_backup",
-  "list_database_backups",
-] as const;
+export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = ["check_update"] as const;
 
 export const MIXED_VERSION_SYNC_PREFLIGHT_COMMANDS = [
   "get_sync_session_status",

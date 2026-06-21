@@ -1,7 +1,12 @@
 import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/electron/shared/ipc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getAppInfo, isAutoUpdateCheckEnabled } from "./settings";
+import {
+  deleteDatabaseBackup,
+  getAppInfo,
+  isAutoUpdateCheckEnabled,
+  listDatabaseBackups,
+} from "./settings";
 
 function installElectronApi(api: Partial<WealthfolioElectronApi>) {
   window[ELECTRON_API_KEY] = {
@@ -48,6 +53,27 @@ describe("electron settings adapter", () => {
 
     await expect(isAutoUpdateCheckEnabled()).resolves.toBe(false);
     expect(bridgeInvoke).toHaveBeenCalledWith("is_auto_update_check_enabled", undefined);
+  });
+
+  it("lists and deletes database backups through the sidecar bridge", async () => {
+    const backups = [
+      {
+        filename: "wealthfolio_backup_20260621_120000.db",
+        sizeBytes: 1234,
+        modifiedAt: "2026-06-21T04:00:00Z",
+      },
+    ];
+    const bridgeInvoke = vi.fn().mockResolvedValueOnce(backups).mockResolvedValueOnce(undefined);
+    installElectronApi({ invoke: bridgeInvoke });
+
+    await expect(listDatabaseBackups()).resolves.toEqual(backups);
+    await expect(deleteDatabaseBackup("wealthfolio_backup_20260621_120000.db")).resolves.toBe(
+      undefined,
+    );
+    expect(bridgeInvoke).toHaveBeenNthCalledWith(1, "list_database_backups", undefined);
+    expect(bridgeInvoke).toHaveBeenNthCalledWith(2, "delete_database_backup", {
+      filename: "wealthfolio_backup_20260621_120000.db",
+    });
   });
 
   it("surfaces auto-update preference failures", async () => {

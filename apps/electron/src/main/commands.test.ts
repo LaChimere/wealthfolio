@@ -299,6 +299,20 @@ describe("Electron sidecar command proxy", () => {
       if (path.endsWith("/backup-to-path")) {
         return Promise.resolve(jsonResponse({ path: "/tmp/wealthfolio_backup.db" }));
       }
+      if (path.endsWith("/backups") && init?.method === "GET") {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              filename: "wealthfolio_backup_20260621_120000.db",
+              sizeBytes: 1234,
+              modifiedAt: "2026-06-21T04:00:00Z",
+            },
+          ]),
+        );
+      }
+      if (path.endsWith("/backups/wealthfolio_backup_20260621_120000.db")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
       if (path.endsWith("/export/accounts/csv")) {
         return Promise.resolve(
           new Response(new Uint8Array([97, 44, 98]), {
@@ -329,6 +343,27 @@ describe("Electron sidecar command proxy", () => {
     ).resolves.toBe("/tmp/wealthfolio_backup.db");
     await expect(
       invokeSidecarCommand({
+        command: "list_database_backups",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([
+      {
+        filename: "wealthfolio_backup_20260621_120000.db",
+        sizeBytes: 1234,
+        modifiedAt: "2026-06-21T04:00:00Z",
+      },
+    ]);
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_database_backup",
+        payload: { filename: "wealthfolio_backup_20260621_120000.db" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
         command: "export_data_file",
         payload: { data: "accounts", format: "CSV" },
         sidecar,
@@ -354,6 +389,12 @@ describe("Electron sidecar command proxy", () => {
         "http://127.0.0.1:18444/api/v1/utilities/database/backup-to-path",
         "POST",
         JSON.stringify({ backupDir: "/tmp" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/utilities/database/backups", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/backups/wealthfolio_backup_20260621_120000.db",
+        "DELETE",
+        undefined,
       ],
       ["http://127.0.0.1:18444/api/v1/utilities/export/accounts/csv", "GET", undefined],
       [
@@ -419,6 +460,14 @@ describe("Electron sidecar command proxy", () => {
         fetchImpl,
       }),
     ).rejects.toThrow('requires string payload field "backupDir"');
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_database_backup",
+        payload: { filename: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "filename"');
     await expect(
       invokeSidecarCommand({
         command: "restore_database",

@@ -63,6 +63,10 @@ export async function invokeSidecarCommand<T>({
       return await invokeBackupDatabase<T>({ sidecar, fetchImpl });
     case "backup_database_to_path":
       return await invokeBackupDatabaseToPath<T>({ payload, sidecar, fetchImpl });
+    case "list_database_backups":
+      return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
+    case "delete_database_backup":
+      return await invokeDeleteDatabaseBackup<T>({ payload, sidecar, fetchImpl });
     case "export_data_file":
       return await invokeExportDataFile<T>({ payload, sidecar, fetchImpl });
     case "restore_database":
@@ -1657,6 +1661,25 @@ async function invokeBackupDatabaseToPath<T>({
   return requireString(response.path, "path", "backup_database_to_path") as T;
 }
 
+async function invokeDeleteDatabaseBackup<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const filename = requireString(payload?.filename, "filename", "delete_database_backup");
+  const url = new URL(
+    `${ELECTRON_COMMANDS.delete_database_backup.path}/${encodeURIComponent(filename)}`,
+    sidecar.baseUrl,
+  );
+  return await fetchSidecarJson<T>({
+    command: "delete_database_backup",
+    fetchImpl,
+    sidecar,
+    url,
+    init: { method: ELECTRON_COMMANDS.delete_database_backup.method },
+  });
+}
+
 async function invokeExportDataFile<T>({
   payload,
   sidecar,
@@ -2393,6 +2416,7 @@ async function invokeSimpleGet<T>({
     | "get_settings"
     | "is_auto_update_check_enabled"
     | "get_app_info"
+    | "list_database_backups"
     | "get_portfolios"
     | "get_goals"
     | "list_import_templates"

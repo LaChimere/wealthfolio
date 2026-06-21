@@ -4565,6 +4565,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   health issue routes now percent-encode account/holding IDs like Rust
   `urlencoding::encode`, including JS-reserved characters that
   `encodeURIComponent` leaves bare. Verified with full health domain tests.
+- Turn 757: Ported Electron backup list/delete command proxies. Electron now
+  registers and forwards `list_database_backups` and `delete_database_backup` to
+  the TS sidecar backup routes, and the command-surface guard no longer marks
+  them web-only. Verified with focused Electron command, frontend Electron
+  settings adapter, and backend-contract guard tests.
 
 ## Deferred items
 
