@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 714
+turns_used: 715
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T14:38:02+08:00"
+updated_at: "2026-06-21T14:54:30+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4376,6 +4376,10 @@ updated_at: "2026-06-21T14:38:02+08:00"
   and import-account-template writes now use Rust `NaiveDateTime` JSON shape
   (`YYYY-MM-DDTHH:MM:SS`) instead of SQLite space-separated timestamps in sync
   payloads. Verified with focused activity tests.
+- Turn 715: Tightened Connect broker sync state timestamp parity. Broker sync
+  attempt/success/failure rows now store Rust `Utc::now().to_rfc3339()` style
+  `+00:00` timestamps for attempted/successful/created/updated fields. Verified
+  with focused Connect tests.
 
 ## Deferred items
 

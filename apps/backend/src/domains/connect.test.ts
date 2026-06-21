@@ -2369,13 +2369,22 @@ describe("TS Connect local session service", () => {
       expect(
         db
           .query<
-            { sync_status: string; last_error: string | null },
+            {
+              sync_status: string;
+              last_error: string | null;
+              last_attempted_at: string | null;
+              updated_at: string;
+            },
             []
-          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          >(
+            "SELECT sync_status, last_error, last_attempted_at, updated_at FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'",
+          )
           .get(),
       ).toEqual({
         sync_status: "FAILED",
         last_error: "Broker activity mapping is not yet available in the TS backend runtime",
+        last_attempted_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
       });
     } finally {
       db.close();
@@ -5853,15 +5862,17 @@ describe("TS Connect local session service", () => {
             last_attempted_at: string | null;
             last_successful_at: string | null;
             last_error: string | null;
+            updated_at: string;
           },
           []
         >(
-          "SELECT sync_status, last_attempted_at, last_successful_at, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'",
+          "SELECT sync_status, last_attempted_at, last_successful_at, last_error, updated_at FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'",
         )
         .get();
       expect(row?.sync_status).toBe("IDLE");
-      expect(row?.last_attempted_at).toBeTruthy();
-      expect(row?.last_successful_at).toBeTruthy();
+      expect(row?.last_attempted_at).toMatch(/\+00:00$/);
+      expect(row?.last_successful_at).toMatch(/\+00:00$/);
+      expect(row?.updated_at).toMatch(/\+00:00$/);
       expect(row?.last_error).toBeNull();
     } finally {
       db.close();

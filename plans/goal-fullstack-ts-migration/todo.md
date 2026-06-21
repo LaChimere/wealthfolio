@@ -5886,6 +5886,9 @@ contract:
 - `pr5-activity-import-template-timestamps`: verification passed: focused
   activity tests. Coverage includes Rust `NaiveDateTime` JSON-shaped timestamps
   in import template and import-account-template sync payloads.
+- `pr5-connect-broker-sync-state-timestamps`: verification passed: focused
+  Connect tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00`
+  timestamps for broker sync state attempt/success/failure rows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

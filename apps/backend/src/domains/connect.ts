@@ -3111,7 +3111,7 @@ function brokerActivitySyncStartDate(
 }
 
 function upsertBrokerSyncAttempt(db: Database, accountId: string): void {
-  const now = new Date().toISOString();
+  const now = brokerSyncTimestampNow();
   db.prepare(
     `
       INSERT INTO brokers_sync_state (
@@ -3128,7 +3128,7 @@ function upsertBrokerSyncAttempt(db: Database, accountId: string): void {
 }
 
 function upsertBrokerSyncSuccess(db: Database, accountId: string): void {
-  const now = new Date().toISOString();
+  const now = brokerSyncTimestampNow();
   db.prepare(
     `
       INSERT INTO brokers_sync_state (
@@ -3147,7 +3147,7 @@ function upsertBrokerSyncSuccess(db: Database, accountId: string): void {
 }
 
 function upsertBrokerSyncFailure(db: Database, accountId: string, error: string): void {
-  const now = new Date().toISOString();
+  const now = brokerSyncTimestampNow();
   db.prepare(
     `
       INSERT INTO brokers_sync_state (
@@ -3162,6 +3162,11 @@ function upsertBrokerSyncFailure(db: Database, accountId: string, error: string)
         updated_at = excluded.updated_at
     `,
   ).run(accountId, now, error, now, now);
+}
+
+function brokerSyncTimestampNow(): string {
+  const iso = new Date().toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
 }
 
 function dateOnly(date: Date): string {
