@@ -3423,7 +3423,7 @@ function insertCompletedImportRun(
   summary: ImportActivitiesSummary,
 ): ImportRunRow {
   const id = crypto.randomUUID();
-  const now = activityTimestampNow();
+  const now = activityStorageTimestampNow();
   const row: ImportRunRow = {
     id,
     account_id: accountId,
@@ -6568,6 +6568,10 @@ function sqliteNow(): string {
 
 function activityTimestampNow(): string {
   return new Date().toISOString();
+}
+
+function activityStorageTimestampNow(): string {
+  return dateToUtcRfc3339(new Date());
 }
 
 function errorMessage(error: unknown): string {

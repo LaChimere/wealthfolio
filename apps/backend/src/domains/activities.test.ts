@@ -2393,6 +2393,8 @@ describe("TS activities import domain", () => {
         status: "APPLIED",
         review_mode: "NEVER",
       });
+      expect(readImportRun(db, result.importRunId)?.started_at).toMatch(/\+00:00$/);
+      expect(readImportRun(db, result.importRunId)?.created_at).toMatch(/\+00:00$/);
       expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
         fetched: 2,
         inserted: 2,
