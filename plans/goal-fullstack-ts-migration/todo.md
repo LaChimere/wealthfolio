@@ -5765,6 +5765,10 @@ contract:
 - `pr5-provider-sync-timestamp-fractional-offset`: verification passed: focused
   market-data provider tests. Coverage includes preserving microsecond
   fractional precision for non-UTC `last_synced_at` values normalized to UTC.
+- `pr5-ai-chat-stored-timestamp-rfc3339`: verification passed: focused AI chat
+  tests. Coverage includes strict Rust-compatible stored thread/message
+  timestamp parsing, non-UTC offset normalization with microsecond precision,
+  and invalid timestamp fallback.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

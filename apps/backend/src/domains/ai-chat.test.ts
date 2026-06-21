@@ -93,6 +93,42 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("parses stored thread and message timestamps like Rust", () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db);
+
+    try {
+      seedThread(db, {
+        id: "thread-rfc3339",
+        title: "Timestamps",
+        updatedAt: "2026-01-02T04:30:00.123456+02:30",
+      });
+      seedMessage(db, {
+        id: "message-rfc3339",
+        threadId: "thread-rfc3339",
+        role: "user",
+        content: { schemaVersion: 1, parts: [{ type: "text", text: "hello" }] },
+      });
+      db.prepare("UPDATE ai_threads SET created_at = ? WHERE id = ?").run(
+        "2026-02-30T00:00:00Z",
+        "thread-rfc3339",
+      );
+      db.prepare("UPDATE ai_messages SET created_at = ? WHERE id = ?").run(
+        "2026-01-02T04:30:00.123456+02:30",
+        "message-rfc3339",
+      );
+
+      const thread = service.getThread("thread-rfc3339");
+      expect(thread?.updatedAt).toBe("2026-01-02T02:00:00.123456Z");
+      expect(thread?.createdAt).not.toBe("2026-03-02T00:00:00Z");
+      expect(service.getMessages("thread-rfc3339")[0]?.createdAt).toBe(
+        "2026-01-02T02:00:00.123456Z",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("persists thread tags with Rust-compatible idempotency", () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);
