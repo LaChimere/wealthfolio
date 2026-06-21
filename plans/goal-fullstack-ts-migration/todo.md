@@ -5910,6 +5910,9 @@ contract:
 - `pr5-device-sync-leap-second-timestamps`: verification passed: focused
   device-sync tests. Coverage includes chrono-compatible leap-second parsing
   with Rust millisecond `Z` normalization.
+- `pr5-health-fx-invalid-timestamps`: verification passed: focused health tests.
+  Coverage includes treating invalid latest FX quote timestamps as missing rates
+  in FX integrity health checks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

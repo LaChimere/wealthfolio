@@ -1096,6 +1096,52 @@ describe("TS health domain", () => {
     }
   });
 
+  test("treats invalid FX quote timestamps as missing rates", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "account-a" })],
+        getActiveNonArchivedAccounts: () => [account({ id: "account-a" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({
+            assetId: "asset-cad",
+            symbol: "CADSEC",
+            marketValue: 10,
+            localCurrency: "CAD",
+            baseCurrency: "USD",
+          }),
+        ],
+      },
+      exchangeRateProvider: {
+        ensureFxPairs: async () => [],
+        getLatestFxRateSnapshots: () => [
+          fxSnapshot({
+            fromCurrency: "CAD",
+            toCurrency: "USD",
+            quoteTimestamp: "not-a-date",
+          }),
+        ],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-18T12:00:00.000Z"),
+    });
+
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      expect(status?.issues).toEqual([
+        expect.objectContaining({
+          category: "FX_INTEGRITY",
+          title: "Missing exchange rate for CAD",
+          fixAction: expect.objectContaining({ payload: ["CAD:USD"] }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds bounded data consistency issues for negative account balances", async () => {
     const db = createHealthDb();
     const requestedAccountIds: string[][] = [];

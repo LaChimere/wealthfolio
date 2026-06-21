@@ -1165,6 +1165,11 @@ function analyzeFxIntegrityFromPairs(
       continue;
     }
     const quoteTime = new Date(pair.latestQuoteTimestamp);
+    if (Number.isNaN(quoteTime.valueOf())) {
+      missingPairs.push(pair);
+      missingMarketValue += pair.affectedMarketValue;
+      continue;
+    }
     if (quoteTime < criticalThreshold) {
       staleErrorPairs.push(pair);
       staleErrorMarketValue += pair.affectedMarketValue;
