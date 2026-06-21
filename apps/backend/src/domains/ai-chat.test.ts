@@ -129,6 +129,38 @@ describe("TS AI chat domain", () => {
     }
   });
 
+  test("stores new thread metadata timestamps like Rust", () => {
+    const db = createAiChatDb();
+    const service = createAiChatService(db);
+
+    try {
+      seedThread(db, { id: "thread-timestamps", title: "Timestamps" });
+
+      service.addTag("thread-timestamps", "tracked");
+      service.updateThread("thread-timestamps", { title: "Updated timestamps" });
+
+      const row = db
+        .query<
+          { updated_at: string },
+          []
+        >("SELECT updated_at FROM ai_threads WHERE id = 'thread-timestamps'")
+        .get();
+      const tagRow = db
+        .query<
+          { created_at: string },
+          []
+        >("SELECT created_at FROM ai_thread_tags WHERE thread_id = 'thread-timestamps'")
+        .get();
+
+      expect(row?.updated_at).toMatch(/\+00:00$/);
+      expect(row?.updated_at).not.toEndWith("Z");
+      expect(tagRow?.created_at).toMatch(/\+00:00$/);
+      expect(tagRow?.created_at).not.toEndWith("Z");
+    } finally {
+      db.close();
+    }
+  });
+
   test("persists thread tags with Rust-compatible idempotency", () => {
     const db = createAiChatDb();
     const service = createAiChatService(db);

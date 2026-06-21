@@ -3055,7 +3055,8 @@ function parseTimestampOrNow(value: string): string {
 }
 
 function timestampNow(): string {
-  return new Date().toISOString();
+  const iso = new Date().toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
 }
 
 function normalizeRustSerdeTimestamp(value: string): string | null {
