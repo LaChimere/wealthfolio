@@ -192,23 +192,23 @@
     custom-provider-backed symbol quote resolution, targeted/general-purpose
     custom-provider latest and historical sync, custom latest fallback during
     backfill, Börse Frankfurt historical/latest sync and quote resolution,
-    MarketData.app history/latest sync and quote resolution, Finnhub equity
-    history/latest sync and quote resolution, Alpha Vantage equity/FX/crypto
-    history/latest sync and quote resolution, Metal Price API metal
-    history/latest sync and quote resolution, US Treasury calculated bond
-    history/latest sync and quote resolution, OpenFIGI bond search fallback,
-    Finnhub/Alpha Vantage search fallbacks, Börse Frankfurt search fallback,
-    provider-backed activity import asset preview symbol resolution, Rust-shaped
-    activity import asset preview drafts for existing and provider-resolved
-    assets, provider-backed activity import check resolution, provider-backed
-    direct holdings snapshot write resolution, ISIN-first activity import check
-    resolution, ISIN-first activity import asset preview resolution, and
-    provider-backed preview type/quote-currency inference now have TS runtime
-    parity, while remaining provider breadth and background orchestration remain
-    deferred to market-data/portfolio parity slices; market-sync result
-    accounting, portfolio `market:sync-complete` failure/skipped-reason
-    payloads, and market-data quote/sync portfolio job side effects now have TS
-    parity; activity mutation event production,
+    MarketData.app history/latest sync and quote resolution, Finnhub
+    equity/FX/crypto history/latest sync and quote resolution, Alpha Vantage
+    equity/FX/crypto history/latest sync plus real-time option quote resolution,
+    Metal Price API metal history/latest sync and quote resolution, US Treasury
+    calculated bond history/latest sync and quote resolution, OpenFIGI bond
+    search fallback, Finnhub/Alpha Vantage search fallbacks, Börse Frankfurt
+    search fallback, provider-backed activity import asset preview symbol
+    resolution, Rust-shaped activity import asset preview drafts for existing
+    and provider-resolved assets, provider-backed activity import check
+    resolution, provider-backed direct holdings snapshot write resolution,
+    ISIN-first activity import check resolution, ISIN-first activity import
+    asset preview resolution, and provider-backed preview type/quote-currency
+    inference now have TS runtime parity, while remaining provider breadth and
+    background orchestration remain deferred to market-data/portfolio parity
+    slices; market-sync result accounting, portfolio `market:sync-complete`
+    failure/skipped-reason payloads, and market-data quote/sync portfolio job
+    side effects now have TS parity; activity mutation event production,
     activity/import-run/activity-created-asset sync-event callback queuing,
     sync_outbox persistence for migrated goal/activity callbacks, FX asset
     callbacks, custom provider callbacks, custom taxonomy bundle callbacks,
@@ -267,17 +267,18 @@
     dismissal hash carryover now have TS runtime parity; market-data no-op sync
     modes plus targeted and bounded broad Yahoo provider-backed asset/FX sync,
     custom-provider latest/history/fallback sync, Börse Frankfurt provider sync,
-    MarketData.app provider sync, Finnhub equity provider sync, Alpha Vantage
-    equity/FX/crypto provider sync, Metal Price API metal provider sync, US
-    Treasury calculated bond provider sync, and OpenFIGI bond search fallback
-    now execute in TS, including market-sync failure/skipped-reason payload
-    propagation, while remaining provider breadth, background orchestration,
-    automatic/background FX quote fetching, and portfolio recalculation remain
-    deferred; remaining calculation-heavy health checks are deferred to
-    health/calculation parity slices; disabled Connect feature-flag responses,
-    local Connect synced-account/platform/sync-state/import-run reads, local
-    broker sync profile persistence, disabled device-sync route responses, and
-    local device-sync status/precondition/no-op/clear-data behavior now have TS
+    MarketData.app provider sync, Finnhub equity/FX/crypto provider sync, Alpha
+    Vantage equity/FX/crypto provider sync plus real-time option quote
+    resolution, Metal Price API metal provider sync, US Treasury calculated bond
+    provider sync, and OpenFIGI bond search fallback now execute in TS,
+    including market-sync failure/skipped-reason payload propagation, while
+    remaining provider breadth, background orchestration, automatic/background
+    FX quote fetching, and portfolio recalculation remain deferred; remaining
+    calculation-heavy health checks are deferred to health/calculation parity
+    slices; disabled Connect feature-flag responses, local Connect
+    synced-account/platform/sync-state/import-run reads, local broker sync
+    profile persistence, disabled device-sync route responses, and local
+    device-sync status/precondition/no-op/clear-data behavior now have TS
     runtime parity; Connect token restore, device-sync fresh/recovery
     enrollment, BOOTSTRAP E2EE key initialization, PAIR/ORPHANED registration
     responses, reinitialize reset ordering, legacy device-id storage, freshness
