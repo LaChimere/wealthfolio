@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 717
+turns_used: 718
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T15:11:36+08:00"
+updated_at: "2026-06-21T15:15:50+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4389,6 +4389,10 @@ updated_at: "2026-06-21T15:11:36+08:00"
   and synthetic holdings snapshots now store Rust `NaiveDateTime`-style UTC
   `YYYY-MM-DDTHH:MM:SS(.fff)Z` values instead of always using JS millisecond ISO
   output. Verified with focused holdings tests.
+- Turn 718: Tightened contribution-limit timestamp parity. Contribution-limit
+  create/update sync payloads now use Rust `NaiveDateTime` JSON-shaped
+  `YYYY-MM-DDTHH:MM:SS` timestamps instead of SQLite space-separated values.
+  Verified with focused contribution-limit tests.
 
 ## Deferred items
 

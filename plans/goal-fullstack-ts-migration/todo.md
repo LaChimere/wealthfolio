@@ -5895,6 +5895,9 @@ contract:
 - `pr5-holdings-calculated-at-timestamps`: verification passed: focused holdings
   tests. Coverage includes Rust `NaiveDateTime`-style UTC `calculated_at`
   timestamps for manual and synthetic holdings snapshots.
+- `pr5-contribution-limit-timestamps`: verification passed: focused
+  contribution-limit tests. Coverage includes Rust `NaiveDateTime` JSON-shaped
+  timestamps in contribution-limit create/update sync payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

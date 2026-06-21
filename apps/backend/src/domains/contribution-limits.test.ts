@@ -177,6 +177,8 @@ describe("TS contribution limits domain", () => {
         accountIds: "account-1,account-2",
         startDate: "2027-01-01",
         endDate: "2027-12-31",
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[1]?.payload).toMatchObject({
         id: created.id,
@@ -186,6 +188,8 @@ describe("TS contribution limits domain", () => {
         accountIds: null,
         startDate: null,
         endDate: null,
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+        updatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
       });
       expect(syncEvents[2]?.payload).toEqual({ id: created.id });
     } finally {
