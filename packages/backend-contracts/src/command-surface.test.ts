@@ -30,7 +30,7 @@ describe("backend command surface contracts", () => {
     const { web, electron } = readRoutes();
 
     expect(web).toHaveLength(235);
-    expect(electron).toHaveLength(250);
+    expect(electron).toHaveLength(252);
     expect(electron.map((route) => route.command)).not.toContain("position");
     expect(web.find((route) => route.command === "get_accounts")).toEqual({
       command: "get_accounts",
@@ -45,10 +45,10 @@ describe("backend command surface contracts", () => {
 
     expect(surface.stats).toEqual({
       web: 235,
-      electron: 250,
-      shared: 232,
+      electron: 252,
+      shared: 234,
       electronOnly: 18,
-      webOnly: 3,
+      webOnly: 1,
       backend: 251,
       electronNative: 2,
     });

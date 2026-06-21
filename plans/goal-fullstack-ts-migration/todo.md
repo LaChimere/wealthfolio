@@ -6069,6 +6069,10 @@ contract:
   adapter command parity tests. Electron command extraction now reads only the
   exported `ELECTRON_COMMANDS` object and excludes unrelated IPC object keys
   such as file-drop `position`.
+- `pr5-backend-contract-command-surface-refresh`: verification passed: focused
+  backend-contract command-surface tests. Guard counts now reflect Electron
+  backup list/delete command parity: 252 Electron commands, 234 shared commands,
+  and one remaining web-only backend command.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

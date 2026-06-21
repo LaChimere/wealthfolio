@@ -4600,6 +4600,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   instead of scanning unrelated IPC object literals, avoiding false positives
   such as file-drop `position`. Verified with focused adapter command parity
   tests.
+- Turn 765: Refreshed backend-contract command-surface counts after Electron
+  backup list/delete command parity. The guard now reflects 252 Electron
+  commands, 234 shared commands, and one remaining web-only backend command.
+  Verified with focused backend-contract command-surface tests.
 
 ## Deferred items
 
