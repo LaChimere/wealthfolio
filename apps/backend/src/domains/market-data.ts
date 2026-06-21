@@ -2835,14 +2835,19 @@ async function resolveSymbolQuote(
     const currency = providerCurrencyFromExchange(exchangeMic, requestedQuoteCcy, exchangeCatalog);
     const candidates =
       instrumentType === "EQUITY"
-        ? symbolResolutionCandidates(trimmedSymbol)
-        : finnhubResolveSymbols(trimmedSymbol, instrumentType, requestedQuoteCcy);
+        ? symbolResolutionCandidates(trimmedSymbol).map((symbol) => ({ symbol, currency }))
+        : finnhubResolveCandidates(
+            trimmedSymbol,
+            instrumentType,
+            requestedQuoteCcy,
+            exchangeCatalog,
+          );
     for (const candidate of candidates) {
       try {
         const quote = await fetchFinnhubLatestQuote(
-          `_QUOTE_RESOLVE_${candidate}`,
-          candidate,
-          currency,
+          `_QUOTE_RESOLVE_${candidate.symbol}`,
+          candidate.symbol,
+          candidate.currency,
           fetchImpl,
           apiKey,
           now,
@@ -6105,21 +6110,29 @@ function finnhubSyncSymbol(asset: AssetMarketSyncRow): string | null {
   return null;
 }
 
-function finnhubResolveSymbols(
+function finnhubResolveCandidates(
   symbol: string,
   instrumentType: string,
   quoteCcy: string | null,
-): string[] {
-  const normalizedSymbol = symbol.trim().toUpperCase();
-  const normalizedQuote = quoteCcy?.trim().toUpperCase() ?? "";
+  exchangeCatalog: ExchangeCatalog,
+): Array<{ symbol: string; currency: string }> {
+  const canonical = canonicalizeSearchIdentity(
+    instrumentType,
+    symbol,
+    null,
+    quoteCcy,
+    exchangeCatalog,
+  );
+  const normalizedSymbol = canonical.instrumentSymbol?.trim().toUpperCase() ?? "";
+  const normalizedQuote = canonical.quoteCcy?.trim().toUpperCase() ?? "";
   if (!normalizedSymbol) {
     return [];
   }
   if (instrumentType === "FX" && normalizedQuote) {
-    return [`OANDA:${normalizedSymbol}_${normalizedQuote}`];
+    return [{ symbol: `OANDA:${normalizedSymbol}_${normalizedQuote}`, currency: normalizedQuote }];
   }
   if (instrumentType === "CRYPTO" && normalizedQuote) {
-    return [`BINANCE:${normalizedSymbol}${normalizedQuote}`];
+    return [{ symbol: `BINANCE:${normalizedSymbol}${normalizedQuote}`, currency: normalizedQuote }];
   }
   return [];
 }

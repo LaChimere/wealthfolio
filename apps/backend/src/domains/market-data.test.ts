@@ -5486,8 +5486,32 @@ describe("TS market data domain", () => {
         price: 44000,
         resolvedProviderId: "FINNHUB",
       });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "EURUSD",
+          instrumentType: "FX",
+          providerId: "FINNHUB",
+        }),
+      ).resolves.toEqual({
+        currency: "USD",
+        price: 1.15,
+        resolvedProviderId: "FINNHUB",
+      });
+      await expect(
+        service.resolveSymbolQuote?.({
+          symbol: "BTC-USDT",
+          instrumentType: "CRYPTO",
+          providerId: "FINNHUB",
+        }),
+      ).resolves.toEqual({
+        currency: "USDT",
+        price: 44000,
+        resolvedProviderId: "FINNHUB",
+      });
       expect(calls.map((call) => new URL(call).searchParams.get("symbol"))).toEqual([
         "SHOP",
+        "OANDA:EUR_USD",
+        "BINANCE:BTCUSDT",
         "OANDA:EUR_USD",
         "BINANCE:BTCUSDT",
       ]);

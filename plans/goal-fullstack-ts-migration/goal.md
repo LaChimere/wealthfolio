@@ -4482,6 +4482,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   provider settings now advertise both `Real-time` and `Historical`, matching
   the existing Metal Price API timeframe sync support. Verified with focused
   Rust and TS provider-settings tests.
+- Turn 740: Resolved GPT Finnhub pair-shaped quote-resolution follow-up. TS
+  Finnhub latest quote resolution now canonicalizes FX/CRYPTO inputs such as
+  `EURUSD` and `BTC-USDT` before building `OANDA:`/`BINANCE:` symbols, and uses
+  the canonical quote currency in resolved summaries. Verified with focused
+  Finnhub market-data tests.
 
 ## Deferred items
 

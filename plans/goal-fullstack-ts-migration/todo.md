@@ -5973,6 +5973,10 @@ contract:
   and TS provider-settings tests. Coverage includes Metal Price API advertising
   both `Real-time` and `Historical` capability features after existing timeframe
   sync support.
+- `pr5-finnhub-pair-shaped-resolve`: verification passed: focused Finnhub
+  market-data tests. Coverage includes TS Finnhub latest quote resolution
+  canonicalizing pair-shaped FX/CRYPTO inputs like `EURUSD` and `BTC-USDT`
+  before building `OANDA:`/`BINANCE:` request symbols.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
