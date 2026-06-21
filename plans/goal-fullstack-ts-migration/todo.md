@@ -5904,6 +5904,9 @@ contract:
 - `pr5-contribution-limit-payload-timestamp-review-fix`: verification passed:
   focused contribution-limit tests. Coverage includes normalizing legacy
   space-separated contribution-limit timestamps at the sync payload boundary.
+- `pr5-addon-detected-permission-timestamps`: verification passed: focused
+  add-on tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00`
+  timestamps for statically detected add-on permissions.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

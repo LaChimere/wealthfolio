@@ -1094,7 +1094,7 @@ function detectAddonPermissions(addonFiles: AddonFileRecord[]): AddonPermissionR
     }
   }
 
-  const detectedAt = new Date().toISOString();
+  const detectedAt = toRustUtcRfc3339(new Date());
   return Array.from(detectedByCategory.entries()).map(([category, functions]) => {
     const pattern = PERMISSION_PATTERNS.find(([candidate]) => candidate === category);
     return {
