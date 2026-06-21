@@ -6147,7 +6147,7 @@ function normalizeActivityDateInput(value: unknown): string {
     return `${year}-${month}-${day}T00:00:00+00:00`;
   }
   const rfc3339 =
-    /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.exec(raw);
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/u.exec(raw);
   if (!rfc3339) {
     throw new Error("Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD");
   }
@@ -6176,7 +6176,7 @@ function dateToUtcRfc3339(date: Date): string {
 
 function normalizeRfc3339ActivityDate(value: string): string | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
     );
   if (!match) {
@@ -6218,7 +6218,7 @@ function normalizeRfc3339ActivityDate(value: string): string | null {
     return null;
   }
   const offsetMinutes =
-    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+    zoneRaw.toUpperCase() === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
   const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
   if (Number.isNaN(parsed.valueOf())) {
     return null;

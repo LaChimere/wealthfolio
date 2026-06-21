@@ -2873,6 +2873,22 @@ describe("TS activities import domain", () => {
         currency: "USD",
       }) as Activity;
       expect(subNanosecondDate.activityDate).toBe("2025-01-15T10:30:00+00:00");
+      const lowercaseZuluDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2015-06-30t23:59:60z",
+        amount: "46",
+        currency: "USD",
+      }) as Activity;
+      expect(lowercaseZuluDate.activityDate).toBe("2015-06-30T23:59:60+00:00");
+      const spaceSeparatorDate = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-15 10:30:00+02:30",
+        amount: "47",
+        currency: "USD",
+      }) as Activity;
+      expect(spaceSeparatorDate.activityDate).toBe("2025-01-15T08:00:00+00:00");
 
       expect(() =>
         service.createActivity?.({
