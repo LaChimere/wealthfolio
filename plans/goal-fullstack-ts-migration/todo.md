@@ -6087,6 +6087,10 @@ contract:
   FIRE planner adapter tests. Web/Electron adapters now cover projection, Monte
   Carlo defaults/seed, and sequence-of-returns payloads; stale web desktop-only
   comment removed.
+- `pr5-web-ai-streaming-adapter-coverage`: verification passed: focused frontend
+  web AI streaming tests. Coverage includes POST request shape, chunked NDJSON
+  parsing through terminal `done`, backend JSON error events, and null-body
+  network errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

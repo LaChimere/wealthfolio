@@ -4620,6 +4620,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   adapters now have focused tests for projection, Monte Carlo defaults/seed, and
   sequence-of-returns payloads; the stale web "desktop-only" comment was
   removed. Verified with focused frontend FIRE planner adapter tests.
+- Turn 770: Strengthened web AI streaming adapter coverage. The web adapter now
+  has focused tests for POST request shape, chunked NDJSON parsing through a
+  terminal `done`, backend JSON error events, and null-body network errors.
+  Verified with focused frontend web AI streaming tests.
 
 ## Deferred items
 
