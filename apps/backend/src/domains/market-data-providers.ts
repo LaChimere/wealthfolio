@@ -383,8 +383,69 @@ function normalizeUtcTimestamp(value: string, allowOffset: boolean): string | nu
   if (!allowOffset) {
     return null;
   }
-  const parsed = parseRustRfc3339Timestamp(value);
-  return parsed === null ? null : toRustUtcRfc3339(parsed);
+  return normalizeOffsetTimestamp(value);
+}
+
+function normalizeOffsetTimestamp(value: string): string | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?([+-])(\d{2}):(\d{2})$/u.exec(
+      value,
+    );
+  if (!match) {
+    const parsed = parseRustRfc3339Timestamp(value);
+    return parsed === null ? null : toRustUtcRfc3339(parsed);
+  }
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
+  }
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, 0));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes = Number(`${signRaw}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  const base = parsed.toISOString().slice(0, 19);
+  return `${base}${normalizeRustFraction(fractionRaw)}+00:00`;
 }
 
 function parseRustRfc3339Timestamp(value: string): Date | null {

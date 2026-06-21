@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 676
+turns_used: 677
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T08:30:47+08:00"
+updated_at: "2026-06-21T08:43:55+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4215,6 +4215,10 @@ updated_at: "2026-06-21T08:30:47+08:00"
   `last_synced_at` values now normalize to UTC like Rust
   `DateTime::parse_from_rfc3339` instead of being dropped as null. Verified with
   focused provider settings tests.
+- Turn 677: Resolved provider timestamp fractional-offset follow-up. Non-UTC
+  provider `last_synced_at` values now preserve Rust-style micro/nanosecond
+  fractional precision when normalized to UTC instead of truncating through JS
+  `Date`. Verified with focused provider settings tests.
 
 ## Deferred items
 
