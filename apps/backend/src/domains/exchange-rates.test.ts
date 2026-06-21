@@ -55,7 +55,7 @@ describe("TS exchange rates domain", () => {
         day: "2026-01-03",
         close: "1.40",
         source: "MANUAL",
-        timestamp: "2026-01-03T18:30:00+02:30",
+        timestamp: "2026-01-03T18:30:00.123456+02:30",
       });
 
       expect(service.getLatestExchangeRates()).toEqual([
@@ -63,8 +63,8 @@ describe("TS exchange rates domain", () => {
           id: "eur-usd",
           fromCurrency: "EUR",
           toCurrency: "USD",
-          rate: "1.20",
-          source: "MANUAL",
+          rate: "1.30",
+          source: "YAHOO",
         }),
         expect.objectContaining({
           id: "usd-cad",
@@ -72,7 +72,7 @@ describe("TS exchange rates domain", () => {
           toCurrency: "CAD",
           rate: "1.40",
           source: "MANUAL",
-          timestamp: "2026-01-03T16:00:00.000Z",
+          timestamp: "2026-01-03T16:00:00.123456Z",
         }),
       ]);
       expect(service.getLatestFxRateSnapshots()).toEqual([
@@ -81,14 +81,14 @@ describe("TS exchange rates domain", () => {
           fromCurrency: "EUR",
           toCurrency: "USD",
           instrumentKey: "FX:EUR/USD",
-          quoteTimestamp: "2026-01-02T16:00:00.000Z",
+          quoteTimestamp: "2026-02-30T16:00:00Z",
         },
         {
           assetId: "usd-cad",
           fromCurrency: "USD",
           toCurrency: "CAD",
           instrumentKey: "FX:USD/CAD",
-          quoteTimestamp: "2026-01-03T18:30:00+02:30",
+          quoteTimestamp: "2026-01-03T18:30:00.123456+02:30",
         },
       ]);
     } finally {
@@ -318,7 +318,7 @@ describe("TS exchange rates domain", () => {
       expect(service.convertCurrencyForDate("10", "USD", "JPY", "+10000-01-01")).toBe("20");
       expect(createExchangeRateRepository(db).getLatestExchangeRate("USD", "JPY")).toMatchObject({
         rate: "4",
-        timestamp: "+10001-01-01T16:00:00+00:00",
+        timestamp: "+10001-01-01T16:00:00Z",
       });
       expect(service.convertCurrency("6", "EUR", "GBP")).toBe("18");
       expect(() => service.convertCurrency("not-a-number", "USD", "CAD")).toThrow(

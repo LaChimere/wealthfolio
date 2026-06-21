@@ -758,7 +758,7 @@ function latestFxQuotesByAssetId(db: Database): Map<string, QuoteRow> {
   const latest = new Map<string, QuoteRow>();
   for (const row of rows) {
     const existing = latest.get(row.asset_id);
-    if (!existing || timestampSortValue(row.timestamp) > timestampSortValue(existing.timestamp)) {
+    if (!existing || row.timestamp > existing.timestamp) {
       latest.set(row.asset_id, row);
     }
   }
@@ -1081,11 +1081,11 @@ function pairKey(fromCurrency: string, toCurrency: string): string {
 }
 
 function parseTimestampOrNow(value: string): string {
-  const parsed = parseTimestampDate(value);
+  const parsed = parseTimestampResult(value);
   if (!parsed) {
     return timestampNow();
   }
-  return timestampToString(parsed);
+  return parsed.text;
 }
 
 function parseDateInput(date: string | Date): string {
@@ -1104,8 +1104,8 @@ function utcDateString(date: Date): string {
 }
 
 function dateStringFromTimestamp(timestamp: string): string {
-  const parsed = parseTimestampDate(timestamp);
-  return parsed ? utcDateString(parsed) : "";
+  const parsed = parseTimestampResult(timestamp);
+  return parsed ? utcDateString(parsed.date) : "";
 }
 
 function daysBetween(left: string, right: string): number {
@@ -1152,7 +1152,7 @@ function chronoYearString(year: number): string {
 }
 
 function parseTimestampDate(value: string): Date | null {
-  return parseExpandedRfc3339DateTime(value);
+  return parseTimestampResult(value)?.date ?? null;
 }
 
 function timestampSortValue(value: string): number {
@@ -1164,7 +1164,12 @@ function timestampInRange(value: string, start: Date, end: Date): boolean {
   return parsed !== null && parsed >= start && parsed <= end;
 }
 
-function parseExpandedRfc3339DateTime(value: string): Date | null {
+interface ParsedTimestamp {
+  date: Date;
+  text: string;
+}
+
+function parseTimestampResult(value: string): ParsedTimestamp | null {
   const match =
     /^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(
       value,
@@ -1192,12 +1197,11 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
   const hour = Number(hourRaw);
   const minute = Number(minuteRaw);
   const second = Number(secondRaw);
-  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
   const zoneHour = Number(zoneHourRaw);
   const zoneMinute = Number(zoneMinuteRaw);
   const offsetMinutes = zoneRaw === "Z" ? 0 : zoneHour * 60 + zoneMinute;
   const offset = signRaw === "-" ? -offsetMinutes : offsetMinutes;
-  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, 0));
   local.setUTCFullYear(year, month - 1, day);
   if (
     Number.isNaN(local.valueOf()) ||
@@ -1212,21 +1216,39 @@ function parseExpandedRfc3339DateTime(value: string): Date | null {
   ) {
     return null;
   }
-  return new Date(local.getTime() - offset * 60_000);
+  const date = new Date(local.getTime() - offset * 60_000);
+  if (Number.isNaN(date.valueOf())) {
+    return null;
+  }
+  return { date, text: timestampToString(date, fractionRaw) };
 }
 
-function timestampToString(date: Date): string {
-  const year = date.getUTCFullYear();
-  if (year >= 0 && year <= 9999) {
-    return date.toISOString();
+function timestampToString(date: Date, fractionRaw: string | undefined): string {
+  const fractional = normalizeRustSerdeFraction(fractionRaw);
+  return `${chronoYearString(date.getUTCFullYear())}-${String(date.getUTCMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(
+    2,
+    "0",
+  )}:${String(date.getUTCMinutes()).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(
+    2,
+    "0",
+  )}${fractional}Z`;
+}
+
+function normalizeRustSerdeFraction(value: string | undefined): string {
+  if (value === undefined || /^0+$/u.test(value)) {
+    return "";
   }
-  const millisecond = date.getUTCMilliseconds();
-  const fractional = millisecond === 0 ? "" : `.${millisecond.toString().padStart(3, "0")}`;
-  return `${chronoYearString(year)}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
-    date.getUTCDate(),
-  ).padStart(2, "0")}T${String(date.getUTCHours()).padStart(2, "0")}:${String(
-    date.getUTCMinutes(),
-  ).padStart(2, "0")}:${String(date.getUTCSeconds()).padStart(2, "0")}${fractional}+00:00`;
+  const nanos = value.padEnd(9, "0");
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
 }
 
 function publishAssetsCreated(eventBus: BackendEventBus | undefined, assetId: string): void {
