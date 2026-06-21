@@ -4515,7 +4515,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   default for Treasury bonds instead of hard-falling back to Yahoo. Stale
   high-error sync states from the previously selected provider no longer block
   the newly selected fallback provider. The now-unreachable Alpha Vantage
-  option-history failure branch was removed after the fallback remap.
+  option-history failure branch was removed after the fallback remap. Fallback
+  provider failures now start a fresh error count instead of inheriting the old
+  provider's count.
 - Turn 746: Tightened AI chat non-vision attachment parity. Image/PDF
   attachments sent to a model without vision now return Rust-shaped
   invalid-input errors instead of TS-runtime-specific 501s. Unsupported
@@ -4532,7 +4534,8 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 749: Added frontend handling for Rust-style uppercase AI error codes.
   Frontend chat error parsing now maps codes such as `INVALID_INPUT`,
   `MISSING_API_KEY`, and `PROVIDER_ERROR`, while still preserving actionable
-  `INVALID_INPUT` raw messages. Verified with focused frontend AI type tests.
+  `INVALID_INPUT` raw messages. Stream error rendering now uses this parser
+  instead of bypassing it. Verified with focused frontend AI type tests.
 
 ## Deferred items
 

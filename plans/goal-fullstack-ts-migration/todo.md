@@ -6000,7 +6000,8 @@ contract:
   assertion and preserves US Treasury calculated fallback for Treasury bonds
   with unsupported preferred providers. It also ignores stale high error counts
   from the old provider when a fallback provider is selected and removes the
-  now-unreachable Alpha Vantage option-history failure branch.
+  now-unreachable Alpha Vantage option-history failure branch. Fallback provider
+  failures start at error count 1 instead of inheriting old-provider counts.
 - `pr5-ai-chat-nonvision-attachment-parity`: verification passed: focused AI
   chat tests. Coverage includes image/PDF attachments on non-vision models
   returning Rust-shaped invalid-input errors before provider/media support
@@ -6016,7 +6017,7 @@ contract:
 - `pr5-ai-chat-uppercase-error-aliases`: verification passed: focused frontend
   AI type tests. Coverage includes Rust-style uppercase AI error codes mapping
   to friendly frontend categories while `INVALID_INPUT` preserves raw actionable
-  messages.
+  messages, and stream error rendering now routes through the parser.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
