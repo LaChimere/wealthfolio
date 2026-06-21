@@ -6021,6 +6021,10 @@ contract:
 - `pr5-data-export-runtime-activity-smoke`: verification passed: focused runtime
   tests. Coverage includes SQLite-backed standalone runtime activity rows
   exported through `/api/v1/utilities/export/activities/json`.
+- `pr5-data-export-runtime-portfolio-history-smoke`: verification passed:
+  focused runtime tests. Coverage includes SQLite-backed standalone runtime
+  TOTAL valuations exported through
+  `/api/v1/utilities/export/portfolio-history/json`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

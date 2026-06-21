@@ -1293,6 +1293,49 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("exports runtime portfolio history through SQLite-backed data export route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-history-export-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() =>
+        Promise.reject(new Error("unexpected market data fetch"))) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeValuation(db, {
+        accountId: "TOTAL",
+        date: "2026-05-14",
+        totalValue: "1234.56",
+        fxRateToBase: "1",
+      });
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const historyExportResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/export/portfolio-history/json`,
+      );
+      expect(historyExportResponse.status).toBe(200);
+      expect(historyExportResponse.headers.get("content-type")).toBe(
+        "application/json; charset=utf-8",
+      );
+      await expect(historyExportResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          accountId: "TOTAL",
+          valuationDate: "2026-05-14",
+          totalValue: 1234.56,
+        }),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires local Connect runtime behavior with disabled cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-disabled-"));
     const publicPlanRequests: string[] = [];

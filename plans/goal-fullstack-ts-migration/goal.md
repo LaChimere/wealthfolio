@@ -4540,6 +4540,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   The SQLite-backed TS server now has end-to-end coverage for seeded transaction
   activities exported through `/api/v1/utilities/export/activities/json`.
   Verified with focused runtime tests.
+- Turn 751: Strengthened standalone runtime data-export coverage for portfolio
+  history. The SQLite-backed TS server now has end-to-end coverage for seeded
+  TOTAL account valuations exported through
+  `/api/v1/utilities/export/portfolio-history/json`. Verified with focused
+  runtime tests.
 
 ## Deferred items
 
