@@ -156,6 +156,18 @@ describe("TS app utility domain", () => {
     });
   });
 
+  test("wraps invalid update response JSON errors like Rust", async () => {
+    const service = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () => new Response("not json", { status: 500 }),
+      logsDir: "/tmp/wealthfolio-data/logs",
+    });
+
+    await expect(service.checkUpdate(true)).rejects.toThrow("Failed to parse update response:");
+  });
+
   test("compares update versions with Rust semver fallback semantics", async () => {
     const prereleaseService = createAppUtilityService({
       appDataDir: "/tmp/wealthfolio-data",

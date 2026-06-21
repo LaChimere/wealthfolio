@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 671
+turns_used: 672
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T08:01:14+08:00"
+updated_at: "2026-06-21T08:04:11+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4194,6 +4194,10 @@ updated_at: "2026-06-21T08:01:14+08:00"
   Rust by treating only 404 as no-update and parsing every other HTTP response
   body as the update JSON payload instead of rejecting non-2xx statuses before
   parse. Verified with focused app-utilities tests.
+- Turn 672: Tightened app update invalid-JSON parity. Update checks now wrap
+  `response.json()` failures as `Failed to parse update response: ...` like the
+  Rust handler instead of surfacing raw parser errors. Verified with focused
+  app-utilities tests.
 
 ## Deferred items
 

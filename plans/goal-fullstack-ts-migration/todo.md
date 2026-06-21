@@ -5746,6 +5746,9 @@ contract:
 - `pr5-app-update-non404-response-parsing`: verification passed: focused
   app-utilities tests. Coverage includes Rust-compatible behavior where only 404
   maps to no-update and all other HTTP responses are parsed as update payloads.
+- `pr5-app-update-invalid-json-error`: verification passed: focused
+  app-utilities tests. Coverage includes wrapping invalid update response JSON
+  parse failures with Rust-compatible `Failed to parse update response` errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

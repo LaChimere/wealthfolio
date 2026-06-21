@@ -344,7 +344,13 @@ async function parseUpdateResponse(
     return noUpdateResponse(currentVersion);
   }
 
-  const payload = parseUpdatePayload(await response.json());
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch (error) {
+    throw new Error(`Failed to parse update response: ${errorMessage(error)}`);
+  }
+  const payload = parseUpdatePayload(json);
   const latestVersion = payload.version;
   return {
     updateAvailable: isUpdateAvailable(currentVersion, latestVersion),
@@ -410,6 +416,10 @@ function optionalStringArrayField(value: unknown, field: string): string[] | nul
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function noUpdateResponse(version: string): UpdateCheckResponse {
