@@ -6059,6 +6059,9 @@ contract:
   event adapter tests and Electron type-check. Successful `restore_database`
   sidecar commands now emit `database:restored`, and the Electron adapter
   forwards it to the existing global refresh/toast listener.
+- `pr5-electron-activity-parse-adapter-coverage`: verification passed: focused
+  frontend Electron activities adapter tests. Coverage proves `File` bytes and
+  parse config are forwarded to the `parse_csv` Electron command.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

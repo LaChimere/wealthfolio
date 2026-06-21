@@ -4587,6 +4587,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   renderer event, and the Electron adapter listener forwards it to the global
   cache invalidation/toast path. Verified with focused Electron event adapter
   tests and Electron type-check.
+- Turn 762: Strengthened Electron activity CSV parse adapter coverage. The
+  renderer adapter now has a focused test proving `File` bytes, including BOM
+  bytes, are forwarded to the `parse_csv` Electron command with the parse
+  config. Verified with focused frontend Electron activities adapter tests.
 
 ## Deferred items
 
