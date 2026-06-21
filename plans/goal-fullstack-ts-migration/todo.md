@@ -5919,6 +5919,10 @@ contract:
 - `pr5-data-export-runtime-route-smoke`: verification passed: runtime tests.
   Coverage includes SQLite-backed standalone runtime wiring for
   `/api/v1/utilities/export` and Rust-compatible empty export 204 responses.
+- `pr5-data-export-runtime-nonempty-smoke`: verification passed: runtime tests
+  and full check. Coverage includes SQLite-backed standalone runtime account
+  creation followed by non-empty `/api/v1/utilities/export/accounts/json`
+  responses.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

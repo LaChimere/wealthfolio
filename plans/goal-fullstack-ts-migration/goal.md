@@ -4421,6 +4421,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   SQLite-backed TS server now has coverage proving `/api/v1/utilities/export` is
   wired through runtime composition and returns Rust-compatible 204 responses
   for empty exports. Verified with runtime tests.
+- Turn 726: Strengthened standalone runtime account export coverage. The
+  SQLite-backed TS server now has end-to-end coverage for creating an account
+  and exporting non-empty account data through
+  `/api/v1/utilities/export/accounts/json`, proving the data-export route is
+  wired past empty-export responses. Verified with runtime tests and full check.
 
 ## Deferred items
 

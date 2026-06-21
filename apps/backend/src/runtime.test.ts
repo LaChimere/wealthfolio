@@ -1211,6 +1211,17 @@ describe("TS backend runtime composition", () => {
       expect(accountResponse.status).toBe(200);
       await expect(accountResponse.json()).resolves.toMatchObject({ currency: "CAD" });
 
+      const accountExportResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/export/accounts/json`,
+      );
+      expect(accountExportResponse.status).toBe(200);
+      expect(accountExportResponse.headers.get("content-type")).toBe(
+        "application/json; charset=utf-8",
+      );
+      await expect(accountExportResponse.json()).resolves.toEqual([
+        expect.objectContaining({ name: "CAD Brokerage", currency: "CAD" }),
+      ]);
+
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         const fxAsset = db
