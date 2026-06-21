@@ -5759,6 +5759,9 @@ contract:
   market-data provider tests. Coverage includes rejecting malformed
   `last_synced_at` values and strict RFC3339 parsing/fallback for sync-error
   `updated_at`.
+- `pr5-provider-sync-timestamp-offset-review`: verification passed: focused
+  market-data provider tests. Coverage includes accepting valid non-UTC RFC3339
+  `last_synced_at` values and normalizing them to UTC like Rust.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

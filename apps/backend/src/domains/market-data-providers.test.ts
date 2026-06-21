@@ -67,12 +67,21 @@ describe("TS market data provider settings domain", () => {
         "2026-01-05T04:30:00+02:30",
         "asset-4",
       );
+      db.query(
+        `
+          INSERT INTO quote_sync_state (
+            asset_id, last_synced_at, data_source, error_count, last_error, updated_at
+          )
+          VALUES (?, ?, ?, 0, NULL, ?)
+        `,
+      ).run("asset-5", "2026-01-06T04:30:00+02:30", "FINNHUB", "2026-01-06T00:00:00Z");
 
       const providers = await service.getProvidersInfo();
       expect(providers.find((provider) => provider.id === "YAHOO")).toMatchObject({
         lastSyncedAt: null,
       });
       expect(providers.find((provider) => provider.id === "FINNHUB")).toMatchObject({
+        lastSyncedAt: "2026-01-06T02:00:00+00:00",
         lastSyncError: "Provider FINNHUB failed",
       });
     } finally {

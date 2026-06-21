@@ -349,7 +349,7 @@ function parseTimestampOrNull(value: string | null): string | null {
   if (!value) {
     return null;
   }
-  return normalizeUtcTimestamp(value, false);
+  return normalizeUtcTimestamp(value, true);
 }
 
 function parseTimestampOrNow(value: string): string {
