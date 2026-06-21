@@ -4549,6 +4549,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   SQLite-backed TS server now has end-to-end coverage for persisted goals
   exported through `/api/v1/utilities/export/goals/json`. Verified with focused
   runtime tests.
+- Turn 753: Added web data-export adapter coverage. The web adapter now has
+  focused tests for backend-provided filenames, empty 204 exports, and
+  unauthorized/error propagation through `exportDataFile`. Verified with focused
+  frontend adapter tests.
 
 ## Deferred items
 

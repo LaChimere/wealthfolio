@@ -6028,6 +6028,9 @@ contract:
 - `pr5-data-export-runtime-goal-smoke`: verification passed: focused runtime
   tests. Coverage includes SQLite-backed standalone runtime goals exported
   through `/api/v1/utilities/export/goals/json`.
+- `pr5-data-export-web-adapter-coverage`: verification passed: focused frontend
+  adapter tests. Coverage includes backend filename downloads, 204 empty
+  exports, and unauthorized/error propagation in the web export adapter.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
