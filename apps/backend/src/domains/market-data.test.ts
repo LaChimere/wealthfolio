@@ -2382,6 +2382,88 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("syncs Finnhub FX and crypto candles with Rust provider symbols", async () => {
+    const db = createMarketDataDb();
+    const calls: string[] = [];
+    const fetchImpl = finnhubTestFetch({
+      calls,
+      candles: {
+        "OANDA:EUR_USD": {
+          s: "ok",
+          t: [1767571200],
+          o: [1.1],
+          h: [1.2],
+          l: [1.0],
+          c: [1.15],
+          v: [0],
+        },
+        "BINANCE:BTCUSDT": {
+          s: "ok",
+          t: [1767571200],
+          o: [43000],
+          h: [45000],
+          l: [42000],
+          c: [44000],
+          v: [12],
+        },
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T22:30:00Z"),
+      secretService: testSecretService("FINNHUB", "finnhub-key"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-finnhub-fx",
+        display_code: "EURUSD",
+        quote_ccy: "USD",
+        instrument_type: "FX",
+        instrument_symbol: "EUR",
+        provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
+      });
+      insertAsset(db, {
+        id: "asset-finnhub-crypto",
+        display_code: "BTC-USDT",
+        quote_ccy: "USDT",
+        instrument_type: "CRYPTO",
+        instrument_symbol: "BTC",
+        provider_config: JSON.stringify({ preferred_provider: "FINNHUB" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["asset-finnhub-fx", "asset-finnhub-crypto"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 2,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 2,
+      });
+
+      expect(calls.map((call) => new URL(call).searchParams.get("symbol"))).toEqual([
+        "OANDA:EUR_USD",
+        "BINANCE:BTCUSDT",
+      ]);
+      expect(readQuoteByDay(db, "asset-finnhub-fx", "2026-01-05")).toMatchObject({
+        source: "FINNHUB",
+        close: "1.15",
+        currency: "USD",
+      });
+      expect(readQuoteByDay(db, "asset-finnhub-crypto", "2026-01-05")).toMatchObject({
+        source: "FINNHUB",
+        close: "44000",
+        currency: "USDT",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("records Alpha Vantage rate-limit sync failures", async () => {
     const db = createMarketDataDb();
     const service = createMarketDataService(db, {

@@ -4455,6 +4455,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   sync failures now use the Rust provider-style unsupported-operation message
   instead of saying the limitation is TS-runtime-specific. Verified with focused
   market-data tests.
+- Turn 734: Extended Finnhub historical sync beyond equities. Preferred Finnhub
+  FX and CRYPTO assets now use Rust provider-style `OANDA:<from>_<to>` and
+  `BINANCE:<base><quote>` symbols for candle backfill while preserving explicit
+  provider overrides. Verified with focused Finnhub market-data tests.
 
 ## Deferred items
 

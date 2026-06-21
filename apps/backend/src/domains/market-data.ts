@@ -1288,11 +1288,9 @@ async function syncMarketDataExecution(
       const failureMessage =
         apiKey === null
           ? `${provider} API key not configured`
-          : asset.instrument_type?.toUpperCase() !== "EQUITY"
-            ? "Finnhub only supports equities in the TS sync runtime"
-            : symbol === null
-              ? "Asset cannot be mapped to a Finnhub symbol"
-              : null;
+          : symbol === null
+            ? "Asset cannot be mapped to a Finnhub symbol"
+            : null;
       if (failureMessage !== null || apiKey === null || symbol === null) {
         const message = failureMessage ?? "Asset cannot be mapped to a Finnhub symbol";
         updateQuoteSyncStateAfterFailure(db, quoteSyncStateExists, asset.id, provider, message);
@@ -6060,10 +6058,39 @@ function finnhubTimestampFromSeconds(timestampSeconds: number): string | null {
 }
 
 function finnhubSyncSymbol(asset: AssetMarketSyncRow): string | null {
-  return (
-    providerOverrideSymbol(asset.provider_config, FINNHUB_PROVIDER) ??
-    optionalString(asset.instrument_symbol)
-  );
+  const override = providerOverrideRecord(asset.provider_config, FINNHUB_PROVIDER);
+  const overrideType = optionalString(override?.type);
+  const overrideSymbol = optionalString(override?.symbol);
+  if (overrideSymbol && overrideType !== "crypto_pair" && overrideType !== "fx_pair") {
+    return overrideSymbol;
+  }
+  const overrideFrom = optionalString(override?.from)?.toUpperCase();
+  const overrideTo = optionalString(override?.to)?.toUpperCase();
+  if (overrideType === "fx_pair" && overrideFrom && overrideTo) {
+    return `OANDA:${overrideFrom}_${overrideTo}`;
+  }
+  const overrideMarket = optionalString(override?.market)?.toUpperCase();
+  if (overrideType === "crypto_pair" && overrideSymbol && overrideMarket) {
+    return `BINANCE:${overrideSymbol.toUpperCase()}${overrideMarket}`;
+  }
+
+  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined);
+  const symbol = optionalString(asset.instrument_symbol);
+  if (!symbol) {
+    return null;
+  }
+  if (instrumentType === "EQUITY") {
+    return symbol;
+  }
+  if (instrumentType === "FX") {
+    const quoteCcy = asset.quote_ccy.toUpperCase();
+    return quoteCcy ? `OANDA:${symbol.toUpperCase()}_${quoteCcy}` : null;
+  }
+  if (instrumentType === "CRYPTO") {
+    const quoteCcy = asset.quote_ccy.toUpperCase();
+    return quoteCcy ? `BINANCE:${symbol.toUpperCase()}${quoteCcy}` : null;
+  }
+  return null;
 }
 
 function parseFinnhubError(text: string): string | null {

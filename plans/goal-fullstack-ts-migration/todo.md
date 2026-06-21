@@ -5949,6 +5949,10 @@ contract:
   market-data tests. Coverage includes historical OPTION sync failures reporting
   Rust provider-style unsupported `historical_quotes` operation text instead of
   TS-runtime-specific wording.
+- `pr5-finnhub-fx-crypto-sync`: verification passed: focused Finnhub market-data
+  tests. Coverage includes preferred Finnhub FX and CRYPTO assets syncing
+  historical candle rows through Rust provider-style `OANDA:<from>_<to>` and
+  `BINANCE:<base><quote>` symbols.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
