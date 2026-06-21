@@ -5952,7 +5952,8 @@ contract:
 - `pr5-finnhub-fx-crypto-sync`: verification passed: focused Finnhub market-data
   tests. Coverage includes preferred Finnhub FX and CRYPTO assets syncing
   historical candle rows through Rust provider-style `OANDA:<from>_<to>` and
-  `BINANCE:<base><quote>` symbols.
+  `BINANCE:<base><quote>` symbols, with Rust Finnhub provider capabilities
+  aligned to include FX and CRYPTO.
 - `pr5-finnhub-fx-crypto-resolve`: verification passed: focused Finnhub
   market-data tests. Coverage includes preferred Finnhub FX and CRYPTO latest
   quote resolution through Rust provider-style `OANDA:<from>_<to>` and

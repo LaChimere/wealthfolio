@@ -553,8 +553,12 @@ impl MarketDataProvider for FinnhubProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            // Finnhub primarily supports equities, but also has crypto/forex
-            instrument_kinds: &[InstrumentKind::Equity],
+            // Finnhub primarily supports equities, but also has crypto/forex.
+            instrument_kinds: &[
+                InstrumentKind::Equity,
+                InstrumentKind::Crypto,
+                InstrumentKind::Fx,
+            ],
             // Global coverage for major exchanges (free tier = US only)
             coverage: Coverage::global_best_effort(),
             supports_latest: true,
@@ -691,6 +695,8 @@ mod tests {
         let provider = FinnhubProvider::new("test_key".to_string());
         let caps = provider.capabilities();
         assert!(caps.instrument_kinds.contains(&InstrumentKind::Equity));
+        assert!(caps.instrument_kinds.contains(&InstrumentKind::Crypto));
+        assert!(caps.instrument_kinds.contains(&InstrumentKind::Fx));
         assert!(caps.supports_latest);
         assert!(caps.supports_historical);
         assert!(caps.supports_search);

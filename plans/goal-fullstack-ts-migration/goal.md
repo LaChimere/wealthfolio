@@ -4458,7 +4458,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 734: Extended Finnhub historical sync beyond equities. Preferred Finnhub
   FX and CRYPTO assets now use Rust provider-style `OANDA:<from>_<to>` and
   `BINANCE:<base><quote>` symbols for candle backfill while preserving explicit
-  provider overrides. Verified with focused Finnhub market-data tests.
+  provider overrides; the Rust Finnhub provider capability list now includes FX
+  and CRYPTO so the registry can select these existing symbol paths. Verified
+  with focused Rust and TS Finnhub market-data tests.
 - Turn 735: Extended Finnhub latest quote resolution beyond equities. Preferred
   Finnhub FX and CRYPTO quote resolves now call `/quote` with Rust
   provider-style `OANDA:<from>_<to>` and `BINANCE:<base><quote>` symbols and
