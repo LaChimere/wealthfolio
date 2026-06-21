@@ -447,5 +447,5 @@ function portfolioAccountPayload(
 }
 
 function timestampNow(): string {
-  return new Date().toISOString();
+  return new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
 }

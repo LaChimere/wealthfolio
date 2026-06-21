@@ -5843,6 +5843,9 @@ contract:
 - `pr5-market-data-quote-read-shape-review-fix`: verification passed: focused
   market-data tests. Coverage distinguishes Rust DB storage `+00:00` quote
   timestamps from Rust API serde `Z` quote-history read timestamps.
+- `pr5-portfolios-timestamps`: verification passed: focused portfolios tests.
+  Coverage includes Rust repository-style second-level UTC `Z` storage for
+  portfolio and portfolio-account timestamps.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

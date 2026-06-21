@@ -29,6 +29,13 @@ describe("TS portfolios domain", () => {
         sortOrder: 2,
         accountIds: ["a1", "a2"],
       });
+      expect(created.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      expect(created.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      expect(
+        db
+          .query<{ created_at: string }, []>("SELECT created_at FROM portfolio_accounts LIMIT 1")
+          .get()?.created_at,
+      ).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       expect(service.listPortfolios()).toEqual([created]);
       expect(service.getPortfolio(created.id)).toEqual(created);
       expect(syncEvents).toEqual([
