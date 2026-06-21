@@ -4446,6 +4446,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `+HHMM` quote timestamps now follow Rust `QuoteDB` strict `parse_from_rfc3339`
   behavior by falling back fresh/classifiable instead of parsing as stale/fresh
   timestamps. Verified with focused health and exchange-rate tests.
+- Turn 732: Cleaned web update adapter success-shaped current-version fallback.
+  Web update checks now populate `UpdateInfo.currentVersion` from backend app
+  info when an update is available instead of returning an empty string, while
+  no-update responses avoid the extra app-info call. Verified with focused
+  frontend adapter tests.
 
 ## Deferred items
 

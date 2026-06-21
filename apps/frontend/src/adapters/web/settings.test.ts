@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Settings } from "@/lib/types";
-import { getAppInfo, getSettings, isAutoUpdateCheckEnabled } from "./settings";
+import { checkForUpdates, getAppInfo, getSettings, isAutoUpdateCheckEnabled } from "./settings";
 import { invoke } from "./core";
 
 vi.mock("./core", () => ({
@@ -65,5 +65,47 @@ describe("web settings adapter", () => {
     invokeMock.mockRejectedValueOnce(error);
 
     await expect(isAutoUpdateCheckEnabled()).rejects.toBe(error);
+  });
+
+  it("maps web update checks with the current app version", async () => {
+    invokeMock
+      .mockResolvedValueOnce({
+        updateAvailable: true,
+        latestVersion: "3.5.0",
+        notes: "Release notes",
+        pubDate: "2026-05-06",
+        downloadUrl: "https://example.test/download",
+        changelogUrl: "https://example.test/changelog",
+        screenshots: ["https://example.test/screenshot.png"],
+      })
+      .mockResolvedValueOnce({
+        version: "3.4.0",
+        dbPath: "/safe/app.db",
+        logsDir: "/safe/logs",
+      });
+
+    await expect(checkForUpdates({ force: true })).resolves.toEqual({
+      currentVersion: "3.4.0",
+      latestVersion: "3.5.0",
+      notes: "Release notes",
+      pubDate: "2026-05-06",
+      isAppStoreBuild: false,
+      storeUrl: "https://example.test/download",
+      changelogUrl: "https://example.test/changelog",
+      screenshots: ["https://example.test/screenshot.png"],
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "check_update", { force: true });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "get_app_info");
+  });
+
+  it("does not load app info when no web update is available", async () => {
+    invokeMock.mockResolvedValueOnce({
+      updateAvailable: false,
+      latestVersion: "3.4.0",
+    });
+
+    await expect(checkForUpdates()).resolves.toBeNull();
+    expect(invokeMock).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenCalledWith("check_update", {});
   });
 });

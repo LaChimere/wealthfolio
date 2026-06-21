@@ -5941,6 +5941,10 @@ contract:
   and exchange-rate tests. Coverage includes compact `+HHMM` FX quote timestamps
   following Rust `QuoteDB` strict `parse_from_rfc3339` fallback-to-fresh
   behavior instead of parsing as valid RFC3339.
+- `pr5-web-update-current-version`: verification passed: focused frontend web
+  adapter tests. Coverage includes update-available responses populating
+  `UpdateInfo.currentVersion` from backend app info instead of an empty string,
+  while no-update responses skip the extra app-info call.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

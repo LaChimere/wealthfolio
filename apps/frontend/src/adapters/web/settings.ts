@@ -128,9 +128,10 @@ export const checkForUpdates = async (options?: {
   if (!response?.updateAvailable) {
     return null;
   }
+  const appInfo = await getAppInfo();
   // Convert web response to UpdateInfo shape
   return {
-    currentVersion: "",
+    currentVersion: appInfo.version,
     latestVersion: response.latestVersion,
     notes: response.notes,
     pubDate: response.pubDate,
