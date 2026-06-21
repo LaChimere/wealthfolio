@@ -4624,6 +4624,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   has focused tests for POST request shape, chunked NDJSON parsing through a
   terminal `done`, backend JSON error events, and null-body network errors.
   Verified with focused frontend web AI streaming tests.
+- Turn 771: Strengthened web SSE event adapter coverage. Web event listeners now
+  have focused tests for credentialed EventSource setup, JSON/null/raw payload
+  parsing, shared connection cleanup, EventSource-unavailable errors, and web
+  no-op desktop-only listeners. Verified with focused frontend web event tests.
 
 ## Deferred items
 

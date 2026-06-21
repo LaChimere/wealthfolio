@@ -6091,6 +6091,10 @@ contract:
   web AI streaming tests. Coverage includes POST request shape, chunked NDJSON
   parsing through terminal `done`, backend JSON error events, and null-body
   network errors.
+- `pr5-web-sse-event-adapter-coverage`: verification passed: focused frontend
+  web event tests. Coverage includes credentialed EventSource setup,
+  JSON/null/raw payload parsing, shared connection cleanup, EventSource
+  unavailable errors, and web no-op desktop-only listeners.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
