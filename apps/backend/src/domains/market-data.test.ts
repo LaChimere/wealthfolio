@@ -2445,10 +2445,12 @@ describe("TS market data domain", () => {
         quotesSynced: 2,
       });
 
-      expect(calls.map((call) => new URL(call).searchParams.get("symbol"))).toEqual([
-        "OANDA:EUR_USD",
-        "BINANCE:BTCUSDT",
-      ]);
+      expect(
+        calls.map((call) => {
+          const url = new URL(call);
+          return `${url.pathname}:${url.searchParams.get("symbol") ?? ""}`;
+        }),
+      ).toEqual(["/api/v1/forex/candle:OANDA:EUR_USD", "/api/v1/crypto/candle:BINANCE:BTCUSDT"]);
       expect(readQuoteByDay(db, "asset-finnhub-fx", "2026-01-05")).toMatchObject({
         source: "FINNHUB",
         close: "1.15",
@@ -6144,7 +6146,11 @@ function finnhubTestFetch(options: {
     expect(headers?.["X-Finnhub-Token"]).toBe("finnhub-key");
     options.calls?.push(url);
     const parsed = new URL(url);
-    if (parsed.pathname === "/api/v1/stock/candle") {
+    if (
+      parsed.pathname === "/api/v1/stock/candle" ||
+      parsed.pathname === "/api/v1/forex/candle" ||
+      parsed.pathname === "/api/v1/crypto/candle"
+    ) {
       const symbol = parsed.searchParams.get("symbol") ?? "";
       expect(parsed.searchParams.get("resolution")).toBe("D");
       const result = options.candles?.[symbol];

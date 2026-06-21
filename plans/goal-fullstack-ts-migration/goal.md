@@ -4470,6 +4470,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `Stocks • Crypto • Forex`, matching the Rust provider capability expansion and
   the new FX/crypto sync/resolve behavior. Verified with focused
   provider-settings tests.
+- Turn 737: Resolved GPT Finnhub capability review follow-ups. Rust
+  `RulesResolver` now resolves Finnhub FX/CRYPTO instruments into existing
+  `FxPair`/`CryptoPair` paths, and Rust/TS Finnhub historical sync routes FX and
+  CRYPTO candles to `/forex/candle` and `/crypto/candle` instead of the stock
+  endpoint. Verified with focused Rust resolver/provider and TS Finnhub tests.
 
 ## Deferred items
 

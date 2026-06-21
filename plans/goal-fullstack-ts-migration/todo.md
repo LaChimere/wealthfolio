@@ -5962,6 +5962,10 @@ contract:
   provider-settings tests. Coverage includes TS provider info and Rust
   provider-settings metadata advertising Finnhub `Stocks • Crypto • Forex`
   capabilities after the Rust provider capability expansion.
+- `pr5-finnhub-review-fixes`: verification passed: focused Rust
+  resolver/provider and TS Finnhub tests. Coverage includes Rust Finnhub
+  resolver support for FX/CRYPTO, plus Rust and TS historical candle endpoint
+  routing to `/forex/candle` and `/crypto/candle`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

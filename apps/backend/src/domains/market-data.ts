@@ -5878,7 +5878,7 @@ async function fetchFinnhubHistoricalQuotes(
   apiKey: string,
 ): Promise<YahooHistoricalQuote[]> {
   const payload = await fetchFinnhubJson(
-    "/stock/candle",
+    finnhubCandleEndpoint(asset),
     [
       ["symbol", symbol],
       ["resolution", "D"],
@@ -5889,6 +5889,17 @@ async function fetchFinnhubHistoricalQuotes(
     apiKey,
   );
   return parseFinnhubHistoricalQuotes(payload, asset, currency);
+}
+
+function finnhubCandleEndpoint(asset: AssetMarketSyncRow): string {
+  const instrumentType = normalizeInstrumentType(asset.instrument_type ?? undefined);
+  if (instrumentType === "CRYPTO") {
+    return "/crypto/candle";
+  }
+  if (instrumentType === "FX") {
+    return "/forex/candle";
+  }
+  return "/stock/candle";
 }
 
 async function fetchFinnhubLatestQuote(

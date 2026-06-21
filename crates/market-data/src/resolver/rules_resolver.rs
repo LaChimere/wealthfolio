@@ -25,6 +25,7 @@ use super::yahoo_equity_base_to_provider;
 ///
 /// - `YAHOO`: Yahoo Finance format (SHOP.TO, BTC-USD, EURUSD=X)
 /// - `ALPHA_VANTAGE`: AlphaVantage format (SHOP.TRT, CryptoPair, FxPair)
+/// - `FINNHUB`: Finnhub format (SHOP, CryptoPair, FxPair)
 /// - `METAL_PRICE_API`: Metal Price API format
 pub struct RulesResolver {
     exchange_map: ExchangeMap,
@@ -116,6 +117,13 @@ impl RulesResolver {
                     market: quote.clone(),
                 })
             }
+            "FINNHUB" => {
+                // Finnhub formats crypto pairs as BINANCE:<base><quote> in the provider.
+                Some(ProviderInstrument::CryptoPair {
+                    symbol: Arc::from(base.as_ref()),
+                    market: quote.clone(),
+                })
+            }
             _ => None,
         }
     }
@@ -136,6 +144,13 @@ impl RulesResolver {
             }
             "ALPHA_VANTAGE" => {
                 // AlphaVantage uses from/to pair
+                Some(ProviderInstrument::FxPair {
+                    from: base.clone(),
+                    to: quote.clone(),
+                })
+            }
+            "FINNHUB" => {
+                // Finnhub formats FX pairs as OANDA:<from>_<to> in the provider.
                 Some(ProviderInstrument::FxPair {
                     from: base.clone(),
                     to: quote.clone(),
@@ -480,6 +495,25 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_fx_finnhub() {
+        let resolver = RulesResolver::new();
+        let context = make_fx_context("EUR", "USD");
+
+        let result = resolver.resolve(&"FINNHUB".into(), &context);
+
+        assert!(result.is_some());
+        let resolved = result.unwrap().unwrap();
+
+        match resolved.instrument {
+            ProviderInstrument::FxPair { from, to } => {
+                assert_eq!(from.as_ref(), "EUR");
+                assert_eq!(to.as_ref(), "USD");
+            }
+            _ => panic!("Expected FxPair"),
+        }
+    }
+
+    #[test]
     fn test_resolve_crypto_yahoo() {
         let resolver = RulesResolver::new();
         let context = make_crypto_context("BTC", "USD");
@@ -503,6 +537,25 @@ mod tests {
         let context = make_crypto_context("BTC", "USD");
 
         let result = resolver.resolve(&"ALPHA_VANTAGE".into(), &context);
+
+        assert!(result.is_some());
+        let resolved = result.unwrap().unwrap();
+
+        match resolved.instrument {
+            ProviderInstrument::CryptoPair { symbol, market } => {
+                assert_eq!(symbol.as_ref(), "BTC");
+                assert_eq!(market.as_ref(), "USD");
+            }
+            _ => panic!("Expected CryptoPair"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_crypto_finnhub() {
+        let resolver = RulesResolver::new();
+        let context = make_crypto_context("BTC", "USD");
+
+        let result = resolver.resolve(&"FINNHUB".into(), &context);
 
         assert!(result.is_some());
         let resolved = result.unwrap().unwrap();
