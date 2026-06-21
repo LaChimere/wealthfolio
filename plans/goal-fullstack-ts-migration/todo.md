@@ -5981,6 +5981,9 @@ contract:
   Rust and TS provider-settings tests. Coverage includes Alpha Vantage
   advertising `Stocks • Crypto • Forex • Options` after existing
   `REALTIME_OPTIONS` latest quote support.
+- `pr5-openfigi-quote-fetch-fallback`: verification passed: focused market-data
+  tests. Coverage includes preferred `OPENFIGI` profile/search assets falling
+  back to Yahoo quote sync instead of being skipped as provider-not-implemented.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

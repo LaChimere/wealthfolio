@@ -291,6 +291,60 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("falls back from OpenFIGI profile provider to Yahoo for quote sync", async () => {
+    const db = createMarketDataDb();
+    const chartSymbols: string[] = [];
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: yahooHistoryFetchBySymbol(
+        {
+          AAPL: {
+            result: {
+              meta: { currency: "USD" },
+              timestamp: [1767571200],
+              indicators: { quote: [{ close: [10.5] }] },
+            },
+          },
+        },
+        (symbol) => chartSymbols.push(symbol),
+      ),
+      now: () => new Date("2026-01-06T22:30:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "openfigi-profile-asset",
+        display_code: "AAPL",
+        instrument_symbol: "AAPL",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "OPENFIGI" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({ type: "incremental", asset_ids: ["openfigi-profile-asset"] }),
+      ).resolves.toMatchObject({
+        synced: 1,
+        failed: 0,
+        skipped: 0,
+        quotesSynced: 1,
+        skippedReasons: [],
+      });
+
+      expect(chartSymbols).toEqual(["AAPL"]);
+      expect(readQuoteByDay(db, "openfigi-profile-asset", "2026-01-05")).toMatchObject({
+        source: "YAHOO",
+        close: "10.5",
+      });
+      expect(readSyncState(db, "openfigi-profile-asset")).toMatchObject({
+        data_source: "YAHOO",
+        error_count: 0,
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs targeted custom provider latest quotes with source overrides", async () => {
     const db = createMarketDataDb();
     const yahooCalls: string[] = [];

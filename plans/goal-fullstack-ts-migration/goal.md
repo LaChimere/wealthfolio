@@ -4491,6 +4491,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   provider settings now advertise `Options` alongside Stocks/Crypto/Forex,
   matching the existing `REALTIME_OPTIONS` latest quote support. Verified with
   focused Rust and TS provider-settings tests.
+- Turn 742: Matched quote-sync fallback for search/profile-only providers.
+  Preferred `OPENFIGI` assets now fall back to a fetch-capable quote provider
+  during TS market sync instead of being skipped as provider-not-implemented,
+  matching Rust provider capability filtering. Verified with focused market-data
+  tests.
 
 ## Deferred items
 

@@ -834,7 +834,7 @@ async function syncMarketDataExecution(
     }
 
     const state = states.get(asset.id) ?? null;
-    const provider = effectiveMarketDataProvider(state, asset);
+    const provider = quoteFetchProvider(effectiveMarketDataProvider(state, asset), asset);
     const customProviderCode = customProviderCodeForMarketSync(asset.provider_config);
     if (isCustomProviderSync(provider)) {
       const quoteSource = customProviderCode
@@ -4162,6 +4162,13 @@ function effectiveMarketDataProvider(
     return trimmed;
   }
   return trimmed.toUpperCase();
+}
+
+function quoteFetchProvider(provider: string, asset: AssetMarketSyncRow): string {
+  if (provider === OPENFIGI_PROVIDER) {
+    return isUsTreasuryBondAsset(asset) ? US_TREASURY_CALC_PROVIDER : DEFAULT_MARKET_DATA_PROVIDER;
+  }
+  return provider;
 }
 
 function isCustomProviderSync(provider: string): boolean {
