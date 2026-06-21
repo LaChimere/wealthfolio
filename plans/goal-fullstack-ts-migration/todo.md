@@ -6105,6 +6105,10 @@ contract:
   backend-contract command-surface tests. Required add-on host canary event
   names are now asserted across TS backend event publisher plus web/Electron
   adapters.
+- `pr5-web-settings-backup-adapter-coverage`: verification passed: focused
+  frontend web settings adapter tests. Coverage includes server-side
+  backup/list/delete/download URL behavior and desktop/native-only backup helper
+  rejection.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

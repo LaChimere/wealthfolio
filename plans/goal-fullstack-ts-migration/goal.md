@@ -4640,6 +4640,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   assert required canary event names are present in the TS backend event
   publisher and both web/Electron adapters. Verified with focused
   backend-contract command-surface tests.
+- Turn 775: Strengthened web settings backup adapter coverage. Web settings
+  tests now cover server-side backup/list/delete/download URL behavior and
+  desktop/native-only backup helper rejection. Verified with focused frontend
+  web settings adapter tests.
 
 ## Deferred items
 

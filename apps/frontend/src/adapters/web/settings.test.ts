@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Settings } from "@/lib/types";
-import { checkForUpdates, getAppInfo, getSettings, isAutoUpdateCheckEnabled } from "./settings";
+import {
+  backupDatabase,
+  backupDatabaseToPath,
+  backupDatabaseToPendingExport,
+  checkForUpdates,
+  deleteDatabaseBackup,
+  getAppInfo,
+  getDatabaseBackupDownloadUrl,
+  getSettings,
+  isAutoUpdateCheckEnabled,
+  listDatabaseBackups,
+  restoreDatabase,
+} from "./settings";
 import { invoke } from "./core";
 
 vi.mock("./core", () => ({
@@ -65,6 +77,49 @@ describe("web settings adapter", () => {
     invokeMock.mockRejectedValueOnce(error);
 
     await expect(isAutoUpdateCheckEnabled()).rejects.toBe(error);
+  });
+
+  it("manages server-side database backups through the backend", async () => {
+    const backups = [
+      {
+        filename: "wealthfolio_backup_20260621_120000.db",
+        sizeBytes: 1234,
+        modifiedAt: "2026-06-21T04:00:00Z",
+      },
+    ];
+    invokeMock
+      .mockResolvedValueOnce({ filename: "wealthfolio_backup_20260621_120000.db" })
+      .mockResolvedValueOnce(backups)
+      .mockResolvedValueOnce(undefined);
+
+    await expect(backupDatabase()).resolves.toEqual({
+      filename: "wealthfolio_backup_20260621_120000.db",
+    });
+    await expect(listDatabaseBackups()).resolves.toEqual(backups);
+    await expect(deleteDatabaseBackup("wealthfolio_backup_20260621_120000.db")).resolves.toBe(
+      undefined,
+    );
+    expect(getDatabaseBackupDownloadUrl("wealthfolio backup.db")).toBe(
+      "/api/v1/utilities/database/backups/wealthfolio%20backup.db/download",
+    );
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "backup_database");
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "list_database_backups");
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "delete_database_backup", {
+      filename: "wealthfolio_backup_20260621_120000.db",
+    });
+  });
+
+  it("rejects desktop/native-only database backup helpers in web mode", async () => {
+    await expect(backupDatabaseToPath("/tmp")).rejects.toThrow(
+      "Backing up to a local path is only supported in the desktop app",
+    );
+    await expect(backupDatabaseToPendingExport()).rejects.toThrow(
+      "Pending backup exports are only supported in a native app",
+    );
+    await expect(restoreDatabase("/tmp/app.db")).rejects.toThrow(
+      "Restore in web mode requires stopping Wealthfolio and replacing app.db",
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("maps web update checks with the current app version", async () => {
