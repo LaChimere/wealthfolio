@@ -6101,6 +6101,10 @@ contract:
 - `pr5-broker-sync-start-global-listener`: verification passed: focused global
   listener hook test. `broker:sync-start` now shows the existing broker sync
   loading toast and participates in listener cleanup.
+- `pr5-addon-event-canary-coverage`: verification passed: focused
+  backend-contract command-surface tests. Required add-on host canary event
+  names are now asserted across TS backend event publisher plus web/Electron
+  adapters.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

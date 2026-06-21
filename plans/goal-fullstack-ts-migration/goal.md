@@ -4636,6 +4636,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `broker:sync-start` now shows the existing broker sync loading toast and is
   included in listener cleanup. Verified with a focused global listener hook
   test.
+- Turn 774: Added add-on host event canary coverage. Backend-contract tests now
+  assert required canary event names are present in the TS backend event
+  publisher and both web/Electron adapters. Verified with focused
+  backend-contract command-surface tests.
 
 ## Deferred items
 

@@ -10,6 +10,9 @@ import { parseCommandRoutesFromSource } from "./source-parsers";
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 const webCorePath = path.join(repoRoot, "apps/frontend/src/adapters/web/core.ts");
 const electronIpcPath = path.join(repoRoot, "apps/electron/src/shared/ipc.ts");
+const webEventsPath = path.join(repoRoot, "apps/frontend/src/adapters/web/events.ts");
+const electronEventsPath = path.join(repoRoot, "apps/frontend/src/adapters/electron/events.ts");
+const portfolioJobsPath = path.join(repoRoot, "apps/backend/src/domains/portfolio-jobs.ts");
 
 function readRoutes() {
   const web = parseCommandRoutesFromSource({
@@ -82,6 +85,18 @@ describe("backend command surface contracts", () => {
     }
     for (const command of ADDON_HOST_CANARY_CONTRACT.requiredCommands) {
       expect(commands.has(command)).toBe(true);
+    }
+  });
+
+  test("keeps addon canary event names present in backend and adapters", () => {
+    const backendEvents = readFileSync(portfolioJobsPath, "utf8");
+    const webEvents = readFileSync(webEventsPath, "utf8");
+    const electronEvents = readFileSync(electronEventsPath, "utf8");
+
+    for (const eventName of ADDON_HOST_CANARY_CONTRACT.requiredEvents) {
+      expect(backendEvents).toContain(`"${eventName}"`);
+      expect(webEvents).toContain(`"${eventName}"`);
+      expect(electronEvents).toContain(`"${eventName}"`);
     }
   });
 });
