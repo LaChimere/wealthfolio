@@ -5999,7 +5999,8 @@ contract:
   tests. Coverage removes the stale Alpha Vantage option-history failure
   assertion and preserves US Treasury calculated fallback for Treasury bonds
   with unsupported preferred providers. It also ignores stale high error counts
-  from the old provider when a fallback provider is selected.
+  from the old provider when a fallback provider is selected and removes the
+  now-unreachable Alpha Vantage option-history failure branch.
 - `pr5-ai-chat-nonvision-attachment-parity`: verification passed: focused AI
   chat tests. Coverage includes image/PDF attachments on non-vision models
   returning Rust-shaped invalid-input errors before provider/media support

@@ -4514,7 +4514,8 @@ updated_at: "2026-06-21T16:04:16+08:00"
   and unsupported preferred providers now preserve the US Treasury calculated
   default for Treasury bonds instead of hard-falling back to Yahoo. Stale
   high-error sync states from the previously selected provider no longer block
-  the newly selected fallback provider.
+  the newly selected fallback provider. The now-unreachable Alpha Vantage
+  option-history failure branch was removed after the fallback remap.
 - Turn 746: Tightened AI chat non-vision attachment parity. Image/PDF
   attachments sent to a model without vision now return Rust-shaped
   invalid-input errors instead of TS-runtime-specific 501s. Unsupported
