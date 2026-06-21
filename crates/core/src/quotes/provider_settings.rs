@@ -82,7 +82,7 @@ impl ProviderCapabilities {
                 features: vec!["Real-time".to_string()],
             }),
             "FINNHUB" => Some(Self {
-                instruments: "Stocks".to_string(),
+                instruments: "Stocks • Crypto • Forex".to_string(),
                 coverage: "Global".to_string(),
                 features: vec![
                     "Real-time".to_string(),

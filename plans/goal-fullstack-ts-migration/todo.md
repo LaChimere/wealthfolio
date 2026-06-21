@@ -5959,9 +5959,9 @@ contract:
   quote resolution through Rust provider-style `OANDA:<from>_<to>` and
   `BINANCE:<base><quote>` `/quote` symbols.
 - `pr5-finnhub-capability-metadata`: verification passed: focused
-  provider-settings tests. Coverage includes TS provider info advertising
-  Finnhub `Stocks • Crypto • Forex` capabilities after the Rust provider
-  capability expansion.
+  provider-settings tests. Coverage includes TS provider info and Rust
+  provider-settings metadata advertising Finnhub `Stocks • Crypto • Forex`
+  capabilities after the Rust provider capability expansion.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
