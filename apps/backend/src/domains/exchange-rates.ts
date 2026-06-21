@@ -659,7 +659,7 @@ function createFxAsset(
     }
 
     const id = crypto.randomUUID();
-    const now = timestampNow();
+    const now = rustUtcTimestampNow();
     const providerConfig = providerConfigJson(source, from, to);
     try {
       db.prepare(
@@ -1258,4 +1258,9 @@ function publishAssetsCreated(eventBus: BackendEventBus | undefined, assetId: st
 
 function timestampNow(): string {
   return new Date().toISOString();
+}
+
+function rustUtcTimestampNow(): string {
+  const iso = new Date().toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
 }

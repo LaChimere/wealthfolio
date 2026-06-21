@@ -130,6 +130,8 @@ describe("TS exchange rates domain", () => {
         quote_ccy: "USD",
         instrument_symbol: "EUR",
         instrument_key: "FX:EUR/USD",
+        created_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
       });
       expect(readQuote(db, added.id)).toMatchObject({
         close: "1.23",
@@ -140,7 +142,11 @@ describe("TS exchange rates domain", () => {
         expect.objectContaining({
           assetId: added.id,
           operation: "Create",
-          payload: expect.objectContaining({ instrumentSymbol: "EUR" }),
+          payload: expect.objectContaining({
+            instrumentSymbol: "EUR",
+            createdAt: expect.stringMatching(/\+00:00$/),
+            updatedAt: expect.stringMatching(/\+00:00$/),
+          }),
         }),
       ]);
       expect(syncEvents[0]?.payload).not.toHaveProperty("instrumentKey");

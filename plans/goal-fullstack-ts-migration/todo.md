@@ -5889,6 +5889,9 @@ contract:
 - `pr5-connect-broker-sync-state-timestamps`: verification passed: focused
   Connect tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00`
   timestamps for broker sync state attempt/success/failure rows.
+- `pr5-fx-asset-create-timestamps`: verification passed: focused exchange-rate
+  tests. Coverage includes Rust `Utc::now().to_rfc3339()` style `+00:00`
+  timestamps for newly created FX assets and sync payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
