@@ -6018,6 +6018,9 @@ contract:
   AI type tests. Coverage includes Rust-style uppercase AI error codes mapping
   to friendly frontend categories while `INVALID_INPUT` preserves raw actionable
   messages, and stream error rendering now routes through the parser.
+- `pr5-data-export-runtime-activity-smoke`: verification passed: focused runtime
+  tests. Coverage includes SQLite-backed standalone runtime activity rows
+  exported through `/api/v1/utilities/export/activities/json`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4536,6 +4536,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `MISSING_API_KEY`, and `PROVIDER_ERROR`, while still preserving actionable
   `INVALID_INPUT` raw messages. Stream error rendering now uses this parser
   instead of bypassing it. Verified with focused frontend AI type tests.
+- Turn 750: Strengthened standalone runtime data-export coverage for activities.
+  The SQLite-backed TS server now has end-to-end coverage for seeded transaction
+  activities exported through `/api/v1/utilities/export/activities/json`.
+  Verified with focused runtime tests.
 
 ## Deferred items
 
