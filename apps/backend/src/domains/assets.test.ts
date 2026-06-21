@@ -625,6 +625,7 @@ describe("TS assets domain", () => {
         data_source: "",
         error_count: 0,
         last_error: null,
+        updated_at: expect.stringMatching(/\+00:00$/),
       });
       const clearedMic = service.updateAssetProfile("asset-1", {
         instrumentExchangeMic: "",

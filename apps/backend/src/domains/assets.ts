@@ -2423,10 +2423,10 @@ function resetQuoteSyncStateForProfileChange(db: Database, assetId: string): voi
     `
       UPDATE quote_sync_state
       SET data_source = '', error_count = 0, last_error = NULL,
-          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          updated_at = ?
       WHERE asset_id = ?
     `,
-  ).run(assetId);
+  ).run(timestampNow(), assetId);
 }
 
 function metadataIdentifier(metadata: string | null, key: string): string | null {

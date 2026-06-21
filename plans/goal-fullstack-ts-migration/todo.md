@@ -5871,6 +5871,9 @@ contract:
   focused asset and activity tests. Coverage includes preserving existing
   `updated_at` values for asset-service and activity-triggered quote-mode
   updates like Rust `update_quote_mode`.
+- `pr5-assets-sync-state-reset-timestamps`: verification passed: focused asset
+  tests. Coverage includes Rust `+00:00` `updated_at` storage when asset profile
+  changes reset quote sync state.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
