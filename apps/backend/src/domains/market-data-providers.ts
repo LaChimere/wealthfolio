@@ -538,7 +538,7 @@ function capabilitiesForProvider(providerId: string): ProviderCapabilities | nul
       };
     case "ALPHA_VANTAGE":
       return {
-        instruments: "Stocks • Crypto • Forex",
+        instruments: "Stocks • Crypto • Forex • Options",
         coverage: "Global",
         features: ["Real-time", "Historical", "Search", "Profiles"],
       };

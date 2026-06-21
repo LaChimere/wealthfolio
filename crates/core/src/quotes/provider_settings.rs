@@ -67,7 +67,7 @@ impl ProviderCapabilities {
                 features: vec!["Real-time".to_string(), "Historical".to_string()],
             }),
             "ALPHA_VANTAGE" => Some(Self {
-                instruments: "Stocks • Crypto • Forex".to_string(),
+                instruments: "Stocks • Crypto • Forex • Options".to_string(),
                 coverage: "Global".to_string(),
                 features: vec![
                     "Real-time".to_string(),
@@ -152,5 +152,18 @@ mod tests {
         assert_eq!(capabilities.instruments, "Metals");
         assert_eq!(capabilities.coverage, "USD only");
         assert_eq!(capabilities.features, ["Real-time", "Historical"]);
+    }
+
+    #[test]
+    fn alpha_vantage_capabilities_include_options() {
+        let capabilities = ProviderCapabilities::for_provider("ALPHA_VANTAGE").unwrap();
+
+        assert_eq!(
+            capabilities.instruments,
+            "Stocks • Crypto • Forex • Options"
+        );
+        assert_eq!(capabilities.coverage, "Global");
+        assert!(capabilities.features.contains(&"Real-time".to_string()));
+        assert!(capabilities.features.contains(&"Historical".to_string()));
     }
 }

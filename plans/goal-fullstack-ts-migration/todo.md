@@ -5977,6 +5977,10 @@ contract:
   market-data tests. Coverage includes TS Finnhub latest quote resolution
   canonicalizing pair-shaped FX/CRYPTO inputs like `EURUSD` and `BTC-USDT`
   before building `OANDA:`/`BINANCE:` request symbols.
+- `pr5-alpha-vantage-option-capability-metadata`: verification passed: focused
+  Rust and TS provider-settings tests. Coverage includes Alpha Vantage
+  advertising `Stocks • Crypto • Forex • Options` after existing
+  `REALTIME_OPTIONS` latest quote support.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

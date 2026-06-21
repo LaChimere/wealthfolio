@@ -4487,6 +4487,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   `EURUSD` and `BTC-USDT` before building `OANDA:`/`BINANCE:` symbols, and uses
   the canonical quote currency in resolved summaries. Verified with focused
   Finnhub market-data tests.
+- Turn 741: Aligned Alpha Vantage provider capability metadata. Rust and TS
+  provider settings now advertise `Options` alongside Stocks/Crypto/Forex,
+  matching the existing `REALTIME_OPTIONS` latest quote support. Verified with
+  focused Rust and TS provider-settings tests.
 
 ## Deferred items
 

@@ -50,6 +50,9 @@ describe("TS market data provider settings domain", () => {
         errorCount: 1,
         lastSyncError: "ALPHA_VANTAGE quota exceeded",
         uniqueErrors: ["ALPHA_VANTAGE quota exceeded"],
+        capabilities: expect.objectContaining({
+          instruments: "Stocks • Crypto • Forex • Options",
+        }),
       });
       expect(providers[3]).toMatchObject({
         id: "FINNHUB",
