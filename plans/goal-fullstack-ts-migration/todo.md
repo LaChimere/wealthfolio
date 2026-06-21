@@ -5783,6 +5783,9 @@ contract:
 - `pr5-activity-date-fractional-rfc3339`: verification passed: focused
   activities tests. Coverage includes direct activity create RFC3339 offset
   normalization preserving microsecond fractional precision.
+- `pr5-activity-manual-quote-timestamp-rfc3339`: verification passed: focused
+  activities tests. Coverage includes activity-created manual quote timestamps
+  using Rust `to_rfc3339()` `+00:00` formatting with microsecond precision.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

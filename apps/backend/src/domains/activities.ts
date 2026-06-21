@@ -4470,9 +4470,9 @@ function upsertManualQuoteFromActivity(
 
 function activityQuoteTimestamp(activityDate: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/u.test(activityDate)) {
-    return `${activityDate}T12:00:00.000Z`;
+    return `${activityDate}T12:00:00+00:00`;
   }
-  return new Date(activityDate).toISOString();
+  return normalizeRfc3339ActivityDate(activityDate) ?? activityDate;
 }
 
 function activityQuoteDateInput(value: unknown, normalizedActivityDate: string): string {

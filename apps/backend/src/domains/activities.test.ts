@@ -2464,7 +2464,7 @@ describe("TS activities import domain", () => {
       expect(readQuoteByAssetDay(db, assetId, "2025-01-15", "MANUAL")).toMatchObject({
         close: "100",
         currency: "USD",
-        timestamp: "2025-01-15T12:00:00.000Z",
+        timestamp: "2025-01-15T12:00:00+00:00",
       });
       expect(readImportRunSummary(db, result.importRunId)).toMatchObject({
         inserted: 1,
@@ -3545,7 +3545,7 @@ describe("TS activities import domain", () => {
         adjclose: "10.5",
         volume: null,
         currency: "USD",
-        timestamp: "2025-01-15T12:00:00.000Z",
+        timestamp: "2025-01-15T12:00:00+00:00",
       });
 
       service.updateActivity?.({
@@ -3559,8 +3559,24 @@ describe("TS activities import domain", () => {
       });
       expect(readQuoteByAssetDay(db, "AAPL", "2025-01-15", "MANUAL")).toMatchObject({
         close: "12.25",
-        timestamp: "2025-01-15T12:00:00.000Z",
+        timestamp: "2025-01-15T12:00:00+00:00",
       });
+
+      const fractionalManualQuote = service.createActivity?.({
+        accountId: "account-1",
+        asset: { id: "AAPL" },
+        activityType: "BUY",
+        activityDate: "2025-01-17T10:30:00.123456+02:30",
+        quantity: "1",
+        unitPrice: "13",
+        amount: "13",
+        currency: "USD",
+      }) as Activity;
+      expect(readQuoteByAssetDay(db, "AAPL", "2025-01-17", "MANUAL")).toMatchObject({
+        close: "13",
+        timestamp: "2025-01-17T08:00:00.123456+00:00",
+      });
+      expect(fractionalManualQuote.activityDate).toBe("2025-01-17T08:00:00.123456+00:00");
 
       service.createActivity?.({
         accountId: "account-1",
