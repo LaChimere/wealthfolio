@@ -168,6 +168,22 @@ describe("TS app utility domain", () => {
     await expect(service.checkUpdate(true)).rejects.toThrow("Failed to parse update response:");
   });
 
+  test("wraps update endpoint request failures like Rust", async () => {
+    const service = createAppUtilityService({
+      appDataDir: "/tmp/wealthfolio-data",
+      appVersion: "3.4.0",
+      dbPath: "/tmp/wealthfolio-data/app.db",
+      fetchUpdate: async () => {
+        throw new Error("connection refused");
+      },
+      logsDir: "/tmp/wealthfolio-data/logs",
+    });
+
+    await expect(service.checkUpdate(true)).rejects.toThrow(
+      "Failed to query update endpoint: connection refused",
+    );
+  });
+
   test("compares update versions with Rust semver fallback semantics", async () => {
     const prereleaseService = createAppUtilityService({
       appDataDir: "/tmp/wealthfolio-data",

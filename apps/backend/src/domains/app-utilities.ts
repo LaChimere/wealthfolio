@@ -184,13 +184,18 @@ export function createAppUtilityService(options: AppUtilityServiceOptions): AppU
 
       const target = normalizeTarget(options.target);
       const arch = normalizeArch(options.arch);
-      const response = await fetchUpdate(
-        `${updateEndpointBase}/${target}/${arch}/${options.appVersion}`,
-        {
-          headers: updateHeaders(resolveInstanceId(options.instanceId)),
-          signal: AbortSignal.timeout(options.updateTimeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS),
-        },
-      );
+      let response: Response;
+      try {
+        response = await fetchUpdate(
+          `${updateEndpointBase}/${target}/${arch}/${options.appVersion}`,
+          {
+            headers: updateHeaders(resolveInstanceId(options.instanceId)),
+            signal: AbortSignal.timeout(options.updateTimeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS),
+          },
+        );
+      } catch (error) {
+        throw new Error(`Failed to query update endpoint: ${errorMessage(error)}`);
+      }
 
       const updateResponse = await parseUpdateResponse(
         response,

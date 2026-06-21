@@ -5749,6 +5749,9 @@ contract:
 - `pr5-app-update-invalid-json-error`: verification passed: focused
   app-utilities tests. Coverage includes wrapping invalid update response JSON
   parse failures with Rust-compatible `Failed to parse update response` errors.
+- `pr5-app-update-request-error`: verification passed: focused app-utilities
+  tests. Coverage includes wrapping update endpoint fetch failures with
+  Rust-compatible `Failed to query update endpoint` errors.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
