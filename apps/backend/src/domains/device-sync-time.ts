@@ -20,14 +20,14 @@ export function normalizeSyncDatetime(value: string): string | null {
 }
 
 function normalizeRfc3339Offset(value: string): string | null {
-  const match = /^(.+?)(Z|[+-]\d{2}|[+-]\d{4}|[+-]\d{2}:\d{2})$/.exec(value);
+  const match = /^(.+?)([Zz]|[+-]\d{2}|[+-]\d{4}|[+-]\d{2}:\d{2})$/.exec(value);
   if (!match) {
     return null;
   }
   const prefix = match[1] ?? "";
   const suffix = match[2] ?? "";
-  if (suffix === "Z") {
-    return value;
+  if (/^[Zz]$/.test(suffix)) {
+    return `${prefix}Z`;
   }
   if (/^[+-]\d{2}$/.test(suffix)) {
     return `${prefix}${suffix}:00`;
@@ -40,7 +40,7 @@ function normalizeRfc3339Offset(value: string): string | null {
 
 function parseRfc3339LikeDatetime(value: string): string | null {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+    /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   if (!match) {
     return null;
   }

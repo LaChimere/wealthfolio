@@ -5828,6 +5828,10 @@ contract:
 - `pr5-activity-audit-timestamps`: verification passed: focused activities
   tests. Coverage includes Rust `to_rfc3339()` `+00:00` storage formatting for
   newly created activity `created_at`/`updated_at` fields.
+- `pr5-device-sync-datetime-parser-variants`: verification passed: focused
+  device-sync tests. Coverage includes chrono-compatible lowercase RFC3339
+  `t`/`z` parsing through the shared device-sync datetime helper while keeping
+  Rust-style millisecond `Z` normalization.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

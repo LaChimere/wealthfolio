@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
 import { createLocalDeviceSyncService } from "./device-sync";
+import { normalizeSyncDatetime } from "./device-sync-time";
 import type { SecretService } from "./secrets";
 
 function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
@@ -19,6 +20,13 @@ function createMemorySecretService(): SecretService & { entries: Map<string, str
     },
   };
 }
+
+describe("device-sync time parsing", () => {
+  test("accepts chrono-compatible lowercase RFC3339 UTC suffixes", () => {
+    expect(normalizeSyncDatetime("2026-03-03t03:02:46.288162z")).toBe("2026-03-03T03:02:46.288Z");
+    expect(normalizeSyncDatetime("2026-03-03 03:02:46.288162z")).toBe("2026-03-03T03:02:46.288Z");
+  });
+});
 
 describe("TS local device sync service", () => {
   test("requires Connect session before device registration and enrolls after restore", async () => {
