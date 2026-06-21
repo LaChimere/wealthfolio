@@ -5846,6 +5846,9 @@ contract:
 - `pr5-portfolios-timestamps`: verification passed: focused portfolios tests.
   Coverage includes Rust repository-style second-level UTC `Z` storage for
   portfolio and portfolio-account timestamps.
+- `pr5-custom-provider-crud-timestamps`: verification passed: focused
+  custom-provider tests. Coverage includes Rust `Utc::now().to_rfc3339()` style
+  `+00:00` storage and sync payload timestamps for custom provider creates.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

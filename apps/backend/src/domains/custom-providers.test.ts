@@ -134,9 +134,27 @@ describe("TS custom providers domain", () => {
         expect.objectContaining({
           providerUuid: expect.not.stringContaining("demo-provider"),
           operation: "Create",
-          payload: expect.objectContaining({ code: "demo-provider", enabled: true }),
+          payload: expect.objectContaining({
+            code: "demo-provider",
+            enabled: true,
+            createdAt: expect.stringMatching(/\+00:00$/),
+            updatedAt: expect.stringMatching(/\+00:00$/),
+          }),
         }),
       ]);
+      expect(syncEvents[0]?.payload.createdAt).not.toEndWith("Z");
+      expect(syncEvents[0]?.payload.updatedAt).not.toEndWith("Z");
+      expect(
+        db
+          .query<
+            { created_at: string; updated_at: string },
+            []
+          >("SELECT created_at, updated_at FROM market_data_custom_providers WHERE code = 'demo-provider'")
+          .get(),
+      ).toEqual({
+        created_at: syncEvents[0]?.payload.createdAt,
+        updated_at: syncEvents[0]?.payload.updatedAt,
+      });
       await expect(
         service.create({
           code: "manual",
