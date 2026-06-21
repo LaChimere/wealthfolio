@@ -5825,6 +5825,9 @@ contract:
 - `pr5-activity-rfc3339-parser-variants`: verification passed: focused
   activities tests. Coverage includes chrono-compatible lowercase `t`/`z` and
   space-separated RFC3339 activity date parsing.
+- `pr5-activity-audit-timestamps`: verification passed: focused activities
+  tests. Coverage includes Rust `to_rfc3339()` `+00:00` storage formatting for
+  newly created activity `created_at`/`updated_at` fields.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -2837,6 +2837,8 @@ describe("TS activities import domain", () => {
         idempotencyKey: "b1f49d68f26eee140ec8198d64cb1552865f71848e924922b5aceeac0fdee5bf",
       });
       expect(created.id).not.toBe("client-temp-id");
+      expect(created.createdAt).toEndWith("+00:00");
+      expect(readActivityValue(db, created.id, "created_at")).toEndWith("+00:00");
 
       const fractionalDate = service.createActivity?.({
         accountId: "account-1",

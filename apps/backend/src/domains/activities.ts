@@ -6612,7 +6612,7 @@ function sqliteNow(): string {
 }
 
 function activityTimestampNow(): string {
-  return new Date().toISOString();
+  return dateToUtcRfc3339(new Date());
 }
 
 function activityStorageTimestampNow(): string {
