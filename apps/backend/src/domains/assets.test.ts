@@ -39,7 +39,7 @@ describe("TS assets domain", () => {
         instrument_exchange_mic: "XNAS",
         provider_config: JSON.stringify({ preferredProvider: "YAHOO" }),
         created_at: "2026-01-02 03:04:05",
-        updated_at: "2026-01-02T03:04:05.123Z",
+        updated_at: "2026-01-02T05:34:05.123456+02:30",
       });
 
       expect(service.listAssets()).toEqual([
@@ -59,14 +59,38 @@ describe("TS assets domain", () => {
           instrumentKey: "EQUITY:AAPL@XNAS",
           providerConfig: { preferredProvider: "YAHOO" },
           exchangeName: "NASDAQ",
-          createdAt: "2026-01-02T03:04:05Z",
-          updatedAt: "2026-01-02T03:04:05.123Z",
+          createdAt: "2026-01-02T03:04:05",
+          updatedAt: "2026-01-02T03:04:05.123456",
         },
       ]);
       expect(service.getAssetProfile("asset-1")).toMatchObject({
         id: "asset-1",
         exchangeName: "NASDAQ",
       });
+      insertAsset(db, {
+        id: "asset-date-only",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+        created_at: "2026-01-03",
+        updated_at: "2026-01-03",
+      });
+      expect(service.getAssetProfile("asset-date-only")).toMatchObject({
+        createdAt: "2026-01-03T00:00:00",
+        updatedAt: "2026-01-03T00:00:00",
+      });
+      insertAsset(db, {
+        id: "asset-invalid-time",
+        kind: "INVESTMENT",
+        quote_mode: "MANUAL",
+        quote_ccy: "USD",
+        created_at: "not-a-date",
+        updated_at: "2026-02-30T00:00:00Z",
+      });
+      expect(service.getAssetProfile("asset-invalid-time").createdAt).not.toEndWith("Z");
+      expect(service.getAssetProfile("asset-invalid-time").updatedAt).not.toBe(
+        "2026-03-02T00:00:00",
+      );
     } finally {
       db.close();
     }

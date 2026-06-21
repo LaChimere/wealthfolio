@@ -2537,13 +2537,144 @@ function parseJsonValue(value: string | null): unknown | null {
 
 function normalizeTimestamp(value: string): string {
   const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-    return `${trimmed.replace(" ", "T")}Z`;
+  return (
+    normalizeRfc3339NaiveTimestamp(trimmed) ??
+    normalizeNaiveTimestamp(trimmed) ??
+    normalizeRfc3339NaiveTimestamp(timestampNow()) ??
+    timestampNow()
+  );
+}
+
+function normalizeRfc3339NaiveTimestamp(value: string): string | null {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) {
+    return null;
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return `${trimmed}T00:00:00Z`;
+  const [
+    ,
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    fractionRaw,
+    zoneRaw,
+    signRaw,
+    zoneHourRaw,
+    zoneMinuteRaw,
+  ] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const millisecond = Number((fractionRaw ?? "").padEnd(3, "0").slice(0, 3));
+  const zoneHour = Number(zoneHourRaw);
+  const zoneMinute = Number(zoneMinuteRaw);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    zoneHour > 23 ||
+    zoneMinute > 59
+  ) {
+    return null;
   }
-  return trimmed;
+  const local = new Date(Date.UTC(2000, 0, 1, hour, minute, second, millisecond));
+  local.setUTCFullYear(year, month - 1, day);
+  if (
+    Number.isNaN(local.valueOf()) ||
+    local.getUTCFullYear() !== year ||
+    local.getUTCMonth() !== month - 1 ||
+    local.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const offsetMinutes =
+    zoneRaw === "Z" ? 0 : Number(`${signRaw ?? "+"}1`) * (zoneHour * 60 + zoneMinute);
+  const parsed = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  return naiveTimestampFromDate(parsed, fractionRaw);
+}
+
+function normalizeNaiveTimestamp(value: string): string | null {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return validDateParts(Number(year), Number(month), Number(day))
+      ? `${year}-${month}-${day}T00:00:00`
+      : null;
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?: |T)(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/u.exec(value);
+  if (!match) {
+    return null;
+  }
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, fractionRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  if (!validDateParts(year, month, day) || hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  return `${yearRaw}-${monthRaw}-${dayRaw}T${hourRaw}:${minuteRaw}:${secondRaw}${normalizeRustFraction(
+    fractionRaw,
+  )}`;
+}
+
+function naiveTimestampFromDate(date: Date, fractionRaw: string | undefined): string {
+  return `${date.getUTCFullYear().toString().padStart(4, "0")}-${String(
+    date.getUTCMonth() + 1,
+  ).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}T${String(
+    date.getUTCHours(),
+  ).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}:${String(
+    date.getUTCSeconds(),
+  ).padStart(2, "0")}${normalizeRustFraction(fractionRaw)}`;
+}
+
+function validDateParts(year: number, month: number, day: number): boolean {
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(year, month - 1, day);
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= 31 &&
+    !Number.isNaN(date.valueOf()) &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function normalizeRustFraction(value: string | undefined): string {
+  if (value === undefined) {
+    return "";
+  }
+  const nanos = value.slice(0, 9).padEnd(9, "0");
+  if (/^0+$/u.test(nanos)) {
+    return "";
+  }
+  if (nanos.endsWith("000000")) {
+    return `.${nanos.slice(0, 3)}`;
+  }
+  if (nanos.endsWith("000")) {
+    return `.${nanos.slice(0, 6)}`;
+  }
+  return `.${nanos}`;
 }
 
 function currentTimestamp(options: AssetServiceOptions): string {

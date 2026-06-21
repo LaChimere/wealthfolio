@@ -5802,6 +5802,10 @@ contract:
   taxonomy tests. Coverage includes Rust `NaiveDateTime` JSON shape without
   timezone suffixes, offset/fraction normalization, and update-created timestamp
   storage in Rust-compatible `...Z` form.
+- `pr5-assets-naive-timestamp-serialization`: verification passed: focused asset
+  tests. Coverage includes Rust `text_to_datetime` read semantics for RFC3339
+  offsets/fractions, SQLite current-timestamp strings, date-only strings, and
+  invalid fallback with `NaiveDateTime` JSON output.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
