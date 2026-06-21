@@ -3,6 +3,7 @@ import {
   isDesktop,
   listenBrokerSyncComplete,
   listenBrokerSyncError,
+  listenBrokerSyncStart,
   listenDatabaseRestored,
   listenMarketSyncComplete,
   listenMarketSyncError,
@@ -182,6 +183,10 @@ const useGlobalEventListener = () => {
       });
     };
 
+    const handleBrokerSyncStart = () => {
+      toast.loading("Syncing broker data...", { id: TOAST_IDS.brokerSyncStart });
+    };
+
     const handleBrokerSyncComplete = (event: {
       payload: {
         success: boolean;
@@ -297,6 +302,7 @@ const useGlobalEventListener = () => {
       const unlistenMarketComplete = await listenMarketSyncComplete(handleMarketSyncComplete);
       const unlistenMarketError = await listenMarketSyncError(handleMarketSyncError);
       const unlistenDatabaseRestored = await listenDatabaseRestored(handleDatabaseRestored);
+      const unlistenBrokerSyncStart = await listenBrokerSyncStart(handleBrokerSyncStart);
       const unlistenBrokerSyncComplete = await listenBrokerSyncComplete(handleBrokerSyncComplete);
       const unlistenBrokerSyncError = await listenBrokerSyncError(handleBrokerSyncError);
 
@@ -309,6 +315,7 @@ const useGlobalEventListener = () => {
         unlistenMarketError();
 
         unlistenDatabaseRestored();
+        unlistenBrokerSyncStart();
         unlistenBrokerSyncComplete();
         unlistenBrokerSyncError();
       };

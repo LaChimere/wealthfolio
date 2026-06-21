@@ -4632,6 +4632,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   runtime events. Backend SSE tests and the add-on host canary fixture now use
   `portfolio:update-*` and `market:sync-*` names instead of stale legacy names.
   Verified with focused backend event and backend-contract tests.
+- Turn 773: Wired broker sync start events into the global frontend listener.
+  `broker:sync-start` now shows the existing broker sync loading toast and is
+  included in listener cleanup. Verified with a focused global listener hook
+  test.
 
 ## Deferred items
 

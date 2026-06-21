@@ -6098,6 +6098,9 @@ contract:
 - `pr5-event-contract-name-alignment`: verification passed: focused backend
   event and backend-contract tests. Backend SSE tests and add-on host canary
   fixture now use current `portfolio:update-*` and `market:sync-*` event names.
+- `pr5-broker-sync-start-global-listener`: verification passed: focused global
+  listener hook test. `broker:sync-start` now shows the existing broker sync
+  loading toast and participates in listener cleanup.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
