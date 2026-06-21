@@ -5979,8 +5979,9 @@ contract:
   before building `OANDA:`/`BINANCE:` request symbols.
 - `pr5-alpha-vantage-option-capability-metadata`: verification passed: focused
   Rust and TS provider-settings tests. Coverage includes Alpha Vantage
-  advertising `Stocks • Crypto • Forex • Options` after existing
-  `REALTIME_OPTIONS` latest quote support.
+  advertising `Stocks • Crypto • Forex • Options (real-time only)` after
+  existing `REALTIME_OPTIONS` latest quote support, without implying historical
+  option support.
 - `pr5-openfigi-quote-fetch-fallback`: verification passed: focused market-data
   tests. Coverage includes preferred `OPENFIGI` profile/search assets falling
   back to Yahoo quote sync instead of being skipped as provider-not-implemented.
@@ -5988,6 +5989,9 @@ contract:
   market-data tests. Coverage includes preferred `MARKETDATA_APP` non-equity and
   `ALPHA_VANTAGE` OPTION historical sync falling back to Yahoo instead of
   failing before provider fallback can occur.
+- `pr5-alpha-option-capability-review-fix`: verification passed: focused Rust
+  and TS provider-settings tests. Coverage clarifies Alpha Vantage option
+  capability text as real-time-only after review feedback.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

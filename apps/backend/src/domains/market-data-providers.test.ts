@@ -51,7 +51,7 @@ describe("TS market data provider settings domain", () => {
         lastSyncError: "ALPHA_VANTAGE quota exceeded",
         uniqueErrors: ["ALPHA_VANTAGE quota exceeded"],
         capabilities: expect.objectContaining({
-          instruments: "Stocks • Crypto • Forex • Options",
+          instruments: "Stocks • Crypto • Forex • Options (real-time only)",
         }),
       });
       expect(providers[3]).toMatchObject({

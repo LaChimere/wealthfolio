@@ -4488,9 +4488,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   the canonical quote currency in resolved summaries. Verified with focused
   Finnhub market-data tests.
 - Turn 741: Aligned Alpha Vantage provider capability metadata. Rust and TS
-  provider settings now advertise `Options` alongside Stocks/Crypto/Forex,
-  matching the existing `REALTIME_OPTIONS` latest quote support. Verified with
-  focused Rust and TS provider-settings tests.
+  provider settings now advertise `Options (real-time only)` alongside
+  Stocks/Crypto/Forex, matching existing `REALTIME_OPTIONS` latest quote support
+  without implying historical option support. Verified with focused Rust and TS
+  provider-settings tests.
 - Turn 742: Matched quote-sync fallback for search/profile-only providers.
   Preferred `OPENFIGI` assets now fall back to a fetch-capable quote provider
   during TS market sync instead of being skipped as provider-not-implemented,
@@ -4501,6 +4502,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   syncs now fall back to Yahoo quote sync instead of failing before another
   fetch-capable provider can handle the asset. Verified with focused market-data
   tests.
+- Turn 744: Resolved Alpha Vantage capability review feedback. Capability text
+  now explicitly marks Alpha Vantage options as real-time only, preserving the
+  historical-support feature for other instrument types while avoiding an
+  implied historical option capability.
 
 ## Deferred items
 
