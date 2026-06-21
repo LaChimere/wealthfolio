@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 723
+turns_used: 724
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-21T15:48:23+08:00"
+updated_at: "2026-06-21T15:59:33+08:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4413,6 +4413,10 @@ updated_at: "2026-06-21T15:48:23+08:00"
   quote timestamps now classify as missing rates instead of silently avoiding
   stale/missing issues through JS `Invalid Date` comparisons. Verified with
   focused health tests.
+- Turn 724: Resolved health FX timestamp review follow-up. FX integrity checks
+  now use strict Rust-like RFC3339 parsing before timestamp comparison, so
+  calendar-rollover strings such as `2026-02-30T16:00:00Z` classify as missing
+  rates instead of stale/fresh rates. Verified with focused health tests.
 
 ## Deferred items
 

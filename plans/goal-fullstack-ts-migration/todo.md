@@ -5913,6 +5913,9 @@ contract:
 - `pr5-health-fx-invalid-timestamps`: verification passed: focused health tests.
   Coverage includes treating invalid latest FX quote timestamps as missing rates
   in FX integrity health checks.
+- `pr5-health-fx-strict-timestamp-review-fix`: verification passed: focused
+  health tests. Coverage includes rejecting calendar-rollover FX quote
+  timestamps before stale/fresh comparisons.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

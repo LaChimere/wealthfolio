@@ -1164,8 +1164,8 @@ function analyzeFxIntegrityFromPairs(
       missingMarketValue += pair.affectedMarketValue;
       continue;
     }
-    const quoteTime = new Date(pair.latestQuoteTimestamp);
-    if (Number.isNaN(quoteTime.valueOf())) {
+    const quoteTime = parseRustRfc3339Timestamp(pair.latestQuoteTimestamp);
+    if (quoteTime === null) {
       missingPairs.push(pair);
       missingMarketValue += pair.affectedMarketValue;
       continue;
