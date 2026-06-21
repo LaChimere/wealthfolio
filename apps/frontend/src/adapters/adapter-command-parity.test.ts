@@ -47,7 +47,39 @@ function collectInvokedCommands(files: string[]): Map<string, string[]> {
 
 function collectRegisteredElectronCommands(): Set<string> {
   const source = readFileSync(path.join(repoRoot, "apps/electron/src/shared/ipc.ts"), "utf8");
-  return new Set([...source.matchAll(ELECTRON_REGISTERED_COMMAND_RE)].map((match) => match[1]));
+  return new Set(
+    [
+      ...extractExportedObjectLiteral(source, "ELECTRON_COMMANDS").matchAll(
+        ELECTRON_REGISTERED_COMMAND_RE,
+      ),
+    ].map((match) => match[1]),
+  );
+}
+
+function extractExportedObjectLiteral(source: string, exportName: string): string {
+  const exportIndex = source.indexOf(`export const ${exportName}`);
+  if (exportIndex < 0) {
+    throw new Error(`Could not find exported object ${exportName}`);
+  }
+  const objectStart = source.indexOf("{", exportIndex);
+  if (objectStart < 0) {
+    throw new Error(`Could not find object literal for ${exportName}`);
+  }
+
+  let depth = 0;
+  for (let index = objectStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(objectStart, index + 1);
+      }
+    }
+  }
+
+  throw new Error(`Could not find end of object literal for ${exportName}`);
 }
 
 describe("adapter command parity", () => {
@@ -90,6 +122,7 @@ describe("adapter command parity", () => {
     ];
     const invokedCommands = collectInvokedCommands(files);
     const registeredCommands = collectRegisteredElectronCommands();
+    expect(registeredCommands.has("position")).toBe(false);
 
     const missing = [...invokedCommands.entries()]
       .filter(([command]) => !registeredCommands.has(command))

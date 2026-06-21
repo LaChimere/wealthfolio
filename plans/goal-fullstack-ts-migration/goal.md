@@ -4595,6 +4595,11 @@ updated_at: "2026-06-21T16:04:16+08:00"
   path, restore, update command, and platform-info adapter paths now have
   focused sidecar-bridge tests. Verified with focused frontend Electron settings
   adapter tests.
+- Turn 764: Hardened frontend adapter command-surface guardrails. The Electron
+  command parity test now parses only the exported `ELECTRON_COMMANDS` object
+  instead of scanning unrelated IPC object literals, avoiding false positives
+  such as file-drop `position`. Verified with focused adapter command parity
+  tests.
 
 ## Deferred items
 

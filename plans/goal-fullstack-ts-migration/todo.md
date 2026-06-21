@@ -6065,6 +6065,10 @@ contract:
 - `pr5-electron-settings-adapter-coverage`: verification passed: focused
   frontend Electron settings adapter tests. Coverage includes backup, backup to
   path, restore, update commands, and platform-info sidecar/runtime delegation.
+- `pr5-adapter-command-surface-guard-hardening`: verification passed: focused
+  adapter command parity tests. Electron command extraction now reads only the
+  exported `ELECTRON_COMMANDS` object and excludes unrelated IPC object keys
+  such as file-drop `position`.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
