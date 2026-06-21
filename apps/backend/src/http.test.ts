@@ -29,6 +29,7 @@ import {
   createCustomProviderService,
   type CustomProviderService,
 } from "./domains/custom-providers";
+import type { DataExportService } from "./domains/data-exports";
 import type { DeviceSyncService } from "./domains/device-sync";
 import { createExchangeRateRepository, createExchangeRateService } from "./domains/exchange-rates";
 import {
@@ -81,6 +82,66 @@ describe("TS backend HTTP skeleton", () => {
     await expect(
       (await handler(new Request("http://127.0.0.1/api/v1/auth/status"))).json(),
     ).resolves.toEqual({ requiresPassword: true });
+  });
+
+  test("routes data exports with Rust-compatible auth, headers, and empty responses", async () => {
+    const calls: Array<{ dataType: string; format: string }> = [];
+    let exportContent: Uint8Array | null = new TextEncoder().encode("id\n1");
+    const dataExportService: DataExportService = {
+      exportData(dataType, format) {
+        calls.push({ dataType, format });
+        return Promise.resolve(exportContent);
+      },
+    };
+    const handler = createBackendRequestHandler(config, { dataExportService });
+    const authHeaders = { authorization: "Bearer sidecar-token" };
+
+    expect(
+      (await handler(new Request("http://127.0.0.1/api/v1/utilities/export/accounts/csv"))).status,
+    ).toBe(401);
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/v1/utilities/export/accounts/csv", {
+        headers: authHeaders,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(response.headers.get("content-disposition")).toMatch(
+      /^attachment; filename="accounts_\d{4}-\d{2}-\d{2}\.csv"$/,
+    );
+    await expect(response.text()).resolves.toBe("id\n1");
+    expect(calls).toEqual([{ dataType: "accounts", format: "csv" }]);
+
+    exportContent = null;
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/utilities/export/activities/json", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/utilities/export/Accounts/csv", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request("http://127.0.0.1/api/v1/utilities/export/accounts/csv/extra", {
+            headers: authHeaders,
+          }),
+        )
+      ).status,
+    ).toBe(404);
   });
 
   test("serves static frontend assets with SPA fallback", async () => {

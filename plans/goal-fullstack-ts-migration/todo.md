@@ -5857,6 +5857,9 @@ contract:
   market-data tests. Coverage includes accepting chrono/Rust-serde-compatible
   `+HHMM` quote timestamp offsets while still rejecting unsupported `+HH`
   offsets.
+- `pr5-data-export-http-route-coverage`: verification passed: focused HTTP
+  tests. Coverage includes data-export auth gating, Rust-shaped response
+  headers, 204 empty responses, invalid parameter 400s, and route miss 404s.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
