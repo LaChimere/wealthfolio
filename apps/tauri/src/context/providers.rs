@@ -38,6 +38,7 @@ use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollServic
 use wealthfolio_storage_sqlite::{
     accounts::AccountRepository,
     activities::ActivityRepository,
+    agent::McpAuditRepository,
     ai_chat::AiChatRepository,
     assets::{AlternativeAssetRepository, AssetRepository},
     db::{self, write_actor},
@@ -536,7 +537,12 @@ pub async fn initialize_context(
         activity_taxonomy_assignment_service.clone(),
         categorization_rules_service.clone(),
     ));
+    let agent_environment: Arc<dyn wealthfolio_agent_tools::AgentEnvironment> =
+        ai_environment.clone();
     let ai_chat_service = Arc::new(ChatService::new(ai_environment, ChatConfig::default()));
+
+    // MCP audit log repository (agent access audit trail)
+    let mcp_audit_repository = Arc::new(McpAuditRepository::new(pool.clone(), writer.clone()));
 
     // Device enroll service for E2EE sync
     let cloud_api_url = crate::services::cloud_api_base_url().unwrap_or_default();
@@ -594,6 +600,8 @@ pub async fn initialize_context(
             connect_service,
             ai_provider_service,
             ai_chat_service,
+            agent_environment,
+            mcp_audit_repository,
             device_enroll_service,
             device_sync_runtime,
             broker_sync_running,

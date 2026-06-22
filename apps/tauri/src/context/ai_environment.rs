@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use wealthfolio_ai::{AiEnvironment, ChatRepositoryTrait};
+use wealthfolio_ai::{AgentEnvironment, AiEnvironment, ChatRepositoryTrait};
 use wealthfolio_core::{
     accounts::AccountServiceTrait, activities::ActivityServiceTrait,
     allocation::AllocationServiceTrait, assets::AssetServiceTrait, goals::GoalServiceTrait,
@@ -15,8 +15,10 @@ use wealthfolio_core::{
     valuation::ValuationServiceTrait,
 };
 use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService;
-use wealthfolio_spending::cash_activities::CashActivityService;
-use wealthfolio_spending::categorization_rules::CategorizationRulesService;
+use wealthfolio_spending::cash_activities::{CashActivityService, CashActivityServiceTrait};
+use wealthfolio_spending::categorization_rules::{
+    CategorizationRulesService, CategorizationRulesServiceTrait,
+};
 
 /// Tauri-side implementation of AiEnvironment.
 ///
@@ -92,7 +94,7 @@ impl TauriAiEnvironment {
     }
 }
 
-impl AiEnvironment for TauriAiEnvironment {
+impl AgentEnvironment for TauriAiEnvironment {
     fn base_currency(&self) -> String {
         self.base_currency.read().unwrap().clone()
     }
@@ -119,14 +121,6 @@ impl AiEnvironment for TauriAiEnvironment {
 
     fn settings_service(&self) -> Arc<dyn SettingsServiceTrait> {
         self.settings_service.clone()
-    }
-
-    fn secret_store(&self) -> Arc<dyn SecretStore> {
-        self.secret_store.clone()
-    }
-
-    fn chat_repository(&self) -> Arc<dyn ChatRepositoryTrait> {
-        self.chat_repository.clone()
     }
 
     fn quote_service(&self) -> Arc<dyn QuoteServiceTrait> {
@@ -157,15 +151,25 @@ impl AiEnvironment for TauriAiEnvironment {
         self.taxonomy_service.clone()
     }
 
-    fn cash_activity_service(&self) -> Arc<CashActivityService> {
+    fn cash_activity_service(&self) -> Arc<dyn CashActivityServiceTrait> {
         self.cash_activity_service.clone()
+    }
+
+    fn categorization_rules_service(&self) -> Arc<dyn CategorizationRulesServiceTrait> {
+        self.categorization_rules_service.clone()
+    }
+}
+
+impl AiEnvironment for TauriAiEnvironment {
+    fn secret_store(&self) -> Arc<dyn SecretStore> {
+        self.secret_store.clone()
+    }
+
+    fn chat_repository(&self) -> Arc<dyn ChatRepositoryTrait> {
+        self.chat_repository.clone()
     }
 
     fn activity_taxonomy_assignment_service(&self) -> Arc<ActivityTaxonomyAssignmentService> {
         self.activity_taxonomy_assignment_service.clone()
-    }
-
-    fn categorization_rules_service(&self) -> Arc<CategorizationRulesService> {
-        self.categorization_rules_service.clone()
     }
 }
