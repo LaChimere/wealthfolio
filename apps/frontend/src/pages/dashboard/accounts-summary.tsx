@@ -564,7 +564,7 @@ export const AccountsSummary = React.memo(
                               item={account}
                               isLoadingValuation={isLoadingPerformance}
                               displayInAccountCurrency={
-                                account.accountCurrency === account.baseCurrency
+                                account.accountCurrency !== account.baseCurrency
                               }
                               isNested
                             />
@@ -581,7 +581,7 @@ export const AccountsSummary = React.memo(
                 key={account.accountId}
                 item={account}
                 isLoadingValuation={isLoadingPerformance}
-                displayInAccountCurrency={account.accountCurrency === account.baseCurrency}
+                displayInAccountCurrency={account.accountCurrency !== account.baseCurrency}
               />
             ))}
           </>
@@ -596,7 +596,7 @@ export const AccountsSummary = React.memo(
             key={account.accountId}
             item={account}
             isLoadingValuation={isLoadingPerformance}
-            displayInAccountCurrency={account.accountCurrency === account.baseCurrency}
+            displayInAccountCurrency={account.accountCurrency !== account.baseCurrency}
           />
         ));
       }
