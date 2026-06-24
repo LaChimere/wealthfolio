@@ -1,4 +1,4 @@
-import { getHoldings, getSnapshots, searchActivities } from "@/adapters";
+import { getContributionLimit, getHoldings, getSnapshots, searchActivities } from "@/adapters";
 import { HistoryChart } from "@/components/history-chart";
 import type { ActivityDetails } from "@/lib/types";
 import {
@@ -27,8 +27,9 @@ import { PrivacyToggle } from "@/components/privacy-toggle";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useRecalculatePortfolioMutation } from "@/hooks/use-calculate-portfolio";
 import { useCurrentValuation } from "@/hooks/use-current-account-valuations";
+import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useValuationHistory } from "@/hooks/use-valuation-history";
-import { canAddHoldings } from "@/lib/activity-restrictions";
+import { canAddHoldings, getActivityRestrictionLevel } from "@/lib/activity-restrictions";
 import {
   AccountPurpose,
   AccountType,
@@ -47,6 +48,7 @@ import { useSettingsContext } from "@/lib/settings-provider";
 import {
   Account,
   AccountValuation,
+  ContributionLimit,
   DateRange,
   Holding,
   SnapshotInfo,
@@ -55,7 +57,13 @@ import {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ActivityDateSheet } from "@/pages/activity/components/activity-date-sheet";
+import { ActivityDeleteModal } from "@/pages/activity/components/activity-delete-modal";
+import { ActivityForm, type AccountSelectOption } from "@/pages/activity/components/activity-form";
+import ActivityTable from "@/pages/activity/components/activity-table/activity-table";
+import ActivityTableMobile from "@/pages/activity/components/activity-table/activity-table-mobile";
 import { BulkHoldingsModal } from "@/pages/activity/components/forms/bulk-holdings-modal";
+import { MobileActivityForm } from "@/pages/activity/components/mobile-forms/mobile-activity-form";
+import { useActivityActionDialogs } from "@/pages/activity/hooks/use-activity-action-dialogs";
 import { PortfolioUpdateTrigger } from "@/pages/dashboard/portfolio-update-trigger";
 import { HoldingsEditMode } from "@/pages/holdings/components/holdings-edit-mode";
 import { useCalculatePerformanceHistory } from "@/pages/performance/hooks/use-performance-data";
@@ -81,7 +89,7 @@ import {
   SheetTrigger,
 } from "@wealthfolio/ui/components/ui/sheet";
 import { format, subMonths } from "date-fns";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AccountContributionLimit } from "./account-contribution-limit";
 import AccountHoldings from "./account-holdings";
 import AccountMetrics from "./account-metrics";
@@ -100,7 +108,7 @@ interface HistoryChartData {
   currency: string;
 }
 
-type AccountDetailTab = "holdings" | "snapshots";
+type AccountDetailTab = "holdings" | "activities" | "snapshots";
 
 // Map account types to icons for visual distinction
 const accountTypeIcons: Record<AccountType, Icon> = {
@@ -119,6 +127,31 @@ const getInitialDateRange = (): DateRange => ({
 // Define the initial interval code (consistent with other pages)
 const INITIAL_INTERVAL_CODE: TimePeriod = "3M";
 const CASH_AUDIT_ACTIVITY_PAGE_SIZE = 500;
+const ACCOUNT_ACTIVITY_PAGE_SIZE = 500;
+
+async function getAccountActivities(accountId: string): Promise<ActivityDetails[]> {
+  const activities: ActivityDetails[] = [];
+  let page = 0;
+  let totalRowCount = Number.POSITIVE_INFINITY;
+
+  while (activities.length < totalRowCount) {
+    const response = await searchActivities(
+      page,
+      ACCOUNT_ACTIVITY_PAGE_SIZE,
+      { accountIds: [accountId] },
+      "",
+      { id: "date", desc: true },
+    );
+
+    activities.push(...response.data);
+    totalRowCount = response.meta.totalRowCount;
+
+    if (response.data.length < ACCOUNT_ACTIVITY_PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return activities;
+}
 
 async function getCashAuditActivities(
   accountId: string,
@@ -154,6 +187,7 @@ const AccountPage = () => {
   const appTimezone = settings?.timezone?.trim() || undefined;
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobileViewport();
   const [dateRange, setDateRange] = useState<DateRange | undefined>(getInitialDateRange());
   const [selectedIntervalCode, setSelectedIntervalCode] =
     useState<TimePeriod>(INITIAL_INTERVAL_CODE);
@@ -167,16 +201,45 @@ const AccountPage = () => {
   const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
   const [showBulkHoldingsForm, setShowBulkHoldingsForm] = useState(false);
   const [accountDetailTab, setAccountDetailTab] = useState<AccountDetailTab>("holdings");
+  const {
+    selectedActivity,
+    formOpen: activityFormOpen,
+    deleteDialogOpen: showActivityDeleteAlert,
+    isDeleting: isActivityDeleting,
+    openForm: handleActivityEdit,
+    closeForm: handleActivityFormClose,
+    requestDelete: handleActivityDelete,
+    cancelDelete: handleActivityDeleteCancel,
+    confirmDelete: handleActivityDeleteConfirm,
+    duplicateActivity: handleActivityDuplicate,
+  } = useActivityActionDialogs();
 
   const recalculatePortfolioMutation = useRecalculatePortfolioMutation();
   const { accounts, isLoading: isAccountsLoading } = useAccounts();
   const account = useMemo(() => accounts?.find((acc) => acc.id === id), [accounts, id]);
   const isLiabilityAccount = isLiabilityAccountType(account?.accountType);
+  const isCashOnlyAccount = account?.accountType === AccountType.CASH || isLiabilityAccount;
   const supportsPerformance = accountSupportsPurpose(account, AccountPurpose.PERFORMANCE);
   const supportsContributionLimits = accountSupportsPurpose(
     account,
     AccountPurpose.CONTRIBUTION_LIMITS,
   );
+  const currentContributionYear = new Date().getFullYear();
+
+  const { data: contributionLimits, isLoading: isContributionLimitsLoading } = useQuery<
+    ContributionLimit[],
+    Error
+  >({
+    queryKey: [QueryKeys.CONTRIBUTION_LIMITS],
+    queryFn: getContributionLimit,
+    enabled: supportsContributionLimits,
+  });
+
+  const currentContributionLimit = contributionLimits?.find(
+    (limit) => limit.accountIds?.includes(id) && limit.contributionYear === currentContributionYear,
+  );
+  const showContributionLimitCard =
+    supportsContributionLimits && (isContributionLimitsLoading || !!currentContributionLimit);
 
   // Check if this account is in HOLDINGS tracking mode
   const isHoldingsMode = useMemo(() => {
@@ -209,19 +272,48 @@ const AccountPage = () => {
   const shouldShowSnapshotHistory = isHoldingsMode && hasHoldings && !isHoldingsLoading;
 
   const accountDetailTabs = useMemo(() => {
-    if (!shouldShowSnapshotHistory) return [];
-
+    if (!account) return [];
     const tabs: { value: AccountDetailTab; label: string }[] = [];
-    if (hasNonCashHoldings) {
+
+    if (!isCashOnlyAccount && (!shouldShowSnapshotHistory || hasNonCashHoldings)) {
       tabs.push({ value: "holdings", label: "Holdings" });
     }
-    tabs.push({ value: "snapshots", label: "Snapshots" });
+
+    tabs.push({ value: "activities", label: "Activities" });
+
+    if (shouldShowSnapshotHistory) {
+      tabs.push({ value: "snapshots", label: "Snapshots" });
+    }
+
     return tabs;
-  }, [shouldShowSnapshotHistory, hasNonCashHoldings]);
+  }, [account, hasNonCashHoldings, isCashOnlyAccount, shouldShowSnapshotHistory]);
 
   const activeAccountDetailTab = accountDetailTabs.some((tab) => tab.value === accountDetailTab)
     ? accountDetailTab
-    : (accountDetailTabs[0]?.value ?? "holdings");
+    : (accountDetailTabs[0]?.value ?? "activities");
+
+  const { data: accountActivities = [], isLoading: isAccountActivitiesLoading } = useQuery<
+    ActivityDetails[],
+    Error
+  >({
+    queryKey: [QueryKeys.ACTIVITIES, "byAccount", id],
+    queryFn: () => getAccountActivities(id),
+    enabled: !!account,
+  });
+
+  const activityFormAccounts = useMemo<AccountSelectOption[]>(
+    () =>
+      accounts
+        .filter((acc) => !acc.isArchived)
+        .map((acc) => ({
+          value: acc.id,
+          label: acc.name,
+          currency: acc.currency,
+          accountType: acc.accountType,
+          restrictionLevel: getActivityRestrictionLevel(acc),
+        })),
+    [accounts],
+  );
 
   // Format date range for snapshot query
   const snapshotDateFrom = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
@@ -521,6 +613,75 @@ const AccountPage = () => {
     setMobileSelectorOpen(false);
   };
 
+  const accountActivitiesContent = isMobile ? (
+    <ActivityTableMobile
+      activities={accountActivities}
+      isCompactView={true}
+      handleEdit={handleActivityEdit}
+      handleDelete={handleActivityDelete}
+      onDuplicate={handleActivityDuplicate}
+      onAdd={() => navigate(`/activities/manage?account=${id}`)}
+    />
+  ) : (
+    <ActivityTable
+      activities={accountActivities}
+      isLoading={isAccountActivitiesLoading}
+      sorting={[{ id: "date", desc: true }]}
+      onSortingChange={() => undefined}
+      handleEdit={handleActivityEdit}
+      handleDelete={handleActivityDelete}
+      onAdd={() => navigate(`/activities/manage?account=${id}`)}
+    />
+  );
+
+  const accountDetailsContent = (
+    <div className="space-y-4">
+      {(accountDetailTabs.length > 1 || activeAccountDetailTab === "activities") && (
+        <div className="flex items-center justify-between gap-3">
+          {accountDetailTabs.length > 1 ? (
+            <AnimatedToggleGroup<AccountDetailTab>
+              items={accountDetailTabs}
+              value={activeAccountDetailTab}
+              onValueChange={setAccountDetailTab}
+              className="text-sm"
+            />
+          ) : (
+            <div />
+          )}
+
+          {activeAccountDetailTab === "activities" && (
+            <Button variant="ghost" size="sm" className="shrink-0" asChild>
+              <Link to={`/activities?account=${id}`} className="inline-flex items-center gap-1.5">
+                Explore activities
+                <Icons.ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+          )}
+        </div>
+      )}
+
+      {activeAccountDetailTab === "holdings" ? (
+        <AccountHoldings
+          accountId={id}
+          showEmptyState={true}
+          showTitle={false}
+          onAddHoldings={() => setIsEditingHoldings(true)}
+        />
+      ) : activeAccountDetailTab === "activities" ? (
+        accountActivitiesContent
+      ) : account ? (
+        <AccountSnapshotHistory
+          account={account}
+          canEditSnapshots={canEditHoldingsDirectly}
+          onAddSnapshot={() => {
+            setEditingSnapshotDate(null);
+            setIsEditingHoldings(true);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+
   return (
     <Page>
       <PageHeader
@@ -617,21 +778,32 @@ const AccountPage = () => {
             </div>
           )}
           <div className="flex min-w-0 flex-col justify-center">
-            <div className="flex items-center gap-1">
-              <h1 className="truncate text-base font-semibold leading-tight md:text-lg">
-                {account?.name ?? "Account"}
-              </h1>
+            <div className="flex min-w-0 items-center">
               {/* Desktop account selector */}
-              <div className="hidden sm:block">
+              <div className="hidden min-w-0 sm:block">
                 <Popover open={desktopSelectorOpen} onOpenChange={setDesktopSelectorOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
+                      className="-ml-2 h-auto min-w-0 justify-start rounded-md px-2 py-1 text-left"
                       aria-label="Switch account"
                     >
-                      <Icons.ChevronDown className="text-muted-foreground size-5" />
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {account?.group ? (
+                          <>
+                            <span className="text-muted-foreground truncate text-base font-semibold leading-tight md:text-lg">
+                              {account.group}
+                            </span>
+                            <span className="text-muted-foreground text-sm" aria-hidden="true">
+                              &gt;
+                            </span>
+                          </>
+                        ) : null}
+                        <span className="truncate text-base font-semibold leading-tight md:text-lg">
+                          {account?.name ?? "Account"}
+                        </span>
+                        <Icons.ChevronDown className="text-muted-foreground size-5 shrink-0" />
+                      </span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-60 p-0" align="start">
@@ -673,16 +845,20 @@ const AccountPage = () => {
               </div>
 
               {/* Mobile account selector */}
-              <div className="block sm:hidden">
+              <div className="block min-w-0 sm:hidden">
                 <Sheet open={mobileSelectorOpen} onOpenChange={setMobileSelectorOpen}>
                   <SheetTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
+                      className="-ml-2 h-auto min-w-0 justify-start rounded-md px-2 py-1 text-left"
                       aria-label="Switch account"
                     >
-                      <Icons.ChevronDown className="text-muted-foreground h-5 w-5" />
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-base font-semibold leading-tight">
+                          {account?.name ?? "Account"}
+                        </span>
+                        <Icons.ChevronDown className="text-muted-foreground h-5 w-5 shrink-0" />
+                      </span>
                     </Button>
                   </SheetTrigger>
                   <SheetContent side="bottom" className="rounded-t-4xl mx-1 h-[80vh] p-0">
@@ -738,9 +914,11 @@ const AccountPage = () => {
                 </Sheet>
               </div>
             </div>
-            <p className="text-muted-foreground text-xs leading-tight md:text-sm">
-              {account?.group ?? account?.currency}
-            </p>
+            {!account?.group && account?.currency && (
+              <p className="text-muted-foreground text-xs leading-tight md:text-sm">
+                {account?.currency}
+              </p>
+            )}
           </div>
         </div>
       </PageHeader>
@@ -857,12 +1035,13 @@ const AccountPage = () => {
                 </CardContent>
               </Card>
 
-              <div className="flex flex-col space-y-4">
+              <div className="flex min-h-0 flex-col gap-4">
                 <AccountMetrics
                   valuation={metricsValuation}
                   performance={accountPerformance}
                   cashCurrencySplit={liveCurrentValuation?.summary.cashCurrencySplit}
-                  className="grow"
+                  className="min-h-0 grow"
+                  compact={showContributionLimitCard}
                   isLoading={isLoading}
                   isPerformanceLoading={isPerformanceHistoryLoading}
                   performanceError={hasPerformanceError ? performanceErrorMessages[0] : undefined}
@@ -885,40 +1064,18 @@ const AccountPage = () => {
                       : undefined
                   }
                 />
-                {supportsContributionLimits && <AccountContributionLimit accountId={id} />}
+                {showContributionLimitCard && <AccountContributionLimit accountId={id} />}
               </div>
             </div>
 
-            {shouldShowSnapshotHistory && account ? (
-              <div className="space-y-4">
-                <AnimatedToggleGroup<AccountDetailTab>
-                  items={accountDetailTabs}
-                  value={activeAccountDetailTab}
-                  onValueChange={setAccountDetailTab}
-                  className="text-sm"
-                />
-
-                {activeAccountDetailTab === "holdings" ? (
-                  <AccountHoldings
-                    accountId={id}
-                    showEmptyState={false}
-                    onAddHoldings={() => setIsEditingHoldings(true)}
-                  />
-                ) : (
-                  <AccountSnapshotHistory
-                    account={account}
-                    canEditSnapshots={canEditHoldingsDirectly}
-                    onAddSnapshot={() => {
-                      setEditingSnapshotDate(null);
-                      setIsEditingHoldings(true);
-                    }}
-                  />
-                )}
-              </div>
+            {accountDetailTabs.length > 0 ? (
+              accountDetailsContent
             ) : (
               <AccountHoldings accountId={id} onAddHoldings={() => setIsEditingHoldings(true)} />
             )}
           </>
+        ) : accountDetailTabs.length > 0 ? (
+          accountDetailsContent
         ) : (
           <AccountHoldings
             accountId={id}
@@ -953,6 +1110,32 @@ const AccountPage = () => {
           </SheetContent>
         </Sheet>
       )}
+
+      {isMobile ? (
+        <MobileActivityForm
+          key={selectedActivity?.id ?? "new"}
+          accounts={activityFormAccounts}
+          transferAccounts={activityFormAccounts}
+          activity={selectedActivity}
+          open={activityFormOpen}
+          onClose={handleActivityFormClose}
+        />
+      ) : (
+        <ActivityForm
+          accounts={activityFormAccounts}
+          transferAccounts={activityFormAccounts}
+          activity={selectedActivity}
+          open={activityFormOpen}
+          onClose={handleActivityFormClose}
+        />
+      )}
+      <ActivityDeleteModal
+        isOpen={showActivityDeleteAlert}
+        isDeleting={isActivityDeleting}
+        linkedTransfer={!!selectedActivity?.sourceGroupId}
+        onConfirm={handleActivityDeleteConfirm}
+        onCancel={handleActivityDeleteCancel}
+      />
 
       <ActivityDateSheet
         open={isActivitySheetOpen}
