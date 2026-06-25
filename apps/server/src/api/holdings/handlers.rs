@@ -272,7 +272,7 @@ pub async fn get_historical_valuations_for_scope(
     } else {
         state
             .valuation_service
-            .get_historical_valuations_for_accounts(
+            .get_historical_valuation_totals_for_accounts(
                 &resolved.scope_id,
                 &account_ids,
                 &resolved.base_currency,

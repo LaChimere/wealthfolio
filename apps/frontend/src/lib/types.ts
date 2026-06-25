@@ -1146,7 +1146,7 @@ export interface PerformanceResult {
   isMixedTrackingMode?: boolean;
 }
 
-export type PerformanceSummaryProfile = "full" | "summary";
+export type PerformanceSummaryProfile = "full" | "summary" | "dashboard";
 
 export interface PerformanceScopeDescriptor {
   id: string;
