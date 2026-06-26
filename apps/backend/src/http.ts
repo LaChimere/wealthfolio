@@ -4839,6 +4839,9 @@ function parseConnectImportRunsQuery(url: URL): ConnectImportRunsRequest | Respo
     return offset;
   }
   const runType = url.searchParams.has("runType") ? url.searchParams.get("runType") : undefined;
+  if (runType !== undefined && runType !== "SYNC" && runType !== "IMPORT") {
+    return jsonResponse({ code: 400, message: "runType must be SYNC or IMPORT" }, 400);
+  }
   return {
     runType: runType ?? undefined,
     limit: limit ?? 50,

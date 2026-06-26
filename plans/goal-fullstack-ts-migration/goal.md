@@ -4684,6 +4684,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   now share `export_data_file` while preserving binary payload handling,
   unauthorized notifications, fallback filenames, and save-dialog behavior.
   Verified with focused web export and backend-contract tests.
+- Turn 786: Aligned Connect import-run type filtering with the `SYNC | IMPORT`
+  contract. HTTP and service boundaries now reject arbitrary run types, and
+  frontend/Electron call sites use canonical values. Verified with focused
+  Connect domain, HTTP, and Electron command tests.
 
 ## Deferred items
 

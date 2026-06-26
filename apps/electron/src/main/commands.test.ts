@@ -904,7 +904,7 @@ describe("Electron sidecar command proxy", () => {
     await expect(
       invokeSidecarCommand({
         command: "get_data_import_runs",
-        payload: { runType: "broker", limit: 5, offset: 10 },
+        payload: { runType: "SYNC", limit: 5, offset: 10 },
         sidecar,
         fetchImpl,
       }),
@@ -912,7 +912,7 @@ describe("Electron sidecar command proxy", () => {
     await expect(
       invokeSidecarCommand({
         command: "get_import_runs",
-        payload: { runType: "manual", limit: 2 },
+        payload: { runType: "IMPORT", limit: 2 },
         sidecar,
         fetchImpl,
       }),
@@ -958,12 +958,12 @@ describe("Electron sidecar command proxy", () => {
       ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
       ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
       [
-        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=broker&limit=5&offset=10",
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=SYNC&limit=5&offset=10",
         "GET",
         undefined,
       ],
       [
-        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=manual&limit=2",
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=IMPORT&limit=2",
         "GET",
         undefined,
       ],

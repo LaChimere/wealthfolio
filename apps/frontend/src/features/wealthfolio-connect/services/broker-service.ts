@@ -23,6 +23,7 @@ import type {
   UserInfo,
   BrokerSyncState,
   ImportRun,
+  ImportRunType,
 } from "../types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ export const getBrokerSyncStates = async (): Promise<BrokerSyncState[]> => {
 };
 
 export const getImportRuns = async (
-  runType?: string,
+  runType?: ImportRunType,
   limit?: number,
   offset?: number,
 ): Promise<ImportRun[]> => {

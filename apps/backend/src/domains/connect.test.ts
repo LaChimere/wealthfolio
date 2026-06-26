@@ -2612,6 +2612,13 @@ describe("TS Connect local session service", () => {
           offset: -1,
         }),
       ).toThrow("import run pagination offset must be greater than or equal to 0");
+      expect(() =>
+        service.getImportRuns({
+          runType: "broker",
+          limit: 50,
+          offset: 0,
+        }),
+      ).toThrow("import run type must be SYNC or IMPORT");
     } finally {
       db.close();
     }

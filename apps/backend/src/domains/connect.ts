@@ -559,6 +559,9 @@ function getLocalImportRuns(db: Database, request: ConnectImportRunsRequest): un
 }
 
 function validateConnectImportRunsPagination(request: ConnectImportRunsRequest): void {
+  if (request.runType !== undefined && request.runType !== "SYNC" && request.runType !== "IMPORT") {
+    throw new ConnectServiceError("bad_request", "import run type must be SYNC or IMPORT", 400);
+  }
   if (!Number.isSafeInteger(request.limit) || !Number.isSafeInteger(request.offset)) {
     throw new ConnectServiceError(
       "bad_request",
