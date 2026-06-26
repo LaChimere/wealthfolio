@@ -6257,6 +6257,10 @@ contract:
   Runtime-backed contribution-limit CRUD route coverage now expects
   `POST/GET/PUT/DELETE /api/v1/limits` to persist contribution-limit sync_outbox
   callbacks and trigger portfolio events.
+- `pr5-runtime-custom-provider-test-source-route-smoke`: verification passed.
+  Runtime-backed custom-provider coverage now expects
+  `POST /api/v1/custom-providers/test-source` to perform provider fetch,
+  extraction, and preview shaping through the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

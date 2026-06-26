@@ -3349,6 +3349,52 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime custom provider test-source route to fetch and extraction", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-test-"));
+    const fetchCalls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        fetchCalls.push(String(input));
+        return Promise.resolve(
+          new Response(JSON.stringify({ price: 123.45, currency: "USD" }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/custom-providers/test-source`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          format: "json",
+          url: "https://example.test/quote/{SYMBOL}",
+          pricePath: "$.price",
+          currencyPath: "$.currency",
+          symbol: "AAPL",
+        }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        success: true,
+        statusCode: 200,
+        price: 123.45,
+        currency: "USD",
+        error: null,
+        rawResponse: '{"price":123.45,"currency":"USD"}',
+      });
+      expect(fetchCalls).toEqual(["https://example.test/quote/AAPL"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime taxonomy sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-taxonomy-sync-"));
     const runtime = createSqliteBackedBackendServices({
