@@ -229,7 +229,9 @@ const useGlobalEventListener = () => {
             action: {
               label: "Review",
               onClick: () => {
-                navigateRef.current("/settings/accounts");
+                window.dispatchEvent(
+                  new CustomEvent("open-new-accounts-modal", { detail: newAccounts }),
+                );
               },
             },
             duration: Infinity, // Don't auto-dismiss - user must act or dismiss manually

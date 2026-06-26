@@ -4660,6 +4660,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 779: Hardened Connect import-run pagination. HTTP and service boundaries
   now reject non-positive limits and negative offsets before local import-run DB
   reads. Verified with focused Connect domain and HTTP route tests.
+- Turn 780: Routed broker-sync new-account prompts into the existing setup
+  modal. The "Review" action now dispatches `open-new-accounts-modal` with the
+  synced account details instead of navigating away. Verified with focused
+  global listener hook tests.
 
 ## Deferred items
 

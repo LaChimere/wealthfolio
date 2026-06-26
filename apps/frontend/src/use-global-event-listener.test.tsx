@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
   >;
   return {
     brokerSyncStartHandler: undefined as ((event: unknown) => void) | undefined,
+    brokerSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
     listenerNames,
     unlisteners,
     updatePortfolio: vi.fn().mockResolvedValue(undefined),
@@ -46,6 +47,9 @@ vi.mock("@/adapters", () => {
       vi.fn((handler?: (event: unknown) => void) => {
         if (name === "listenBrokerSyncStart") {
           mocks.brokerSyncStartHandler = handler;
+        }
+        if (name === "listenBrokerSyncComplete") {
+          mocks.brokerSyncCompleteHandler = handler;
         }
         return Promise.resolve(mocks.unlisteners[name]);
       }),
@@ -77,6 +81,7 @@ vi.mock("sonner", () => ({
 
 afterEach(() => {
   mocks.brokerSyncStartHandler = undefined;
+  mocks.brokerSyncCompleteHandler = undefined;
   mocks.updatePortfolio.mockClear();
   mocks.navigate.mockClear();
   mocks.logger.debug.mockClear();
@@ -114,5 +119,51 @@ describe("useGlobalEventListener", () => {
 
     unmount();
     expect(mocks.unlisteners.listenBrokerSyncStart).toHaveBeenCalledOnce();
+  });
+
+  it("opens the new-account setup modal from broker sync completion toasts", async () => {
+    const dispatchEvent = vi.spyOn(window, "dispatchEvent");
+    const queryClient = new QueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    }
+
+    renderHook(() => useGlobalEventListener(), { wrapper: Wrapper });
+    await waitFor(() => expect(mocks.brokerSyncCompleteHandler).toBeDefined());
+
+    const newAccounts = [
+      {
+        localAccountId: "account-1",
+        providerAccountId: "provider-account-1",
+        defaultName: "Broker Account",
+        currency: "USD",
+      },
+    ];
+    act(() => {
+      mocks.brokerSyncCompleteHandler?.({
+        event: "broker:sync-complete",
+        id: 2,
+        payload: {
+          success: true,
+          message: "Sync completed.",
+          newAccounts,
+        },
+      });
+    });
+
+    expect(mocks.toast.info).toHaveBeenCalledWith(
+      "New accounts found",
+      expect.objectContaining({
+        description: "1 new account(s) need to be configured",
+        action: expect.objectContaining({ label: "Review" }),
+      }),
+    );
+    const toastOptions = mocks.toast.info.mock.calls[0]?.[1] as {
+      action: { onClick: () => void };
+    };
+    toastOptions.action.onClick();
+    const dispatched = dispatchEvent.mock.calls.at(-1)?.[0] as CustomEvent<typeof newAccounts>;
+    expect(dispatched.type).toBe("open-new-accounts-modal");
+    expect(dispatched.detail).toEqual(newAccounts);
   });
 });

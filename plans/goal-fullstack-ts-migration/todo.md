@@ -6124,6 +6124,10 @@ contract:
 - `pr5-connect-import-runs-pagination-hardening`: verification passed: focused
   Connect domain and HTTP route tests. Import-run listing now rejects
   non-positive limits and negative offsets before local DB reads.
+- `pr5-broker-sync-new-account-modal-routing`: verification passed: focused
+  global listener hook tests. Broker sync "New accounts found" review actions
+  now dispatch `open-new-accounts-modal` with synced account details instead of
+  navigating away.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
