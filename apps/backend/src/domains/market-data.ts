@@ -449,6 +449,7 @@ const MINOR_CURRENCY_MAJOR: Record<string, string> = {
   ZAc: "ZAR",
   ZAC: "ZAR",
   ILA: "ILS",
+  USX: "USD",
 };
 
 export function createMarketDataService(

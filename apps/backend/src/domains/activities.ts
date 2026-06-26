@@ -612,10 +612,11 @@ const MANUAL_QUOTE_SOURCE = "MANUAL";
 const CURRENCY_NORMALIZATION_RULES: Record<string, { majorCode: string; factor: Decimal }> = {
   GBp: { majorCode: "GBP", factor: new Decimal("0.01") },
   GBX: { majorCode: "GBP", factor: new Decimal("0.01") },
-  KWF: { majorCode: "KWD", factor: new Decimal("0.01") },
+  KWF: { majorCode: "KWD", factor: new Decimal("0.001") },
   ZAc: { majorCode: "ZAR", factor: new Decimal("0.01") },
   ZAC: { majorCode: "ZAR", factor: new Decimal("0.01") },
   ILA: { majorCode: "ILS", factor: new Decimal("0.01") },
+  USX: { majorCode: "USD", factor: new Decimal("0.01") },
 };
 const CANONICAL_ACTIVITY_SUBTYPES = [
   "DRIP",

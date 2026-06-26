@@ -4695,6 +4695,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   the `File` through the shared `parse_csv` command as a Blob instead of
   materializing it as a boxed number array, while keeping numeric content
   compatibility for command callers.
+- Turn 789: Aligned TS minor-currency normalization tables with the Rust
+  reference. KWF now uses the Rust 0.001 factor, USX is recognized as a USD
+  minor unit, and affected activity, holdings, portfolio, exchange-rate, and
+  market-data normalization copies are consistent.
 
 ## Deferred items
 

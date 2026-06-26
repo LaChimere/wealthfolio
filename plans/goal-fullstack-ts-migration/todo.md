@@ -6154,6 +6154,10 @@ contract:
 - `pr5-web-parse-csv-blob-pass-through`: verification passed. Web CSV parsing
   now passes the `File` through `parse_csv` as a Blob instead of materializing a
   boxed number array, while preserving numeric content payload compatibility.
+- `pr5-minor-currency-normalization-parity`: verification passed. TS
+  normalization tables now match Rust for KWF (0.001) and include USX as a USD
+  minor unit across activity, holdings, portfolio, exchange-rate, and
+  market-data paths.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

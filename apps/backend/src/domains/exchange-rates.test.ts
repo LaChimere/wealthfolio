@@ -410,11 +410,31 @@ describe("TS exchange rates domain", () => {
         close: "1.25",
         source: "MANUAL",
       });
+      seedFxAsset(db, { id: "kwd-usd", from: "KWD", to: "USD" });
+      seedQuote(db, {
+        id: "kwd-usd",
+        assetId: "kwd-usd",
+        day: "2026-01-01",
+        close: "3.25",
+        source: "MANUAL",
+      });
+      seedFxAsset(db, { id: "usd-cad", from: "USD", to: "CAD" });
+      seedQuote(db, {
+        id: "usd-cad",
+        assetId: "usd-cad",
+        day: "2026-01-01",
+        close: "1.2",
+        source: "MANUAL",
+      });
       service.initialize();
 
       expect(service.getLatestExchangeRate("GBp", "USD")).toBe("0.0125");
       expect(service.getLatestExchangeRate("GBP", "GBp")).toBe("100");
       expect(service.getExchangeRateForDate("GBp", "USD", "2026-01-01")).toBe("0.0125");
+      expect(service.getLatestExchangeRate("KWF", "USD")).toBe("0.00325");
+      expect(service.getLatestExchangeRate("KWD", "KWF")).toBe("1000");
+      expect(service.getLatestExchangeRate("USX", "CAD")).toBe("0.012");
+      expect(service.getLatestExchangeRate("USD", "USX")).toBe("100");
     } finally {
       db.close();
     }

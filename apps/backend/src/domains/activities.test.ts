@@ -2925,6 +2925,32 @@ describe("TS activities import domain", () => {
         currency: "GBP",
       });
 
+      const kwfMinorCurrency = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-16",
+        amount: "1234",
+        currency: "KWF",
+        fee: "5",
+      }) as Activity;
+      expect(kwfMinorCurrency).toMatchObject({
+        amount: "1.234",
+        fee: "0.005",
+        currency: "KWD",
+      });
+
+      const usxMinorCurrency = service.createActivity?.({
+        accountId: "account-1",
+        activityType: "DEPOSIT",
+        activityDate: "2025-01-16",
+        amount: "250",
+        currency: "USX",
+      }) as Activity;
+      expect(usxMinorCurrency).toMatchObject({
+        amount: "2.5",
+        currency: "USD",
+      });
+
       const existingSymbol = service.createActivity?.({
         accountId: "account-1",
         asset: { symbol: "aapl", exchangeMic: "XNAS", instrumentType: "EQUITY" },

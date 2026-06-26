@@ -990,10 +990,11 @@ function denormalizationMultiplier(currency: string): Decimal {
 const CURRENCY_NORMALIZATION_RULES: Record<string, { majorCode: string; factor: Decimal }> = {
   GBp: { majorCode: "GBP", factor: new Decimal("0.01") },
   GBX: { majorCode: "GBP", factor: new Decimal("0.01") },
-  KWF: { majorCode: "KWD", factor: new Decimal("0.01") },
+  KWF: { majorCode: "KWD", factor: new Decimal("0.001") },
   ZAc: { majorCode: "ZAR", factor: new Decimal("0.01") },
   ZAC: { majorCode: "ZAR", factor: new Decimal("0.01") },
   ILA: { majorCode: "ILS", factor: new Decimal("0.01") },
+  USX: { majorCode: "USD", factor: new Decimal("0.01") },
 };
 
 function validateCurrency(currency: string, field: string): void {

@@ -521,10 +521,11 @@ const ALTERNATIVE_ASSET_KINDS = new Set([
 const CURRENCY_NORMALIZATION_RULES = new Map<string, CurrencyNormalizationRule>([
   ["GBp", { majorCode: "GBP", factor: new Decimal("0.01") }],
   ["GBX", { majorCode: "GBP", factor: new Decimal("0.01") }],
-  ["KWF", { majorCode: "KWD", factor: new Decimal("0.01") }],
+  ["KWF", { majorCode: "KWD", factor: new Decimal("0.001") }],
   ["ZAc", { majorCode: "ZAR", factor: new Decimal("0.01") }],
   ["ZAC", { majorCode: "ZAR", factor: new Decimal("0.01") }],
   ["ILA", { majorCode: "ILS", factor: new Decimal("0.01") }],
+  ["USX", { majorCode: "USD", factor: new Decimal("0.01") }],
 ]);
 
 const DECIMAL_PRECISION = 8;
