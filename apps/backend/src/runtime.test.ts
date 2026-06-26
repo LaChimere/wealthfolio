@@ -3957,6 +3957,88 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime bulk activity updates and deletes to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-activity-bulk-update-delete-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const bulkResponse = await fetch(`${server.baseUrl}/api/v1/activities/bulk`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            creates: [],
+            updates: [
+              {
+                id: "tx-deposit",
+                accountId: "tx-account",
+                activityType: "DEPOSIT",
+                activityDate: "2026-05-14T10:00:00.000Z",
+                amount: "120",
+                currency: "USD",
+              },
+            ],
+            deleteIds: ["tx-buy"],
+          }),
+        });
+        expect(bulkResponse.status).toBe(200);
+        await expect(bulkResponse.json()).resolves.toMatchObject({
+          created: [],
+          updated: [expect.objectContaining({ id: "tx-deposit", amount: "120" })],
+          deleted: [expect.objectContaining({ id: "tx-buy" })],
+          errors: [],
+          createdMappings: [],
+        });
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"120"}',
+          cost_basis: "0",
+          net_contribution: "120",
+        });
+        expect(readRuntimeSnapshotPositions(resultDb, "tx-account", "2026-05-14")).toEqual({});
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "120",
+          investment_market_value: "0",
+          total_value: "120",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events.filter((event) => event === ACTIVITIES_CHANGED_EVENT)).toHaveLength(1);
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime activity imports to transaction snapshot rebuilds", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-import-"));
     const runtime = createSqliteBackedBackendServices({

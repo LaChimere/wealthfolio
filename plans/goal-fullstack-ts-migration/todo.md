@@ -6217,6 +6217,10 @@ contract:
   successful `POST /api/v1/activities/import` coverage now expects activity
   events to rebuild transaction snapshots after imports through the real
   domain-event worker.
+- `pr5-runtime-bulk-activity-update-delete-smoke`: verification passed.
+  Runtime-backed `POST /api/v1/activities/bulk` coverage now expects existing
+  row updates and `deleteIds` to rebuild transaction snapshots through the real
+  domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
