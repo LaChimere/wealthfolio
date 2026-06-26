@@ -1222,6 +1222,44 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime orphan activity health issues from SQLite state", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-orphans-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeOrphanActivityHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      const status = (await response.json()) as { issues: Array<{ id: string; title: string }> };
+      expect(status.issues).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(/^orphan_activity_account:/),
+          title: "Transaction references missing account",
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^orphan_activity_asset:/),
+          title: "Transaction references missing asset",
+        }),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -3681,6 +3719,54 @@ function seedRuntimeNegativePositionHealthInput(db: ReturnType<typeof openSqlite
       },
     }),
   );
+}
+
+function seedRuntimeOrphanActivityHealthInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('orphan-existing-account', 'Existing Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('orphan-existing-asset', 'INVESTMENT', 'Existing Asset', 'EXIST', NULL, NULL, 1, 'MANUAL',
+        'USD', 'EQUITY', 'EXIST', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.prepare(
+      `
+        INSERT INTO activities (
+          id, account_id, asset_id, activity_type, subtype, status, activity_date,
+          quantity, unit_price, amount, fee, currency, notes, metadata,
+          source_system, source_record_id, source_group_id, idempotency_key,
+          import_run_id, is_user_modified, needs_review, created_at, updated_at
+        )
+        VALUES
+          ('orphan-account-activity', 'missing-account', 'orphan-existing-asset', 'BUY', NULL, 'POSTED',
+            '2026-05-14T12:00:00.000Z', '1', '10', NULL, NULL, 'USD', NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-05-14T12:00:00.000Z', '2026-05-14T12:00:00.000Z'),
+          ('orphan-asset-activity', 'orphan-existing-account', 'missing-asset', 'BUY', NULL, 'POSTED',
+            '2026-05-15T12:00:00.000Z', '1', '10', NULL, NULL, 'USD', NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-05-15T12:00:00.000Z', '2026-05-15T12:00:00.000Z')
+      `,
+    ).run();
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
 }
 
 function seedRuntimeConnectData(db: ReturnType<typeof openSqliteDatabase>): void {

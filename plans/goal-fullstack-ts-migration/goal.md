@@ -4717,6 +4717,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 794: Added runtime-backed Health Center data-consistency smoke coverage.
   The SQLite-backed runtime now proves `/api/v1/health/check` surfaces negative
   latest-position issues through the real health service wiring.
+- Turn 795: Added runtime-backed orphan activity Health Center smoke coverage.
+  The SQLite-backed runtime now proves orphan account/asset activity references
+  are surfaced by `/api/v1/health/check` through the real runtime schema.
 
 ## Deferred items
 

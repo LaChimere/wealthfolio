@@ -6176,6 +6176,10 @@ contract:
   Runtime-backed `/api/v1/health/check` coverage now seeds SQLite snapshots and
   expects negative latest-position data-consistency issues through real service
   wiring.
+- `pr5-health-runtime-orphan-activity-smoke`: verification passed.
+  Runtime-backed `/api/v1/health/check` coverage now seeds legacy orphan
+  activity references and expects account/asset orphan data-consistency issues
+  through the real runtime schema.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
