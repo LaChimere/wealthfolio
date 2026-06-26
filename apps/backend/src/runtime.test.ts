@@ -3560,6 +3560,11 @@ describe("TS backend runtime composition", () => {
             investment_market_value: "18",
             total_value: "25",
           });
+          expect(readRuntimeValuation(savedDb, "TOTAL", "2026-05-17")).toMatchObject({
+            cash_balance: "7",
+            investment_market_value: "18",
+            total_value: "25",
+          });
         } finally {
           savedDb.close();
         }
@@ -3580,6 +3585,8 @@ describe("TS backend runtime composition", () => {
       try {
         expect(readRuntimeSnapshot(resultDb, "account-1", "2026-05-17")).toBeNull();
         expect(readRuntimeValuation(resultDb, "account-1", "2026-05-17")).toBeNull();
+        expect(readRuntimeSnapshot(resultDb, "TOTAL", "2026-05-17")).toBeNull();
+        expect(readRuntimeValuation(resultDb, "TOTAL", "2026-05-17")).toBeNull();
         expect(readRuntimeValuation(resultDb, "account-1", "2026-05-16")).toMatchObject({
           cash_balance: "5",
           investment_market_value: "20",

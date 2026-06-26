@@ -6246,8 +6246,9 @@ contract:
 - `pr5-runtime-snapshot-delete-event-smoke`: verification passed. Runtime-backed
   `DELETE /api/v1/snapshots` coverage now expects holdings events to remove
   stale valuation rows for deleted manual snapshots through the real
-  domain-event worker; review follow-up now flushes after save first, proving
-  stale valuation rows exist before deletion and are removed afterward.
+  domain-event worker; review follow-ups now flush after save first and prove
+  account-level plus aggregate TOTAL valuation rows exist before deletion and
+  are removed afterward.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
