@@ -6199,6 +6199,9 @@ contract:
   `POST /api/v1/activities` coverage now expects activity events to drive
   transaction snapshot rebuilding and portfolio valuation through the real
   domain-event worker.
+- `pr5-runtime-database-backup-routes-smoke`: verification passed.
+  Runtime-backed database utility coverage now expects backup, list, download,
+  and delete routes to operate against the real app data backup directory.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

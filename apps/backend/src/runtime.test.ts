@@ -1388,6 +1388,59 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime database backup list download and delete routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-backup-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const backupResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/backup`, {
+        method: "POST",
+      });
+      expect(backupResponse.status).toBe(200);
+      const backup = (await backupResponse.json()) as { filename: string; dataB64: string };
+      expect(backup.filename).toMatch(/^wealthfolio_backup_\d{8}_\d{6}\.db$/);
+      expect(Buffer.from(backup.dataB64, "base64").byteLength).toBeGreaterThan(0);
+
+      const listResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/backups`);
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          filename: backup.filename,
+          sizeBytes: expect.any(Number),
+          modifiedAt: expect.stringMatching(/\+00:00$/),
+        }),
+      ]);
+
+      const downloadResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/database/backups/${encodeURIComponent(backup.filename)}/download`,
+      );
+      expect(downloadResponse.status).toBe(200);
+      expect(downloadResponse.headers.get("content-disposition")).toBe(
+        `attachment; filename="${backup.filename}"`,
+      );
+      expect(Buffer.from(await downloadResponse.arrayBuffer()).toString("base64")).toBe(
+        backup.dataB64,
+      );
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/database/backups/${encodeURIComponent(backup.filename)}`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+      const emptyListResponse = await fetch(`${server.baseUrl}/api/v1/utilities/database/backups`);
+      expect(emptyListResponse.status).toBe(200);
+      await expect(emptyListResponse.json()).resolves.toEqual([]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
