@@ -6273,6 +6273,9 @@ contract:
   Runtime-backed goal-plan route coverage now expects save-up plan
   create/update/get/delete HTTP routes to persist goal_plan sync_outbox
   callbacks.
+- `pr5-runtime-account-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed account route coverage now expects account create/update/list
+  and delete HTTP routes to persist account sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

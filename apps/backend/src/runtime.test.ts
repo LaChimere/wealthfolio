@@ -2786,6 +2786,122 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime account route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/accounts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Route Brokerage",
+          accountType: "SECURITIES",
+          group: "Investing",
+          currency: "CAD",
+          isDefault: true,
+          isActive: true,
+          trackingMode: "HOLDINGS",
+          accountNumber: "123",
+          meta: '{"source":"route"}',
+          provider: "SNAPTRADE",
+          providerAccountId: "provider-account-route",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string };
+      expect(created.id).toEqual(expect.any(String));
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/accounts/${created.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Route Brokerage Updated",
+          accountType: "CASH",
+          group: null,
+          isDefault: false,
+          isActive: false,
+          isArchived: true,
+          trackingMode: "HOLDINGS",
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: created.id,
+        name: "Route Brokerage Updated",
+        accountType: "CASH",
+        group: null,
+        currency: "CAD",
+        isDefault: false,
+        isActive: false,
+        isArchived: true,
+        trackingMode: "HOLDINGS",
+      });
+
+      const listResponse = await fetch(`${server.baseUrl}/api/v1/accounts?includeArchived=true`);
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: created.id, name: "Route Brokerage Updated" }),
+      ]);
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/accounts/${created.id}`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "account");
+        expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
+          [created.id, "create"],
+          [created.id, "update"],
+          [created.id, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.id,
+          name: "Route Brokerage",
+          account_type: "SECURITIES",
+          group: "Investing",
+          currency: "CAD",
+          is_default: true,
+          is_active: true,
+          account_number: "123",
+          meta: '{"source":"route"}',
+          provider: "SNAPTRADE",
+          provider_account_id: "provider-account-route",
+          is_archived: false,
+          tracking_mode: "HOLDINGS",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: created.id,
+          name: "Route Brokerage Updated",
+          account_type: "CASH",
+          group: null,
+          currency: "CAD",
+          is_default: false,
+          is_active: false,
+          account_number: "123",
+          meta: '{"source":"route"}',
+          provider: "SNAPTRADE",
+          provider_account_id: "provider-account-route",
+          is_archived: true,
+          tracking_mode: "HOLDINGS",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime portfolio route callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-portfolio-routes-"));
     const runtime = createSqliteBackedBackendServices({
