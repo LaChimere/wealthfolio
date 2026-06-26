@@ -3272,6 +3272,125 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime import template route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-template-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('template-route-account', 'Template Route Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/activities/import/templates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          template: {
+            id: "route-custom",
+            name: "Route Custom",
+            scope: "USER",
+            kind: "CSV_HOLDINGS",
+            fieldMappings: { symbol: "Ticker" },
+            parseConfig: { delimiter: ";" },
+          },
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      await expect(createResponse.json()).resolves.toMatchObject({
+        id: "route-custom",
+        name: "Route Custom",
+        kind: "CSV_HOLDINGS",
+      });
+
+      const listResponse = await fetch(`${server.baseUrl}/api/v1/activities/import/templates`);
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: "route-custom" })]),
+      );
+
+      const itemResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/templates/item?id=route-custom`,
+      );
+      expect(itemResponse.status).toBe(200);
+      await expect(itemResponse.json()).resolves.toMatchObject({
+        id: "route-custom",
+        parseConfig: expect.objectContaining({ delimiter: ";" }),
+      });
+
+      const linkResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/templates/link`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountId: "template-route-account",
+            templateId: "route-custom",
+            contextKind: "HOLDINGS",
+          }),
+        },
+      );
+      expect(linkResponse.status).toBe(200);
+      await expect(linkResponse.json()).resolves.toEqual({ success: true });
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/templates?id=route-custom`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(200);
+      await expect(deleteResponse.json()).resolves.toEqual({ success: true });
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "import_template" || row.entity === "activity_import_profile",
+        );
+        expect(rows.map((row) => [row.entity, row.op, row.entity_id])).toEqual([
+          ["import_template", "update", "route-custom"],
+          ["activity_import_profile", "update", expect.any(String)],
+          ["import_template", "delete", "route-custom"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "route-custom",
+          name: "Route Custom",
+          scope: "USER",
+          kind: "CSV_HOLDINGS",
+          source_system: "",
+          config_version: 1,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "template-route-account",
+          context_kind: "CSV_HOLDINGS",
+          source_system: "",
+          template_id: "route-custom",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: "route-custom" });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime broker sync profile callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-broker-profile-sync-"));
     const runtime = createSqliteBackedBackendServices({

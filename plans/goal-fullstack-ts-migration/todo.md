@@ -6280,6 +6280,10 @@ contract:
   Runtime-backed asset route coverage now expects asset create/profile
   update/pricing-mode update/delete HTTP routes to persist asset sync_outbox
   callbacks.
+- `pr5-runtime-import-template-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed import-template route coverage now expects template
+  create/list/get/link/delete HTTP routes to persist import_template and
+  activity_import_profile sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
