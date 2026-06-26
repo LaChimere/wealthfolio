@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 797
+turns_used: 798
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -4726,6 +4726,9 @@ updated_at: "2026-06-26T18:08:25+09:00"
 - Turn 797: Added runtime-backed quote-sync Health Center smoke coverage. The
   SQLite-backed runtime now proves `quote_sync_state` failures are surfaced as
   retryable price-staleness health issues by `/api/v1/health/check`.
+- Turn 798: Added runtime-backed FX integrity Health Center smoke coverage. The
+  SQLite-backed runtime now proves foreign-currency holdings with missing FX
+  quotes are surfaced as `fetch_fx` health issues by `/api/v1/health/check`.
 
 ## Deferred items
 

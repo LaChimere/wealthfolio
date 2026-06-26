@@ -1347,6 +1347,46 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime FX integrity health issues from holdings", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-fx-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeFxIntegrityHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "CRITICAL",
+        issueCounts: { CRITICAL: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^fx_missing:/),
+            category: "FX_INTEGRITY",
+            title: "Missing exchange rate for EUR",
+            affectedCount: 1,
+            fixAction: { id: "fetch_fx", label: "Fetch Exchange Rates", payload: ["EUR:USD"] },
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -3927,6 +3967,72 @@ function seedRuntimeQuoteSyncHealthInput(db: ReturnType<typeof openSqliteDatabas
         '2026-05-18T00:00:00Z',
         '2026-05-18T00:00:00Z'
       )
+    `,
+  ).run();
+}
+
+function seedRuntimeFxIntegrityHealthInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+  ).run();
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('base_currency', 'USD')",
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('fx-health-account', 'FX Health Account', 'SECURITIES', NULL, 'EUR', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('fx-health-asset', 'INVESTMENT', 'Euro Asset', 'EURSEC', NULL, NULL, 1, 'MANUAL',
+        'EUR', 'EQUITY', 'EURSEC', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO holdings_snapshots (
+        id, account_id, snapshot_date, currency, positions, cash_balances,
+        cost_basis, net_contribution, net_contribution_base, source
+      )
+      VALUES ('fx-health-account_2026-05-18', 'fx-health-account', '2026-05-18', 'EUR',
+        ?, '{}', '0', '0', '0', 'MANUAL_ENTRY')
+    `,
+  ).run(
+    JSON.stringify({
+      "fx-health-asset": {
+        id: "fx-health-asset_fx-health-account",
+        accountId: "fx-health-account",
+        assetId: "fx-health-asset",
+        quantity: "10",
+        averageCost: "0",
+        totalCostBasis: "0",
+        currency: "EUR",
+        inceptionDate: "2026-05-18T00:00:00Z",
+        createdAt: "2026-05-18T00:00:00Z",
+        lastUpdated: "2026-05-18T00:00:00Z",
+        isAlternative: false,
+        contractMultiplier: "1",
+        lots: [],
+      },
+    }),
+  );
+  db.prepare(
+    `
+      INSERT INTO quotes (
+        id, asset_id, day, source, close, currency, created_at, timestamp
+      )
+      VALUES ('fx-health-asset_2026-05-18_MANUAL', 'fx-health-asset', '2026-05-18',
+        'MANUAL', '10', 'EUR', '2026-05-18T00:00:00Z', '2026-05-18T00:00:00Z')
     `,
   ).run();
 }

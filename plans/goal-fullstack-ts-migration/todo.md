@@ -6187,6 +6187,10 @@ contract:
 - `pr5-health-runtime-quote-sync-smoke`: verification passed. Runtime-backed
   `/api/v1/health/check` coverage now seeds `quote_sync_state` rows and expects
   retryable quote-sync price-staleness issues through real service wiring.
+- `pr5-health-runtime-fx-integrity-smoke`: verification passed. Runtime-backed
+  `/api/v1/health/check` coverage now seeds foreign-currency holdings with
+  missing FX quotes and expects `fetch_fx` FX integrity issues through real
+  service wiring.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
