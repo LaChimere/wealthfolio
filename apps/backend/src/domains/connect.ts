@@ -566,6 +566,20 @@ function validateConnectImportRunsPagination(request: ConnectImportRunsRequest):
       400,
     );
   }
+  if (request.limit <= 0) {
+    throw new ConnectServiceError(
+      "bad_request",
+      "import run pagination limit must be greater than 0",
+      400,
+    );
+  }
+  if (request.offset < 0) {
+    throw new ConnectServiceError(
+      "bad_request",
+      "import run pagination offset must be greater than or equal to 0",
+      400,
+    );
+  }
 }
 
 function importRunFromRow(row: ImportRunRow): unknown {

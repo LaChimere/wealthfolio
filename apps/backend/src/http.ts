@@ -4831,6 +4831,9 @@ function parseConnectImportRunsQuery(url: URL): ConnectImportRunsRequest | Respo
   if (limit instanceof Response) {
     return limit;
   }
+  if (limit !== undefined && limit <= 0) {
+    return jsonResponse({ code: 400, message: "limit must be greater than 0" }, 400);
+  }
   const offset = parseOptionalIntegerQuery(url, "offset");
   if (offset instanceof Response) {
     return offset;
@@ -4848,7 +4851,7 @@ function parseOptionalIntegerQuery(url: URL, field: string): number | undefined 
   if (value === null) {
     return undefined;
   }
-  if (!/^[-+]?\d+$/.test(value)) {
+  if (!/^\d+$/.test(value)) {
     return jsonResponse({ code: 400, message: `${field} must be an integer` }, 400);
   }
   const parsed = Number(value);

@@ -4657,6 +4657,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   loading state now comes from the canonical `broker:sync-start` SSE event, so
   synchronous TS broker sync completion cannot be followed by a stale mutation
   success loading toast. Verified with focused broker sync hook tests.
+- Turn 779: Hardened Connect import-run pagination. HTTP and service boundaries
+  now reject non-positive limits and negative offsets before local import-run DB
+  reads. Verified with focused Connect domain and HTTP route tests.
 
 ## Deferred items
 

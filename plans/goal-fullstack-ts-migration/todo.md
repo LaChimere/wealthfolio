@@ -6121,6 +6121,9 @@ contract:
   hook tests. Loading state now comes from `broker:sync-start` SSE events,
   preventing synchronous TS sync completion from being followed by a stale
   mutation-success loading toast.
+- `pr5-connect-import-runs-pagination-hardening`: verification passed: focused
+  Connect domain and HTTP route tests. Import-run listing now rejects
+  non-positive limits and negative offsets before local DB reads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

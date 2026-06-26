@@ -2600,6 +2600,18 @@ describe("TS Connect local session service", () => {
           offset: Number.MAX_SAFE_INTEGER + 1,
         }),
       ).toThrow("import run pagination values must be safe integers");
+      expect(() =>
+        service.getImportRuns({
+          limit: 0,
+          offset: 0,
+        }),
+      ).toThrow("import run pagination limit must be greater than 0");
+      expect(() =>
+        service.getImportRuns({
+          limit: 50,
+          offset: -1,
+        }),
+      ).toThrow("import run pagination offset must be greater than or equal to 0");
     } finally {
       db.close();
     }

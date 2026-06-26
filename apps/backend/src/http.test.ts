@@ -5214,17 +5214,24 @@ describe("TS backend HTTP skeleton", () => {
         headers: authHeaders,
       }),
     );
-    await handler(
-      new Request("http://127.0.0.1/api/v1/connect/import-runs?runType=broker&limit=10&offset=-1", {
-        headers: authHeaders,
-      }),
-    );
+    expect(
+      (
+        await handler(
+          new Request(
+            "http://127.0.0.1/api/v1/connect/import-runs?runType=broker&limit=10&offset=-1",
+            {
+              headers: authHeaders,
+            },
+          ),
+        )
+      ).status,
+    ).toBe(400);
     await handler(
       new Request("http://127.0.0.1/api/v1/connect/import-runs?runType=&limit=5&offset=0", {
         headers: authHeaders,
       }),
     );
-    for (const query of ["limit=", "limit=1.5", "limit=9007199254740992"]) {
+    for (const query of ["limit=", "limit=0", "limit=1.5", "limit=9007199254740992", "offset=-1"]) {
       expect(
         (
           await handler(
@@ -5310,7 +5317,6 @@ describe("TS backend HTTP skeleton", () => {
       ["sync-accounts", undefined],
       ["sync-activities", undefined],
       ["import-runs", { limit: 50, offset: 0, runType: undefined }],
-      ["import-runs", { limit: 10, offset: -1, runType: "broker" }],
       ["import-runs", { limit: 5, offset: 0, runType: "" }],
       ["broker-sync-profile", { accountId: "acct-1", sourceSystem: "snaptrade" }],
       ["save-broker-sync-profile", { rules: [{ id: "rule-1" }] }],
