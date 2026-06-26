@@ -4664,6 +4664,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   modal. The "Review" action now dispatches `open-new-accounts-modal` with the
   synced account details instead of navigating away. Verified with focused
   global listener hook tests.
+- Turn 781: Aligned web activity CSV parse unauthorized handling with other
+  direct-fetch web adapters. HTTP 401 parse responses now notify the global auth
+  handler before surfacing the backend error. Verified with focused web activity
+  adapter tests.
 
 ## Deferred items
 

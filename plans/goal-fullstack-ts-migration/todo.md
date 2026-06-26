@@ -6128,6 +6128,9 @@ contract:
   global listener hook tests. Broker sync "New accounts found" review actions
   now dispatch `open-new-accounts-modal` with synced account details instead of
   navigating away.
+- `pr5-web-activity-parse-auth-parity`: verification passed: focused web
+  activity adapter tests. HTTP 401 CSV parse responses now notify the global
+  auth handler before surfacing the backend parse error.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

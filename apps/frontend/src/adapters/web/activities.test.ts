@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { notifyUnauthorized } from "@/lib/auth-token";
 import { parseCsv } from "./activities";
+
+vi.mock("@/lib/auth-token", () => ({
+  notifyUnauthorized: vi.fn(),
+}));
+
+const notifyUnauthorizedMock = vi.mocked(notifyUnauthorized);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -53,5 +60,22 @@ describe("web activities adapter", () => {
     await expect(parseCsv(file, config)).rejects.toThrow(
       "Failed to parse CSV: plain parse failure",
     );
+  });
+
+  it("notifies on unauthorized parse responses", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ message: "Unauthorized" }, { status: 401, statusText: "Unauthorized" }),
+        ),
+    );
+    const file = new File(["bad"], "bad.csv", { type: "text/csv" });
+    const config = { delimiter: ",", mappings: {} };
+
+    await expect(parseCsv(file, config)).rejects.toThrow("Failed to parse CSV: Unauthorized");
+    expect(notifyUnauthorizedMock).toHaveBeenCalledOnce();
   });
 });

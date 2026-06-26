@@ -1,4 +1,5 @@
 // Web-specific activity commands
+import { notifyUnauthorized } from "@/lib/auth-token";
 import type { ParseConfig, ParsedCsvResult } from "@/lib/types";
 import { API_PREFIX, logger } from "./core";
 
@@ -47,6 +48,9 @@ export const parseCsv = async (file: File, config: ParseConfig): Promise<ParsedC
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        notifyUnauthorized();
+      }
       const details = await extractErrorMessage(response);
       const fallback = `Request failed (${response.status}${response.statusText ? ` ${response.statusText}` : ""})`;
       throw new Error(
