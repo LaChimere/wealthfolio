@@ -4649,9 +4649,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   while the web command parity test pins provider-id URL encoding for
   `list_ai_models`. Verified with focused frontend adapter tests.
 - Turn 777: Added TS Connect broker sync lifecycle events. Accepted local broker
-  sync now publishes `broker:sync-start` and `broker:sync-complete` through the
-  runtime event bus, matching the frontend/global listener contract. Verified
-  with focused Connect broker sync tests.
+  sync now publishes `broker:sync-start` plus Rust-shaped success/error payloads
+  through the runtime event bus, including synced-account setup prompts and
+  account-level failure errors. Verified with focused Connect broker sync and
+  global listener tests.
 
 ## Deferred items
 

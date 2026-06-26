@@ -2078,8 +2078,14 @@ describe("TS Connect local session service", () => {
     const localAccounts: Array<{
       id: string;
       providerAccountId: string | null;
-      trackingMode: "HOLDINGS";
-    }> = [];
+      trackingMode: "HOLDINGS" | "NOT_SET";
+    }> = [
+      {
+        id: "needs-setup",
+        providerAccountId: "broker-account-needs-setup",
+        trackingMode: "NOT_SET",
+      },
+    ];
     const service = createLocalConnectService({
       db,
       secretService,
@@ -2172,13 +2178,173 @@ describe("TS Connect local session service", () => {
     try {
       await expect(service.syncBrokerData()).resolves.toEqual({ status: "accepted" });
       expect(localAccounts).toEqual([
+        {
+          id: "needs-setup",
+          providerAccountId: "broker-account-needs-setup",
+          trackingMode: "NOT_SET",
+        },
         { id: "created-local", providerAccountId: "broker-account-1", trackingMode: "HOLDINGS" },
       ]);
       expect(events).toEqual([
         { name: "broker:sync-start" },
         {
           name: "broker:sync-complete",
-          payload: { success: true, message: "Broker sync completed" },
+          payload: {
+            success: true,
+            message: "Sync completed. 1 accounts created, 0 activities synced, 0 holdings synced.",
+            connectionsSynced: {
+              synced: 1,
+              platformsCreated: 1,
+              platformsUpdated: 0,
+            },
+            accountsSynced: {
+              synced: 1,
+              created: 1,
+              updated: 0,
+              skipped: 0,
+              createdAccounts: [["created-local", "USD"]],
+              newAccountsInfo: [
+                {
+                  localAccountId: "created-local",
+                  providerAccountId: "broker-account-1",
+                  defaultName: "Broker Account",
+                  currency: "USD",
+                  institutionName: null,
+                },
+              ],
+            },
+            activitiesSynced: {
+              accountsSynced: 0,
+              activitiesUpserted: 0,
+              assetsInserted: 0,
+              accountsFailed: 0,
+              accountsWarned: 0,
+              newAssetIds: [],
+            },
+            holdingsSynced: {
+              accountsSynced: 0,
+              snapshotsUpserted: 0,
+              positionsUpserted: 0,
+              assetsInserted: 0,
+              accountsFailed: 0,
+              newAssetIds: [],
+            },
+            newAccounts: [
+              {
+                localAccountId: "needs-setup",
+                providerAccountId: "broker-account-needs-setup",
+                defaultName: "Broker Account",
+                currency: "USD",
+                institutionName: "brokerage",
+              },
+            ],
+          },
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      db.close();
+    }
+  });
+
+  test("emits broker sync error event when bounded activity sync has account failures", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const eventBus = createEventBus();
+    const events: BackendEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      eventBus,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            email: "user@example.test",
+            team: { id: "team-1", plan: "pro", subscriptionStatus: "active" },
+          });
+        }
+        if (url.endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({ connections: [] });
+        }
+        if (url.endsWith("/api/v1/sync/brokerage/accounts")) {
+          return Response.json({ accounts: [] });
+        }
+        return Response.json({ data: {}, pagination: { has_more: false } });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        createAccount: async () => {
+          throw new Error("should not create accounts during failing activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "accepted" });
+      expect(events).toEqual([
+        { name: "broker:sync-start" },
+        {
+          name: "broker:sync-error",
+          payload: {
+            error:
+              "Sync completed. 0 accounts created, 0 activities synced, 0 holdings synced (1 failed).",
+          },
         },
       ]);
     } finally {

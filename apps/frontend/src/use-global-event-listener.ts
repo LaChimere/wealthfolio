@@ -282,6 +282,7 @@ const useGlobalEventListener = () => {
       const { error } = event.payload || { error: "Unknown error" };
       // Dismiss the loading toast
       toast.dismiss(TOAST_IDS.brokerSyncStart);
+      queryClientRef.current.invalidateQueries();
       toast.error("Broker Sync Failed", {
         description: error,
         duration: 10000,

@@ -52,6 +52,53 @@ export interface ConnectSyncBrokerDataResult {
   status: ConnectSyncBrokerDataStatus;
 }
 
+interface BrokerSyncEventPayload {
+  success: boolean;
+  message: string;
+  connectionsSynced?: {
+    synced: number;
+    platformsCreated: number;
+    platformsUpdated: number;
+  };
+  accountsSynced?: {
+    synced: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    createdAccounts: Array<[string, string]>;
+    newAccountsInfo: Array<{
+      localAccountId: string;
+      providerAccountId: string;
+      defaultName: string;
+      currency: string;
+      institutionName: string | null;
+    }>;
+  };
+  activitiesSynced?: {
+    accountsSynced: number;
+    activitiesUpserted: number;
+    assetsInserted: number;
+    accountsFailed: number;
+    accountsWarned: number;
+    newAssetIds: string[];
+  };
+  holdingsSynced?: {
+    accountsSynced: number;
+    snapshotsUpserted: number;
+    positionsUpserted: number;
+    assetsInserted: number;
+    accountsFailed: number;
+    newAssetIds: string[];
+  };
+  newAccounts?: Array<{
+    localAccountId: string;
+    providerAccountId: string;
+    defaultName: string;
+    currency: string;
+    institutionName: string | null;
+  }>;
+}
+
 export interface ConnectService {
   storeSyncSession(refreshToken: string): Promise<void> | void;
   clearSyncSession(): Promise<void> | void;
@@ -153,7 +200,7 @@ export function createDisabledConnectService(): ConnectService {
       throw connectSyncDisabled();
     },
     async syncBrokerData() {
-      return await syncBrokerDataBounded(this);
+      return (await syncBrokerDataBounded(this)).result;
     },
     async syncBrokerConnections() {
       throw connectSyncDisabled();
@@ -299,11 +346,16 @@ export function createLocalConnectService({
       }
       eventBus?.publish({ name: BROKER_SYNC_START });
       try {
-        const result = await syncBrokerDataBounded(this);
-        if (result.status === "accepted") {
+        const { result, eventPayload } = await syncBrokerDataBounded(this);
+        if (eventPayload.success) {
           eventBus?.publish({
             name: BROKER_SYNC_COMPLETE,
-            payload: { success: true, message: "Broker sync completed" },
+            payload: eventPayload,
+          });
+        } else {
+          eventBus?.publish({
+            name: BROKER_SYNC_ERROR,
+            payload: { error: eventPayload.message },
           });
         }
         return result;
@@ -3199,13 +3251,87 @@ function dateOnly(date: Date): string {
 async function syncBrokerDataBounded(
   service: Pick<
     ConnectService,
-    "syncBrokerConnections" | "syncBrokerAccounts" | "syncBrokerActivities"
+    "syncBrokerConnections" | "syncBrokerAccounts" | "syncBrokerActivities" | "getSyncedAccounts"
   >,
-): Promise<ConnectSyncBrokerDataResult> {
-  await service.syncBrokerConnections();
-  await service.syncBrokerAccounts();
-  await service.syncBrokerActivities();
-  return { status: "accepted" };
+): Promise<{ result: ConnectSyncBrokerDataResult; eventPayload: BrokerSyncEventPayload }> {
+  const connectionsSynced = (await service.syncBrokerConnections()) as
+    | BrokerSyncEventPayload["connectionsSynced"]
+    | undefined;
+  const accountsSynced = (await service.syncBrokerAccounts()) as
+    | BrokerSyncEventPayload["accountsSynced"]
+    | undefined;
+  const activitiesSynced = (await service.syncBrokerActivities()) as
+    | BrokerSyncEventPayload["activitiesSynced"]
+    | undefined;
+  const holdingsSynced = {
+    accountsSynced: 0,
+    snapshotsUpserted: 0,
+    positionsUpserted: 0,
+    assetsInserted: 0,
+    accountsFailed: 0,
+    newAssetIds: [],
+  };
+  const totalFailed = (activitiesSynced?.accountsFailed ?? 0) + holdingsSynced.accountsFailed;
+  const totalWarnings = activitiesSynced?.accountsWarned ?? 0;
+  const newAccounts = brokerSyncNewAccountsFromSyncedAccounts(await service.getSyncedAccounts());
+  const eventPayload: BrokerSyncEventPayload = {
+    success: totalFailed === 0,
+    message: brokerSyncSummaryMessage({
+      accountsCreated: accountsSynced?.created ?? 0,
+      activitiesUpserted: activitiesSynced?.activitiesUpserted ?? 0,
+      holdingsUpserted: holdingsSynced.positionsUpserted,
+      totalFailed,
+      totalWarnings,
+    }),
+    connectionsSynced,
+    accountsSynced,
+    activitiesSynced,
+    holdingsSynced,
+    ...(newAccounts ? { newAccounts } : {}),
+  };
+  return { result: { status: "accepted" }, eventPayload };
+}
+
+function brokerSyncNewAccountsFromSyncedAccounts(
+  accounts: unknown[],
+): BrokerSyncEventPayload["newAccounts"] {
+  const newAccounts = accounts
+    .filter((account): account is Record<string, unknown> => isRecord(account))
+    .filter((account) => optionalString(account.trackingMode) === "NOT_SET")
+    .map((account) => {
+      const providerAccountId = optionalString(account.providerAccountId);
+      const localAccountId = optionalString(account.id);
+      if (!providerAccountId || !localAccountId) {
+        return null;
+      }
+      return {
+        localAccountId,
+        providerAccountId,
+        defaultName: optionalString(account.name) ?? "Broker Account",
+        currency: optionalString(account.currency) ?? "USD",
+        institutionName: optionalString(account.platformId),
+      };
+    })
+    .filter((account): account is NonNullable<typeof account> => account !== null);
+  return newAccounts.length > 0 ? newAccounts : undefined;
+}
+
+function brokerSyncSummaryMessage({
+  accountsCreated,
+  activitiesUpserted,
+  holdingsUpserted,
+  totalFailed,
+  totalWarnings,
+}: {
+  accountsCreated: number;
+  activitiesUpserted: number;
+  holdingsUpserted: number;
+  totalFailed: number;
+  totalWarnings: number;
+}): string {
+  return `Sync completed. ${accountsCreated} accounts created, ${activitiesUpserted} activities synced, ${holdingsUpserted} holdings synced${
+    totalFailed === 0 ? "." : ` (${totalFailed} failed).`
+  }${totalWarnings === 0 ? "" : ` (${totalWarnings} warning${totalWarnings === 1 ? "" : "s"}).`}`;
 }
 
 function brokerAccountDisplayName(account: Record<string, unknown>): string {
