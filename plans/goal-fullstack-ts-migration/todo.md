@@ -6239,18 +6239,18 @@ contract:
   valuation/activity-replay runtime; cross-platform keyring CI moves with a
   dedicated runtime parity slice; AI chat richer provider/tool orchestration and
   any future Ollama PDF support move with AI runtime parity slices if Ollama
-  documents non-image file inputs; asset quote-provider interactions and
-  portfolio recalculation side effects move with asset/market-data/portfolio
-  parity slices; remaining provider breadth and background orchestration move
-  with market-data/portfolio parity slices; remaining provider-backed symbol
-  fetch/resolution and sync breadth moves with market-data/provider parity
-  slices; full portfolio snapshot rebuilding side effects move with
-  holdings/portfolio parity slices; add-on security scanning, full sandbox
-  isolation, and query-cache hardening move with add-on runtime parity slices;
-  provider-backed asset resolution, remaining quote sync-outbox emission outside
-  migrated alternative-asset and market-data quote paths, remaining
-  activity/provider-backed asset resolution beyond import flows, sync engine
-  push/pull, and portfolio recalculation side effects move with
+  documents non-image file inputs; asset quote-provider interactions and broader
+  quote-mode/provider-driven portfolio recalculation side effects move with
+  asset/market-data/portfolio parity slices; remaining provider breadth and
+  background orchestration move with market-data/portfolio parity slices;
+  remaining provider-backed symbol fetch/resolution and sync breadth moves with
+  market-data/provider parity slices; full portfolio snapshot rebuilding side
+  effects move with holdings/portfolio parity slices; add-on security scanning,
+  full sandbox isolation, and query-cache hardening move with add-on runtime
+  parity slices; provider-backed asset resolution, remaining quote sync-outbox
+  emission outside migrated alternative-asset and market-data quote paths,
+  remaining activity/provider-backed asset resolution beyond import flows, sync
+  engine push/pull, and portfolio recalculation side effects move with
   activities/import/device-sync runtime parity slices; device-sync integration
   for sync crypto moves with device-sync parity slices; broader health checks
   and real market sync fix execution move with health/calculation parity slices;

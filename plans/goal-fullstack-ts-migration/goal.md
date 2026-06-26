@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 808
+turns_used: 809
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-26T20:30:48+09:00"
+updated_at: "2026-06-26T20:48:22+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4760,6 +4760,9 @@ updated_at: "2026-06-26T20:30:48+09:00"
 - Turn 808: Added runtime-backed asset profile update event coverage. The
   SQLite-backed runtime now proves `PUT /api/v1/assets/profile/:id` publishes
   asset events that drive portfolio valuation recalculation.
+- Turn 809: Cleaned stale deferred wording after runtime asset-profile
+  recalculation coverage. Remaining asset follow-ups are now scoped to
+  quote-mode/provider-driven recalculation and quote-provider interactions.
 
 ## Deferred items
 
@@ -4876,8 +4879,10 @@ updated_at: "2026-06-26T20:30:48+09:00"
   `instrument_key`, and Rust-compatible initial
   `instrument_type`/`asset_classes` assignments for newly created assets;
   quote-provider interactions, remaining quote sync outbox follow-ups outside
-  migrated alternative-asset and market-data quote paths, and portfolio
-  recalculation behavior remain active follow-ups.
+  migrated alternative-asset and market-data quote paths, and broader
+  quote-mode/provider-driven portfolio recalculation behavior remain active
+  follow-ups; direct asset profile updates now have runtime recalculation
+  coverage.
 - App utility database restore runtime now has TS runtime parity. reason=the
   standalone backend performs file-level restore after closing the live database
   handle and explicitly reports restart-required readiness afterward; future
