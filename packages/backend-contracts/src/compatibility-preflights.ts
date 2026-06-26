@@ -9,10 +9,7 @@ export const EXPECTED_ELECTRON_NATIVE_COMMANDS = [
   "install_app_update",
 ] as const;
 
-export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
-  "backup_database_to_path",
-  "restore_database",
-] as const;
+export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [] as const;
 
 export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = [] as const;
 

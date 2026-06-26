@@ -41,8 +41,10 @@ export const COMMANDS: CommandMap = {
   get_app_info: { method: "GET", path: "/app/info" },
   check_update: { method: "GET", path: "/app/check-update" },
   backup_database: { method: "POST", path: "/utilities/database/backup" },
+  backup_database_to_path: { method: "POST", path: "/utilities/database/backup-to-path" },
   list_database_backups: { method: "GET", path: "/utilities/database/backups" },
   delete_database_backup: { method: "DELETE", path: "/utilities/database/backups" },
+  restore_database: { method: "POST", path: "/utilities/database/restore" },
   export_data_file: { method: "GET", path: "/utilities/export" },
   get_holdings: { method: "POST", path: "/holdings/query" },
   get_holding: { method: "GET", path: "/holdings/item" },
@@ -431,6 +433,10 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       url += `/${encodeURIComponent(filename)}`;
       break;
     }
+    case "backup_database_to_path":
+      throw new Error("Backing up to a local path is only supported in the desktop app");
+    case "restore_database":
+      throw new Error("Restore in web mode requires stopping Wealthfolio and replacing app.db");
     case "update_settings": {
       const data = payload as { settingsUpdate: Record<string, unknown> };
       body = JSON.stringify(data.settingsUpdate);

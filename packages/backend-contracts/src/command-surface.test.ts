@@ -32,7 +32,7 @@ describe("backend command surface contracts", () => {
   test("parses current web and Electron command registries without false positives", () => {
     const { web, electron } = readRoutes();
 
-    expect(web).toHaveLength(249);
+    expect(web).toHaveLength(251);
     expect(electron).toHaveLength(253);
     expect(electron.map((route) => route.command)).not.toContain("position");
     expect(web.find((route) => route.command === "get_accounts")).toEqual({
@@ -47,10 +47,10 @@ describe("backend command surface contracts", () => {
     const surface = classifyCommandSurface(readRoutes());
 
     expect(surface.stats).toEqual({
-      web: 249,
+      web: 251,
       electron: 253,
-      shared: 249,
-      electronOnly: 4,
+      shared: 251,
+      electronOnly: 2,
       webOnly: 0,
       backend: 251,
       electronNative: 2,
@@ -62,6 +62,12 @@ describe("backend command surface contracts", () => {
       "backend",
     );
     expect(surface.commands.find((command) => command.command === "check_update")?.type).toBe(
+      "backend",
+    );
+    expect(
+      surface.commands.find((command) => command.command === "backup_database_to_path")?.type,
+    ).toBe("backend");
+    expect(surface.commands.find((command) => command.command === "restore_database")?.type).toBe(
       "backend",
     );
     expect(surface.commands.find((command) => command.command === "register_device")?.type).toBe(

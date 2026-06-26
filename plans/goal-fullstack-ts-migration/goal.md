@@ -4711,6 +4711,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   now exposes the `check_update` sidecar alias while preserving native
   `check_for_updates`/`install_app_update`, eliminating the last web-only
   backend command delta.
+- Turn 793: Added controlled web aliases for desktop-only database path
+  backup/restore commands. Backend command-surface deltas are now zero; only
+  Electron-native updater commands remain one-sided.
 
 ## Deferred items
 

@@ -6168,6 +6168,10 @@ contract:
   the web `check_update` backend command as a sidecar alias while keeping native
   updater commands separate, eliminating the last web-only backend command
   delta.
+- `pr5-zero-backend-command-deltas`: verification passed. Web now has
+  controlled-error aliases for desktop-only database path backup/restore
+  commands, so backend command-surface deltas are zero and only Electron-native
+  updater commands remain one-sided.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
