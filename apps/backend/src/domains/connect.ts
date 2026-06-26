@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
+import type { BackendEventBus } from "../events";
 import type { AccountService } from "./accounts";
 import { ACTIVITY_BULK_CREATED_ASSET_IDS, type ActivityService } from "./activities";
 import type { ExchangeMetadata } from "./assets";
@@ -28,6 +29,7 @@ export interface LocalConnectServiceDependencies {
   exchangeMetadata?: Pick<ExchangeMetadata, "yahooSuffixToMic">;
   symbolSearch?: (query: string) => Promise<SymbolSearchResult[]> | SymbolSearchResult[];
   secretService?: SecretService;
+  eventBus?: BackendEventBus;
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
 }
@@ -113,6 +115,9 @@ const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this bu
 const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
   "Broker sync profile persistence is not available in this build.";
 const BROKER_ACTIVITY_MAX_PAGES = 10_000;
+const BROKER_SYNC_START = "broker:sync-start";
+const BROKER_SYNC_COMPLETE = "broker:sync-complete";
+const BROKER_SYNC_ERROR = "broker:sync-error";
 const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
 const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
@@ -196,6 +201,7 @@ export function createLocalConnectService({
   exchangeMetadata,
   symbolSearch,
   secretService,
+  eventBus,
   env = process.env,
   fetch: fetchImpl = fetch,
 }: LocalConnectServiceDependencies): ConnectService {
@@ -291,7 +297,24 @@ export function createLocalConnectService({
       } catch {
         return { status: "forbidden" };
       }
-      return await syncBrokerDataBounded(this);
+      eventBus?.publish({ name: BROKER_SYNC_START });
+      try {
+        const result = await syncBrokerDataBounded(this);
+        if (result.status === "accepted") {
+          eventBus?.publish({
+            name: BROKER_SYNC_COMPLETE,
+            payload: { success: true, message: "Broker sync completed" },
+          });
+        }
+        return result;
+      } catch (error) {
+        const message = errorMessage(error);
+        eventBus?.publish({
+          name: BROKER_SYNC_ERROR,
+          payload: { error: message },
+        });
+        throw error;
+      }
     },
     async syncBrokerConnections() {
       const response = await fetchAuthenticatedConnectJsonRaw(

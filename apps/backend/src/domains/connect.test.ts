@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { ACTIVITY_BULK_CREATED_ASSET_IDS } from "./activities";
 import type { SecretService } from "./secrets";
 import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./connect";
+import { createEventBus, type BackendEvent } from "../events";
 
 function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
   const entries = new Map<string, string>();
@@ -2071,6 +2072,9 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const eventBus = createEventBus();
+    const events: BackendEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
     const localAccounts: Array<{
       id: string;
       providerAccountId: string | null;
@@ -2079,6 +2083,7 @@ describe("TS Connect local session service", () => {
     const service = createLocalConnectService({
       db,
       secretService,
+      eventBus,
       fetch: async (input) => {
         if (String(input).includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token" });
@@ -2169,7 +2174,15 @@ describe("TS Connect local session service", () => {
       expect(localAccounts).toEqual([
         { id: "created-local", providerAccountId: "broker-account-1", trackingMode: "HOLDINGS" },
       ]);
+      expect(events).toEqual([
+        { name: "broker:sync-start" },
+        {
+          name: "broker:sync-complete",
+          payload: { success: true, message: "Broker sync completed" },
+        },
+      ]);
     } finally {
+      unsubscribe();
       db.close();
     }
   });

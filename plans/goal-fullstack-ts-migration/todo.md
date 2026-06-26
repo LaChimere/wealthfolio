@@ -6113,6 +6113,9 @@ contract:
   adapter tests. Shared AI provider adapter coverage includes provider
   reads/mutations/model listing/failure surfacing, and web command parity pins
   provider-id URL encoding for `list_ai_models`.
+- `pr5-connect-broker-sync-events`: verification passed: focused Connect broker
+  sync tests. Accepted local broker sync now publishes `broker:sync-start` and
+  `broker:sync-complete` through the runtime event bus.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

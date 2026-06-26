@@ -457,6 +457,7 @@ function createServicesFromDatabase(
     exchangeMetadata,
     symbolSearch: (query) => marketDataService.searchSymbol?.(query) ?? [],
     secretService,
+    eventBus,
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,
   });
