@@ -6131,6 +6131,9 @@ contract:
 - `pr5-web-activity-parse-auth-parity`: verification passed: focused web
   activity adapter tests. HTTP 401 CSV parse responses now notify the global
   auth handler before surfacing the backend parse error.
+- `pr5-web-sync-crypto-command-parity`: verification passed: focused web crypto
+  and backend-contract tests. Web sync-crypto now uses the same command names as
+  Electron for E2EE operations, shrinking Electron-only backend command deltas.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

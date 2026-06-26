@@ -266,6 +266,18 @@ export const COMMANDS: CommandMap = {
   enable_device_sync: { method: "POST", path: "/connect/device/enable" },
   clear_device_sync_data: { method: "DELETE", path: "/connect/device/sync-data" },
   reinitialize_device_sync: { method: "POST", path: "/connect/device/reinitialize" },
+  sync_generate_root_key: { method: "POST", path: "/sync/crypto/generate-root-key" },
+  sync_derive_dek: { method: "POST", path: "/sync/crypto/derive-dek" },
+  sync_generate_keypair: { method: "POST", path: "/sync/crypto/generate-keypair" },
+  sync_compute_shared_secret: { method: "POST", path: "/sync/crypto/compute-shared-secret" },
+  sync_derive_session_key: { method: "POST", path: "/sync/crypto/derive-session-key" },
+  sync_encrypt: { method: "POST", path: "/sync/crypto/encrypt" },
+  sync_decrypt: { method: "POST", path: "/sync/crypto/decrypt" },
+  sync_generate_pairing_code: { method: "POST", path: "/sync/crypto/generate-pairing-code" },
+  sync_hash_pairing_code: { method: "POST", path: "/sync/crypto/hash-pairing-code" },
+  sync_hmac_sha256: { method: "POST", path: "/sync/crypto/hmac-sha256" },
+  sync_compute_sas: { method: "POST", path: "/sync/crypto/compute-sas" },
+  sync_generate_device_id: { method: "POST", path: "/sync/crypto/generate-device-id" },
   device_sync_engine_status: { method: "GET", path: "/connect/device/engine-status" },
   device_sync_pairing_source_status: {
     method: "GET",
@@ -1197,6 +1209,52 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "reset_team_sync": {
       const { reason } = (payload ?? {}) as { reason?: string };
       body = reason ? JSON.stringify({ reason }) : JSON.stringify({});
+      break;
+    }
+    // Sync crypto commands
+    case "sync_generate_root_key":
+    case "sync_generate_keypair":
+    case "sync_generate_pairing_code":
+    case "sync_generate_device_id":
+      break;
+    case "sync_derive_dek": {
+      const { rootKey, version } = payload as { rootKey: string; version: number };
+      body = JSON.stringify({ rootKey, version });
+      break;
+    }
+    case "sync_compute_shared_secret": {
+      const { ourSecret, theirPublic } = payload as { ourSecret: string; theirPublic: string };
+      body = JSON.stringify({ ourSecret, theirPublic });
+      break;
+    }
+    case "sync_derive_session_key": {
+      const { sharedSecret, context } = payload as { sharedSecret: string; context: string };
+      body = JSON.stringify({ sharedSecret, context });
+      break;
+    }
+    case "sync_encrypt": {
+      const { key, plaintext } = payload as { key: string; plaintext: string };
+      body = JSON.stringify({ key, plaintext });
+      break;
+    }
+    case "sync_decrypt": {
+      const { key, ciphertext } = payload as { key: string; ciphertext: string };
+      body = JSON.stringify({ key, ciphertext });
+      break;
+    }
+    case "sync_hash_pairing_code": {
+      const { code } = payload as { code: string };
+      body = JSON.stringify({ code });
+      break;
+    }
+    case "sync_hmac_sha256": {
+      const { key, data } = payload as { key: string; data: string };
+      body = JSON.stringify({ key, data });
+      break;
+    }
+    case "sync_compute_sas": {
+      const { sharedSecret } = payload as { sharedSecret: string };
+      body = JSON.stringify({ sharedSecret });
       break;
     }
     // Device Sync commands - Pairing (Issuer - Trusted Device)

@@ -51,7 +51,7 @@ describe("full-stack TS compatibility preflights", () => {
     expect(report.electronNative).toEqual([...EXPECTED_ELECTRON_NATIVE_COMMANDS].sort());
     expect(report.electronOnlyBackend).toContain("export_data_file");
     expect(report.electronOnlyBackend).toContain("parse_csv");
-    expect(report.electronOnlyBackend).toContain("sync_encrypt");
+    expect(report.electronOnlyBackend).not.toContain("sync_encrypt");
     expect(report.webOnlyBackend).not.toContain("list_database_backups");
     expect(report.webOnlyBackend).not.toContain("delete_database_backup");
     expect(() => assertExpectedCompatibilityPreflights(surface)).not.toThrow();

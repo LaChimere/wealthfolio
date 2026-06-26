@@ -14,18 +14,6 @@ export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
   "export_data_file",
   "parse_csv",
   "restore_database",
-  "sync_compute_sas",
-  "sync_compute_shared_secret",
-  "sync_decrypt",
-  "sync_derive_dek",
-  "sync_derive_session_key",
-  "sync_encrypt",
-  "sync_generate_device_id",
-  "sync_generate_keypair",
-  "sync_generate_pairing_code",
-  "sync_generate_root_key",
-  "sync_hash_pairing_code",
-  "sync_hmac_sha256",
 ] as const;
 
 export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = ["check_update"] as const;
