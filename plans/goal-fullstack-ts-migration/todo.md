@@ -6244,10 +6244,11 @@ contract:
   dedicated runtime parity slice; AI chat richer provider/tool orchestration and
   any future Ollama PDF support move with AI runtime parity slices if Ollama
   documents non-image file inputs; asset quote-provider interactions and broader
-  quote-mode/provider-driven portfolio recalculation side effects move with
-  asset/market-data/portfolio parity slices; remaining provider breadth and
-  background orchestration move with market-data/portfolio parity slices;
-  remaining provider-backed symbol fetch/resolution and sync breadth moves with
+  provider-driven portfolio recalculation side effects move with
+  asset/market-data/portfolio parity slices after direct profile and quote-mode
+  route recalculation coverage; remaining provider breadth and background
+  orchestration move with market-data/portfolio parity slices; remaining
+  provider-backed symbol fetch/resolution and sync breadth moves with
   market-data/provider parity slices; full portfolio snapshot rebuilding side
   effects move with holdings/portfolio parity slices; add-on security scanning,
   full sandbox isolation, and query-cache hardening move with add-on runtime
