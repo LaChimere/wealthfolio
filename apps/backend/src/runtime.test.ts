@@ -3618,6 +3618,60 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime asset creates to asset enrichment", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-create-route-"));
+    const fetchCalls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        fetchCalls.push(String(input));
+        return Promise.reject(new Error("unexpected enrichment network call"));
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: unknown[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event);
+    });
+
+    try {
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const createResponse = await fetch(`${server.baseUrl}/api/v1/assets`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "PROPERTY",
+            quoteMode: "MANUAL",
+            quoteCcy: "USD",
+            name: "HTTP Property",
+          }),
+        });
+        expect(createResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      expect(events).toEqual([
+        {
+          name: ASSETS_CREATED_EVENT,
+          payload: { type: ASSETS_CREATED_EVENT, asset_ids: [expect.any(String)] },
+        },
+        { name: "asset:enrichment-start", payload: { total: 1 } },
+        { name: "asset:enrichment-progress", payload: { completed: 1, total: 1 } },
+        { name: "asset:enrichment-complete", payload: { enriched: 1, skipped: 0, failed: 0 } },
+      ]);
+      expect(fetchCalls).toEqual([]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime asset-updated events to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-updated-"));
     const runtime = createSqliteBackedBackendServices({
