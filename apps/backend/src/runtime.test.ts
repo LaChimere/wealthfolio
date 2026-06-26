@@ -3589,6 +3589,95 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime activity creates to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-create-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityHttpInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const depositResponse = await fetch(`${server.baseUrl}/api/v1/activities`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountId: "tx-account",
+            activityType: "DEPOSIT",
+            activityDate: "2026-05-14T10:00:00.000Z",
+            amount: "100",
+            currency: "USD",
+          }),
+        });
+        expect(depositResponse.status).toBe(200);
+        const buyResponse = await fetch(`${server.baseUrl}/api/v1/activities`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountId: "tx-account",
+            asset: { id: "tx-asset" },
+            activityType: "BUY",
+            activityDate: "2026-05-14T12:00:00.000Z",
+            quantity: "2",
+            unitPrice: "10",
+            fee: "1",
+            currency: "USD",
+          }),
+        });
+        expect(buyResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"79"}',
+          cost_basis: "21",
+          net_contribution: "100",
+        });
+        expect(readRuntimeSnapshotPositions(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          "tx-asset": expect.objectContaining({
+            quantity: "2",
+            totalCostBasis: "21",
+          }),
+        });
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "79",
+          investment_market_value: "20",
+          total_value: "99",
+        });
+        expect(readRuntimeValuation(resultDb, "TOTAL", "2026-05-14")).toMatchObject({
+          total_value: "99",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events.filter((event) => event === ACTIVITIES_CHANGED_EVENT)).toHaveLength(2);
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires keyring secrets when requested", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
@@ -3883,6 +3972,38 @@ function seedRuntimeTransactionActivityInput(db: ReturnType<typeof openSqliteDat
         ('tx-buy', 'tx-account', 'tx-asset', 'BUY', NULL, 'POSTED',
           '2026-05-14T12:00:00.000Z', '2', '10', NULL, '1', 'USD', NULL, NULL,
           NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-05-14T12:00:00.000Z', '2026-05-14T12:00:00.000Z')
+    `,
+  ).run();
+}
+
+function seedRuntimeTransactionActivityHttpInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('tx-account', 'Transaction Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('tx-asset', 'INVESTMENT', 'Transaction Asset', 'TX', NULL, NULL, 1, 'MANUAL',
+        'USD', 'EQUITY', 'TX', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO quotes (
+        id, asset_id, day, source, close, currency, created_at, timestamp
+      )
+      VALUES ('tx-asset_2026-05-14_MANUAL', 'tx-asset', '2026-05-14', 'MANUAL',
+        '10', 'USD', '2026-05-14T16:00:00Z', '2026-05-14T16:00:00Z')
     `,
   ).run();
 }
