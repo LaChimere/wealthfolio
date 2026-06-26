@@ -3957,6 +3957,95 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime activity imports to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-import-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityHttpInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const importResponse = await fetch(`${server.baseUrl}/api/v1/activities/import`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            activities: [
+              {
+                accountId: "tx-account",
+                activityType: "DEPOSIT",
+                date: "2026-05-14T10:00:00.000Z",
+                amount: "100",
+                currency: "USD",
+              },
+              {
+                accountId: "tx-account",
+                assetId: "tx-asset",
+                symbol: "TX",
+                activityType: "BUY",
+                date: "2026-05-14T12:00:00.000Z",
+                quantity: "2",
+                unitPrice: "10",
+                fee: "1",
+                currency: "USD",
+              },
+            ],
+          }),
+        });
+        expect(importResponse.status).toBe(200);
+        await expect(importResponse.json()).resolves.toMatchObject({
+          summary: {
+            total: 2,
+            imported: 2,
+            skipped: 0,
+            success: true,
+            errorMessage: null,
+          },
+        });
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"79"}',
+          cost_basis: "21",
+          net_contribution: "100",
+        });
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "79",
+          investment_market_value: "20",
+          total_value: "99",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events.filter((event) => event === ACTIVITIES_CHANGED_EVENT)).toHaveLength(1);
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires keyring secrets when requested", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
