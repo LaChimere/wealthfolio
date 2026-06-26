@@ -6,10 +6,23 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use wealthfolio_agent_tools::AgentEnvironment;
 use wealthfolio_mcp::{AuditSink, McpAuditEntry};
+use wealthfolio_storage_sqlite::agent::{NewPersonalAccessToken, PatRepository};
+use wealthfolio_storage_sqlite::db::{create_pool, run_migrations, write_actor::spawn_writer};
 
 use super::server::build_router;
 
 const TEST_TOKEN: &str = "wfl_test";
+
+/// A real `PatRepository` backed by a fresh temp SQLite DB. The returned
+/// `TempDir` keeps the file alive for the repository's lifetime.
+fn pat_repo() -> (Arc<PatRepository>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db").to_string_lossy().to_string();
+    run_migrations(&db_path).unwrap();
+    let pool = create_pool(&db_path).unwrap();
+    let writer = spawn_writer((*pool).clone()).unwrap();
+    (Arc::new(PatRepository::new(pool, writer)), dir)
+}
 
 struct StubEnv;
 
@@ -64,6 +77,19 @@ impl AgentEnvironment for StubEnv {
     fn taxonomy_service(&self) -> Arc<dyn wealthfolio_core::taxonomies::TaxonomyServiceTrait> {
         unimplemented!("StubEnv")
     }
+    fn portfolio_service(&self) -> Arc<dyn wealthfolio_core::portfolios::PortfolioServiceTrait> {
+        unimplemented!("StubEnv")
+    }
+    fn net_worth_service(
+        &self,
+    ) -> Arc<dyn wealthfolio_core::portfolio::net_worth::NetWorthServiceTrait> {
+        unimplemented!("StubEnv")
+    }
+    fn contribution_limit_service(
+        &self,
+    ) -> Arc<dyn wealthfolio_core::limits::ContributionLimitServiceTrait> {
+        unimplemented!("StubEnv")
+    }
     fn cash_activity_service(
         &self,
     ) -> Arc<dyn wealthfolio_spending::cash_activities::CashActivityServiceTrait> {
@@ -84,16 +110,26 @@ impl AuditSink for NoopSink {
 }
 
 /// Spawns the real router on a random loopback port; returns the base URL.
+/// Uses a fresh empty PAT store, so only the legacy token authenticates.
 async fn spawn_server() -> String {
+    let (repo, dir) = pat_repo();
+    spawn_server_with_repo(repo, dir).await
+}
+
+/// Like [`spawn_server`] but with a caller-provided PAT store (and its
+/// backing temp dir, which is moved into the serve task to stay alive).
+async fn spawn_server_with_repo(repo: Arc<PatRepository>, dir: tempfile::TempDir) -> String {
     let router = build_router(
         Arc::new(StubEnv),
         Some(Arc::new(NoopSink)),
+        repo,
         TEST_TOKEN.to_string(),
         CancellationToken::new(),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
+        let _keep_db_alive = dir;
         let _ = axum::serve(listener, router).await;
     });
     format!("http://{addr}")
@@ -192,6 +228,90 @@ async fn mcp_initialize_roundtrip_succeeds() {
     assert_eq!(parsed["jsonrpc"], "2.0");
     assert_eq!(parsed["id"], 1);
     assert_eq!(parsed["result"]["serverInfo"]["name"], "wealthfolio");
+}
+
+#[tokio::test]
+async fn mcp_with_unknown_pat_is_unauthorized() {
+    let base = spawn_server().await;
+    let client = reqwest::Client::new();
+    // A well-formed `wfp_` token that was never minted -> 401.
+    let response = mcp_post(&client, &base)
+        .header(
+            "Authorization",
+            "Bearer wfp_notavalidtoken_notavalidtoken_notavalid",
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+}
+
+/// A PAT scoped to only `accounts:read` authenticates and is granted
+/// exactly that scope: `tools/list` exposes `get_accounts` but hides
+/// tools requiring other scopes (e.g. `get_holdings`).
+#[tokio::test]
+async fn mcp_scoped_pat_grants_only_its_scopes() {
+    let (repo, dir) = pat_repo();
+
+    let token = wealthfolio_mcp::pat::generate_token();
+    let prefix = wealthfolio_mcp::pat::token_prefix(&token)
+        .unwrap()
+        .to_string();
+    repo.create(NewPersonalAccessToken {
+        name: "accounts-only".to_string(),
+        token_prefix: prefix,
+        token_hash: wealthfolio_mcp::pat::hash_token(&token),
+        scopes_json: serde_json::json!(["accounts:read"]).to_string(),
+        expires_at: None,
+    })
+    .await
+    .unwrap();
+
+    let base = spawn_server_with_repo(repo, dir).await;
+    let client = reqwest::Client::new();
+
+    // Handshake with the PAT succeeds.
+    let init = mcp_post(&client, &base)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(init.status(), 200);
+    let session = init
+        .headers()
+        .get("mcp-session-id")
+        .expect("stateful mode should assign a session id")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // tools/list reflects exactly the granted scope.
+    let response = client
+        .post(format!("{base}/mcp"))
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("mcp-session-id", session)
+        .body(serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let list = parse_sse_data(&response.text().await.unwrap());
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"get_accounts"),
+        "accounts:read should expose get_accounts: {names:?}"
+    );
+    assert!(
+        !names.contains(&"get_holdings"),
+        "accounts:read must NOT expose holdings tools: {names:?}"
+    );
 }
 
 #[tokio::test]

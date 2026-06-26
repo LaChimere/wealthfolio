@@ -15,14 +15,17 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use wealthfolio_agent_tools::AgentEnvironment;
 use wealthfolio_mcp::{token_fingerprint, AuditSink, McpServerBuilder};
+use wealthfolio_storage_sqlite::agent::PatRepository;
 
-use super::middleware::{require_local_bearer, validate_origin, BearerAuth};
+use super::middleware::{require_local_bearer, validate_origin, BearerAuth, DualAuth};
 
 /// Fixed default port; falls back to a random port when already in use.
 pub const DEFAULT_PORT: u16 = 8639;
 
-const INSTRUCTIONS: &str = "Read-only access to the user's Wealthfolio portfolio: accounts, \
-holdings, valuations, performance, activities, income, goals, health, and classifications.";
+const INSTRUCTIONS: &str = "Read and write access to the user's Wealthfolio portfolio: accounts, \
+holdings, valuations, performance, activities, income, goals, health, and classifications. \
+Write capabilities (drafting and committing activities, classification suggestions) depend on the \
+scopes granted to the access token in use.";
 
 /// A started embedded MCP server.
 pub struct RunningServer {
@@ -57,6 +60,7 @@ async fn health() -> Json<serde_json::Value> {
 pub fn build_router(
     env: Arc<dyn AgentEnvironment>,
     audit_sink: Option<Arc<dyn AuditSink>>,
+    pat_repository: Arc<PatRepository>,
     token: String,
     cancel: CancellationToken,
 ) -> Router {
@@ -68,12 +72,10 @@ pub fn build_router(
         StreamableHttpServerConfig::default().with_cancellation_token(cancel.child_token()),
     );
 
+    let auth = DualAuth::new(pat_repository, BearerAuth::new(token));
     let protected = Router::new()
         .nest_service("/mcp", mcp_service)
-        .layer(middleware::from_fn_with_state(
-            BearerAuth::new(token),
-            require_local_bearer,
-        ))
+        .layer(middleware::from_fn_with_state(auth, require_local_bearer))
         .layer(middleware::from_fn(validate_origin));
 
     Router::new().route("/health", get(health)).merge(protected)
@@ -85,6 +87,7 @@ pub fn build_router(
 pub async fn start(
     env: Arc<dyn AgentEnvironment>,
     audit_sink: Option<Arc<dyn AuditSink>>,
+    pat_repository: Arc<PatRepository>,
     token: String,
     configured_port: Option<u16>,
 ) -> Result<RunningServer, String> {
@@ -109,7 +112,7 @@ pub async fn start(
 
     let cancel = CancellationToken::new();
     let fingerprint = token_fingerprint(&token);
-    let router = build_router(env, audit_sink, token, cancel.clone());
+    let router = build_router(env, audit_sink, pat_repository, token, cancel.clone());
 
     let serve_cancel = cancel.clone();
     let join = tokio::spawn(async move {

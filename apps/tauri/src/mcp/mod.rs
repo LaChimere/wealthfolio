@@ -139,7 +139,14 @@ async fn start_server_locked(app: &AppHandle, ctx: &ServiceContext) -> Result<()
     let token = token::load_or_generate(&secret_store)
         .map_err(|e| format!("Failed to load MCP token: {e}"))?;
     let sink = build_audit_sink(ctx);
-    let running = server::start(ctx.agent_environment(), sink, token, configured_port(ctx)).await?;
+    let running = server::start(
+        ctx.agent_environment(),
+        sink,
+        ctx.pat_repository(),
+        token,
+        configured_port(ctx),
+    )
+    .await?;
 
     if let Err(err) = write_lock_file(app, &running) {
         // Don't drop the server without stopping it: dropping the
@@ -283,6 +290,7 @@ pub async fn rotate_token(app: &AppHandle, ctx: &ServiceContext) -> Result<Strin
             let restarted = match server::start(
                 ctx.agent_environment(),
                 sink,
+                ctx.pat_repository(),
                 new_token.clone(),
                 configured_port(ctx),
             )

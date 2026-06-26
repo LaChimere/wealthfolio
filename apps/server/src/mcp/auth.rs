@@ -14,42 +14,18 @@ use axum::extract::{Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use rand::rngs::OsRng;
-use rand::RngCore;
-use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use wealthfolio_agent_tools::AgentScopeSet;
 use wealthfolio_mcp::{ActorKind, McpAuthContext};
 use wealthfolio_storage_sqlite::agent::PatRepository;
 
-/// Bearer token prefix for personal access tokens.
-pub const PAT_PREFIX: &str = "wfp_";
-/// Length of the lookup prefix stored alongside the hash (chars after `wfp_`).
-pub const TOKEN_PREFIX_LEN: usize = 12;
+// Token format primitives are shared with the embedded Tauri server. Re-export
+// so existing imports (`crate::mcp::auth::{generate_token, hash_token,
+// token_prefix}`) keep working.
+pub use wealthfolio_mcp::pat::{generate_token, hash_token, token_prefix};
+
 /// Minimum interval between `last_used_at` writes per token.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(60);
-
-/// Generates a fresh PAT: `wfp_` + 43-char base64url of 32 OsRng bytes.
-pub fn generate_token() -> String {
-    let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
-    format!("{PAT_PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes))
-}
-
-/// Lookup prefix: the first 12 chars after `wfp_`. `None` when the token
-/// does not look like a PAT.
-pub fn token_prefix(token: &str) -> Option<&str> {
-    let rest = token.strip_prefix(PAT_PREFIX)?;
-    rest.get(..TOKEN_PREFIX_LEN)
-}
-
-/// SHA-256 hex of the full presented token string.
-pub fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    format!("{digest:x}")
-}
 
 /// Shared middleware state: repository handle plus a per-token throttle
 /// for `last_used_at` writes.

@@ -643,6 +643,9 @@ pub fn run() {
             commands::mcp::mcp_get_connection_info,
             commands::mcp::mcp_list_audit_log,
             commands::mcp::mcp_purge_audit_log,
+            commands::mcp::mcp_list_tokens,
+            commands::mcp::mcp_create_token,
+            commands::mcp::mcp_revoke_token,
             // Addon commands
             commands::addon::extract_addon_zip,
             commands::addon::install_addon_zip,

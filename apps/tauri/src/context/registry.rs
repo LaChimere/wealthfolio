@@ -18,7 +18,9 @@ use wealthfolio_spending::events::EventsService;
 use wealthfolio_spending::insight::InsightService;
 use wealthfolio_spending::settings::SpendingSettingsService;
 use wealthfolio_storage_sqlite::{
-    agent::McpAuditRepository, portfolio::snapshot::SnapshotRepository, sync::AppSyncRepository,
+    agent::{McpAuditRepository, PatRepository},
+    portfolio::snapshot::SnapshotRepository,
+    sync::AppSyncRepository,
 };
 
 use super::TauriAiEnvironment;
@@ -68,6 +70,7 @@ pub struct ServiceContext {
     pub ai_chat_service: Arc<ChatService<TauriAiEnvironment>>,
     pub agent_environment: Arc<dyn wealthfolio_agent_tools::AgentEnvironment>,
     pub mcp_audit_repository: Arc<McpAuditRepository>,
+    pub pat_repository: Arc<PatRepository>,
     pub device_enroll_service: Arc<DeviceEnrollService>,
     pub device_sync_runtime: Arc<DeviceSyncRuntimeState>,
     pub broker_sync_running: Arc<AtomicBool>,
@@ -242,6 +245,10 @@ impl ServiceContext {
 
     pub fn mcp_audit_repository(&self) -> Arc<McpAuditRepository> {
         Arc::clone(&self.mcp_audit_repository)
+    }
+
+    pub fn pat_repository(&self) -> Arc<PatRepository> {
+        Arc::clone(&self.pat_repository)
     }
 
     pub fn portfolio_service(&self) -> Arc<dyn portfolios::PortfolioServiceTrait> {

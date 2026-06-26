@@ -11,6 +11,7 @@
 pub mod audit;
 pub mod auth;
 pub mod handler;
+pub mod pat;
 pub mod service;
 
 pub use audit::{AuditOutcome, AuditSink, McpAuditEntry};
