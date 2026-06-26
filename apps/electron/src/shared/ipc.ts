@@ -106,6 +106,10 @@ export const ELECTRON_COMMANDS = {
     method: "GET",
     path: "/api/v1/app/check-update",
   },
+  check_update: {
+    method: "GET",
+    path: "/api/v1/app/check-update",
+  },
   install_app_update: {
     method: "POST",
     path: "/__electron_native/install-update",

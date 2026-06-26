@@ -54,6 +54,7 @@ describe("full-stack TS compatibility preflights", () => {
     expect(report.electronOnlyBackend).not.toContain("sync_encrypt");
     expect(report.webOnlyBackend).not.toContain("list_database_backups");
     expect(report.webOnlyBackend).not.toContain("delete_database_backup");
+    expect(report.webOnlyBackend).not.toContain("check_update");
     expect(() => assertExpectedCompatibilityPreflights(surface)).not.toThrow();
   });
 

@@ -56,6 +56,8 @@ export async function invokeSidecarCommand<T>({
       return await invokeSimpleGet<T>({ command, sidecar, fetchImpl });
     case "update_settings":
       return await invokeUpdateSettings<T>({ payload, sidecar, fetchImpl });
+    case "check_update":
+      return await invokeCheckUpdate<T>({ payload, sidecar, fetchImpl });
     case "check_for_updates":
     case "install_app_update":
       throw new Error("Electron update commands are handled by Electron main.");
@@ -1645,6 +1647,32 @@ async function invokeBackupDatabase<T>({
   const filename = requireString(response.filename, "filename", "backup_database");
   const dataB64 = requireString(response.dataB64, "dataB64", "backup_database");
   return [filename, Array.from(Buffer.from(dataB64, "base64"))] as T;
+}
+
+async function invokeCheckUpdate<T>({
+  payload,
+  sidecar,
+  fetchImpl,
+}: ResolvedSidecarCommandOptions): Promise<T> {
+  const params = new URLSearchParams();
+  const currentVersion = optionalString(payload?.currentVersion);
+  const target = optionalString(payload?.target);
+  const arch = optionalString(payload?.arch);
+  if (currentVersion) params.set("currentVersion", currentVersion);
+  if (target) params.set("target", target);
+  if (arch) params.set("arch", arch);
+  if (payload?.force === true) params.set("force", "true");
+  const query = params.toString();
+  return await fetchSidecarJson<T>({
+    command: "check_update",
+    fetchImpl,
+    sidecar,
+    url: new URL(
+      `${ELECTRON_COMMANDS.check_update.path}${query ? `?${query}` : ""}`,
+      sidecar.baseUrl,
+    ),
+    init: { method: ELECTRON_COMMANDS.check_update.method },
+  });
 }
 
 async function invokeBackupDatabaseToPath<T>({

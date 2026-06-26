@@ -6164,6 +6164,10 @@ contract:
 - `pr5-market-data-minor-factor-review-fix`: verification passed. Yahoo
   historical price normalization now uses per-currency factors so KWF applies
   Rust's 0.001 factor instead of a hard-coded 1/100 minor-currency divisor.
+- `pr5-check-update-command-alias`: verification passed. Electron now exposes
+  the web `check_update` backend command as a sidecar alias while keeping native
+  updater commands separate, eliminating the last web-only backend command
+  delta.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

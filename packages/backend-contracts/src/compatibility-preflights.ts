@@ -14,7 +14,7 @@ export const EXPECTED_ELECTRON_ONLY_BACKEND_COMMANDS = [
   "restore_database",
 ] as const;
 
-export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = ["check_update"] as const;
+export const EXPECTED_WEB_ONLY_BACKEND_COMMANDS = [] as const;
 
 export const MIXED_VERSION_SYNC_PREFLIGHT_COMMANDS = [
   "get_sync_session_status",

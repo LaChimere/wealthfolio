@@ -4707,6 +4707,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   historical price normalization now uses per-currency factors, so KWF prices
   are normalized with the Rust 0.001 factor instead of a hard-coded 1/100 minor
   divisor.
+- Turn 792: Shared the web update-check backend command with Electron. Electron
+  now exposes the `check_update` sidecar alias while preserving native
+  `check_for_updates`/`install_app_update`, eliminating the last web-only
+  backend command delta.
 
 ## Deferred items
 

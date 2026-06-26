@@ -283,6 +283,38 @@ describe("Electron sidecar command proxy", () => {
     expect(called).toBe(false);
   });
 
+  test("proxies web update-check alias through the sidecar", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ updateAvailable: false }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "check_update",
+        payload: {
+          currentVersion: "1.2.3",
+          target: "darwin",
+          arch: "arm64",
+          force: true,
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ updateAvailable: false });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe(
+      "http://127.0.0.1:18444/api/v1/app/check-update?currentVersion=1.2.3&target=darwin&arch=arm64&force=true",
+    );
+    expect(init?.method).toBe("GET");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
   test("proxies database backup and restore utilities with Tauri-compatible shapes", async () => {
     const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
     const fetchImpl: FetchLike = (url, init) => {
