@@ -3806,6 +3806,64 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime activity deletes to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-delete-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const deleteResponse = await fetch(`${server.baseUrl}/api/v1/activities/tx-buy`, {
+          method: "DELETE",
+        });
+        expect(deleteResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"100"}',
+          cost_basis: "0",
+          net_contribution: "100",
+        });
+        expect(readRuntimeSnapshotPositions(resultDb, "tx-account", "2026-05-14")).toEqual({});
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "100",
+          investment_market_value: "0",
+          total_value: "100",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toContain(ACTIVITIES_CHANGED_EVENT);
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires keyring secrets when requested", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
