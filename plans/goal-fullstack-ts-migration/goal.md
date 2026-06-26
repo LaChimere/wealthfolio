@@ -4720,6 +4720,9 @@ updated_at: "2026-06-26T18:08:25+09:00"
 - Turn 795: Added runtime-backed orphan activity Health Center smoke coverage.
   The SQLite-backed runtime now proves orphan account/asset activity references
   are surfaced by `/api/v1/health/check` through the real runtime schema.
+- Turn 796: Added runtime-backed negative balance Health Center smoke coverage.
+  The SQLite-backed runtime now proves negative account and cash balances from
+  `daily_account_valuation` are surfaced by `/api/v1/health/check`.
 
 ## Deferred items
 

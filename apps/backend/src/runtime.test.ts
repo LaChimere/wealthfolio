@@ -1260,6 +1260,53 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime negative balance health issues from valuations", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-balances-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeNegativeBalanceHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { INFO: 1, WARNING: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^negative_account_balance:/),
+            title: "Account has negative portfolio balance",
+            affectedItems: [
+              expect.objectContaining({ id: "negative-investment", name: "Negative Investment" }),
+            ],
+          }),
+          expect.objectContaining({
+            id: expect.stringMatching(/^negative_cash_balance:/),
+            title: "Cash account had a negative balance",
+            affectedItems: [
+              expect.objectContaining({ id: "negative-cash", name: "Negative Cash" }),
+            ],
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -3767,6 +3814,37 @@ function seedRuntimeOrphanActivityHealthInput(db: ReturnType<typeof openSqliteDa
   } finally {
     db.exec("PRAGMA foreign_keys = ON");
   }
+}
+
+function seedRuntimeNegativeBalanceHealthInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES
+        ('negative-investment', 'Negative Investment', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
+        ('negative-cash', 'Negative Cash', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO daily_account_valuation (
+        id, account_id, valuation_date, account_currency, base_currency,
+        fx_rate_to_base, cash_balance, investment_market_value, total_value,
+        cost_basis, net_contribution, calculated_at
+      )
+      VALUES
+        ('negative-investment_2026-05-18', 'negative-investment', '2026-05-18', 'USD', 'USD',
+          '1', '-50', '25', '-25', '0', '0', '2026-05-18T00:00:00Z'),
+        ('negative-cash_2026-05-18', 'negative-cash', '2026-05-18', 'USD', 'USD',
+          '1', '-10', '0', '-10', '0', '0', '2026-05-18T00:00:00Z')
+    `,
+  ).run();
 }
 
 function seedRuntimeConnectData(db: ReturnType<typeof openSqliteDatabase>): void {
