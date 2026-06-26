@@ -2786,6 +2786,104 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime portfolio route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-portfolio-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        db.prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES
+              ('portfolio-account-1', 'Portfolio One', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
+              ('portfolio-account-2', 'Portfolio Two', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+        ).run();
+      } finally {
+        db.close();
+      }
+
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/portfolios`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Runtime Portfolio",
+          description: null,
+          sortOrder: 2,
+          accountIds: ["portfolio-account-2", "portfolio-account-1"],
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string; accountIds: string[] };
+      expect(created).toMatchObject({
+        accountIds: ["portfolio-account-1", "portfolio-account-2"],
+      });
+
+      const listResponse = await fetch(`${server.baseUrl}/api/v1/portfolios`);
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: created.id, name: "Runtime Portfolio" }),
+      ]);
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/portfolios/${created.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Updated Portfolio",
+          description: "runtime route",
+          sortOrder: 1,
+          accountIds: ["portfolio-account-1"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: created.id,
+        name: "Updated Portfolio",
+        accountIds: ["portfolio-account-1"],
+      });
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/portfolios/${created.id}`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(204);
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(resultDb).filter(
+          (row) => row.entity === "portfolio" || row.entity === "portfolio_account",
+        );
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["portfolio", "create"],
+          ["portfolio_account", "create"],
+          ["portfolio_account", "create"],
+          ["portfolio", "update"],
+          ["portfolio_account", "delete"],
+          ["portfolio_account", "delete"],
+          ["portfolio_account", "create"],
+          ["portfolio_account", "delete"],
+          ["portfolio", "delete"],
+        ]);
+        expect(rows[0]).toMatchObject({ entity_id: created.id });
+        expect(JSON.parse(String(rows.at(-1)?.payload))).toEqual({ id: created.id });
+      } finally {
+        resultDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime holdings snapshot sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-sync-"));
     const runtime = createSqliteBackedBackendServices({

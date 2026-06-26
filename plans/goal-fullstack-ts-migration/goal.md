@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 817
+turns_used: 818
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-26T22:00:42+09:00"
+updated_at: "2026-06-26T22:27:21+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4788,6 +4788,9 @@ updated_at: "2026-06-26T22:00:42+09:00"
 - Turn 817: Resolved snapshot-delete TOTAL cleanup review feedback. The runtime
   smoke now proves account-level and aggregate TOTAL valuation rows exist before
   deletion and are both removed after delete processing.
+- Turn 818: Added runtime-backed portfolio CRUD route coverage. The
+  SQLite-backed runtime now proves `POST/GET/PUT/DELETE /api/v1/portfolios`
+  routes persist portfolio and portfolio-account sync_outbox callbacks.
 
 ## Deferred items
 

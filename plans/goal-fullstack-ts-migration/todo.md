@@ -6249,6 +6249,10 @@ contract:
   domain-event worker; review follow-ups now flush after save first and prove
   account-level plus aggregate TOTAL valuation rows exist before deletion and
   are removed afterward.
+- `pr5-runtime-portfolio-crud-sync-outbox-smoke`: verification passed.
+  Runtime-backed portfolio CRUD route coverage now expects
+  `POST/GET/PUT/DELETE /api/v1/portfolios` to persist portfolio and
+  portfolio-account sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
