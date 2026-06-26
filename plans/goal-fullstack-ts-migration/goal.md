@@ -8,7 +8,7 @@ turns_used: 798
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-26T18:08:25+09:00"
+updated_at: "2026-06-26T19:24:09+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
