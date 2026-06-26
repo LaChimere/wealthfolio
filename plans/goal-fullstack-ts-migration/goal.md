@@ -4653,6 +4653,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   through the runtime event bus, including synced-account setup prompts and
   account-level failure errors. Verified with focused Connect broker sync and
   global listener tests.
+- Turn 778: Removed duplicate broker sync success loading toasts. Broker sync
+  loading state now comes from the canonical `broker:sync-start` SSE event, so
+  synchronous TS broker sync completion cannot be followed by a stale mutation
+  success loading toast. Verified with focused broker sync hook tests.
 
 ## Deferred items
 

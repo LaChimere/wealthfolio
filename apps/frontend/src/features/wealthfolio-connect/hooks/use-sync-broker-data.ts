@@ -10,9 +10,6 @@ import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 export function useSyncBrokerData() {
   return useMutation({
     mutationFn: syncBrokerData,
-    onSuccess: () => {
-      toast.loading("Syncing broker data...", { id: "broker-sync-start" });
-    },
     onError: (error) => {
       toast.error(
         `Failed to start sync: ${error instanceof Error ? error.message : "Unknown error"}`,

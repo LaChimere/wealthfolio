@@ -6117,6 +6117,10 @@ contract:
   sync and global listener tests. Accepted local broker sync now publishes
   `broker:sync-start` plus Rust-shaped success/error payloads, including
   synced-account setup prompts and account-level failure errors.
+- `pr5-broker-sync-toast-race-cleanup`: verification passed: focused broker sync
+  hook tests. Loading state now comes from `broker:sync-start` SSE events,
+  preventing synchronous TS sync completion from being followed by a stale
+  mutation-success loading toast.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
