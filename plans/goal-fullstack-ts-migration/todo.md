@@ -6141,6 +6141,10 @@ contract:
 - `pr5-web-export-fallback-filename-coverage`: verification passed: focused web
   export adapter tests. No-`Content-Disposition` web exports now have fallback
   filename coverage matching Electron export proxy coverage.
+- `pr5-web-export-command-parity`: verification passed: focused web export and
+  backend-contract tests. Web data exports now use the shared `export_data_file`
+  command while preserving binary payload handling, unauthorized notifications,
+  fallback filenames, and save-dialog behavior.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

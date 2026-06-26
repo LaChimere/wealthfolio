@@ -43,6 +43,7 @@ export const COMMANDS: CommandMap = {
   backup_database: { method: "POST", path: "/utilities/database/backup" },
   list_database_backups: { method: "GET", path: "/utilities/database/backups" },
   delete_database_backup: { method: "DELETE", path: "/utilities/database/backups" },
+  export_data_file: { method: "GET", path: "/utilities/export" },
   get_holdings: { method: "POST", path: "/holdings/query" },
   get_holding: { method: "GET", path: "/holdings/item" },
   get_asset_holdings: { method: "GET", path: "/holdings/by-asset" },
@@ -367,6 +368,20 @@ export function toBase64(data: Uint8Array | number[]): string {
   return btoa(binary);
 }
 
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+  const bareMatch = /filename=([^;]+)/i.exec(value);
+  return bareMatch?.[1]?.trim() ?? null;
+}
+
 /**
  * Invoke a command via REST API (internal - use typed adapter functions instead)
  */
@@ -605,6 +620,11 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       if (force) params.set("force", "true");
       const qs = params.toString();
       if (qs) url += `?${qs}`;
+      break;
+    }
+    case "export_data_file": {
+      const { data, format } = payload as { data: string; format: string };
+      url += `/${encodeURIComponent(data)}/${encodeURIComponent(format.toLowerCase())}`;
       break;
     }
     case "get_income_summary": {
@@ -1588,6 +1608,40 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   // 401 = app auth failure (JWT expired/invalid). Cloud auth failures return 403.
   if (res.status === 401) {
     notifyUnauthorized();
+  }
+  if (command === "export_data_file") {
+    if (res.status === 204) {
+      return { status: "empty" } as T;
+    }
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const text = await res.text();
+        if (text.trim()) {
+          try {
+            const err = JSON.parse(text) as { message?: unknown; error?: unknown };
+            msg =
+              typeof err.message === "string"
+                ? err.message
+                : typeof err.error === "string"
+                  ? err.error
+                  : text.trim();
+          } catch {
+            msg = text.trim();
+          }
+        }
+      } catch (_e) {
+        void 0;
+      }
+      console.error(`[Invoke] Command "${command}" failed: ${msg}`);
+      throw new Error(msg);
+    }
+    const data = Array.from(new Uint8Array(await res.arrayBuffer()));
+    return {
+      status: "content",
+      filename: filenameFromContentDisposition(res.headers.get("Content-Disposition")) ?? undefined,
+      data,
+    } as T;
   }
   if (!res.ok) {
     let msg = res.statusText;

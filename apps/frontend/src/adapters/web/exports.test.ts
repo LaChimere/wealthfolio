@@ -48,7 +48,10 @@ describe("web exports adapter", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/utilities/export/activities/json", {
       method: "GET",
+      headers: {},
+      body: undefined,
       credentials: "same-origin",
+      signal: expect.any(AbortSignal),
     });
     expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
     expect(click).toHaveBeenCalledOnce();
@@ -91,6 +94,7 @@ describe("web exports adapter", () => {
   });
 
   it("notifies on unauthorized export responses and surfaces backend errors", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi

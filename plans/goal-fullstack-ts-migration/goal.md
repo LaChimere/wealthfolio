@@ -4680,6 +4680,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   now pin the no-`Content-Disposition` fallback filename behavior to match
   Electron export proxy coverage. Verified with focused web export adapter
   tests.
+- Turn 785: Moved web data exports onto the command registry. Web and Electron
+  now share `export_data_file` while preserving binary payload handling,
+  unauthorized notifications, fallback filenames, and save-dialog behavior.
+  Verified with focused web export and backend-contract tests.
 
 ## Deferred items
 
