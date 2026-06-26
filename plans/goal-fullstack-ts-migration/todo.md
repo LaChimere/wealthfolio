@@ -6228,6 +6228,10 @@ contract:
 - `pr5-runtime-asset-profile-event-smoke`: verification passed. Runtime-backed
   `PUT /api/v1/assets/profile/:id` coverage now expects asset events to drive
   portfolio valuation recalculation through the real domain-event worker.
+- `pr5-runtime-asset-quote-mode-event-smoke`: verification passed.
+  Runtime-backed `PUT /api/v1/assets/pricing-mode/:id` coverage now expects
+  asset events to drive portfolio valuation recalculation through the real
+  domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

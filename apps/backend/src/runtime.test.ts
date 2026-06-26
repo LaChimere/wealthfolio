@@ -3669,6 +3669,68 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime asset quote-mode updates to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-quote-mode-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      marketDataFetch: (() => {
+        throw new Error("unexpected market data fetch");
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+        db.prepare("UPDATE assets SET quote_mode = 'MARKET' WHERE id = 'asset-1'").run();
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const updateResponse = await fetch(`${server.baseUrl}/api/v1/assets/pricing-mode/asset-1`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ quoteMode: "MANUAL" }),
+        });
+        expect(updateResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-16")).toMatchObject({
+          cash_balance: "5",
+          investment_market_value: "20",
+          total_value: "25",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toEqual([
+        ASSETS_UPDATED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("keeps domain event goal refresh best-effort when active goals cannot load", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-goal-refresh-error-"));
     const runtime = createSqliteBackedBackendServices({
