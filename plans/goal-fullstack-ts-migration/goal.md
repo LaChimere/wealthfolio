@@ -4699,6 +4699,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   reference. KWF now uses the Rust 0.001 factor, USX is recognized as a USD
   minor unit, and affected activity, holdings, portfolio, exchange-rate, and
   market-data normalization copies are consistent.
+- Turn 790: Cleaned remaining stale runtime wording in migrated surfaces. AI
+  text-only system prompts no longer name the TypeScript backend runtime, and
+  the web sync-crypto export comment no longer describes shared commands as web
+  stubs.
 
 ## Deferred items
 

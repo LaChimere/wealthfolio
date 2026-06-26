@@ -423,7 +423,7 @@ export {
   runRetirementStressTests,
 } from "./fire-planner";
 
-// Crypto Commands (web stubs - not available in web mode)
+// Sync crypto commands
 export {
   syncComputeSas,
   syncComputeSharedSecret,

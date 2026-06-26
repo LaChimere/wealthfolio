@@ -6158,6 +6158,9 @@ contract:
   normalization tables now match Rust for KWF (0.001) and include USX as a USD
   minor unit across activity, holdings, portfolio, exchange-rate, and
   market-data paths.
+- `pr5-stale-runtime-wording-cleanup`: verification passed. Remaining migrated
+  AI prompt/web adapter wording no longer calls the current chat path a
+  TypeScript-backend limitation or shared sync-crypto commands web stubs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
