@@ -66,6 +66,30 @@ describe("web exports adapter", () => {
     expect(createObjectUrl).not.toHaveBeenCalled();
   });
 
+  it("uses fallback filenames when backend export responses omit Content-Disposition", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-21T12:00:00.000Z"));
+    let clickedDownload = "";
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clickedDownload = this.download;
+    });
+    const createObjectUrl = vi.fn().mockReturnValue("blob:export");
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: vi.fn(),
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([123, 125]))));
+
+    await expect(exportDataFile("JSON", "goals")).resolves.toEqual({
+      status: "saved",
+      filename: "goals_2026-06-21.json",
+    });
+    expect(clickedDownload).toBe("goals_2026-06-21.json");
+  });
+
   it("notifies on unauthorized export responses and surfaces backend errors", async () => {
     vi.stubGlobal(
       "fetch",

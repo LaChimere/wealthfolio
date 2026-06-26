@@ -4676,6 +4676,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   Electron now share the `parse_csv` command name while preserving multipart
   uploads, auth handling, and parse error wrapping. Verified with focused web
   activity and backend-contract tests.
+- Turn 784: Strengthened web export fallback filename coverage. Web export tests
+  now pin the no-`Content-Disposition` fallback filename behavior to match
+  Electron export proxy coverage. Verified with focused web export adapter
+  tests.
 
 ## Deferred items
 

@@ -6138,6 +6138,9 @@ contract:
   and backend-contract tests. Web activity CSV parsing now uses the shared
   `parse_csv` command name while preserving multipart upload, auth handling, and
   parse error wrapping.
+- `pr5-web-export-fallback-filename-coverage`: verification passed: focused web
+  export adapter tests. No-`Content-Disposition` web exports now have fallback
+  filename coverage matching Electron export proxy coverage.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
