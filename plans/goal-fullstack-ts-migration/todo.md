@@ -6210,6 +6210,9 @@ contract:
   `DELETE /api/v1/activities/:id` coverage now expects activity events to
   rebuild transaction snapshots after deletions through the real domain-event
   worker.
+- `pr5-runtime-bulk-activity-event-smoke`: verification passed. Runtime-backed
+  `POST /api/v1/activities/bulk` coverage now expects activity events to rebuild
+  transaction snapshots after bulk creates through the real domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

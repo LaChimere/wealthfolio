@@ -3864,6 +3864,99 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime bulk activity creates to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-bulk-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityHttpInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const bulkResponse = await fetch(`${server.baseUrl}/api/v1/activities/bulk`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            creates: [
+              {
+                id: "bulk-deposit-temp",
+                accountId: "tx-account",
+                activityType: "DEPOSIT",
+                activityDate: "2026-05-14T10:00:00.000Z",
+                amount: "100",
+                currency: "USD",
+              },
+              {
+                id: "bulk-buy-temp",
+                accountId: "tx-account",
+                asset: { id: "tx-asset" },
+                activityType: "BUY",
+                activityDate: "2026-05-14T12:00:00.000Z",
+                quantity: "2",
+                unitPrice: "10",
+                fee: "1",
+                currency: "USD",
+              },
+            ],
+            updates: [],
+            deletes: [],
+          }),
+        });
+        expect(bulkResponse.status).toBe(200);
+        await expect(bulkResponse.json()).resolves.toMatchObject({
+          created: [expect.any(Object), expect.any(Object)],
+          updated: [],
+          deleted: [],
+          errors: [],
+          createdMappings: [
+            { tempId: "bulk-deposit-temp", activityId: expect.any(String) },
+            { tempId: "bulk-buy-temp", activityId: expect.any(String) },
+          ],
+        });
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"79"}',
+          cost_basis: "21",
+          net_contribution: "100",
+        });
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "79",
+          investment_market_value: "20",
+          total_value: "99",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events.filter((event) => event === ACTIVITIES_CHANGED_EVENT)).toHaveLength(1);
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires keyring secrets when requested", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-keyring-"));
 
