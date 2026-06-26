@@ -3498,6 +3498,106 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime taxonomy route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-taxonomy-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-taxonomy-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/taxonomies`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "runtime-taxonomy-route",
+          name: "Runtime Route Taxonomy",
+          color: "#4385be",
+          description: null,
+          isSystem: false,
+          isSingleSelect: false,
+          sortOrder: 99,
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const taxonomy = (await createResponse.json()) as { id: string };
+
+      const categoryResponse = await fetch(`${server.baseUrl}/api/v1/taxonomies/categories`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "runtime-category-route",
+          taxonomyId: taxonomy.id,
+          name: "Runtime Route Category",
+          key: "runtime",
+          color: "#879a39",
+          description: null,
+          sortOrder: 1,
+        }),
+      });
+      expect(categoryResponse.status).toBe(200);
+      const category = (await categoryResponse.json()) as { id: string };
+
+      const assignmentResponse = await fetch(`${server.baseUrl}/api/v1/taxonomies/assignments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "runtime-assignment-route",
+          assetId: "runtime-taxonomy-asset",
+          taxonomyId: taxonomy.id,
+          categoryId: category.id,
+          weight: 5_000,
+          source: "manual",
+        }),
+      });
+      expect(assignmentResponse.status).toBe(200);
+      const assignment = (await assignmentResponse.json()) as { id: string };
+
+      const deleteAssignmentResponse = await fetch(
+        `${server.baseUrl}/api/v1/taxonomies/assignments/${assignment.id}`,
+        { method: "DELETE" },
+      );
+      expect(deleteAssignmentResponse.status).toBe(204);
+      const deleteTaxonomyResponse = await fetch(
+        `${server.baseUrl}/api/v1/taxonomies/${taxonomy.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      expect(deleteTaxonomyResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        const taxonomyRows = rows.filter((row) => row.entity === "custom_taxonomy");
+        expect(taxonomyRows).toEqual([
+          expect.objectContaining({ entity_id: taxonomy.id, op: "create" }),
+          expect.objectContaining({ entity_id: taxonomy.id, op: "update" }),
+          expect.objectContaining({ entity_id: taxonomy.id, op: "delete" }),
+        ]);
+        const assignmentRows = rows.filter((row) => row.entity === "asset_taxonomy_assignment");
+        expect(assignmentRows).toEqual([
+          expect.objectContaining({ entity_id: assignment.id, op: "update" }),
+          expect.objectContaining({ entity_id: assignment.id, op: "delete" }),
+        ]);
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime domain events to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-domain-events-"));
     const runtime = createSqliteBackedBackendServices({

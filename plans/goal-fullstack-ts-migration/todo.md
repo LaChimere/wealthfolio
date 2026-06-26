@@ -6261,6 +6261,10 @@ contract:
   Runtime-backed custom-provider coverage now expects
   `POST /api/v1/custom-providers/test-source` to perform provider fetch,
   extraction, and preview shaping through the HTTP seam.
+- `pr5-runtime-taxonomy-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed taxonomy/category/assignment route coverage now expects HTTP
+  routes to persist custom-taxonomy and asset-taxonomy-assignment sync_outbox
+  callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
