@@ -4672,6 +4672,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   the same command names as Electron for E2EE operations, shrinking
   Electron-only backend deltas and preserving string/value unwrapping in the web
   adapter. Verified with focused web crypto and backend-contract tests.
+- Turn 783: Moved web activity CSV parsing onto the command registry. Web and
+  Electron now share the `parse_csv` command name while preserving multipart
+  uploads, auth handling, and parse error wrapping. Verified with focused web
+  activity and backend-contract tests.
 
 ## Deferred items
 

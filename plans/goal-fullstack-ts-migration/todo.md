@@ -6134,6 +6134,10 @@ contract:
 - `pr5-web-sync-crypto-command-parity`: verification passed: focused web crypto
   and backend-contract tests. Web sync-crypto now uses the same command names as
   Electron for E2EE operations, shrinking Electron-only backend command deltas.
+- `pr5-web-parse-csv-command-parity`: verification passed: focused web activity
+  and backend-contract tests. Web activity CSV parsing now uses the shared
+  `parse_csv` command name while preserving multipart upload, auth handling, and
+  parse error wrapping.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

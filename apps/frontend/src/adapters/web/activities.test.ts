@@ -33,12 +33,18 @@ describe("web activities adapter", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/activities/import/parse", {
       method: "POST",
+      headers: {},
       body: expect.any(FormData),
       credentials: "same-origin",
+      signal: expect.any(AbortSignal),
     });
     const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
-    expect(formData.get("file")).toBe(file);
-    expect(formData.get("config")).toBe(JSON.stringify(config));
+    const filePart = formData.get("file");
+    const configPart = formData.get("config");
+    expect(filePart).toBeInstanceOf(Blob);
+    expect(configPart).toBeInstanceOf(Blob);
+    expect(await (filePart as Blob).text()).toBe("Date,Amount\n2026-06-21,42");
+    expect(await (configPart as Blob).text()).toBe(JSON.stringify(config));
   });
 
   it("surfaces backend parse errors from JSON or text responses", async () => {

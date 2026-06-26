@@ -110,6 +110,7 @@ export const COMMANDS: CommandMap = {
   // Activity import
   check_activities_import: { method: "POST", path: "/activities/import/check" },
   preview_import_assets: { method: "POST", path: "/activities/import/assets/preview" },
+  parse_csv: { method: "POST", path: "/activities/import/parse" },
   import_activities: { method: "POST", path: "/activities/import" },
   get_account_import_mapping: { method: "GET", path: "/activities/import/mapping" },
   save_account_import_mapping: { method: "POST", path: "/activities/import/mapping" },
@@ -375,6 +376,7 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   let url = `${API_PREFIX}${config.path}`;
   let method = config.method;
   let body: BodyInit | undefined;
+  let jsonBody = true;
 
   switch (command) {
     case "update_account": {
@@ -745,6 +747,21 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "preview_import_assets":
     case "import_activities": {
       body = JSON.stringify(payload);
+      break;
+    }
+    case "parse_csv": {
+      const { content, config } = payload as {
+        content: number[] | Uint8Array;
+        config: Record<string, unknown>;
+      };
+      const contentBytes = Uint8Array.from(content);
+      const contentBuffer = new ArrayBuffer(contentBytes.byteLength);
+      new Uint8Array(contentBuffer).set(contentBytes);
+      const form = new FormData();
+      form.append("file", new Blob([contentBuffer]), "upload.csv");
+      form.append("config", new Blob([JSON.stringify(config)], { type: "application/json" }));
+      body = form;
+      jsonBody = false;
       break;
     }
     case "get_account_import_mapping": {
@@ -1546,7 +1563,7 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   }
 
   const headers: HeadersInit = {};
-  if (body !== undefined) {
+  if (body !== undefined && jsonBody) {
     headers["Content-Type"] = "application/json";
   }
   if (command === "get_health_status" || command === "run_health_checks") {
@@ -1575,10 +1592,22 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   if (!res.ok) {
     let msg = res.statusText;
     try {
-      const err = await res.json();
-      msg = (err?.message ?? msg) as string;
+      const text = await res.text();
+      if (text.trim()) {
+        try {
+          const err = JSON.parse(text) as { message?: unknown; error?: unknown };
+          msg =
+            typeof err.message === "string"
+              ? err.message
+              : typeof err.error === "string"
+                ? err.error
+                : text.trim();
+        } catch {
+          msg = text.trim();
+        }
+      }
     } catch (_e) {
-      // ignore JSON parse error from non-JSON error bodies
+      // ignore body read error
       void 0;
     }
     console.error(`[Invoke] Command "${command}" failed: ${msg}`);
