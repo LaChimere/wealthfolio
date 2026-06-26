@@ -6243,6 +6243,10 @@ contract:
 - `pr5-runtime-snapshot-import-event-smoke`: verification passed. Runtime-backed
   `POST /api/v1/snapshots/import` coverage now expects holdings events to drive
   portfolio valuation recalculation through the real domain-event worker.
+- `pr5-runtime-snapshot-delete-event-smoke`: verification passed. Runtime-backed
+  `DELETE /api/v1/snapshots` coverage now expects holdings events to remove
+  stale valuation rows for deleted manual snapshots through the real
+  domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
