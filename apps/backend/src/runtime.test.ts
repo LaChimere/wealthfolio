@@ -3423,6 +3423,92 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime snapshot imports to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-imports-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const importResponse = await fetch(`${server.baseUrl}/api/v1/snapshots/import`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountId: "account-1",
+            snapshots: [
+              {
+                date: "2026-05-17",
+                positions: [
+                  {
+                    assetId: "asset-1",
+                    symbol: "RUNTIME",
+                    quantity: "3",
+                    avgCost: "6",
+                    currency: "USD",
+                  },
+                ],
+                cashBalances: { USD: "7" },
+              },
+            ],
+          }),
+        });
+        expect(importResponse.status).toBe(200);
+        await expect(importResponse.json()).resolves.toEqual({
+          snapshotsImported: 1,
+          snapshotsFailed: 0,
+          errors: [],
+        });
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-17")).toMatchObject({
+          cash_balance: "7",
+          investment_market_value: "18",
+          total_value: "25",
+        });
+        expect(readRuntimeValuation(resultDb, "TOTAL", "2026-05-17")).toMatchObject({
+          cash_balance: "7",
+          investment_market_value: "18",
+          total_value: "25",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toEqual([
+        HOLDINGS_CHANGED_EVENT,
+        MANUAL_SNAPSHOT_SAVED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime account updates to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-events-"));
     const runtime = createSqliteBackedBackendServices({
