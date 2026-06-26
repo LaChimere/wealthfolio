@@ -770,15 +770,26 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "parse_csv": {
-      const { content, config } = payload as {
-        content: number[] | Uint8Array;
+      const { file, content, config } = payload as {
+        file?: Blob;
+        content?: number[] | Uint8Array | ArrayBuffer;
         config: Record<string, unknown>;
       };
-      const contentBytes = Uint8Array.from(content);
-      const contentBuffer = new ArrayBuffer(contentBytes.byteLength);
-      new Uint8Array(contentBuffer).set(contentBytes);
       const form = new FormData();
-      form.append("file", new Blob([contentBuffer]), "upload.csv");
+      if (file instanceof Blob) {
+        const filename = typeof File !== "undefined" && file instanceof File ? file.name : "";
+        form.append("file", file, filename || "upload.csv");
+      } else {
+        const contentBytes =
+          content instanceof Uint8Array
+            ? content
+            : content instanceof ArrayBuffer
+              ? new Uint8Array(content)
+              : Uint8Array.from(content ?? []);
+        const contentBuffer = new ArrayBuffer(contentBytes.byteLength);
+        new Uint8Array(contentBuffer).set(contentBytes);
+        form.append("file", new Blob([contentBuffer]), "upload.csv");
+      }
       form.append("config", new Blob([JSON.stringify(config)], { type: "application/json" }));
       body = form;
       jsonBody = false;

@@ -4,13 +4,11 @@ import { invoke, logger } from "./core";
 
 /**
  * Parse a CSV file with the given configuration.
- * Web implementation: POSTs multipart form data to /api/v1/activities/import/parse.
+ * Web implementation: routes through the shared parse_csv command.
  */
 export const parseCsv = async (file: File, config: ParseConfig): Promise<ParsedCsvResult> => {
   try {
-    const buffer = await file.arrayBuffer();
-    const content = Array.from(new Uint8Array(buffer));
-    return await invoke<ParsedCsvResult>("parse_csv", { content, config });
+    return await invoke<ParsedCsvResult>("parse_csv", { file, config });
   } catch (err) {
     logger.error("Error parsing CSV file:", err);
     if (err instanceof Error && !err.message.startsWith("Failed to parse CSV:")) {

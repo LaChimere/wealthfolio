@@ -24,6 +24,7 @@ describe("web activities adapter", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const file = new File(["Date,Amount\n2026-06-21,42"], "import.csv", { type: "text/csv" });
+    const arrayBufferSpy = vi.spyOn(file, "arrayBuffer");
     const config = { delimiter: ",", mappings: { date: "Date", amount: "Amount" } };
 
     await expect(parseCsv(file, config)).resolves.toEqual({
@@ -43,6 +44,7 @@ describe("web activities adapter", () => {
     const configPart = formData.get("config");
     expect(filePart).toBeInstanceOf(Blob);
     expect(configPart).toBeInstanceOf(Blob);
+    expect(arrayBufferSpy).not.toHaveBeenCalled();
     expect(await (filePart as Blob).text()).toBe("Date,Amount\n2026-06-21,42");
     expect(await (configPart as Blob).text()).toBe(JSON.stringify(config));
   });

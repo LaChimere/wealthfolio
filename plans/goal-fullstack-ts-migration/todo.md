@@ -6151,6 +6151,9 @@ contract:
 - `pr5-connect-import-run-type-review-fix`: verification passed. Runtime smoke
   coverage now expects blank `runType` to fail with the canonical
   `SYNC | IMPORT` validation error.
+- `pr5-web-parse-csv-blob-pass-through`: verification passed. Web CSV parsing
+  now passes the `File` through `parse_csv` as a Blob instead of materializing a
+  boxed number array, while preserving numeric content payload compatibility.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4691,6 +4691,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 787: Resolved post-commit review feedback for Connect import-run type
   filtering. Runtime-backed import-run smoke coverage now expects blank
   `runType` to fail with the same `SYNC | IMPORT` validation error.
+- Turn 788: Resolved web CSV parse review feedback. The web adapter now passes
+  the `File` through the shared `parse_csv` command as a Blob instead of
+  materializing it as a boxed number array, while keeping numeric content
+  compatibility for command callers.
 
 ## Deferred items
 
