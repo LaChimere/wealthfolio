@@ -6276,6 +6276,10 @@ contract:
 - `pr5-runtime-account-route-sync-outbox-smoke`: verification passed.
   Runtime-backed account route coverage now expects account create/update/list
   and delete HTTP routes to persist account sync_outbox callbacks.
+- `pr5-runtime-asset-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed asset route coverage now expects asset create/profile
+  update/pricing-mode update/delete HTTP routes to persist asset sync_outbox
+  callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
