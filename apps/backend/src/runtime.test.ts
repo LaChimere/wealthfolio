@@ -3551,12 +3551,25 @@ describe("TS backend runtime composition", () => {
           }),
         });
         expect(saveResponse.status).toBe(200);
+        await runtime.domainEventWorker.flush();
+
+        const savedDb = openSqliteDatabase(runtime.dbPath);
+        try {
+          expect(readRuntimeValuation(savedDb, "account-1", "2026-05-17")).toMatchObject({
+            cash_balance: "7",
+            investment_market_value: "18",
+            total_value: "25",
+          });
+        } finally {
+          savedDb.close();
+        }
 
         const deleteResponse = await fetch(
           `${server.baseUrl}/api/v1/snapshots?accountId=account-1&date=2026-05-17`,
           { method: "DELETE" },
         );
         expect(deleteResponse.status).toBe(204);
+        await runtime.domainEventWorker.flush();
       } finally {
         server.stop();
       }
