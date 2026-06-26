@@ -3598,6 +3598,124 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime goal route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-goal-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('goal-route-account', 'Goal Route Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/goals`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          goalType: "custom_save_up",
+          title: "Goal Route",
+          targetAmount: 1_000,
+          currency: "USD",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string };
+      expect(created.id).toEqual(expect.any(String));
+      const goalId = created.id;
+
+      const fundingResponse = await fetch(`${server.baseUrl}/api/v1/goals/${goalId}/funding`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify([{ accountId: "goal-route-account", sharePercent: 100 }]),
+      });
+      expect(fundingResponse.status).toBe(200);
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/goals`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...created,
+          title: "Goal Route Updated",
+          targetAmount: 2_000,
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: goalId,
+        title: "Goal Route Updated",
+        targetAmount: 2_000,
+      });
+
+      const clearFundingResponse = await fetch(`${server.baseUrl}/api/v1/goals/${goalId}/funding`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify([]),
+      });
+      expect(clearFundingResponse.status).toBe(200);
+      await expect(clearFundingResponse.json()).resolves.toEqual([]);
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/goals/${goalId}`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "goal" || row.entity === "goals_allocation",
+        );
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["goal", "create"],
+          ["goals_allocation", "create"],
+          ["goal", "update"],
+          ["goals_allocation", "delete"],
+          ["goal", "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: goalId,
+          title: "Goal Route",
+          target_amount: 1_000,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          goal_id: goalId,
+          account_id: "goal-route-account",
+          share_percent: 100,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: goalId,
+          title: "Goal Route Updated",
+          target_amount: 2_000,
+        });
+        expect(JSON.parse(String(rows[3]?.payload))).toEqual({
+          id: rows[1]?.entity_id,
+        });
+        expect(JSON.parse(String(rows.at(-1)?.payload))).toEqual({ id: goalId });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime domain events to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-domain-events-"));
     const runtime = createSqliteBackedBackendServices({

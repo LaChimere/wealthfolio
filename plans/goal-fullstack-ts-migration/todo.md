@@ -6265,6 +6265,10 @@ contract:
   Runtime-backed taxonomy/category/assignment route coverage now expects HTTP
   routes to persist custom-taxonomy and asset-taxonomy-assignment sync_outbox
   callbacks.
+- `pr5-runtime-goal-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed goal route coverage now expects goal create/update/delete and
+  funding replacement HTTP routes to persist goal and goals_allocation
+  sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
