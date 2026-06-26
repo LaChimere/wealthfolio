@@ -4723,6 +4723,9 @@ updated_at: "2026-06-26T18:08:25+09:00"
 - Turn 796: Added runtime-backed negative balance Health Center smoke coverage.
   The SQLite-backed runtime now proves negative account and cash balances from
   `daily_account_valuation` are surfaced by `/api/v1/health/check`.
+- Turn 797: Added runtime-backed quote-sync Health Center smoke coverage. The
+  SQLite-backed runtime now proves `quote_sync_state` failures are surfaced as
+  retryable price-staleness health issues by `/api/v1/health/check`.
 
 ## Deferred items
 

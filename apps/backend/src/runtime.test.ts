@@ -1307,6 +1307,46 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime quote sync health issues from sync state", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-quote-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeQuoteSyncHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "ERROR",
+        issueCounts: { ERROR: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^quote_sync:error:/),
+            category: "PRICE_STALENESS",
+            title: "Quotes sync failing for RUNTIME",
+            affectedCount: 1,
+            fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["quote-sync-asset"] },
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -3843,6 +3883,50 @@ function seedRuntimeNegativeBalanceHealthInput(db: ReturnType<typeof openSqliteD
           '1', '-50', '25', '-25', '0', '0', '2026-05-18T00:00:00Z'),
         ('negative-cash_2026-05-18', 'negative-cash', '2026-05-18', 'USD', 'USD',
           '1', '-10', '0', '-10', '0', '0', '2026-05-18T00:00:00Z')
+    `,
+  ).run();
+}
+
+function seedRuntimeQuoteSyncHealthInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('quote-sync-account', 'Quote Sync Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('quote-sync-asset', 'INVESTMENT', 'Quote Sync Asset', 'RUNTIME', NULL, NULL, 1, 'MARKET',
+        'USD', 'EQUITY', 'RUNTIME', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO quote_sync_state (
+        asset_id, last_synced_at, data_source, sync_priority, error_count,
+        last_error, created_at, updated_at
+      )
+      VALUES (
+        'quote-sync-asset',
+        NULL,
+        'YAHOO',
+        1,
+        6,
+        'provider unavailable',
+        '2026-05-18T00:00:00Z',
+        '2026-05-18T00:00:00Z'
+      )
     `,
   ).run();
 }
