@@ -6253,6 +6253,10 @@ contract:
   Runtime-backed portfolio CRUD route coverage now expects
   `POST/GET/PUT/DELETE /api/v1/portfolios` to persist portfolio and
   portfolio-account sync_outbox callbacks.
+- `pr5-runtime-contribution-limit-route-smoke`: verification passed.
+  Runtime-backed contribution-limit CRUD route coverage now expects
+  `POST/GET/PUT/DELETE /api/v1/limits` to persist contribution-limit sync_outbox
+  callbacks and trigger portfolio events.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

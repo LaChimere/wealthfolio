@@ -3174,6 +3174,99 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime contribution-limit route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-limit-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/limits`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          groupName: "TFSA",
+          contributionYear: 2027,
+          limitAmount: 7_000,
+          accountIds: "account-1",
+          startDate: "2027-01-01",
+          endDate: "2027-12-31",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string };
+
+      const listResponse = await fetch(`${server.baseUrl}/api/v1/limits`);
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: created.id, groupName: "TFSA" }),
+      ]);
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/limits/${created.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          groupName: "FHSA",
+          contributionYear: 2028,
+          limitAmount: 8_000,
+          accountIds: null,
+          startDate: null,
+          endDate: null,
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: created.id,
+        groupName: "FHSA",
+        contributionYear: 2028,
+      });
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/limits/${created.id}`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 3);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "contribution_limit");
+        expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
+          [created.id, "create"],
+          [created.id, "update"],
+          [created.id, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.id,
+          group_name: "TFSA",
+          contribution_year: 2027,
+          limit_amount: 7_000,
+          account_ids: "account-1",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: created.id,
+          group_name: "FHSA",
+          contribution_year: 2028,
+          limit_amount: 8_000,
+          account_ids: null,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime custom provider sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-sync-"));
     const runtime = createSqliteBackedBackendServices({
