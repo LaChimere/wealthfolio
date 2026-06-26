@@ -6172,6 +6172,10 @@ contract:
   controlled-error aliases for desktop-only database path backup/restore
   commands, so backend command-surface deltas are zero and only Electron-native
   updater commands remain one-sided.
+- `pr5-health-runtime-data-consistency-smoke`: verification passed.
+  Runtime-backed `/api/v1/health/check` coverage now seeds SQLite snapshots and
+  expects negative latest-position data-consistency issues through real service
+  wiring.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

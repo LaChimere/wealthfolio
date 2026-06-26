@@ -1178,6 +1178,50 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime data consistency health issues from SQLite state", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-consistency-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeNegativePositionHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { WARNING: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^negative_position:/),
+            category: "DATA_CONSISTENCY",
+            title: "Holding has negative quantity",
+            affectedCount: 1,
+            navigateAction: {
+              route: "/holdings",
+              query: { filter: "negative" },
+              label: "View Holdings",
+            },
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -3583,6 +3627,60 @@ function seedRuntimeTransactionActivityInput(db: ReturnType<typeof openSqliteDat
           NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-05-14T12:00:00.000Z', '2026-05-14T12:00:00.000Z')
     `,
   ).run();
+}
+
+function seedRuntimeNegativePositionHealthInput(db: ReturnType<typeof openSqliteDatabase>): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        is_archived, tracking_mode
+      )
+      VALUES ('health-account', 'Health Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO assets (
+        id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+        quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+        provider_config, created_at, updated_at
+      )
+      VALUES ('health-asset', 'INVESTMENT', 'Health Asset', 'HEALTH', NULL, NULL, 1, 'MANUAL',
+        'USD', 'EQUITY', 'HEALTH', NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+    `,
+  ).run();
+  db.prepare(
+    `
+      INSERT INTO holdings_snapshots (
+        id, account_id, snapshot_date, currency, positions, cash_balances,
+        cost_basis, net_contribution, net_contribution_base, source
+      )
+      VALUES ('health-account_2026-05-18', 'health-account', '2026-05-18', 'USD',
+        ?, '{}', '0', '0', '0', 'MANUAL_ENTRY')
+    `,
+  ).run(
+    JSON.stringify({
+      "health-asset": {
+        id: "health-asset_health-account",
+        accountId: "health-account",
+        assetId: "health-asset",
+        quantity: "-1",
+        averageCost: "0",
+        totalCostBasis: "0",
+        currency: "USD",
+        inceptionDate: "2026-05-18T00:00:00Z",
+        createdAt: "2026-05-18T00:00:00Z",
+        lastUpdated: "2026-05-18T00:00:00Z",
+        isAlternative: false,
+        contractMultiplier: "1",
+        lots: [],
+      },
+    }),
+  );
 }
 
 function seedRuntimeConnectData(db: ReturnType<typeof openSqliteDatabase>): void {

@@ -4714,6 +4714,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
 - Turn 793: Added controlled web aliases for desktop-only database path
   backup/restore commands. Backend command-surface deltas are now zero; only
   Electron-native updater commands remain one-sided.
+- Turn 794: Added runtime-backed Health Center data-consistency smoke coverage.
+  The SQLite-backed runtime now proves `/api/v1/health/check` surfaces negative
+  latest-position issues through the real health service wiring.
 
 ## Deferred items
 
