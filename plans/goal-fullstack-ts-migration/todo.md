@@ -6161,6 +6161,9 @@ contract:
 - `pr5-stale-runtime-wording-cleanup`: verification passed. Remaining migrated
   AI prompt/web adapter wording no longer calls the current chat path a
   TypeScript-backend limitation or shared sync-crypto commands web stubs.
+- `pr5-market-data-minor-factor-review-fix`: verification passed. Yahoo
+  historical price normalization now uses per-currency factors so KWF applies
+  Rust's 0.001 factor instead of a hard-coded 1/100 minor-currency divisor.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

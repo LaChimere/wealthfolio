@@ -1959,11 +1959,12 @@ describe("TS market data domain", () => {
         currency: "GBP",
       });
 
-      await service.syncMarketData?.({
+      const syncResult = await service.syncMarketData?.({
         type: "backfill_history",
         asset_ids: ["asset-1"],
         days: 7,
       });
+      expect(syncResult).toMatchObject({ synced: 1, failed: 0, failures: [] });
 
       expect(readQuote(db, "old-yahoo")).toBeNull();
       expect(readQuote(db, "broker-quote")).not.toBeNull();
@@ -1976,6 +1977,53 @@ describe("TS market data domain", () => {
         close: "1.2345",
         adjclose: "1.215",
         currency: "GBP",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("normalizes Yahoo KWF historical prices with Rust factor", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = yahooHistoryFetch("KWFTEST", {
+      meta: { currency: "KWF" },
+      timestamp: [1767484800],
+      indicators: {
+        quote: [{ open: [1200], high: [1300], low: [1190], close: [1234], volume: [987] }],
+        adjclose: [{ adjclose: [1215] }],
+      },
+    });
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+      now: () => new Date("2026-01-06T18:00:00Z"),
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-kwf",
+        display_code: "KWFTEST",
+        quote_ccy: "KWD",
+        instrument_symbol: "KWFTEST",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+      });
+
+      const syncResult = await service.syncMarketData?.({
+        type: "backfill_history",
+        asset_ids: ["asset-kwf"],
+        days: 7,
+      });
+      expect(syncResult).toMatchObject({ synced: 1, failed: 0, failures: [] });
+
+      expect(readQuoteByDay(db, "asset-kwf", "2026-01-04")).toMatchObject({
+        source: "YAHOO",
+        open: "1.2",
+        high: "1.3",
+        low: "1.19",
+        close: "1.234",
+        adjclose: "1.215",
+        currency: "KWD",
       });
     } finally {
       db.close();

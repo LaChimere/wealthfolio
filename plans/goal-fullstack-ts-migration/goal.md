@@ -4703,6 +4703,10 @@ updated_at: "2026-06-21T16:04:16+08:00"
   text-only system prompts no longer name the TypeScript backend runtime, and
   the web sync-crypto export comment no longer describes shared commands as web
   stubs.
+- Turn 791: Resolved minor-currency review feedback in market-data. Yahoo
+  historical price normalization now uses per-currency factors, so KWF prices
+  are normalized with the Rust 0.001 factor instead of a hard-coded 1/100 minor
+  divisor.
 
 ## Deferred items
 

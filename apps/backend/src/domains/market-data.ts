@@ -442,14 +442,14 @@ const CUSTOM_PROVIDER_RFC3339_DATETIME_RE =
   /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const CUSTOM_PROVIDER_NAIVE_DATETIME_RE =
   /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?$/;
-const MINOR_CURRENCY_MAJOR: Record<string, string> = {
-  GBp: "GBP",
-  GBX: "GBP",
-  KWF: "KWD",
-  ZAc: "ZAR",
-  ZAC: "ZAR",
-  ILA: "ILS",
-  USX: "USD",
+const MINOR_CURRENCY_RULES: Record<string, { majorCode: string; factor: Decimal }> = {
+  GBp: { majorCode: "GBP", factor: new Decimal("0.01") },
+  GBX: { majorCode: "GBP", factor: new Decimal("0.01") },
+  KWF: { majorCode: "KWD", factor: new Decimal("0.001") },
+  ZAc: { majorCode: "ZAR", factor: new Decimal("0.01") },
+  ZAC: { majorCode: "ZAR", factor: new Decimal("0.01") },
+  ILA: { majorCode: "ILS", factor: new Decimal("0.01") },
+  USX: { majorCode: "USD", factor: new Decimal("0.01") },
 };
 
 export function createMarketDataService(
@@ -6634,12 +6634,12 @@ function yahooHistoricalCurrency(
 }
 
 function yahooHistoricalPriceNormalizer(currency: string): (value: number | null) => string | null {
-  const divisor = isMinorCurrency(currency) ? 100 : 1;
+  const factor = MINOR_CURRENCY_RULES[currency]?.factor;
   return (value) => {
     if (value === null) {
       return null;
     }
-    return decimalString(divisor === 1 ? value : value / divisor);
+    return factor ? new Decimal(value).mul(factor).toString() : decimalString(value);
   };
 }
 
@@ -7319,11 +7319,11 @@ function metadataDate(metadata: string | null, section: string, key: string): st
 }
 
 function normalizeCurrencyCode(currency: string): string {
-  return MINOR_CURRENCY_MAJOR[currency] ?? currency;
+  return MINOR_CURRENCY_RULES[currency]?.majorCode ?? currency;
 }
 
 function isMinorCurrency(currency: string): boolean {
-  return MINOR_CURRENCY_MAJOR[currency] !== undefined;
+  return MINOR_CURRENCY_RULES[currency] !== undefined;
 }
 
 function quoteId(assetId: string, day: string, source: string): string {
