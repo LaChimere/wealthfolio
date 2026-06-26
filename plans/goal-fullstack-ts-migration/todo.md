@@ -6148,6 +6148,9 @@ contract:
 - `pr5-connect-import-run-type-contract`: verification passed: focused Connect
   domain, HTTP, and Electron command tests. Import-run filters now reject
   arbitrary run types and use canonical `SYNC | IMPORT` values across callers.
+- `pr5-connect-import-run-type-review-fix`: verification passed. Runtime smoke
+  coverage now expects blank `runType` to fail with the canonical
+  `SYNC | IMPORT` validation error.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

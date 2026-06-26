@@ -1685,8 +1685,11 @@ describe("TS backend runtime composition", () => {
       const emptyRunTypeImportRunsResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/import-runs?runType=&limit=10&offset=0`,
       );
-      expect(emptyRunTypeImportRunsResponse.status).toBe(200);
-      await expect(emptyRunTypeImportRunsResponse.json()).resolves.toEqual([]);
+      expect(emptyRunTypeImportRunsResponse.status).toBe(400);
+      await expect(emptyRunTypeImportRunsResponse.json()).resolves.toEqual({
+        code: 400,
+        message: "runType must be SYNC or IMPORT",
+      });
 
       const defaultProfileResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/broker-sync-profile?accountId=acct-1&sourceSystem=snaptrade`,

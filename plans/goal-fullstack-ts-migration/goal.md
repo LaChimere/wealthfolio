@@ -4688,6 +4688,9 @@ updated_at: "2026-06-21T16:04:16+08:00"
   contract. HTTP and service boundaries now reject arbitrary run types, and
   frontend/Electron call sites use canonical values. Verified with focused
   Connect domain, HTTP, and Electron command tests.
+- Turn 787: Resolved post-commit review feedback for Connect import-run type
+  filtering. Runtime-backed import-run smoke coverage now expects blank
+  `runType` to fail with the same `SYNC | IMPORT` validation error.
 
 ## Deferred items
 
