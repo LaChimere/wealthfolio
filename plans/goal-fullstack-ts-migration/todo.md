@@ -6221,6 +6221,10 @@ contract:
   Runtime-backed `POST /api/v1/activities/bulk` coverage now expects existing
   row updates and `deleteIds` to rebuild transaction snapshots through the real
   domain-event worker.
+- `pr5-runtime-account-update-event-smoke`: verification passed. Runtime-backed
+  `PUT /api/v1/accounts/:id` coverage now expects account events to drive
+  portfolio valuation and goal-summary recalculation through the real
+  domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

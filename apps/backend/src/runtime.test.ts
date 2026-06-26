@@ -3423,6 +3423,86 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime account updates to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-events-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const { goalService } = runtime.options;
+      if (!goalService) {
+        throw new Error("Runtime account event test requires goal service");
+      }
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+      } finally {
+        db.close();
+      }
+      const goal = await goalService.createGoal({
+        goalType: "custom_save_up",
+        title: "Account Event Goal",
+        targetAmount: 50,
+        currency: "USD",
+      });
+      await goalService.saveGoalFunding(goal.id, [{ accountId: "account-1", sharePercent: 100 }]);
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const updateResponse = await fetch(`${server.baseUrl}/api/v1/accounts/account-1`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: "Updated Runtime Account",
+            accountType: "SECURITIES",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "HOLDINGS",
+          }),
+        });
+        expect(updateResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-16")).toMatchObject({
+          cash_balance: "5",
+          investment_market_value: "20",
+          total_value: "25",
+        });
+        expect(readRuntimeGoalSummary(resultDb, goal.id)).toEqual({
+          summary_current_value: 25,
+          summary_progress: 0.5,
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toEqual([
+        "accounts_changed",
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime asset-created events to asset enrichment", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-enrichment-"));
     const fetchCalls: string[] = [];
