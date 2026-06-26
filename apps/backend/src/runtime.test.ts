@@ -3503,6 +3503,73 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime tracking-mode changes to transaction snapshot rebuilds", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-tracking-mode-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(db);
+        db.prepare("UPDATE accounts SET tracking_mode = 'HOLDINGS' WHERE id = 'tx-account'").run();
+      } finally {
+        db.close();
+      }
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const updateResponse = await fetch(`${server.baseUrl}/api/v1/accounts/tx-account`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: "Transaction Account",
+            accountType: "SECURITIES",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+          }),
+        });
+        expect(updateResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeSnapshot(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          source: "CALCULATED",
+          cash_balances: '{"USD":"79"}',
+          cost_basis: "21",
+          net_contribution: "100",
+        });
+        expect(readRuntimeValuation(resultDb, "tx-account", "2026-05-14")).toMatchObject({
+          cash_balance: "79",
+          investment_market_value: "20",
+          total_value: "99",
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toContain("tracking_mode_changed");
+      expect(events).toContain("portfolio:update-complete");
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime asset-created events to asset enrichment", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-enrichment-"));
     const fetchCalls: string[] = [];
