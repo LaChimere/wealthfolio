@@ -18,6 +18,7 @@ import {
   ASSETS_CREATED_EVENT,
   ASSETS_UPDATED_EVENT,
   HOLDINGS_CHANGED_EVENT,
+  MANUAL_SNAPSHOT_SAVED_EVENT,
 } from "./domain-events/planner";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
@@ -3266,6 +3267,98 @@ describe("TS backend runtime composition", () => {
       }
       expect(events).toEqual([
         HOLDINGS_CHANGED_EVENT,
+        "market:sync-start",
+        "market:sync-complete",
+        "portfolio:update-start",
+        "portfolio:update-complete",
+      ]);
+    } finally {
+      unsubscribe?.();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime snapshot saves to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-events-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const { goalService } = runtime.options;
+      if (!goalService) {
+        throw new Error("Runtime snapshot event test requires goal service");
+      }
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimePortfolioJobInput(db);
+      } finally {
+        db.close();
+      }
+      const goal = await goalService.createGoal({
+        goalType: "custom_save_up",
+        title: "Snapshot Event Goal",
+        targetAmount: 50,
+        currency: "USD",
+      });
+      await goalService.saveGoalFunding(goal.id, [{ accountId: "account-1", sharePercent: 100 }]);
+
+      const server = startBackendServer(config, runtime.options);
+      try {
+        const saveResponse = await fetch(`${server.baseUrl}/api/v1/snapshots`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            accountId: "account-1",
+            snapshotDate: "2026-05-17",
+            holdings: [
+              {
+                assetId: "asset-1",
+                symbol: "RUNTIME",
+                quantity: "3",
+                currency: "USD",
+                averageCost: "6",
+              },
+            ],
+            cashBalances: { USD: "7" },
+          }),
+        });
+        expect(saveResponse.status).toBe(200);
+      } finally {
+        server.stop();
+      }
+
+      await runtime.close();
+
+      const resultDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(readRuntimeValuation(resultDb, "account-1", "2026-05-17")).toMatchObject({
+          cash_balance: "7",
+          investment_market_value: "18",
+          total_value: "25",
+        });
+        expect(readRuntimeValuation(resultDb, "TOTAL", "2026-05-17")).toMatchObject({
+          cash_balance: "7",
+          investment_market_value: "18",
+          total_value: "25",
+        });
+        expect(readRuntimeGoalSummary(resultDb, goal.id)).toEqual({
+          summary_current_value: 25,
+          summary_progress: 0.5,
+        });
+      } finally {
+        resultDb.close();
+      }
+      expect(events).toEqual([
+        HOLDINGS_CHANGED_EVENT,
+        MANUAL_SNAPSHOT_SAVED_EVENT,
         "market:sync-start",
         "market:sync-complete",
         "portfolio:update-start",

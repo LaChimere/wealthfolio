@@ -6191,6 +6191,10 @@ contract:
   `/api/v1/health/check` coverage now seeds foreign-currency holdings with
   missing FX quotes and expects `fetch_fx` FX integrity issues through real
   service wiring.
+- `pr5-runtime-snapshot-event-portfolio-job-smoke`: verification passed.
+  Runtime-backed `POST /api/v1/snapshots` coverage now expects holdings events
+  to drive portfolio valuation and goal-summary recalculation through the real
+  domain-event worker.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
