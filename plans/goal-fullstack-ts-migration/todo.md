@@ -6309,6 +6309,10 @@ contract:
   `POST /api/v1/market-data/quotes/import` to persist UUID manual quote update
   sync_outbox callbacks while deterministic non-UUID manual imports remain
   local-only.
+- `pr5-runtime-quote-update-route-explicit-id-review-fix`: verification passed.
+  Runtime-backed quote update route coverage now includes real explicit-ID
+  manual quote edits and expects Rust-compatible UUID delete/recreate sync
+  behavior alongside id-less UUID update sync.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -2899,6 +2899,7 @@ describe("TS backend runtime composition", () => {
     });
     const server = startBackendServer(config, runtime.options);
     const quoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7d";
+    const replacedQuoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7f";
     const events: string[] = [];
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
@@ -2919,6 +2920,17 @@ describe("TS backend runtime composition", () => {
           `,
           )
           .run(quoteId);
+        seedDb
+          .prepare(
+            `
+            INSERT INTO quotes (
+              id, asset_id, day, source, close, currency, created_at, timestamp
+            )
+            VALUES (?, 'runtime-quote-update-asset', '2026-05-15', 'MANUAL', '11.00', 'USD',
+              '2026-05-15T00:00:00Z', '2026-05-15T16:00:00Z')
+          `,
+          )
+          .run(replacedQuoteId);
       } finally {
         seedDb.close();
       }
@@ -2938,7 +2950,23 @@ describe("TS backend runtime composition", () => {
         },
       );
       expect(updateResponse.status).toBe(204);
-      await waitForEventCount(events, "portfolio:update-complete", 1);
+
+      const explicitIdUpdateResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/runtime-quote-update-asset`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: replacedQuoteId,
+            timestamp: "2026-05-15T17:00:00Z",
+            dataSource: "MANUAL",
+            close: "11.25",
+            currency: "USD",
+          }),
+        },
+      );
+      expect(explicitIdUpdateResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 2);
 
       const db = openSqliteDatabase(runtime.dbPath);
       try {
@@ -2949,6 +2977,11 @@ describe("TS backend runtime composition", () => {
             entity_id: quoteId,
             op: "update",
           }),
+          expect.objectContaining({
+            entity: "quote",
+            entity_id: replacedQuoteId,
+            op: "delete",
+          }),
         ]);
         expect(JSON.parse(String(quoteRows[0]?.payload))).toMatchObject({
           id: quoteId,
@@ -2958,6 +2991,7 @@ describe("TS backend runtime composition", () => {
           close: "10.25",
           notes: "Route quote update",
         });
+        expect(JSON.parse(String(quoteRows[1]?.payload))).toEqual({ id: replacedQuoteId });
       } finally {
         db.close();
       }
