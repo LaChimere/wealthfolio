@@ -2866,6 +2866,114 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime bootstrap confirm route to overwrite-required branch", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bootstrap-overwrite-"));
+    const requests: Array<{ url: string; method: string; body: string | null; deviceId: string }> =
+      [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        const headers = new Headers(init?.headers);
+        requests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        return Response.json({ success: true, key_version: 2 });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 2, 'trusted', NULL, NULL)
+          `,
+          )
+          .run();
+        seedDb.prepare("UPDATE sync_engine_state SET last_cycle_status = 'ok' WHERE id = 1").run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('overwrite-account', 'Overwrite Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const response = await fetch(
+        jsonRequest("/api/v1/sync/pairing/confirm-with-bootstrap", {
+          pairingId: "pairing-1",
+          proof: "proof",
+          allowOverwrite: false,
+        }),
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        status: "overwrite_required",
+        message: "Local data (1 rows) will be replaced by remote snapshot",
+        localRows: 1,
+        nonEmptyTables: [{ table: "accounts", rows: 1 }],
+      });
+      expect(requests).toEqual([
+        expect.objectContaining({
+          url: "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+          method: "POST",
+          deviceId: "",
+        }),
+        expect.objectContaining({
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-runtime",
+        }),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime FX asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-sync-"));
     const runtime = createSqliteBackedBackendServices({

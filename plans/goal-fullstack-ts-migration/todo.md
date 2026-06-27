@@ -6405,6 +6405,10 @@ contract:
   Runtime-backed device-sync bootstrap confirm route coverage now expects
   confirm-with-bootstrap to return already_complete when local bootstrap is
   complete while still sending expected cloud confirm request metadata.
+- `pr5-runtime-device-sync-overwrite-required-route-smoke`: verification passed.
+  Runtime-backed device-sync bootstrap confirm route coverage now expects
+  confirm-with-bootstrap to report local overwrite risk before snapshot polling
+  when bootstrap is required and local user data exists.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
