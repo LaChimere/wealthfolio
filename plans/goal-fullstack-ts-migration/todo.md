@@ -6477,6 +6477,10 @@ contract:
 - `pr5-runtime-device-sync-cloud-route-review`: dual-model review passed. Claude
   Opus 4.8 xhigh and GPT-5.5 xhigh reviewed standalone device read/mutation and
   team-key runtime route smokes and found no actionable issues.
+- `pr5-runtime-device-sync-reset-team-route-smoke`: verification passed.
+  Runtime-backed reset-team now expects `/api/v1/sync/team/reset` to restore
+  Connect tokens, send the Rust-shaped cloud reset request, and map the
+  key-version response through the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -3016,6 +3016,75 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime reset-team cloud route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-team-reset-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      deviceId: string;
+      requestId: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 1, reset_at: "2026-01-01T00:00:00Z" });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const resetResponse = await fetch(`${server.baseUrl}/api/v1/sync/team/reset`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "test" }),
+      });
+      expect(resetResponse.status).toBe(200);
+      await expect(resetResponse.json()).resolves.toEqual({
+        success: true,
+        keyVersion: 1,
+        resetAt: "2026-01-01T00:00:00Z",
+      });
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/keys/reset",
+          method: "POST",
+          body: JSON.stringify({ reason: "test" }),
+          deviceId: "",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route with pending outbox gate", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];
