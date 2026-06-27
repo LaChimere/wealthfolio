@@ -6364,6 +6364,10 @@ contract:
 - `pr5-runtime-settings-timezone-route-event-smoke`: verification passed.
   Runtime-backed settings route coverage now expects timezone updates through
   `PUT /api/v1/settings` to enqueue portfolio recalculation jobs.
+- `pr5-runtime-settings-base-currency-route-event-smoke`: verification passed.
+  Runtime-backed settings route coverage now expects base-currency updates
+  through `PUT /api/v1/settings` to enqueue full portfolio recalculation with
+  market-sync lifecycle events.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
