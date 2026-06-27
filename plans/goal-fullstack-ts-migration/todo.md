@@ -6348,6 +6348,10 @@ contract:
   Runtime-backed import-mapping route coverage now expects save/get HTTP routes
   to preserve account-template link identity and persist activity_import_profile
   sync_outbox callbacks.
+- `pr5-runtime-liability-link-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed liability link route coverage now expects alternative-asset
+  liability link/unlink HTTP routes to persist the Rust-compatible liability
+  asset update callback while unlink remains local/no-op.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

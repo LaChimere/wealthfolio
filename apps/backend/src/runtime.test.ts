@@ -2847,6 +2847,77 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime liability link route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-liability-link-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO assets (
+              id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+              quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+              provider_config, created_at, updated_at
+            )
+            VALUES
+              ('route-property', 'PROPERTY', 'Route Property', 'Property', NULL, NULL, 1, 'MANUAL',
+                'USD', NULL, NULL, NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z'),
+              ('route-liability', 'LIABILITY', 'Route Liability', 'Liability', NULL, NULL, 1, 'MANUAL',
+                'USD', NULL, NULL, NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const linkResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets/route-liability/link-liability`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ targetAssetId: "route-property" }),
+        },
+      );
+      expect(linkResponse.status).toBe(204);
+
+      const unlinkResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets/route-liability/link-liability`,
+        { method: "DELETE" },
+      );
+      expect(unlinkResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assetRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "asset");
+        expect(assetRows).toEqual([
+          expect.objectContaining({
+            entity_id: "route-liability",
+            op: "update",
+          }),
+        ]);
+        expect(JSON.parse(String(assetRows[0]?.payload))).toMatchObject({
+          id: "route-liability",
+          kind: "LIABILITY",
+          metadata: JSON.stringify({ linked_asset_id: "route-property" }),
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime market-data UUID manual quote deletes to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-sync-"));
     const runtime = createSqliteBackedBackendServices({
