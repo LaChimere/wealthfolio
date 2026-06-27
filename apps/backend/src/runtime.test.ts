@@ -1863,6 +1863,12 @@ describe("TS backend runtime composition", () => {
       db.close();
     }
     const server = startBackendServer(config, runtime.options);
+    const brokerSyncEvents: unknown[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      if (event.name.startsWith("broker:sync")) {
+        brokerSyncEvents.push(event);
+      }
+    });
 
     try {
       const publicPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans/public`);
@@ -1963,6 +1969,18 @@ describe("TS backend runtime composition", () => {
         method: "POST",
       });
       expect(syncResponse.status).toBe(202);
+      expect(brokerSyncEvents).toEqual([
+        { name: "broker:sync-start" },
+        {
+          name: "broker:sync-complete",
+          payload: expect.objectContaining({
+            success: true,
+            connectionsSynced: expect.objectContaining({ synced: 1 }),
+            accountsSynced: expect.objectContaining({ synced: 1 }),
+            activitiesSynced: expect.objectContaining({ activitiesUpserted: 0 }),
+          }),
+        },
+      ]);
 
       const syncActivitiesResponse = await fetch(
         `${server.baseUrl}/api/v1/connect/sync/activities`,
@@ -2155,6 +2173,7 @@ describe("TS backend runtime composition", () => {
         symbolMappingMeta: { AAPL: { exchangeMic: "XNAS" } },
       });
     } finally {
+      unsubscribe?.();
       server.stop();
       await runtime.close();
     }

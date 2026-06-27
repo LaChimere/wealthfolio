@@ -6376,6 +6376,10 @@ contract:
   Runtime-backed provider settings route coverage now expects GET/PUT provider
   settings routes to persist provider priority/enabled state and preserve
   priority ordering.
+- `pr5-runtime-connect-sync-route-event-smoke`: verification passed.
+  Runtime-backed Connect sync route coverage now expects
+  `POST /api/v1/connect/sync` to emit broker sync start/complete events with
+  connection, account, and activity summary payloads.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
