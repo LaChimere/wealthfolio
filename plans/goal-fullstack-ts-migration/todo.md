@@ -6328,6 +6328,10 @@ contract:
   Runtime-backed bulk activity route coverage now expects
   `POST /api/v1/activities/bulk` to persist delete/update/create activity
   sync_outbox callbacks in Rust-compatible bulk operation order.
+- `pr5-runtime-activity-import-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed activity import route coverage now expects
+  `POST /api/v1/activities/import` to persist import_run and imported activity
+  sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

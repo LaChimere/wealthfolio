@@ -3501,6 +3501,96 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime activity import route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-activity-import-sync-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityHttpInput(seedDb);
+      } finally {
+        seedDb.close();
+      }
+
+      const importResponse = await fetch(`${server.baseUrl}/api/v1/activities/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          activities: [
+            {
+              accountId: "tx-account",
+              assetId: "tx-asset",
+              symbol: "TX",
+              activityType: "BUY",
+              date: "2026-05-14T12:00:00.000Z",
+              quantity: "2",
+              unitPrice: "10",
+              fee: "1",
+              currency: "USD",
+              isDraft: false,
+              lineNumber: 1,
+            },
+          ],
+        }),
+      });
+      expect(importResponse.status).toBe(200);
+      const importResult = (await importResponse.json()) as {
+        importRunId: string;
+        activities: Array<{ id: string }>;
+      };
+      expect(importResult).toMatchObject({
+        summary: {
+          total: 1,
+          imported: 1,
+          skipped: 0,
+          success: true,
+          errorMessage: null,
+        },
+      });
+      expect(typeof importResult.importRunId).toBe("string");
+      const activityId = importResult.activities[0]?.id;
+      expect(typeof activityId).toBe("string");
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "import_run" || row.entity === "activity",
+        );
+        expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
+          ["import_run", importResult.importRunId, "create"],
+          ["activity", activityId, "create"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: importResult.importRunId,
+          source_system: "csv",
+          run_type: "IMPORT",
+          status: "APPLIED",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: activityId,
+          account_id: "tx-account",
+          asset_id: "tx-asset",
+          source_system: "CSV",
+          import_run_id: importResult.importRunId,
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime account sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
     const runtime = createSqliteBackedBackendServices({
