@@ -6352,6 +6352,10 @@ contract:
   Runtime-backed liability link route coverage now expects alternative-asset
   liability link/unlink HTTP routes to persist the Rust-compatible liability
   asset update callback while unlink remains local/no-op.
+- `pr5-runtime-alternative-metadata-route-sync-outbox-smoke`: verification
+  passed. Runtime-backed alternative-asset metadata route coverage now expects
+  metadata update HTTP routes to persist asset update and UUID manual quote
+  create sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

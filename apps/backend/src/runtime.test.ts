@@ -2918,6 +2918,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime alternative asset metadata route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alt-metadata-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO assets (
+              id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+              quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+              provider_config, created_at, updated_at
+            )
+            VALUES ('route-collectible', 'COLLECTIBLE', 'Route Watch', 'Collectible', NULL, NULL, 1, 'MANUAL',
+              'EUR', NULL, NULL, NULL, NULL, '2026-05-14T00:00:00Z', '2026-05-14T00:00:00Z')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets/route-collectible/metadata`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: "Route Watch II",
+            notes: "insured",
+            metadata: {
+              purchase_price: "9000.00",
+              purchase_date: "2025-01-01",
+            },
+          }),
+        },
+      );
+      expect(updateResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "asset" || row.entity === "quote",
+        );
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["asset", "update"],
+          ["quote", "create"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "route-collectible",
+          name: "Route Watch II",
+          notes: "insured",
+          metadata: JSON.stringify({ purchase_price: "9000.00", purchase_date: "2025-01-01" }),
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          asset_id: "route-collectible",
+          day: "2025-01-01",
+          close: "9000.00",
+          currency: "EUR",
+          source: "MANUAL",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime market-data UUID manual quote deletes to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-sync-"));
     const runtime = createSqliteBackedBackendServices({
