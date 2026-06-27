@@ -4899,7 +4899,7 @@ describe("TS activities import domain", () => {
             id: importResult.importRunId,
             source_system: "csv",
             run_type: "IMPORT",
-            status: "APPLIED",
+            status: "RUNNING",
           }),
         }),
         expect.objectContaining({
@@ -4908,6 +4908,17 @@ describe("TS activities import domain", () => {
           payload: expect.objectContaining({
             source_system: "CSV",
             import_run_id: importResult.importRunId,
+          }),
+        }),
+        expect.objectContaining({
+          entity: "import_runs",
+          entityId: importResult.importRunId,
+          operation: "Update",
+          payload: expect.objectContaining({
+            id: importResult.importRunId,
+            source_system: "csv",
+            run_type: "IMPORT",
+            status: "APPLIED",
           }),
         }),
       ]);
@@ -5015,6 +5026,11 @@ describe("TS activities import domain", () => {
           entity: "activities",
           operation: "Create",
           payload: expect.objectContaining({ import_run_id: importResult.importRunId }),
+        }),
+        expect.objectContaining({
+          entity: "import_runs",
+          entityId: importResult.importRunId,
+          operation: "Update",
         }),
       ]);
 
@@ -5218,6 +5234,11 @@ describe("TS activities import domain", () => {
         expect.objectContaining({
           entity: "activities",
           operation: "Create",
+        }),
+        expect.objectContaining({
+          entity: "import_runs",
+          entityId: imported.importRunId,
+          operation: "Update",
         }),
       ]);
       expect(

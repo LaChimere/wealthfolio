@@ -261,7 +261,7 @@ export interface ActivityRowSyncEvent {
 export interface ActivityImportRunSyncEvent {
   entity: "import_runs";
   entityId: string;
-  operation: "Create";
+  operation: Exclude<ActivitySyncOperation, "Delete">;
   payload: ImportRunRow;
 }
 
@@ -1333,7 +1333,10 @@ function existingUpdatedAssetIds(
   return [...updatedAssetIds].filter((assetId) => !created.has(assetId));
 }
 
-function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
+function importRunSyncEvents(
+  row: ImportRunRow,
+  operation: Exclude<ActivitySyncOperation, "Delete"> = "Create",
+): ActivitySyncEvent[] {
   if (!shouldQueueImportRunSyncEvent(row)) {
     return [];
   }
@@ -1341,7 +1344,7 @@ function importRunSyncEvents(row: ImportRunRow): ActivitySyncEvent[] {
     {
       entity: "import_runs",
       entityId: row.id,
-      operation: "Create",
+      operation,
       payload: { ...row },
     },
   ];
@@ -2998,13 +3001,13 @@ async function importActivityRows(
   const result = db.transaction(() => {
     ensurePendingActivityAssets(db, assetContext, pendingAssetIds, insertable);
     const createdAssetIds = [...assetContext.createdAssetIds];
-    const importRun = insertCompletedImportRun(db, prepared[0]?.create.accountId ?? "", summary);
+    const runningImportRun = insertRunningImportRun(db, prepared[0]?.create.accountId ?? "");
     const syncInputs: ActivitySyncInput[] = [];
     const quoteModeUpdatedAssetIds = new Set<string>();
 
     try {
       for (const row of insertable) {
-        row.create.importRunId = importRun.id;
+        row.create.importRunId = runningImportRun.id;
         applyActivityQuoteSideEffects(
           db,
           row.create,
@@ -3022,10 +3025,11 @@ async function importActivityRows(
     for (const row of prepared) {
       ordered[row.index] = finalizeImportActivity(row.activity);
     }
+    const completedImportRun = completeImportRun(db, runningImportRun, summary);
 
     return {
       activities: ordered.flatMap((activity) => (activity === null ? [] : [activity])),
-      importRunId: importRun.id,
+      importRunId: completedImportRun.id,
       summary,
       syncEvents: [
         ...assetSyncEvents(readAssetSyncRows(db, createdAssetIds), "Create"),
@@ -3033,8 +3037,9 @@ async function importActivityRows(
           readAssetSyncRows(db, existingUpdatedAssetIds(quoteModeUpdatedAssetIds, createdAssetIds)),
           "Update",
         ),
-        ...importRunSyncEvents(importRun),
+        ...importRunSyncEvents(runningImportRun, "Create"),
         ...activitySyncEvents(syncInputs),
+        ...importRunSyncEvents(completedImportRun, "Update"),
       ],
     };
   })();
@@ -3423,11 +3428,7 @@ function addImportError(activity: Record<string, unknown>, field: string, messag
   activity.errors = errors;
 }
 
-function insertCompletedImportRun(
-  db: Database,
-  accountId: string,
-  summary: ImportActivitiesSummary,
-): ImportRunRow {
+function insertRunningImportRun(db: Database, accountId: string): ImportRunRow {
   const id = crypto.randomUUID();
   const now = activityStorageTimestampNow();
   const row: ImportRunRow = {
@@ -3436,22 +3437,22 @@ function insertCompletedImportRun(
     source_system: "csv",
     run_type: "IMPORT",
     mode: "INCREMENTAL",
-    status: "APPLIED",
+    status: "RUNNING",
     started_at: now,
-    finished_at: now,
+    finished_at: null,
     review_mode: "NEVER",
-    applied_at: now,
+    applied_at: null,
     checkpoint_in: null,
     checkpoint_out: null,
     summary: JSON.stringify({
-      fetched: summary.total,
-      inserted: summary.imported,
+      fetched: 0,
+      inserted: 0,
       updated: 0,
-      skipped: summary.skipped,
-      warnings: summary.duplicates,
+      skipped: 0,
+      warnings: 0,
       errors: 0,
       removed: 0,
-      assetsCreated: summary.assetsCreated,
+      assetsCreated: 0,
     }),
     warnings: null,
     error: null,
@@ -3465,19 +3466,50 @@ function insertCompletedImportRun(
         review_mode, applied_at, checkpoint_in, checkpoint_out, summary, warnings, error,
         created_at, updated_at
       )
-      VALUES (?, ?, 'csv', 'IMPORT', 'INCREMENTAL', 'APPLIED', ?, ?, 'NEVER', ?, NULL, NULL, ?, NULL, NULL, ?, ?)
+      VALUES (?, ?, 'csv', 'IMPORT', 'INCREMENTAL', 'RUNNING', ?, NULL, 'NEVER', NULL, NULL, NULL, ?, NULL, NULL, ?, ?)
+    `,
+  ).run(row.id, row.account_id, row.started_at, row.summary, row.created_at, row.updated_at);
+  return row;
+}
+
+function completeImportRun(
+  db: Database,
+  running: ImportRunRow,
+  summary: ImportActivitiesSummary,
+): ImportRunRow {
+  const now = activityStorageTimestampNow();
+  const completed: ImportRunRow = {
+    ...running,
+    status: "APPLIED",
+    finished_at: now,
+    applied_at: now,
+    summary: JSON.stringify({
+      fetched: summary.total,
+      inserted: summary.imported,
+      updated: 0,
+      skipped: summary.skipped,
+      warnings: summary.duplicates,
+      errors: 0,
+      removed: 0,
+      assetsCreated: summary.assetsCreated,
+    }),
+    updated_at: now,
+  };
+  db.query(
+    `
+      UPDATE import_runs
+      SET status = ?, finished_at = ?, applied_at = ?, summary = ?, updated_at = ?
+      WHERE id = ?
     `,
   ).run(
-    row.id,
-    row.account_id,
-    row.started_at,
-    row.finished_at,
-    row.applied_at,
-    row.summary,
-    row.created_at,
-    row.updated_at,
+    completed.status,
+    completed.finished_at,
+    completed.applied_at,
+    completed.summary,
+    completed.updated_at,
+    completed.id,
   );
-  return row;
+  return completed;
 }
 
 function ensureActivityCreateIsUnique(db: Database, activity: ActivityCreateRowInput): void {

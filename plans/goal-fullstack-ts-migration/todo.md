@@ -6339,6 +6339,11 @@ contract:
 - `pr5-runtime-exchange-rate-route-event-smoke`: verification passed.
   Runtime-backed exchange-rate route coverage now expects create/update/delete
   HTTP routes to enqueue portfolio recalculation jobs.
+- `pr5-runtime-activity-import-lifecycle-review-fix`: verification passed. TS
+  activity imports now mirror Rust import-run lifecycle with RUNNING create,
+  imported activity create, and APPLIED update sync_outbox callbacks; transfer
+  route coverage verifies flow metadata transitions, and exchange-rate route
+  coverage verifies one portfolio completion per mutation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

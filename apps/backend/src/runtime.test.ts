@@ -2435,6 +2435,8 @@ describe("TS backend runtime composition", () => {
       expect(createResponse.status).toBe(200);
       const createdRate = (await createResponse.json()) as { id: string };
       expect(typeof createdRate.id).toBe("string");
+      await waitForEventCount(events, "portfolio:update-complete", 1);
+      expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(1);
 
       const updateResponse = await fetch(`${server.baseUrl}/api/v1/exchange-rates`, {
         method: "PUT",
@@ -2454,6 +2456,8 @@ describe("TS backend runtime composition", () => {
         rate: "1.24",
         source: "MANUAL",
       });
+      await waitForEventCount(events, "portfolio:update-complete", 2);
+      expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(2);
 
       const deleteResponse = await fetch(
         `${server.baseUrl}/api/v1/exchange-rates/${encodeURIComponent(createdRate.id)}`,
@@ -2461,6 +2465,7 @@ describe("TS backend runtime composition", () => {
       );
       expect(deleteResponse.status).toBe(204);
       await waitForEventCount(events, "portfolio:update-complete", 3);
+      expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(3);
     } finally {
       unsubscribe?.();
       server.stop();
@@ -3628,12 +3633,13 @@ describe("TS backend runtime composition", () => {
         expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
           ["import_run", importResult.importRunId, "create"],
           ["activity", activityId, "create"],
+          ["import_run", importResult.importRunId, "update"],
         ]);
         expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
           id: importResult.importRunId,
           source_system: "csv",
           run_type: "IMPORT",
-          status: "APPLIED",
+          status: "RUNNING",
         });
         expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
           id: activityId,
@@ -3641,6 +3647,10 @@ describe("TS backend runtime composition", () => {
           asset_id: "tx-asset",
           source_system: "CSV",
           import_run_id: importResult.importRunId,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: importResult.importRunId,
+          status: "APPLIED",
         });
       } finally {
         db.close();
@@ -3740,20 +3750,32 @@ describe("TS backend runtime composition", () => {
           source_group_id: linkedGroupId,
           is_user_modified: 1,
         });
+        expect(JSON.parse(JSON.parse(String(rows[0]?.payload)).metadata).flow).toMatchObject({
+          is_external: false,
+        });
         expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
           id: "transfer-out",
           source_group_id: linkedGroupId,
           is_user_modified: 1,
+        });
+        expect(JSON.parse(JSON.parse(String(rows[1]?.payload)).metadata).flow).toMatchObject({
+          is_external: false,
         });
         expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
           id: "transfer-in",
           source_group_id: null,
           is_user_modified: 1,
         });
+        expect(JSON.parse(JSON.parse(String(rows[2]?.payload)).metadata).flow).toMatchObject({
+          is_external: true,
+        });
         expect(JSON.parse(String(rows[3]?.payload))).toMatchObject({
           id: "transfer-out",
           source_group_id: null,
           is_user_modified: 1,
+        });
+        expect(JSON.parse(JSON.parse(String(rows[3]?.payload)).metadata).flow).toMatchObject({
+          is_external: true,
         });
       } finally {
         db.close();

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 840
+turns_used: 841
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-27T11:23:00+09:00"
+updated_at: "2026-06-27T19:56:00+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4865,6 +4865,11 @@ updated_at: "2026-06-27T11:23:00+09:00"
 - Turn 840: Added runtime-backed exchange-rate route event coverage. The
   SQLite-backed runtime now proves exchange-rate create/update/delete HTTP
   routes enqueue portfolio recalculation jobs.
+- Turn 841: Resolved activity/import route review feedback. TS activity imports
+  now mirror Rust import-run lifecycle with RUNNING create, activity create, and
+  APPLIED update sync_outbox callbacks; transfer route coverage now verifies
+  transfer metadata transitions, and exchange-rate route coverage verifies one
+  portfolio completion per mutation.
 
 ## Deferred items
 
