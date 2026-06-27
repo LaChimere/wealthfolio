@@ -6361,6 +6361,9 @@ contract:
   `POST /api/v1/market-data/sync` to enqueue portfolio jobs and emit
   market/portfolio lifecycle events without live provider fetches for empty
   explicit targets.
+- `pr5-runtime-settings-timezone-route-event-smoke`: verification passed.
+  Runtime-backed settings route coverage now expects timezone updates through
+  `PUT /api/v1/settings` to enqueue portfolio recalculation jobs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

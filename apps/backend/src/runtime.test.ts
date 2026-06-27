@@ -1441,6 +1441,36 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime settings timezone updates to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-settings-events-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timezone: "UTC" }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ timezone: "UTC" });
+      await waitForEventCount(events, "portfolio:update-complete", 1);
+      expect(events).toEqual(["portfolio:update-start", "portfolio:update-complete"]);
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
