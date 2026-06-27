@@ -3718,6 +3718,92 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime holdings snapshot route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-route-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      marketDataFetch: (() =>
+        Promise.reject(new Error("unexpected market data fetch"))) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('snapshot-route-account', 'Snapshot Route Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+        seedRuntimeAsset(seedDb, "snapshot-route-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const saveResponse = await fetch(`${server.baseUrl}/api/v1/snapshots`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          accountId: "snapshot-route-account",
+          snapshotDate: "2026-04-02",
+          holdings: [
+            {
+              assetId: "snapshot-route-asset",
+              symbol: "SNAPROUTE",
+              quantity: "2",
+              averageCost: "5",
+              currency: "USD",
+            },
+          ],
+          cashBalances: { USD: "25" },
+        }),
+      });
+      expect(saveResponse.status).toBe(200);
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/snapshots?accountId=snapshot-route-account&date=2026-04-02`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "snapshot");
+        expect(rows.map((row) => [row.op, row.entity_id])).toEqual([
+          ["create", expect.any(String)],
+          ["create", expect.any(String)],
+          ["delete", rows[0]?.entity_id],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          account_id: "snapshot-route-account",
+          snapshot_date: "2026-04-02",
+          source: "MANUAL_ENTRY",
+          cash_balances: '{"USD":"25"}',
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "snapshot-route-account",
+          snapshot_date: "2026-01-02",
+          source: "SYNTHETIC",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: rows[0]?.entity_id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime import template sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-template-sync-"));
     const runtime = createSqliteBackedBackendServices({

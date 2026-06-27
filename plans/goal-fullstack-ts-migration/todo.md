@@ -6313,6 +6313,10 @@ contract:
   Runtime-backed quote update route coverage now includes real explicit-ID
   manual quote edits and expects Rust-compatible UUID delete/recreate sync
   behavior alongside id-less UUID update sync.
+- `pr5-runtime-snapshot-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed holdings snapshot route coverage now expects
+  `POST/DELETE /api/v1/snapshots` to persist manual, synthetic, and delete
+  snapshot sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
