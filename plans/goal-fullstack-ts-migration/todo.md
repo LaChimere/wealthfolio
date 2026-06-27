@@ -6448,6 +6448,10 @@ contract:
   passed. Runtime-backed complete-with-transfer coverage now expects the route
   to fail closed before cloud approve/complete mutations when local snapshot
   bootstrap is still required.
+- `pr5-runtime-device-sync-transfer-idempotent-approve-route-smoke`:
+  verification passed. Runtime-backed complete-with-transfer coverage now
+  expects an already-approved cloud pairing response to proceed to complete and
+  return the Rust-shaped composite success response.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
