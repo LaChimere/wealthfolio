@@ -2992,6 +2992,25 @@ describe("TS backend runtime composition", () => {
           notes: "Route quote update",
         });
         expect(JSON.parse(String(quoteRows[1]?.payload))).toEqual({ id: replacedQuoteId });
+        expect(
+          db
+            .query<
+              { id: string; close: string },
+              [string]
+            >("SELECT id, close FROM quotes WHERE id = ?")
+            .get(replacedQuoteId),
+        ).toBeNull();
+        expect(
+          db
+            .query<
+              { id: string; close: string },
+              [string, string, string]
+            >("SELECT id, close FROM quotes WHERE asset_id = ? AND day = ? AND source = ?")
+            .get("runtime-quote-update-asset", "2026-05-15", "MANUAL"),
+        ).toEqual({
+          id: "runtime-quote-update-asset_2026-05-15_MANUAL",
+          close: "11.25",
+        });
       } finally {
         db.close();
       }

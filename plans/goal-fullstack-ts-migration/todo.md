@@ -6321,6 +6321,9 @@ contract:
   Runtime-backed activity route coverage now expects `POST/PUT/DELETE` activity
   routes to persist create/update/delete activity sync_outbox callbacks with
   Rust-compatible user-modified flags.
+- `pr5-runtime-explicit-quote-edit-recreate-review-fix`: verification passed.
+  Runtime-backed quote update route coverage now also verifies the deterministic
+  manual quote row is recreated after the UUID delete sync_outbox callback.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
