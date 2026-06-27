@@ -6435,6 +6435,11 @@ contract:
   verification passed. Runtime-backed device-sync pairing flow approval coverage
   now expects newer snapshot schema metadata to surface the Rust-shaped terminal
   error before bootstrap apply and remove the flow.
+- `pr5-runtime-device-sync-bootstrap-confirm-waiting-route-smoke`: verification
+  passed. Runtime-backed device-sync confirm-with-bootstrap coverage now expects
+  clear local data to skip overwrite prompts, poll latest snapshot metadata, and
+  return the Rust-shaped waiting_snapshot response when the cloud has no
+  snapshot yet.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
