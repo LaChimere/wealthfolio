@@ -436,7 +436,10 @@ function queueAccountSyncEvent(
 function accountSyncEvent(
   row: AccountRow,
   operation: Exclude<AccountSyncOperation, "Delete">,
-): AccountSyncEvent {
+): AccountSyncEvent | undefined {
+  if (operation === "Create" && !shouldSyncAccountCreate(row.provider_account_id)) {
+    return undefined;
+  }
   return {
     accountId: row.id,
     operation,
@@ -450,6 +453,10 @@ function accountSyncDeleteEvent(accountId: string): AccountSyncEvent {
     operation: "Delete",
     payload: { id: accountId },
   };
+}
+
+function shouldSyncAccountCreate(providerAccountId: string | null): boolean {
+  return !providerAccountId || providerAccountId.trim().length === 0;
 }
 
 function accountRowPayload(row: AccountRow): AccountRowPayload {

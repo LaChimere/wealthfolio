@@ -6284,6 +6284,10 @@ contract:
   Runtime-backed import-template route coverage now expects template
   create/list/get/link/delete HTTP routes to persist import_template and
   activity_import_profile sync_outbox callbacks.
+- `pr5-account-create-sync-outbox-provider-filter`: verification passed. TS
+  account sync now suppresses account Create sync_outbox rows for broker-linked
+  accounts with provider_account_id, matching Rust, while local account
+  create/update/delete sync rows remain covered.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

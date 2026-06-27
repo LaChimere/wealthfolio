@@ -2815,6 +2815,19 @@ describe("TS backend runtime composition", () => {
 
     try {
       const { accountService } = runtime.options;
+      const brokerCreated = await accountService.createAccount({
+        name: "Brokerage",
+        accountType: "SECURITIES",
+        group: "Investing",
+        currency: "CAD",
+        isDefault: true,
+        isActive: true,
+        trackingMode: "TRANSACTIONS",
+        accountNumber: "broker-123",
+        meta: '{"source":"broker"}',
+        provider: "SNAPTRADE",
+        providerAccountId: "provider-account-1",
+      });
       const created = await accountService.createAccount({
         name: "Brokerage",
         accountType: "SECURITIES",
@@ -2824,9 +2837,8 @@ describe("TS backend runtime composition", () => {
         isActive: true,
         trackingMode: "TRANSACTIONS",
         accountNumber: "123",
-        meta: '{"source":"broker"}',
-        provider: "SNAPTRADE",
-        providerAccountId: "provider-account-1",
+        meta: '{"source":"manual"}',
+        provider: "MANUAL",
       });
       await accountService.updateAccount({
         id: created.id,
@@ -2844,6 +2856,7 @@ describe("TS backend runtime composition", () => {
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         const rows = readRuntimeSyncOutbox(db);
+        expect(rows.some((row) => row.entity_id === brokerCreated.id)).toBe(false);
         expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
           ["account", created.id, "create"],
           ["account", created.id, "update"],
@@ -2859,9 +2872,9 @@ describe("TS backend runtime composition", () => {
           is_active: true,
           platform_id: null,
           account_number: "123",
-          meta: '{"source":"broker"}',
-          provider: "SNAPTRADE",
-          provider_account_id: "provider-account-1",
+          meta: '{"source":"manual"}',
+          provider: "MANUAL",
+          provider_account_id: null,
           is_archived: false,
           tracking_mode: "TRANSACTIONS",
         });
@@ -2875,9 +2888,9 @@ describe("TS backend runtime composition", () => {
           is_active: false,
           platform_id: null,
           account_number: "123",
-          meta: '{"source":"broker"}',
-          provider: "SNAPTRADE",
-          provider_account_id: "provider-account-1",
+          meta: '{"source":"manual"}',
+          provider: "MANUAL",
+          provider_account_id: null,
           is_archived: true,
           tracking_mode: "HOLDINGS",
         });
@@ -2913,8 +2926,7 @@ describe("TS backend runtime composition", () => {
           trackingMode: "HOLDINGS",
           accountNumber: "123",
           meta: '{"source":"route"}',
-          provider: "SNAPTRADE",
-          providerAccountId: "provider-account-route",
+          provider: "MANUAL",
         }),
       });
       expect(createResponse.status).toBe(200);
@@ -2958,9 +2970,31 @@ describe("TS backend runtime composition", () => {
       });
       expect(deleteResponse.status).toBe(204);
 
+      const brokerCreateResponse = await fetch(`${server.baseUrl}/api/v1/accounts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Route Broker Account",
+          accountType: "SECURITIES",
+          group: "Investing",
+          currency: "CAD",
+          isDefault: false,
+          isActive: true,
+          trackingMode: "HOLDINGS",
+          accountNumber: "broker-123",
+          meta: '{"source":"broker"}',
+          provider: "SNAPTRADE",
+          providerAccountId: "provider-account-route",
+        }),
+      });
+      expect(brokerCreateResponse.status).toBe(200);
+      const brokerCreated = (await brokerCreateResponse.json()) as { id: string };
+      expect(brokerCreated.id).toEqual(expect.any(String));
+
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "account");
+        expect(rows.some((row) => row.entity_id === brokerCreated.id)).toBe(false);
         expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
           [created.id, "create"],
           [created.id, "update"],
@@ -2976,8 +3010,8 @@ describe("TS backend runtime composition", () => {
           is_active: true,
           account_number: "123",
           meta: '{"source":"route"}',
-          provider: "SNAPTRADE",
-          provider_account_id: "provider-account-route",
+          provider: "MANUAL",
+          provider_account_id: null,
           is_archived: false,
           tracking_mode: "HOLDINGS",
         });
@@ -2991,8 +3025,8 @@ describe("TS backend runtime composition", () => {
           is_active: false,
           account_number: "123",
           meta: '{"source":"route"}',
-          provider: "SNAPTRADE",
-          provider_account_id: "provider-account-route",
+          provider: "MANUAL",
+          provider_account_id: null,
           is_archived: true,
           tracking_mode: "HOLDINGS",
         });

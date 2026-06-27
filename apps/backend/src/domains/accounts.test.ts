@@ -277,9 +277,9 @@ describe("TS accounts domain", () => {
     );
 
     try {
-      const created = await service.createAccount({
+      const brokerCreated = await service.createAccount({
         ...newAccount({
-          name: "Synced",
+          name: "Broker Synced",
           group: "Investing",
           currency: "CAD",
           isDefault: true,
@@ -290,6 +290,19 @@ describe("TS accounts domain", () => {
         meta: '{"source":"broker"}',
         provider: "SNAPTRADE",
         providerAccountId: "provider-account-1",
+      });
+      const created = await service.createAccount({
+        ...newAccount({
+          name: "Synced",
+          group: "Investing",
+          currency: "CAD",
+          isDefault: true,
+          trackingMode: "TRANSACTIONS",
+        }),
+        platformId: "platform-1",
+        accountNumber: "123",
+        meta: '{"source":"manual"}',
+        provider: "MANUAL",
       });
       await service.updateAccount({
         id: created.id,
@@ -315,6 +328,7 @@ describe("TS accounts domain", () => {
         ["Update", created.id],
         ["Delete", created.id],
       ]);
+      expect(syncEvents.some((event) => event.accountId === brokerCreated.id)).toBe(false);
       expect(syncEvents[0]?.payload).toMatchObject({
         id: created.id,
         name: "Synced",
@@ -325,9 +339,9 @@ describe("TS accounts domain", () => {
         isActive: true,
         platformId: "platform-1",
         accountNumber: "123",
-        meta: '{"source":"broker"}',
-        provider: "SNAPTRADE",
-        providerAccountId: "provider-account-1",
+        meta: '{"source":"manual"}',
+        provider: "MANUAL",
+        providerAccountId: null,
         isArchived: false,
         trackingMode: "TRANSACTIONS",
         createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
@@ -343,9 +357,9 @@ describe("TS accounts domain", () => {
         isActive: false,
         platformId: "platform-1",
         accountNumber: "123",
-        meta: '{"source":"broker"}',
-        provider: "SNAPTRADE",
-        providerAccountId: "provider-account-1",
+        meta: '{"source":"manual"}',
+        provider: "MANUAL",
+        providerAccountId: null,
         isArchived: true,
         trackingMode: "HOLDINGS",
         createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
