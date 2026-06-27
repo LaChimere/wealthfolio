@@ -6427,6 +6427,10 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed the latest overwrite-required,
   pairing-flow begin, approve-overwrite, and cancel-cleanup runtime route smokes
   and found no actionable issues.
+- `pr5-runtime-device-sync-pairing-flow-begin-waiting-route-smoke`: verification
+  passed. Runtime-backed device-sync pairing flow begin coverage now expects
+  clear local data to skip overwrite prompts, poll latest snapshot metadata, and
+  store a waiting_snapshot flow when the cloud has no snapshot yet.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
