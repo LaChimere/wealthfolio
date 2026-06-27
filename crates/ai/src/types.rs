@@ -77,6 +77,15 @@ pub fn normalize_tools_allowlist(tools_allowlist: Option<Vec<String>>) -> Option
 
     if has(&tools, "get_accounts") {
         push_tool_once(&mut tools, "get_cash_balances");
+        push_tool_once(&mut tools, "get_portfolios");
+    }
+
+    if has(&tools, "get_holdings") {
+        push_tool_once(&mut tools, "get_net_worth");
+    }
+
+    if has(&tools, "get_goals") {
+        push_tool_once(&mut tools, "get_contribution_limits");
     }
 
     if has(&tools, "search_activities") {
