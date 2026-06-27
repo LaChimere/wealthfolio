@@ -3413,6 +3413,94 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime bulk activity route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bulk-activity-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(seedDb);
+      } finally {
+        seedDb.close();
+      }
+
+      const bulkResponse = await fetch(`${server.baseUrl}/api/v1/activities/bulk`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          creates: [
+            {
+              id: "bulk-route-temp",
+              accountId: "tx-account",
+              activityType: "DEPOSIT",
+              activityDate: "2026-05-15T10:00:00.000Z",
+              amount: "25",
+              currency: "USD",
+            },
+          ],
+          updates: [
+            {
+              id: "tx-deposit",
+              accountId: "tx-account",
+              activityType: "DEPOSIT",
+              activityDate: "2026-05-14T10:00:00.000Z",
+              amount: "120",
+              currency: "USD",
+            },
+          ],
+          deleteIds: ["tx-buy"],
+        }),
+      });
+      expect(bulkResponse.status).toBe(200);
+      const bulkResult = (await bulkResponse.json()) as {
+        createdMappings: Array<{ tempId: string; activityId: string }>;
+      };
+      const createdId = bulkResult.createdMappings[0]?.activityId;
+      expect(typeof createdId).toBe("string");
+      expect(bulkResult).toMatchObject({
+        created: [expect.objectContaining({ amount: "25" })],
+        updated: [expect.objectContaining({ id: "tx-deposit", amount: "120" })],
+        deleted: [expect.objectContaining({ id: "tx-buy" })],
+        errors: [],
+        createdMappings: [{ tempId: "bulk-route-temp", activityId: createdId }],
+      });
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "activity");
+        expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
+          ["tx-buy", "delete"],
+          ["tx-deposit", "update"],
+          [createdId, "create"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toEqual({ id: "tx-buy" });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: "tx-deposit",
+          amount: "120",
+          is_user_modified: 1,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: createdId,
+          amount: "25",
+          source_system: "MANUAL",
+          is_user_modified: 0,
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime account sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
     const runtime = createSqliteBackedBackendServices({

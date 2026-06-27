@@ -6324,6 +6324,10 @@ contract:
 - `pr5-runtime-explicit-quote-edit-recreate-review-fix`: verification passed.
   Runtime-backed quote update route coverage now also verifies the deterministic
   manual quote row is recreated after the UUID delete sync_outbox callback.
+- `pr5-runtime-bulk-activity-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed bulk activity route coverage now expects
+  `POST /api/v1/activities/bulk` to persist delete/update/create activity
+  sync_outbox callbacks in Rust-compatible bulk operation order.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
