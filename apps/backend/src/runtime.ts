@@ -11,7 +11,10 @@ import { createLocalAddonService } from "./domains/addons";
 import { createAiChatService } from "./domains/ai-chat";
 import { createPortfolioAiChatTools } from "./domains/ai-chat-tools";
 import { createAlternativeAssetService } from "./domains/alternative-assets";
-import { createAiProviderService } from "./domains/ai-providers";
+import {
+  createAiProviderService,
+  type CreateAiProviderServiceOptions,
+} from "./domains/ai-providers";
 import { createAppUtilityService } from "./domains/app-utilities";
 import { createAssetService, parseExchangeMetadataLookup } from "./domains/assets";
 import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./domains/connect";
@@ -86,6 +89,7 @@ export interface SqliteBackedBackendServicesOptions {
   secretKey?: Uint8Array;
   exchangeCatalogJson?: string;
   aiProviderCatalogJson?: string;
+  aiProviderFetchModels?: CreateAiProviderServiceOptions["fetchModels"];
   marketDataFetch?: typeof fetch;
   domainEventDebounceMs?: number;
 }
@@ -119,6 +123,7 @@ export function createSqliteBackedBackendServices(
       secretKey: options.secretKey,
       exchangeCatalogJson: options.exchangeCatalogJson,
       aiProviderCatalogJson: options.aiProviderCatalogJson,
+      aiProviderFetchModels: options.aiProviderFetchModels,
       marketDataFetch: options.marketDataFetch,
       ...(options.domainEventDebounceMs === undefined
         ? {}
@@ -179,6 +184,7 @@ function createServicesFromDatabase(
     secretKey?: Uint8Array;
     exchangeCatalogJson?: string;
     aiProviderCatalogJson?: string;
+    aiProviderFetchModels?: CreateAiProviderServiceOptions["fetchModels"];
     marketDataFetch?: typeof fetch;
     domainEventDebounceMs?: number;
   },
@@ -314,6 +320,7 @@ function createServicesFromDatabase(
         catalogJson:
           runtimeOptions.aiProviderCatalogJson ??
           readAiProviderCatalogJson(runtimeOptions.env, runtimeOptions.repositoryRoot),
+        fetchModels: runtimeOptions.aiProviderFetchModels,
       })
     : undefined;
   const taxonomyService = createTaxonomyService(

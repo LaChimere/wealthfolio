@@ -1603,8 +1603,13 @@ describe("TS backend runtime composition", () => {
 
   test("wires runtime AI provider settings routes to SQLite persistence", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-provider-routes-"));
+    const modelRequests: string[] = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      aiProviderFetchModels: async (url) => {
+        modelRequests.push(url);
+        return Response.json({ models: [{ name: "runtime-model" }] });
+      },
       repositoryRoot,
       secretKey: config.secretKey,
     });
@@ -1663,6 +1668,14 @@ describe("TS backend runtime composition", () => {
           toolsAllowlist: ["get_accounts", "get_cash_balances"],
         },
       );
+
+      const modelsResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/ollama/models`);
+      expect(modelsResponse.status).toBe(200);
+      await expect(modelsResponse.json()).resolves.toEqual({
+        models: [{ id: "runtime-model", name: "runtime-model" }],
+        supportsListing: true,
+      });
+      expect(modelRequests).toEqual(["http://localhost:11434/api/tags"]);
 
       const db = openSqliteDatabase(runtime.dbPath);
       try {

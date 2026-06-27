@@ -6388,6 +6388,10 @@ contract:
   Runtime-backed Connect broker route coverage now expects broker-created
   external platforms/accounts not to enqueue local platform/account sync_outbox
   rows.
+- `pr5-runtime-ai-provider-models-route-smoke`: verification passed.
+  Runtime-backed AI provider model-listing route coverage now injects the AI
+  model fetch seam and expects `/api/v1/ai/providers/:id/models` to call the
+  expected provider endpoint without live network access.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
