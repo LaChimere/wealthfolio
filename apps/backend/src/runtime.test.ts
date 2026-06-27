@@ -1547,6 +1547,60 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime provider settings routes to SQLite persistence", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-provider-settings-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const providersResponse = await fetch(`${server.baseUrl}/api/v1/providers/settings`);
+      expect(providersResponse.status).toBe(200);
+      await expect(providersResponse.json()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "FINNHUB", enabled: expect.any(Boolean) }),
+        ]),
+      );
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "FINNHUB", priority: 0, enabled: true }),
+      });
+      expect(updateResponse.status).toBe(204);
+
+      const updatedResponse = await fetch(`${server.baseUrl}/api/v1/providers`);
+      expect(updatedResponse.status).toBe(200);
+      const updatedProviders = (await updatedResponse.json()) as Array<Record<string, unknown>>;
+      expect(updatedProviders[0]).toMatchObject({ id: "FINNHUB", priority: 0, enabled: true });
+      expect(updatedProviders).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "FINNHUB", priority: 0, enabled: true }),
+        ]),
+      );
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          db
+            .query<
+              { priority: number; enabled: number },
+              []
+            >("SELECT priority, enabled FROM market_data_providers WHERE id = 'FINNHUB'")
+            .get(),
+        ).toEqual({ priority: 0, enabled: 1 });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({

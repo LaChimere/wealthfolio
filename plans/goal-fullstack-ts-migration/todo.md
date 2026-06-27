@@ -6372,6 +6372,10 @@ contract:
   Runtime-backed route smokes now capture portfolio job configs for market-data
   sync, settings timezone, settings base-currency, and exchange-rate mutations
   rather than relying only on lifecycle event names.
+- `pr5-runtime-provider-settings-route-smoke`: verification passed.
+  Runtime-backed provider settings route coverage now expects GET/PUT provider
+  settings routes to persist provider priority/enabled state and preserve
+  priority ordering.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
