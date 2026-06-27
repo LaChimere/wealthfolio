@@ -6396,6 +6396,11 @@ contract:
   Runtime-backed AI provider model-listing route coverage now also expects
   API-key-backed OpenAI model listing to read the runtime secret service and
   send the expected Authorization header.
+- `pr5-runtime-device-sync-transfer-route-smoke`: verification passed.
+  Runtime-backed device-sync pairing transfer route coverage now passes
+  env/fetch seams into device-sync and expects complete-with-transfer success
+  with clear outbox, then pending sync_outbox gating before cloud complete
+  calls.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

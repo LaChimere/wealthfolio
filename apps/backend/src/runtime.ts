@@ -587,6 +587,8 @@ function createServicesFromDatabase(
       connectService,
       secretService,
       db,
+      env: runtimeOptions.env,
+      fetch: runtimeOptions.marketDataFetch,
       onPairingComplete: () => connectDeviceSyncService.startDeviceSyncBackgroundEngine(),
     }),
     exchangeRateService,
