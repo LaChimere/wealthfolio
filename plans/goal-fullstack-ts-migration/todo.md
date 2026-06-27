@@ -6300,6 +6300,10 @@ contract:
   Runtime-backed AI chat route coverage now expects thread update/delete, tag
   create/delete, and tool-result update HTTP routes to persist ai_thread,
   ai_thread_tag, and ai_message sync_outbox callbacks.
+- `pr5-runtime-quote-update-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed market-data quote update route coverage now expects
+  `PUT /api/v1/market-data/quotes/:assetId` to persist UUID manual quote update
+  sync_outbox callbacks and trigger portfolio recalculation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

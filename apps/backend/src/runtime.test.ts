@@ -2890,6 +2890,84 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime market-data quote update route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-update-route-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const quoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7d";
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-quote-update-asset");
+        seedDb
+          .prepare(
+            `
+            INSERT INTO quotes (
+              id, asset_id, day, source, close, currency, created_at, timestamp
+            )
+            VALUES (?, 'runtime-quote-update-asset', '2026-05-14', 'MANUAL', '10.00', 'USD',
+              '2026-05-14T00:00:00Z', '2026-05-14T16:00:00Z')
+          `,
+          )
+          .run(quoteId);
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/runtime-quote-update-asset`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            timestamp: "2026-05-14T17:00:00Z",
+            dataSource: "MANUAL",
+            close: "10.25",
+            currency: "USD",
+            notes: "Route quote update",
+          }),
+        },
+      );
+      expect(updateResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 1);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const quoteRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "quote");
+        expect(quoteRows).toEqual([
+          expect.objectContaining({
+            entity: "quote",
+            entity_id: quoteId,
+            op: "update",
+          }),
+        ]);
+        expect(JSON.parse(String(quoteRows[0]?.payload))).toMatchObject({
+          id: quoteId,
+          asset_id: "runtime-quote-update-asset",
+          day: "2026-05-14",
+          source: "MANUAL",
+          close: "10.25",
+          notes: "Route quote update",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
