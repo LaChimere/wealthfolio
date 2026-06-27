@@ -6481,6 +6481,11 @@ contract:
   Runtime-backed reset-team now expects `/api/v1/sync/team/reset` to restore
   Connect tokens, send the Rust-shaped cloud reset request, and map the
   key-version response through the HTTP seam.
+- `pr5-runtime-device-sync-issuer-pairing-route-smoke`: verification passed.
+  Runtime-backed issuer-side pairing create, get, approve, complete, and cancel
+  routes now resolve the local device ID, restore Connect tokens, send
+  Rust-shaped device-scoped cloud requests, and map pairing responses through
+  the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

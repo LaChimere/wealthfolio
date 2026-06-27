@@ -3085,6 +3085,169 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime issuer pairing cloud routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-issuer-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      deviceId: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (url.endsWith("/approve") || url.endsWith("/cancel")) {
+          return Response.json({ success: true });
+        }
+        if (url.endsWith("/complete")) {
+          return Response.json({ success: true, remote_seed_present: false });
+        }
+        if (init?.method === "POST") {
+          return Response.json({
+            pairing_id: "pairing-1",
+            expires_at: "2026-01-01T00:00:00Z",
+            key_version: 2,
+            require_sas: true,
+          });
+        }
+        return Response.json({
+          pairing_id: "pairing-1",
+          status: "open",
+          claimer_device_id: null,
+          claimer_ephemeral_pub: null,
+          expires_at: "2026-01-01T00:00:00Z",
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const createResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing", {
+          codeHash: "hash",
+          ephemeralPublicKey: "public-key",
+        }),
+      );
+      expect(createResponse.status).toBe(200);
+      await expect(createResponse.json()).resolves.toEqual({
+        pairingId: "pairing-1",
+        expiresAt: "2026-01-01T00:00:00Z",
+        keyVersion: 2,
+        requireSas: true,
+      });
+
+      const getResponse = await fetch(`${server.baseUrl}/api/v1/sync/pairing/pairing-1`);
+      expect(getResponse.status).toBe(200);
+      await expect(getResponse.json()).resolves.toEqual({
+        pairingId: "pairing-1",
+        status: "open",
+        claimerDeviceId: null,
+        claimerEphemeralPub: null,
+        expiresAt: "2026-01-01T00:00:00Z",
+      });
+
+      const approveResponse = await fetch(
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/approve`, {
+          method: "POST",
+        }),
+      );
+      expect(approveResponse.status).toBe(200);
+      await expect(approveResponse.json()).resolves.toEqual({ success: true });
+
+      const completeResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/pairing-1/complete", {
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      );
+      expect(completeResponse.status).toBe(200);
+      await expect(completeResponse.json()).resolves.toEqual({
+        success: true,
+        remoteSeedPresent: false,
+      });
+
+      const cancelResponse = await fetch(
+        new Request(`${server.baseUrl}/api/v1/sync/pairing/pairing-1/cancel`, {
+          method: "POST",
+        }),
+      );
+      expect(cancelResponse.status).toBe(200);
+      await expect(cancelResponse.json()).resolves.toEqual({ success: true });
+
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings",
+          method: "POST",
+          body: JSON.stringify({ code_hash: "hash", ephemeral_public_key: "public-key" }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1",
+          method: "GET",
+          body: null,
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/approve",
+          method: "POST",
+          body: null,
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/complete",
+          method: "POST",
+          body: JSON.stringify({
+            encrypted_key_bundle: "bundle",
+            sas_proof: { ok: true },
+            signature: "signature",
+          }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/cancel",
+          method: "POST",
+          body: null,
+          deviceId: "device-runtime",
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route with pending outbox gate", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];
