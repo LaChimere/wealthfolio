@@ -6444,6 +6444,10 @@ contract:
   Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed the latest device-sync
   waiting-snapshot and snapshot metadata error route smokes and found no
   actionable issues.
+- `pr5-runtime-device-sync-transfer-bootstrap-gate-route-smoke`: verification
+  passed. Runtime-backed complete-with-transfer coverage now expects the route
+  to fail closed before cloud approve/complete mutations when local snapshot
+  bootstrap is still required.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
