@@ -6469,6 +6469,11 @@ contract:
   passed. Runtime-backed standalone device update, delete, and revoke routes now
   restore Connect tokens, send Rust-shaped cloud requests, and map success
   responses through the HTTP seam.
+- `pr5-runtime-device-sync-team-key-route-smoke`: verification passed.
+  Runtime-backed team-key initialize, rotate, initialize-commit, and
+  rotate-commit routes now resolve the local device ID, restore Connect tokens,
+  send Rust-shaped device-scoped cloud requests, and map cloud responses through
+  the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

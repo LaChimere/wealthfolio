@@ -2848,6 +2848,174 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime team-key cloud routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-team-key-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      deviceId: string;
+      requestId: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        if (url.endsWith("/keys/rotate")) {
+          return Response.json({ challenge: "challenge", nonce: "nonce", new_key_version: 3 });
+        }
+        if (url.endsWith("/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        if (url.endsWith("/keys/rotate/commit")) {
+          return Response.json({ success: true, key_version: 3 });
+        }
+        return Response.json({
+          mode: "BOOTSTRAP",
+          challenge: "challenge",
+          nonce: "nonce",
+          key_version: 2,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const initializeResponse = await fetch(
+        new Request(`${server.baseUrl}/api/v1/sync/keys/initialize`, { method: "POST" }),
+      );
+      expect(initializeResponse.status).toBe(200);
+      await expect(initializeResponse.json()).resolves.toEqual({
+        mode: "BOOTSTRAP",
+        challenge: "challenge",
+        nonce: "nonce",
+        key_version: 2,
+      });
+
+      const rotateResponse = await fetch(
+        new Request(`${server.baseUrl}/api/v1/sync/keys/rotate`, { method: "POST" }),
+      );
+      expect(rotateResponse.status).toBe(200);
+      await expect(rotateResponse.json()).resolves.toEqual({
+        challenge: "challenge",
+        nonce: "nonce",
+        newKeyVersion: 3,
+      });
+
+      const commitInitializeResponse = await fetch(
+        jsonRequest("/api/v1/sync/keys/initialize/commit", {
+          keyVersion: 2,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+          challengeResponse: "challenge",
+          recoveryEnvelope: "recovery",
+        }),
+      );
+      expect(commitInitializeResponse.status).toBe(200);
+      await expect(commitInitializeResponse.json()).resolves.toEqual({
+        success: true,
+        keyState: "ACTIVE",
+      });
+
+      const commitRotateResponse = await fetch(
+        jsonRequest("/api/v1/sync/keys/rotate/commit", {
+          newKeyVersion: 3,
+          envelopes: [{ deviceId: "device-2", deviceKeyEnvelope: "envelope-2" }],
+          signature: "signature",
+          challengeResponse: "challenge",
+        }),
+      );
+      expect(commitRotateResponse.status).toBe(200);
+      await expect(commitRotateResponse.json()).resolves.toEqual({ success: true, keyVersion: 3 });
+
+      expect(
+        deviceSyncRequests.map((request) => ({
+          url: request.url,
+          method: request.method,
+          body: request.body,
+          deviceId: request.deviceId,
+        })),
+      ).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/keys/initialize",
+          method: "POST",
+          body: JSON.stringify({ device_id: "device-runtime" }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/keys/rotate",
+          method: "POST",
+          body: JSON.stringify({ initiator_device_id: "device-runtime" }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/keys/initialize/commit",
+          method: "POST",
+          body: JSON.stringify({
+            device_id: "device-runtime",
+            key_version: 2,
+            device_key_envelope: "envelope",
+            signature: "signature",
+            challenge_response: "challenge",
+            recovery_envelope: "recovery",
+          }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/keys/rotate/commit",
+          method: "POST",
+          body: JSON.stringify({
+            new_key_version: 3,
+            envelopes: [{ device_id: "device-2", device_key_envelope: "envelope-2" }],
+            signature: "signature",
+            challenge_response: "challenge",
+          }),
+          deviceId: "device-runtime",
+        },
+      ]);
+      expect(deviceSyncRequests.map((request) => request.requestId)).toEqual([
+        expect.stringMatching(/^device-runtime:[0-9a-f-]{36}$/),
+        expect.stringMatching(/^device-runtime:[0-9a-f-]{36}$/),
+        expect.stringMatching(/^device-runtime:[0-9a-f-]{36}$/),
+        expect.stringMatching(/^device-runtime:[0-9a-f-]{36}$/),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route with pending outbox gate", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];
