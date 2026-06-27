@@ -6419,6 +6419,10 @@ contract:
   flow cancel to reach cloud cancel/delete best-effort calls, remove the flow,
   clear local sync identity while preserving nonce, delete the legacy device-id
   secret, and reset local sync session config.
+- `pr5-runtime-device-sync-pairing-flow-begin-success-route-smoke`: verification
+  passed. Runtime-backed device-sync pairing flow begin coverage now expects
+  flow begin to return a Rust-shaped success phase after cloud confirm when
+  local bootstrap is already complete, without polling snapshot metadata.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

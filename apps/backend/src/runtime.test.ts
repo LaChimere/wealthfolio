@@ -2974,6 +2974,95 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime pairing flow begin when bootstrap is already complete", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-begin-"));
+    const deviceSyncRequests: Array<{ url: string; method: string; body: string | null }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+        });
+        return Response.json({ success: true, key_version: 2 });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 2, 'trusted', '2026-01-02T03:04:05Z', NULL)
+          `,
+          )
+          .run();
+        seedDb.prepare("UPDATE sync_engine_state SET last_cycle_status = 'ok' WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const beginResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-complete",
+          proof: "proof",
+        }),
+      );
+      expect(beginResponse.status).toBe(200);
+      const beginBody = await beginResponse.text();
+      const begin = JSON.parse(beginBody) as { flowId?: unknown; phase?: unknown };
+      const flowId = begin.flowId;
+      expect(typeof flowId, beginBody).toBe("string");
+      if (typeof flowId !== "string") {
+        throw new Error("Expected pairing flow id");
+      }
+      expect(begin).toEqual({ flowId, phase: { phase: "success" } });
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-complete/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing flow overwrite approval to waiting snapshot", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-flow-"));
     const runtime = createSqliteBackedBackendServices({
