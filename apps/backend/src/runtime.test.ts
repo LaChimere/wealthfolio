@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { strToU8, zipSync } from "fflate";
 
 import type { BackendRuntimeConfig } from "./config";
+import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import {
   createSqliteBackedBackendServices,
   resolveBackendAppDataDir,
@@ -1450,6 +1451,17 @@ describe("TS backend runtime composition", () => {
     });
     const server = startBackendServer(config, runtime.options);
     const events: string[] = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime settings timezone route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
     });
@@ -1463,6 +1475,15 @@ describe("TS backend runtime composition", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ timezone: "UTC" });
       await waitForEventCount(events, "portfolio:update-complete", 1);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
       expect(events).toEqual(["portfolio:update-start", "portfolio:update-complete"]);
     } finally {
       unsubscribe?.();
@@ -1480,6 +1501,17 @@ describe("TS backend runtime composition", () => {
     });
     const server = startBackendServer(config, runtime.options);
     const events: string[] = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime settings base-currency route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
     });
@@ -1493,6 +1525,15 @@ describe("TS backend runtime composition", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ baseCurrency: "USD" });
       await waitForEventCount(events, "portfolio:update-complete", 1);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "backfill_history", asset_ids: null, days: 1825 },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
       expect(events).toEqual([
         "market:sync-start",
         "market:sync-complete",
@@ -2482,6 +2523,17 @@ describe("TS backend runtime composition", () => {
     });
     const server = startBackendServer(config, runtime.options);
     const events: string[] = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime exchange-rate route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
     });
@@ -2502,6 +2554,15 @@ describe("TS backend runtime composition", () => {
       expect(typeof createdRate.id).toBe("string");
       await waitForEventCount(events, "portfolio:update-complete", 1);
       expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(1);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
 
       const updateResponse = await fetch(`${server.baseUrl}/api/v1/exchange-rates`, {
         method: "PUT",
@@ -2523,6 +2584,22 @@ describe("TS backend runtime composition", () => {
       });
       await waitForEventCount(events, "portfolio:update-complete", 2);
       expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(2);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
 
       const deleteResponse = await fetch(
         `${server.baseUrl}/api/v1/exchange-rates/${encodeURIComponent(createdRate.id)}`,
@@ -2531,6 +2608,29 @@ describe("TS backend runtime composition", () => {
       expect(deleteResponse.status).toBe(204);
       await waitForEventCount(events, "portfolio:update-complete", 3);
       expect(events.filter((event) => event === "portfolio:update-complete")).toHaveLength(3);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+        {
+          accountIds: null,
+          marketSyncMode: { type: "none" },
+          snapshotMode: "full",
+          valuationMode: "full",
+          sinceDate: null,
+        },
+      ]);
     } finally {
       unsubscribe?.();
       server.stop();
@@ -3404,6 +3504,17 @@ describe("TS backend runtime composition", () => {
     });
     const server = startBackendServer(config, runtime.options);
     const events: string[] = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime market-data sync route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
     });
@@ -3416,6 +3527,15 @@ describe("TS backend runtime composition", () => {
       });
       expect(response.status).toBe(204);
       await waitForEventCount(events, "portfolio:update-complete", 1);
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "incremental", asset_ids: [] },
+          snapshotMode: "incremental_from_last",
+          valuationMode: "incremental_from_last",
+          sinceDate: null,
+        },
+      ]);
       expect(events).toEqual([
         "market:sync-start",
         "market:sync-complete",

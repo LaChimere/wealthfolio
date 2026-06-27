@@ -6368,6 +6368,10 @@ contract:
   Runtime-backed settings route coverage now expects base-currency updates
   through `PUT /api/v1/settings` to enqueue full portfolio recalculation with
   market-sync lifecycle events.
+- `pr5-runtime-event-route-config-review-fix`: verification passed.
+  Runtime-backed route smokes now capture portfolio job configs for market-data
+  sync, settings timezone, settings base-currency, and exchange-rate mutations
+  rather than relying only on lifecycle event names.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
