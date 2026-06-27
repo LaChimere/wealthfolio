@@ -6392,6 +6392,10 @@ contract:
   Runtime-backed AI provider model-listing route coverage now injects the AI
   model fetch seam and expects `/api/v1/ai/providers/:id/models` to call the
   expected provider endpoint without live network access.
+- `pr5-runtime-ai-provider-openai-models-route-smoke`: verification passed.
+  Runtime-backed AI provider model-listing route coverage now also expects
+  API-key-backed OpenAI model listing to read the runtime secret service and
+  send the expected Authorization header.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

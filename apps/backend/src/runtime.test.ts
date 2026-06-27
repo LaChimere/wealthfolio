@@ -1603,11 +1603,14 @@ describe("TS backend runtime composition", () => {
 
   test("wires runtime AI provider settings routes to SQLite persistence", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-provider-routes-"));
-    const modelRequests: string[] = [];
+    const modelRequests: Array<{ url: string; headers?: HeadersInit }> = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
-      aiProviderFetchModels: async (url) => {
-        modelRequests.push(url);
+      aiProviderFetchModels: async (url, init) => {
+        modelRequests.push({ url, headers: init?.headers });
+        if (url.includes("openai")) {
+          return Response.json({ data: [{ id: "runtime-gpt" }] });
+        }
         return Response.json({ models: [{ name: "runtime-model" }] });
       },
       repositoryRoot,
@@ -1675,7 +1678,27 @@ describe("TS backend runtime composition", () => {
         models: [{ id: "runtime-model", name: "runtime-model" }],
         supportsListing: true,
       });
-      expect(modelRequests).toEqual(["http://localhost:11434/api/tags"]);
+      expect(modelRequests[0]).toMatchObject({ url: "http://localhost:11434/api/tags" });
+
+      const secretResponse = await fetch(`${server.baseUrl}/api/v1/secrets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secretKey: "ai_openai", secret: "openai-key" }),
+      });
+      expect(secretResponse.status).toBe(204);
+
+      const openAiModelsResponse = await fetch(
+        `${server.baseUrl}/api/v1/ai/providers/openai/models`,
+      );
+      expect(openAiModelsResponse.status).toBe(200);
+      await expect(openAiModelsResponse.json()).resolves.toEqual({
+        models: [{ id: "runtime-gpt", name: "runtime-gpt" }],
+        supportsListing: true,
+      });
+      expect(modelRequests[1]).toMatchObject({
+        url: "https://api.openai.com/v1/models",
+        headers: { Authorization: "Bearer openai-key" },
+      });
 
       const db = openSqliteDatabase(runtime.dbPath);
       try {
