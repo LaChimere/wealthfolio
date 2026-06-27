@@ -2829,6 +2829,67 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime market-data quote delete route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-route-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const quoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7c";
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-quote-route-asset");
+        seedDb
+          .prepare(
+            `
+            INSERT INTO quotes (
+              id, asset_id, day, source, close, currency, created_at, timestamp
+            )
+            VALUES (?, 'runtime-quote-route-asset', '2026-05-14', 'MANUAL', '10.00', 'USD',
+              '2026-05-14T00:00:00Z', '2026-05-14T16:00:00Z')
+          `,
+          )
+          .run(quoteId);
+      } finally {
+        seedDb.close();
+      }
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/quotes/id/${encodeURIComponent(quoteId)}`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 1);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const quoteRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "quote");
+        expect(quoteRows).toEqual([
+          expect.objectContaining({
+            entity: "quote",
+            entity_id: quoteId,
+            op: "delete",
+          }),
+        ]);
+        expect(JSON.parse(String(quoteRows[0]?.payload))).toEqual({ id: quoteId });
+      } finally {
+        db.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({

@@ -6292,6 +6292,10 @@ contract:
   Runtime-backed alternative-asset route coverage now expects create/valuation
   update/delete HTTP routes to persist asset and quote sync_outbox callbacks and
   trigger portfolio recalculation.
+- `pr5-runtime-quote-delete-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed market-data quote delete route coverage now expects
+  `DELETE /api/v1/market-data/quotes/id/:id` to persist quote delete sync_outbox
+  callbacks and trigger portfolio recalculation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
