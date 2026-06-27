@@ -4492,6 +4492,104 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime import mapping route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-mapping-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('mapping-route-account', 'Mapping Route Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const saveMapping = (fieldName: string) =>
+        fetch(`${server.baseUrl}/api/v1/activities/import/mapping`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mapping: {
+              accountId: "mapping-route-account",
+              contextKind: "ACTIVITY",
+              name: "Route Mapping",
+              fieldMappings: { date: fieldName },
+            },
+          }),
+        });
+
+      const firstResponse = await saveMapping("Trade Date");
+      expect(firstResponse.status).toBe(200);
+      await expect(firstResponse.json()).resolves.toMatchObject({
+        accountId: "mapping-route-account",
+        contextKind: "CSV_ACTIVITY",
+        name: "Route Mapping",
+      });
+
+      const secondResponse = await saveMapping("Settlement Date");
+      expect(secondResponse.status).toBe(200);
+      await expect(secondResponse.json()).resolves.toMatchObject({
+        accountId: "mapping-route-account",
+        contextKind: "CSV_ACTIVITY",
+        name: "Route Mapping",
+      });
+
+      const getResponse = await fetch(
+        `${server.baseUrl}/api/v1/activities/import/mapping?accountId=mapping-route-account&contextKind=ACTIVITY`,
+      );
+      expect(getResponse.status).toBe(200);
+      await expect(getResponse.json()).resolves.toMatchObject({
+        accountId: "mapping-route-account",
+        contextKind: "CSV_ACTIVITY",
+        templateId: "acct_mapping-route-account",
+        fieldMappings: { date: "Settlement Date" },
+      });
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "activity_import_profile",
+        );
+        expect(rows.map((row) => [row.entity, row.op, row.entity_id])).toEqual([
+          ["activity_import_profile", "update", expect.any(String)],
+          ["activity_import_profile", "update", rows[0]?.entity_id],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          account_id: "mapping-route-account",
+          context_kind: "CSV_ACTIVITY",
+          source_system: "",
+          template_id: "acct_mapping-route-account",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          account_id: "mapping-route-account",
+          context_kind: "CSV_ACTIVITY",
+          source_system: "",
+          template_id: "acct_mapping-route-account",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime broker sync profile callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-broker-profile-sync-"));
     const runtime = createSqliteBackedBackendServices({

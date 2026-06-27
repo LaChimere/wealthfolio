@@ -6344,6 +6344,10 @@ contract:
   imported activity create, and APPLIED update sync_outbox callbacks; transfer
   route coverage verifies flow metadata transitions, and exchange-rate route
   coverage verifies one portfolio completion per mutation.
+- `pr5-runtime-import-mapping-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed import-mapping route coverage now expects save/get HTTP routes
+  to preserve account-template link identity and persist activity_import_profile
+  sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
