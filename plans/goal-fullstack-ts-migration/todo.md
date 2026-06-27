@@ -6336,6 +6336,9 @@ contract:
   Runtime-backed transfer link route coverage now expects activity link/unlink
   HTTP routes to persist paired activity update sync_outbox callbacks with
   user-modified transfer metadata.
+- `pr5-runtime-exchange-rate-route-event-smoke`: verification passed.
+  Runtime-backed exchange-rate route coverage now expects create/update/delete
+  HTTP routes to enqueue portfolio recalculation jobs.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

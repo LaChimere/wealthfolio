@@ -2408,6 +2408,66 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime exchange-rate routes to portfolio job execution", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-route-events-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/exchange-rates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          rate: "1.23",
+          source: "YAHOO",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const createdRate = (await createResponse.json()) as { id: string };
+      expect(typeof createdRate.id).toBe("string");
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/exchange-rates`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: createdRate.id,
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          rate: "1.24",
+          source: "MANUAL",
+          timestamp: "2026-05-14T16:00:00Z",
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: createdRate.id,
+        rate: "1.24",
+        source: "MANUAL",
+      });
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/exchange-rates/${encodeURIComponent(createdRate.id)}`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 3);
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime direct asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-asset-sync-"));
     const runtime = createSqliteBackedBackendServices({
