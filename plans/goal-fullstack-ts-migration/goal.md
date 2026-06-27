@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 867
+turns_used: 868
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-27T23:49:41+09:00"
+updated_at: "2026-06-27T23:53:32+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4970,6 +4970,10 @@ updated_at: "2026-06-27T23:49:41+09:00"
   approval coverage. The SQLite-backed runtime now proves an already-approved
   cloud pairing response still proceeds to complete and returns the Rust-shaped
   composite success response.
+- Turn 868: Added runtime-backed device-sync complete-with-transfer approve
+  failure coverage. The SQLite-backed runtime now proves a non-idempotent cloud
+  approve failure surfaces as an internal error and stops before the complete
+  pairing mutation.
 
 ## Deferred items
 
