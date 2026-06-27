@@ -6409,6 +6409,11 @@ contract:
   Runtime-backed device-sync bootstrap confirm route coverage now expects
   confirm-with-bootstrap to report local overwrite risk before snapshot polling
   when bootstrap is required and local user data exists.
+- `pr5-runtime-device-sync-pairing-flow-approval-route-smoke`: verification
+  passed. Runtime-backed device-sync pairing flow coverage now expects flow
+  begin to return overwrite_required for local data, approve-overwrite to
+  transition to waiting_snapshot when no cloud snapshot exists, and flow state
+  to preserve the waiting status.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
