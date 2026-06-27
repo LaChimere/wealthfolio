@@ -2753,6 +2753,101 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime device cloud mutation routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-mutate-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      authorization: string;
+      requestId: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          authorization: headers.get("authorization") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        return Response.json({ success: true });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/sync/device/device-runtime`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: "Renamed Mac" }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toEqual({ success: true });
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/sync/device/device-runtime`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(200);
+      await expect(deleteResponse.json()).resolves.toEqual({ success: true });
+
+      const revokeResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/device/device-runtime/revoke`,
+        {
+          method: "POST",
+        },
+      );
+      expect(revokeResponse.status).toBe(200);
+      await expect(revokeResponse.json()).resolves.toEqual({ success: true });
+
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          method: "PATCH",
+          body: JSON.stringify({ display_name: "Renamed Mac" }),
+          authorization: "Bearer access-token",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          method: "DELETE",
+          body: null,
+          authorization: "Bearer access-token",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/revoke",
+          method: "POST",
+          body: null,
+          authorization: "Bearer access-token",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route with pending outbox gate", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];

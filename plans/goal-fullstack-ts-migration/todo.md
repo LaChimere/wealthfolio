@@ -6465,6 +6465,10 @@ contract:
   `/api/v1/sync/device/current` to restore Connect tokens, call cloud device
   endpoints with Rust-shaped request IDs, and map cloud device payloads through
   the HTTP seam.
+- `pr5-runtime-device-sync-device-cloud-mutation-route-smoke`: verification
+  passed. Runtime-backed standalone device update, delete, and revoke routes now
+  restore Connect tokens, send Rust-shaped cloud requests, and map success
+  responses through the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
