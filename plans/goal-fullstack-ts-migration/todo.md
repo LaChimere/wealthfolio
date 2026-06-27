@@ -6493,6 +6493,10 @@ contract:
 - `pr5-runtime-device-sync-pairing-route-review`: dual-model review passed.
   Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed reset-team plus
   issuer/claimer pairing runtime route smokes and found no actionable issues.
+- `pr5-runtime-device-sync-register-route-smoke`: verification passed.
+  Runtime-backed device registration now expects `/api/v1/sync/device/register`
+  to restore Connect tokens, send the Rust-shaped enrollment request, map the
+  cloud enrollment response, and persist the returned legacy device ID secret.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

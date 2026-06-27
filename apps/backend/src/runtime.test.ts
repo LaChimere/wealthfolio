@@ -2848,6 +2848,93 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime device registration route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-register-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      authorization: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          authorization: headers.get("authorization") ?? "",
+        });
+        return Response.json({
+          mode: "READY",
+          device_id: "device-runtime",
+          e2ee_key_version: 2,
+          trust_state: "trusted",
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const registerResponse = await fetch(`${server.baseUrl}/api/v1/sync/device/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: "MacBook",
+          platform: "macos",
+          instanceId: "instance-runtime",
+          osVersion: "14.0",
+          appVersion: "1.2.3",
+        }),
+      });
+      expect(registerResponse.status).toBe(200);
+      await expect(registerResponse.json()).resolves.toEqual({
+        mode: "READY",
+        device_id: "device-runtime",
+        e2ee_key_version: 2,
+        trust_state: "trusted",
+      });
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices",
+          method: "POST",
+          body: JSON.stringify({
+            device_nonce: "instance-runtime",
+            display_name: "MacBook",
+            platform: "macos",
+            os_version: "14.0",
+            app_version: "1.2.3",
+          }),
+          authorization: "Bearer access-token",
+        },
+      ]);
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
+        "device-runtime",
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime team-key cloud routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-team-key-"));
     const deviceSyncRequests: Array<{
