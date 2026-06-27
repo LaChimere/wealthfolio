@@ -6401,6 +6401,10 @@ contract:
   env/fetch seams into device-sync and expects complete-with-transfer success
   with clear outbox, then pending sync_outbox gating before cloud complete
   calls.
+- `pr5-runtime-device-sync-bootstrap-confirm-route-smoke`: verification passed.
+  Runtime-backed device-sync bootstrap confirm route coverage now expects
+  confirm-with-bootstrap to return already_complete when local bootstrap is
+  complete while still sending expected cloud confirm request metadata.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
