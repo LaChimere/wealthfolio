@@ -3090,6 +3090,158 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime pairing flow cancel to local cleanup", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-cancel-"));
+    const deviceSyncRequests: Array<{ url: string; method: string; deviceId: string }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        return Response.json({ success: true, key_version: 2 });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 2,
+          deviceSecretKey: "device-secret",
+          devicePublicKey: "device-public",
+        }),
+      );
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 2, 'trusted', NULL, NULL)
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('cancel-account', 'Cancel Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const beginResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-cancel",
+          proof: "proof",
+        }),
+      );
+      expect(beginResponse.status).toBe(200);
+      const begin = (await beginResponse.json()) as { flowId?: unknown };
+      const flowId = begin.flowId;
+      expect(typeof flowId).toBe("string");
+      if (typeof flowId !== "string") {
+        throw new Error("Expected pairing flow id");
+      }
+
+      const cancelResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/cancel", { flowId }),
+      );
+      expect(cancelResponse.status).toBe(200);
+      await expect(cancelResponse.json()).resolves.toEqual({
+        flowId,
+        phase: { phase: "success" },
+      });
+
+      const stateResponse = await fetch(jsonRequest("/api/v1/sync/pairing/flow/state", { flowId }));
+      expect(stateResponse.status).toBe(500);
+      await expect(stateResponse.json()).resolves.toMatchObject({ message: "Flow not found" });
+
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-cancel/confirm",
+          method: "POST",
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-cancel/cancel",
+          method: "POST",
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          method: "DELETE",
+          deviceId: "",
+        },
+      ]);
+      const clearedIdentityRaw = await runtime.options.secretService?.getSecret("sync_identity");
+      expect(JSON.parse(clearedIdentityRaw ?? "{}")).toEqual({
+        version: 2,
+        deviceNonce: "nonce-runtime",
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBeNull();
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_device_config")
+            .get()?.count,
+        ).toBe(0);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime FX asset sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-fx-sync-"));
     const runtime = createSqliteBackedBackendServices({
