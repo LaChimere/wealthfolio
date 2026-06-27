@@ -6288,6 +6288,10 @@ contract:
   account sync now suppresses account Create sync_outbox rows for broker-linked
   accounts with provider_account_id, matching Rust, while local account
   create/update/delete sync rows remain covered.
+- `pr5-runtime-alternative-asset-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed alternative-asset route coverage now expects create/valuation
+  update/delete HTTP routes to persist asset and quote sync_outbox callbacks and
+  trigger portfolio recalculation.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -2681,6 +2681,107 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime alternative asset route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alt-asset-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/alternative-assets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "property",
+          name: "Route Property",
+          currency: "USD",
+          currentValue: "125000.00",
+          valueDate: "2026-05-14",
+          purchasePrice: "100000.00",
+          purchaseDate: "2024-01-01",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { assetId: string; quoteId: string };
+      expect(created.assetId).toEqual(expect.any(String));
+      expect(created.quoteId).toEqual(expect.any(String));
+
+      const valuationResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets/${created.assetId}/valuation`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            value: "130000.00",
+            date: "2026-05-14",
+            notes: "Route appraisal",
+          }),
+        },
+      );
+      expect(valuationResponse.status).toBe(200);
+      await expect(valuationResponse.json()).resolves.toMatchObject({
+        quoteId: created.quoteId,
+        valuationDate: "2026-05-14",
+        value: "130000.00",
+      });
+      await runtime.domainEventWorker.flush();
+
+      const deleteResponse = await fetch(
+        `${server.baseUrl}/api/v1/alternative-assets/${created.assetId}`,
+        { method: "DELETE" },
+      );
+      expect(deleteResponse.status).toBe(204);
+      await waitForEventCount(events, "portfolio:update-complete", 3);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter(
+          (row) => row.entity === "asset" || row.entity === "quote",
+        );
+        expect(rows.map((row) => [row.entity, row.entity_id, row.op])).toEqual([
+          ["asset", created.assetId, "create"],
+          ["quote", expect.any(String), "create"],
+          ["quote", created.quoteId, "create"],
+          ["quote", created.quoteId, "update"],
+          ["asset", created.assetId, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.assetId,
+          kind: "PROPERTY",
+          name: "Route Property",
+          quote_mode: "MANUAL",
+          quote_ccy: "USD",
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          asset_id: created.assetId,
+          day: "2024-01-01",
+          close: "100000.00",
+          source: "MANUAL",
+        });
+        expect(JSON.parse(String(rows[3]?.payload))).toMatchObject({
+          id: created.quoteId,
+          asset_id: created.assetId,
+          close: "130000.00",
+          notes: "Route appraisal",
+        });
+        expect(JSON.parse(String(rows[4]?.payload))).toEqual({ id: created.assetId });
+      } finally {
+        db.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime market-data UUID manual quote deletes to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-sync-"));
     const runtime = createSqliteBackedBackendServices({
