@@ -2967,6 +2967,134 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime AI chat route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-route-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO ai_threads (
+              id, title, config_snapshot, is_pinned, created_at, updated_at
+            )
+            VALUES ('ai-thread-route', 'Original Route', NULL, 0, '2026-05-14T00:00:00Z',
+              '2026-05-14T00:00:00Z')
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO ai_messages (id, thread_id, role, content_json, created_at)
+            VALUES (
+              'ai-message-route',
+              'ai-thread-route',
+              'assistant',
+              '{"schemaVersion":1,"parts":[{"type":"toolResult","toolCallId":"tool-route","data":{"status":"pending"}}]}',
+              '2026-05-14T00:00:00Z'
+            )
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const updateThreadResponse = await fetch(
+        `${server.baseUrl}/api/v1/ai/threads/ai-thread-route`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Updated Route", isPinned: true }),
+        },
+      );
+      expect(updateThreadResponse.status).toBe(200);
+      await expect(updateThreadResponse.json()).resolves.toMatchObject({
+        id: "ai-thread-route",
+        title: "Updated Route",
+        isPinned: true,
+      });
+
+      const addTagResponse = await fetch(
+        `${server.baseUrl}/api/v1/ai/threads/ai-thread-route/tags`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tag: "favorite" }),
+        },
+      );
+      expect(addTagResponse.status).toBe(204);
+
+      const updateToolResultResponse = await fetch(`${server.baseUrl}/api/v1/ai/tool-result`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          threadId: "ai-thread-route",
+          toolCallId: "tool-route",
+          resultPatch: { status: "submitted" },
+        }),
+      });
+      expect(updateToolResultResponse.status).toBe(200);
+      await expect(updateToolResultResponse.json()).resolves.toMatchObject({
+        id: "ai-message-route",
+        threadId: "ai-thread-route",
+      });
+
+      const removeTagResponse = await fetch(
+        `${server.baseUrl}/api/v1/ai/threads/ai-thread-route/tags/favorite`,
+        { method: "DELETE" },
+      );
+      expect(removeTagResponse.status).toBe(204);
+
+      const deleteThreadResponse = await fetch(
+        `${server.baseUrl}/api/v1/ai/threads/ai-thread-route`,
+        { method: "DELETE" },
+      );
+      expect(deleteThreadResponse.status).toBe(204);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db);
+        expect(rows.map((row) => [row.entity, row.op])).toEqual([
+          ["ai_thread", "update"],
+          ["ai_thread_tag", "create"],
+          ["ai_message", "update"],
+          ["ai_thread_tag", "delete"],
+          ["ai_thread", "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "ai-thread-route",
+          title: "Updated Route",
+          is_pinned: 1,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          thread_id: "ai-thread-route",
+          tag: "favorite",
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: "ai-message-route",
+          thread_id: "ai-thread-route",
+        });
+        expect(String(rows[2]?.payload)).toContain("submitted");
+        expect(JSON.parse(String(rows[3]?.payload))).toEqual({ id: rows[1]?.entity_id });
+        expect(JSON.parse(String(rows[4]?.payload))).toEqual({ id: "ai-thread-route" });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime account sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
     const runtime = createSqliteBackedBackendServices({

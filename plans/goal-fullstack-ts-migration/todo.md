@@ -6296,6 +6296,10 @@ contract:
   Runtime-backed market-data quote delete route coverage now expects
   `DELETE /api/v1/market-data/quotes/id/:id` to persist quote delete sync_outbox
   callbacks and trigger portfolio recalculation.
+- `pr5-runtime-ai-chat-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed AI chat route coverage now expects thread update/delete, tag
+  create/delete, and tool-result update HTTP routes to persist ai_thread,
+  ai_thread_tag, and ai_message sync_outbox callbacks.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
