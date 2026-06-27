@@ -6431,6 +6431,10 @@ contract:
   passed. Runtime-backed device-sync pairing flow begin coverage now expects
   clear local data to skip overwrite prompts, poll latest snapshot metadata, and
   store a waiting_snapshot flow when the cloud has no snapshot yet.
+- `pr5-runtime-device-sync-pairing-flow-snapshot-error-route-smoke`:
+  verification passed. Runtime-backed device-sync pairing flow approval coverage
+  now expects newer snapshot schema metadata to surface the Rust-shaped terminal
+  error before bootstrap apply and remove the flow.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 862
+turns_used: 863
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-27T23:16:03+09:00"
+updated_at: "2026-06-27T23:20:24+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -4950,6 +4950,10 @@ updated_at: "2026-06-27T23:16:03+09:00"
   pairing, skips overwrite prompts when local data is clear, polls latest
   snapshot metadata, and stores a waiting_snapshot flow when the cloud has no
   snapshot yet.
+- Turn 863: Added runtime-backed device-sync pairing-flow snapshot-metadata
+  error coverage. The SQLite-backed runtime now proves approve-overwrite
+  surfaces the Rust-shaped newer-schema error before bootstrap apply and removes
+  the flow after the terminal error.
 
 ## Deferred items
 

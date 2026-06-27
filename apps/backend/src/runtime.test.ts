@@ -3289,6 +3289,119 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime pairing flow approval to snapshot metadata error", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-snapshot-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            schema_version: 2,
+            covers_tables: [],
+            created_at: "2026-01-01T00:05:00Z",
+            oplog_seq: 1,
+            size_bytes: 0,
+            checksum: "checksum-1",
+          });
+        }
+        return Response.json({ success: true, key_version: 2 });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 2, 'trusted', NULL, NULL)
+          `,
+          )
+          .run();
+        seedDb.prepare("UPDATE sync_engine_state SET last_cycle_status = 'ok' WHERE id = 1").run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('schema-account', 'Schema Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const beginResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-schema",
+          proof: "proof",
+        }),
+      );
+      expect(beginResponse.status).toBe(200);
+      const begin = (await beginResponse.json()) as { flowId?: unknown };
+      const flowId = begin.flowId;
+      expect(typeof flowId).toBe("string");
+      if (typeof flowId !== "string") {
+        throw new Error("Expected pairing flow id");
+      }
+
+      const approveResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/approve-overwrite", { flowId }),
+      );
+      expect(approveResponse.status).toBe(200);
+      await expect(approveResponse.json()).resolves.toEqual({
+        flowId,
+        phase: {
+          phase: "error",
+          message:
+            "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+        },
+      });
+
+      const stateResponse = await fetch(jsonRequest("/api/v1/sync/pairing/flow/state", { flowId }));
+      expect(stateResponse.status).toBe(500);
+      await expect(stateResponse.json()).resolves.toMatchObject({ message: "Flow not found" });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing flow cancel to local cleanup", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-cancel-"));
     const deviceSyncRequests: Array<{ url: string; method: string; deviceId: string }> = [];
