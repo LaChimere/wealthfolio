@@ -1601,6 +1601,99 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime AI provider settings routes to SQLite persistence", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-provider-routes-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const providersResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
+      expect(providersResponse.status).toBe(200);
+      const providers = (await providersResponse.json()) as {
+        providers: Array<Record<string, unknown>>;
+      };
+      expect(providers.providers.find((provider) => provider.id === "ollama")).toMatchObject({
+        id: "ollama",
+        defaultModel: "gemma4:e4b",
+      });
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          favorite: true,
+          selectedModel: "qwen3.5:9b",
+          priority: 1,
+          favoriteModels: ["qwen3.5:9b"],
+          toolsAllowlist: ["get_accounts"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toBeNull();
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+      await expect(defaultResponse.json()).resolves.toBeNull();
+
+      const updatedResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers`);
+      expect(updatedResponse.status).toBe(200);
+      const updatedProviders = (await updatedResponse.json()) as {
+        defaultProvider: string;
+        providers: Array<Record<string, unknown>>;
+      };
+      expect(updatedProviders.defaultProvider).toBe("ollama");
+      expect(updatedProviders.providers.find((provider) => provider.id === "ollama")).toMatchObject(
+        {
+          id: "ollama",
+          enabled: true,
+          favorite: true,
+          selectedModel: "qwen3.5:9b",
+          priority: 1,
+          favoriteModels: ["qwen3.5:9b"],
+          toolsAllowlist: ["get_accounts", "get_cash_balances"],
+        },
+      );
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const stored = db
+          .query<
+            { setting_value: string },
+            []
+          >("SELECT setting_value FROM app_settings WHERE setting_key = 'ai_provider_settings'")
+          .get();
+        expect(JSON.parse(String(stored?.setting_value))).toMatchObject({
+          defaultProvider: "ollama",
+          providers: {
+            ollama: {
+              enabled: true,
+              favorite: true,
+              selectedModel: "qwen3.5:9b",
+              priority: 1,
+              favoriteModels: ["qwen3.5:9b"],
+              toolsAllowlist: ["get_accounts", "get_cash_balances"],
+            },
+          },
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({

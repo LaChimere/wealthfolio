@@ -6380,6 +6380,10 @@ contract:
   Runtime-backed Connect sync route coverage now expects
   `POST /api/v1/connect/sync` to emit broker sync start/complete events with
   connection, account, and activity summary payloads.
+- `pr5-runtime-ai-provider-route-smoke`: verification passed. Runtime-backed AI
+  provider route coverage now expects provider settings/default HTTP routes to
+  persist selected model, priority, favorite models, tool allowlist, and default
+  provider state.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
