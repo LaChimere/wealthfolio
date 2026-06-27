@@ -6384,6 +6384,10 @@ contract:
   provider route coverage now expects provider settings/default HTTP routes to
   persist selected model, priority, favorite models, tool allowlist, and default
   provider state.
+- `pr5-runtime-connect-external-sync-outbox-suppression`: verification passed.
+  Runtime-backed Connect broker route coverage now expects broker-created
+  external platforms/accounts not to enqueue local platform/account sync_outbox
+  rows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

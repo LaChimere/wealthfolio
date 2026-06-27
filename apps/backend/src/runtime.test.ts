@@ -2030,6 +2030,16 @@ describe("TS backend runtime composition", () => {
           }),
         ],
       });
+      const syncOutboxDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          readRuntimeSyncOutbox(syncOutboxDb).filter(
+            (row) => row.entity === "platform" || row.entity === "account",
+          ),
+        ).toEqual([]);
+      } finally {
+        syncOutboxDb.close();
+      }
 
       const authenticatedPlansResponse = await fetch(`${server.baseUrl}/api/v1/connect/plans`);
       expect(authenticatedPlansResponse.status).toBe(200);
