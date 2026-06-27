@@ -3248,6 +3248,143 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime claimer pairing cloud routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-claimer-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: string | null;
+      deviceId: string;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? init.body : null,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+        });
+        if (url.endsWith("/messages")) {
+          return Response.json({
+            session_status: "approved",
+            messages: [
+              {
+                id: "message-1",
+                payload_type: "rk_transfer_v1",
+                payload: "payload",
+                created_at: "2026-01-01T00:00:00Z",
+              },
+            ],
+          });
+        }
+        if (url.endsWith("/confirm")) {
+          return Response.json({ success: true, key_version: 2, remote_seed_present: true });
+        }
+        return Response.json({
+          session_id: "pairing-1",
+          issuer_ephemeral_pub: "issuer-key",
+          e2ee_key_version: 2,
+          require_sas: true,
+          expires_at: "2026-01-01T00:00:00Z",
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const claimResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/claim", {
+          code: "123456",
+          ephemeralPublicKey: "public-key",
+        }),
+      );
+      expect(claimResponse.status).toBe(200);
+      await expect(claimResponse.json()).resolves.toEqual({
+        sessionId: "pairing-1",
+        issuerEphemeralPub: "issuer-key",
+        e2eeKeyVersion: 2,
+        requireSas: true,
+        expiresAt: "2026-01-01T00:00:00Z",
+      });
+
+      const messagesResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/pairing/pairing-1/messages`,
+      );
+      expect(messagesResponse.status).toBe(200);
+      await expect(messagesResponse.json()).resolves.toEqual({
+        sessionStatus: "approved",
+        messages: [
+          {
+            id: "message-1",
+            payloadType: "rk_transfer_v1",
+            payload: "payload",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+
+      const confirmResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/pairing-1/confirm", { proof: "proof" }),
+      );
+      expect(confirmResponse.status).toBe(200);
+      await expect(confirmResponse.json()).resolves.toEqual({
+        success: true,
+        keyVersion: 2,
+        remoteSeedPresent: true,
+      });
+
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/claim",
+          method: "POST",
+          body: JSON.stringify({ code: "123456", ephemeral_public_key: "public-key" }),
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/messages",
+          method: "GET",
+          body: null,
+          deviceId: "device-runtime",
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-1/confirm",
+          method: "POST",
+          body: JSON.stringify({ proof: "proof" }),
+          deviceId: "device-runtime",
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route with pending outbox gate", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];
