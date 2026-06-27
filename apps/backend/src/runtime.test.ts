@@ -3303,6 +3303,97 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime activity route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-route-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityHttpInput(seedDb);
+      } finally {
+        seedDb.close();
+      }
+
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/activities`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          accountId: "tx-account",
+          activityType: "DEPOSIT",
+          activityDate: "2026-05-14T10:00:00.000Z",
+          amount: "100",
+          currency: "USD",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string };
+      expect(created.id).toEqual(expect.any(String));
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/activities`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: created.id,
+          accountId: "tx-account",
+          activityType: "DEPOSIT",
+          activityDate: "2026-05-14T10:00:00.000Z",
+          amount: "125",
+          currency: "USD",
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      await expect(updateResponse.json()).resolves.toMatchObject({
+        id: created.id,
+        amount: "125",
+        isUserModified: true,
+      });
+
+      const deleteResponse = await fetch(`${server.baseUrl}/api/v1/activities/${created.id}`, {
+        method: "DELETE",
+      });
+      expect(deleteResponse.status).toBe(200);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "activity");
+        expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
+          [created.id, "create"],
+          [created.id, "update"],
+          [created.id, "delete"],
+        ]);
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: created.id,
+          account_id: "tx-account",
+          activity_type: "DEPOSIT",
+          amount: "100",
+          source_system: "MANUAL",
+          is_user_modified: 0,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: created.id,
+          account_id: "tx-account",
+          activity_type: "DEPOSIT",
+          amount: "125",
+          source_system: "MANUAL",
+          is_user_modified: 1,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toEqual({ id: created.id });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime account sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
     const runtime = createSqliteBackedBackendServices({

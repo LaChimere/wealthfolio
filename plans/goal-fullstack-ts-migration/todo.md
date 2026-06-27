@@ -6317,6 +6317,10 @@ contract:
   Runtime-backed holdings snapshot route coverage now expects
   `POST/DELETE /api/v1/snapshots` to persist manual, synthetic, and delete
   snapshot sync_outbox callbacks.
+- `pr5-runtime-activity-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed activity route coverage now expects `POST/PUT/DELETE` activity
+  routes to persist create/update/delete activity sync_outbox callbacks with
+  Rust-compatible user-modified flags.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
