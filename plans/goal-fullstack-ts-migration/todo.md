@@ -6356,6 +6356,11 @@ contract:
   passed. Runtime-backed alternative-asset metadata route coverage now expects
   metadata update HTTP routes to persist asset update and UUID manual quote
   create sync_outbox callbacks.
+- `pr5-runtime-market-sync-route-event-smoke`: verification passed.
+  Runtime-backed market-data sync route coverage now expects
+  `POST /api/v1/market-data/sync` to enqueue portfolio jobs and emit
+  market/portfolio lifecycle events without live provider fetches for empty
+  explicit targets.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
