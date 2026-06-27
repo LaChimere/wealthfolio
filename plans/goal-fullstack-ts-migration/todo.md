@@ -6304,6 +6304,11 @@ contract:
   Runtime-backed market-data quote update route coverage now expects
   `PUT /api/v1/market-data/quotes/:assetId` to persist UUID manual quote update
   sync_outbox callbacks and trigger portfolio recalculation.
+- `pr5-runtime-quote-import-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed market-data quote import route coverage now expects
+  `POST /api/v1/market-data/quotes/import` to persist UUID manual quote update
+  sync_outbox callbacks while deterministic non-UUID manual imports remain
+  local-only.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

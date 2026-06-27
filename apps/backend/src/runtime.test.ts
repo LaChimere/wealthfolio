@@ -2968,6 +2968,102 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime market-data quote import route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-quote-import-route-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const quoteId = "018f4b3a-90c4-7d8e-9a1b-3e2f4c5d6a7e";
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-quote-import-asset");
+        seedDb
+          .prepare(
+            `
+            INSERT INTO quotes (
+              id, asset_id, day, source, close, currency, created_at, timestamp
+            )
+            VALUES (?, 'runtime-quote-import-asset', '2026-01-06', 'MANUAL', '12.00', 'USD',
+              '2026-01-06T00:00:00Z', '2026-01-06T16:00:00Z')
+          `,
+          )
+          .run(quoteId);
+      } finally {
+        seedDb.close();
+      }
+
+      const importResponse = await fetch(`${server.baseUrl}/api/v1/market-data/quotes/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          overwriteExisting: true,
+          quotes: [
+            {
+              symbol: "runtime-quote-import-asset",
+              date: "2026-01-05",
+              close: 11,
+              currency: "USD",
+              validationStatus: "valid",
+            },
+            {
+              symbol: "runtime-quote-import-asset",
+              date: "2026-01-06",
+              close: 12.5,
+              currency: "USD",
+              validationStatus: "valid",
+            },
+          ],
+        }),
+      });
+      expect(importResponse.status).toBe(200);
+      await expect(importResponse.json()).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "runtime-quote-import-asset",
+          validationStatus: "valid",
+        }),
+        expect.objectContaining({
+          symbol: "runtime-quote-import-asset",
+          validationStatus: "valid",
+        }),
+      ]);
+      await waitForEventCount(events, "portfolio:update-complete", 1);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const quoteRows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "quote");
+        expect(quoteRows).toEqual([
+          expect.objectContaining({
+            entity: "quote",
+            entity_id: quoteId,
+            op: "update",
+          }),
+        ]);
+        expect(JSON.parse(String(quoteRows[0]?.payload))).toMatchObject({
+          id: quoteId,
+          asset_id: "runtime-quote-import-asset",
+          day: "2026-01-06",
+          source: "MANUAL",
+          close: "12.5",
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
