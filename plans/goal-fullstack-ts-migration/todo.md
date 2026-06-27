@@ -6332,6 +6332,10 @@ contract:
   Runtime-backed activity import route coverage now expects
   `POST /api/v1/activities/import` to persist import_run and imported activity
   sync_outbox callbacks.
+- `pr5-runtime-transfer-link-route-sync-outbox-smoke`: verification passed.
+  Runtime-backed transfer link route coverage now expects activity link/unlink
+  HTTP routes to persist paired activity update sync_outbox callbacks with
+  user-modified transfer metadata.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

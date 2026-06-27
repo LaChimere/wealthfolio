@@ -3591,6 +3591,119 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("persists runtime transfer link route callbacks to sync_outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-transfer-link-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES
+              ('transfer-account-in', 'Transfer In', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS'),
+              ('transfer-account-out', 'Transfer Out', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS')
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO activities (
+              id, account_id, asset_id, activity_type, subtype, status, activity_date,
+              quantity, unit_price, amount, fee, currency, notes, metadata,
+              source_system, source_record_id, source_group_id, idempotency_key,
+              import_run_id, is_user_modified, needs_review, created_at, updated_at
+            )
+            VALUES
+              ('transfer-in', 'transfer-account-in', NULL, 'TRANSFER_IN', NULL, 'POSTED',
+                '2026-05-14T10:00:00.000Z', NULL, NULL, '100', NULL, 'USD', NULL, NULL,
+                'PLAID', 'transfer-in-row', NULL, NULL, NULL, 0, 0,
+                '2026-05-14T10:00:00.000Z', '2026-05-14T10:00:00.000Z'),
+              ('transfer-out', 'transfer-account-out', NULL, 'TRANSFER_OUT', NULL, 'POSTED',
+                '2026-05-14T10:00:00.000Z', NULL, NULL, '100', NULL, 'USD', NULL, NULL,
+                'PLAID', 'transfer-out-row', NULL, NULL, NULL, 0, 0,
+                '2026-05-14T10:00:00.000Z', '2026-05-14T10:00:00.000Z')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const linkResponse = await fetch(`${server.baseUrl}/api/v1/activities/link`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ activityAId: "transfer-in", activityBId: "transfer-out" }),
+      });
+      expect(linkResponse.status).toBe(200);
+      await expect(linkResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: "transfer-in", isUserModified: true }),
+        expect.objectContaining({ id: "transfer-out", isUserModified: true }),
+      ]);
+
+      const unlinkResponse = await fetch(`${server.baseUrl}/api/v1/activities/unlink`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ activityAId: "transfer-in", activityBId: "transfer-out" }),
+      });
+      expect(unlinkResponse.status).toBe(200);
+      await expect(unlinkResponse.json()).resolves.toEqual([
+        expect.objectContaining({ id: "transfer-in", sourceGroupId: null }),
+        expect.objectContaining({ id: "transfer-out", sourceGroupId: null }),
+      ]);
+
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        const rows = readRuntimeSyncOutbox(db).filter((row) => row.entity === "activity");
+        expect(rows.map((row) => [row.entity_id, row.op])).toEqual([
+          ["transfer-in", "update"],
+          ["transfer-out", "update"],
+          ["transfer-in", "update"],
+          ["transfer-out", "update"],
+        ]);
+        const linkedGroupId = JSON.parse(String(rows[0]?.payload)).source_group_id;
+        expect(typeof linkedGroupId).toBe("string");
+        expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
+          id: "transfer-in",
+          source_group_id: linkedGroupId,
+          is_user_modified: 1,
+        });
+        expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
+          id: "transfer-out",
+          source_group_id: linkedGroupId,
+          is_user_modified: 1,
+        });
+        expect(JSON.parse(String(rows[2]?.payload))).toMatchObject({
+          id: "transfer-in",
+          source_group_id: null,
+          is_user_modified: 1,
+        });
+        expect(JSON.parse(String(rows[3]?.payload))).toMatchObject({
+          id: "transfer-out",
+          source_group_id: null,
+          is_user_modified: 1,
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime account sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-sync-"));
     const runtime = createSqliteBackedBackendServices({
