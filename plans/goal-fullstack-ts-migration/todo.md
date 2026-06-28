@@ -6643,6 +6643,10 @@ contract:
   Runtime-backed Connect enable now expects `/api/v1/connect/device/enable` to
   enroll a fresh device into the pairing-required state, persist the generated
   identity, and avoid bootstrap key initialization when trusted devices exist.
+- `pr5-runtime-connect-enable-reinitialize-review`: dual-model review passed.
+  Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed Connect enable
+  STALE/REGISTERED/FRESH-PAIR and reinitialize reset+reenroll runtime route
+  smokes and found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
