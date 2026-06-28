@@ -7259,6 +7259,20 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedHighIdStalePayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "zzz-assignment",
+          assetId: "assignment-asset",
+          taxonomyId: "custom_groups",
+          categoryId: "replay-category",
+          weight: 1250,
+          source: "manual",
+          updatedAt: "2026-01-01T00:00:00+00:00",
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -7271,13 +7285,13 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 40 });
+          return Response.json({ action: "PULL_TAIL", cursor: 41 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 40,
-            next_cursor: 40,
+            to: 41,
+            next_cursor: 41,
             has_more: false,
             events: [
               {
@@ -7307,6 +7321,20 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:02Z",
+              },
+              {
+                event_id: "cfcfcfcf-cfcf-4cfc-8fcf-cfcfcfcfcfcf",
+                device_id: "other-device",
+                type: "asset_taxonomy_assignment.update.v1",
+                entity: "asset_taxonomy_assignment",
+                entity_id: "zzz-assignment",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedHighIdStalePayload,
+                payload_key_version: 5,
+                seq: 41,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:03Z",
               },
             ],
           });
@@ -7375,7 +7403,7 @@ describe("TS backend runtime composition", () => {
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
         pulledCount: 1,
-        cursor: 40,
+        cursor: 41,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
@@ -7439,6 +7467,14 @@ describe("TS backend runtime composition", () => {
               { count: number },
               []
             >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = 'cececece-cece-4cec-8ece-cececececece'")
+            .get(),
+        ).toEqual({ count: 1 });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = 'cfcfcfcf-cfcf-4cfc-8fcf-cfcfcfcfcfcf'")
             .get(),
         ).toEqual({ count: 1 });
       } finally {
