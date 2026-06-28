@@ -6598,6 +6598,10 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed start-background READY gate,
   bootstrap-overwrite-check, and reconcile-ready-state not-ready runtime route
   smokes and found no actionable issues.
+- `pr5-runtime-connect-trigger-cycle-pull-tail-route-smoke`: verification
+  passed. Runtime-backed Connect trigger-cycle now expects covered pull-tail
+  reconcile results to acquire the local sync lock, return the Rust-shaped ok
+  payload, and clear stale engine error/retry state.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
