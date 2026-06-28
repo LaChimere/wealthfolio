@@ -6554,6 +6554,10 @@ contract:
 - `pr5-runtime-connect-generate-uploaded-route-smoke`: verification passed.
   Runtime-backed Connect generate-snapshot now expects trusted devices to skip
   local export when the latest remote snapshot already covers the local cursor.
+- `pr5-runtime-connect-generate-restore-route-smoke`: verification passed.
+  Runtime-backed Connect generate-snapshot now expects a local cursor ahead of
+  the server cursor to surface the Rust-shaped restore-required internal error
+  before snapshot metadata lookup.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
