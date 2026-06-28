@@ -6684,6 +6684,10 @@ contract:
   Runtime-backed Connect trigger-cycle now decrypts and applies remote account
   replay events, updates sync entity metadata/applied-event tracking, and keeps
   non-account replay entities gated.
+- `pr5-runtime-connect-trigger-replay-review-fixes`: review feedback resolved.
+  Push retries now include Rust retryable statuses and transport errors,
+  key-version mismatches preserve current-key pending rows, replay apply errors
+  are skipped so the cursor can advance, and stuck pull pagination fails closed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

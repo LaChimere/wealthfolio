@@ -4090,6 +4090,13 @@ class LocalPushSyncFailureError extends Error {
   }
 }
 
+class LocalReplayApplyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalReplayApplyError";
+  }
+}
+
 const STALE_PULL_ERROR_CODES = new Set([
   "SYNC_CURSOR_TOO_OLD",
   "SYNC_SEGMENT_OBJECT_MISSING",
@@ -7315,7 +7322,12 @@ async function triggerLocalDeviceSyncCycle(
       localHasPendingSyncOutbox(db)
     ) {
       const acquiredLockVersion = localAcquireSyncCycleLock(db);
-      let pushResult: { pushedCount: number; serverCursor: number; deadLetterCount: number };
+      let pushResult: {
+        pushedCount: number;
+        serverCursor: number;
+        deadLetterCount: number;
+        status?: "ok" | "key_version_mismatch";
+      };
       try {
         pushResult = await localPushPendingSyncOutbox(
           db,
@@ -7328,6 +7340,21 @@ async function triggerLocalDeviceSyncCycle(
       } catch (error) {
         markLocalSyncCycleError(db, "push_error", `Push failed: ${errorMessage(error)}`);
         return localSyncCycleResult("push_error", acquiredLockVersion, cursor);
+      }
+      if (pushResult.status !== undefined) {
+        if (pushResult.status === "ok") {
+          markLocalSyncCycleOutcome(db, "ok");
+        } else {
+          markLocalSyncCycleError(
+            db,
+            pushResult.status,
+            "Key version mismatch — re-pairing required",
+          );
+        }
+        return localSyncCycleResult(pushResult.status, acquiredLockVersion, cursor, null, null, {
+          pushedCount: pushResult.pushedCount,
+          deadLetterCount: pushResult.deadLetterCount,
+        });
       }
       const followUpCursor = Math.max(
         pushResult.serverCursor,
@@ -7465,7 +7492,12 @@ async function localPushPendingSyncOutbox(
   accessToken: string,
   identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
   localCursor: number,
-): Promise<{ pushedCount: number; serverCursor: number; deadLetterCount: number }> {
+): Promise<{
+  pushedCount: number;
+  serverCursor: number;
+  deadLetterCount: number;
+  status?: "ok" | "key_version_mismatch";
+}> {
   const pending = localPendingSyncOutboxRows(db, 500);
   if (pending.length === 0) {
     return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: 0 };
@@ -7473,8 +7505,11 @@ async function localPushPendingSyncOutbox(
   const crypto = createSyncCryptoService();
   const events: Array<Record<string, unknown>> = [];
   const eventIds: string[] = [];
+  const staleKeyVersionEventIds: string[] = [];
+  const futureKeyVersionEventIds: string[] = [];
   const invalidEntityIds: string[] = [];
   let maxRetryCount = 0;
+  const currentKeyVersion = Math.max(identity.keyVersion ?? 1, 1);
   for (const row of pending) {
     if (!localRemoteEntityIdIsValid(row.entity_id)) {
       invalidEntityIds.push(row.event_id);
@@ -7482,6 +7517,11 @@ async function localPushPendingSyncOutbox(
     }
     maxRetryCount = Math.max(maxRetryCount, row.retry_count);
     const payloadKeyVersion = Math.max(row.payload_key_version, 1);
+    if (payloadKeyVersion < currentKeyVersion) {
+      staleKeyVersionEventIds.push(row.event_id);
+    } else if (payloadKeyVersion > currentKeyVersion) {
+      futureKeyVersionEventIds.push(row.event_id);
+    }
     if (!identity.rootKey) {
       throw new ConnectServiceError(
         "internal_error",
@@ -7519,7 +7559,17 @@ async function localPushPendingSyncOutbox(
     response = await localPushSyncEvents(env, fetchImpl, accessToken, identity.deviceId, events);
   } catch (error) {
     if (error instanceof LocalPushSyncFailureError) {
-      localApplyPushFailureToOutbox(db, eventIds, error, maxRetryCount);
+      const handled = localApplyPushFailureToOutbox(
+        db,
+        eventIds,
+        staleKeyVersionEventIds,
+        futureKeyVersionEventIds,
+        error,
+        maxRetryCount,
+      );
+      if (handled) {
+        return { pushedCount: 0, serverCursor: localCursor, ...handled };
+      }
     }
     throw error;
   }
@@ -7574,13 +7624,13 @@ async function localPushSyncEvents(
       },
     );
   } catch (error) {
-    throw new ConnectServiceError("internal_error", `Push failed: ${errorMessage(error)}`, 500);
+    throw new LocalPushSyncFailureError(`Push failed: ${errorMessage(error)}`, 0, null);
   }
   let bodyText: string;
   try {
     bodyText = await response.text();
   } catch (error) {
-    throw new ConnectServiceError("internal_error", `Push failed: ${errorMessage(error)}`, 500);
+    throw new LocalPushSyncFailureError(`Push failed: ${errorMessage(error)}`, 0, null);
   }
   if (!response.ok) {
     const parsedError = parseDeviceSyncApiError(bodyText);
@@ -7655,21 +7705,27 @@ function localMarkSyncOutboxDead(
 function localApplyPushFailureToOutbox(
   db: Database,
   eventIds: string[],
+  staleKeyVersionEventIds: string[],
+  futureKeyVersionEventIds: string[],
   error: LocalPushSyncFailureError,
   maxRetryCount: number,
-): void {
+): { status: "ok" | "key_version_mismatch"; deadLetterCount: number } | null {
   if (eventIds.length === 0) {
-    return;
+    return null;
   }
-  if (error.errorCode === "KEY_VERSION_MISMATCH") {
+  if (localPushErrorIsKeyVersionMismatch(error)) {
+    if (staleKeyVersionEventIds.length > 0 && futureKeyVersionEventIds.length === 0) {
+      localMarkSyncOutboxDead(db, staleKeyVersionEventIds, error.message, "key_version_mismatch");
+      return { status: "ok", deadLetterCount: staleKeyVersionEventIds.length };
+    }
     localMarkSyncOutboxDead(db, eventIds, error.message, "key_version_mismatch");
-    return;
+    return { status: "key_version_mismatch", deadLetterCount: eventIds.length };
   }
   if (error.status === 401 || error.status === 403) {
     localScheduleSyncOutboxRetry(db, eventIds, 30, error.message, "reauth_required");
-    return;
+    return null;
   }
-  if (error.status === 408 || error.status === 429 || error.status >= 500) {
+  if (localPushErrorIsRetryable(error.status)) {
     localScheduleSyncOutboxRetry(
       db,
       eventIds,
@@ -7677,9 +7733,29 @@ function localApplyPushFailureToOutbox(
       error.message,
       "retryable",
     );
-    return;
+    return null;
   }
   localMarkSyncOutboxDead(db, eventIds, error.message, "permanent");
+  return null;
+}
+
+function localPushErrorIsKeyVersionMismatch(error: LocalPushSyncFailureError): boolean {
+  return (
+    error.errorCode?.includes("KEY_VERSION_MISMATCH") === true ||
+    error.message.includes("KEY_VERSION_MISMATCH")
+  );
+}
+
+function localPushErrorIsRetryable(status: number): boolean {
+  return (
+    status === 0 ||
+    status === 408 ||
+    status === 409 ||
+    status === 423 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500
+  );
 }
 
 function localScheduleSyncOutboxRetry(
@@ -7763,14 +7839,26 @@ async function localPullRemoteSyncEvents(
       if (!localCanReplayAccountEvent(event)) {
         throw deviceSyncDisabled();
       }
-      if (await localApplyAccountReplayEvent(db, event, identity)) {
+      let applied = false;
+      try {
+        applied = await localApplyAccountReplayEvent(db, event, identity);
+      } catch (error) {
+        if (error instanceof LocalReplayApplyError) {
+          console.warn(
+            `[Connect] Dead-lettering replay event due to apply error: ${error.message}`,
+          );
+          continue;
+        }
+        throw error;
+      }
+      if (applied) {
         pulledCount += 1;
       }
     }
-    if (response.nextCursor < cursor) {
+    if (response.nextCursor < cursor || (response.hasMore && response.nextCursor <= cursor)) {
       throw new ConnectServiceError(
         "internal_error",
-        `Server returned non-monotonic cursor (${response.nextCursor} < ${cursor})`,
+        `Server returned non-monotonic cursor (${response.nextCursor} <= ${cursor})`,
         500,
       );
     }
@@ -7952,6 +8040,7 @@ async function localApplyAccountReplayEvent(
     "clientTimestamp",
   );
   const seq = requiredInteger(event.seq, "pull event");
+  const payload = await localDecryptReplayPayload(event, identity);
   if (
     db
       .query<
@@ -7989,24 +8078,32 @@ async function localApplyAccountReplayEvent(
               eventId,
             );
   if (shouldApply) {
-    if (operation === "delete") {
-      db.prepare("DELETE FROM accounts WHERE id = ?").run(entityId);
-    } else {
-      const payload = await localDecryptReplayPayload(event, identity);
-      localUpsertAccountReplayPayload(db, entityId, payload, clientTimestamp);
+    const applyTransaction = db.transaction(() => {
+      if (operation === "delete") {
+        db.prepare("DELETE FROM accounts WHERE id = ?").run(entityId);
+      } else {
+        localUpsertAccountReplayPayload(db, entityId, payload, clientTimestamp);
+      }
+      localUpsertSyncEntityMetadata(
+        db,
+        "account",
+        entityId,
+        eventId,
+        clientTimestamp,
+        operation,
+        seq,
+      );
+      localMarkAccountReplayTableState(db);
+      localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
+    });
+    try {
+      applyTransaction();
+    } catch (error) {
+      throw new LocalReplayApplyError(errorMessage(error));
     }
-    localUpsertSyncEntityMetadata(
-      db,
-      "account",
-      entityId,
-      eventId,
-      clientTimestamp,
-      operation,
-      seq,
-    );
-    localMarkAccountReplayTableState(db);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
   }
-  localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
   return shouldApply;
 }
 

@@ -3503,7 +3503,7 @@ describe("TS backend runtime composition", () => {
           return Response.json({ action: "NOOP" });
         }
         if (url.endsWith("/api/v1/sync/events/push")) {
-          return Response.json({ code: "TEMPORARY", message: "try later" }, { status: 500 });
+          return Response.json({ code: "TEMPORARY", message: "try later" }, { status: 409 });
         }
         return Response.json({
           id: "device-runtime",
@@ -3603,6 +3603,147 @@ describe("TS backend runtime composition", () => {
           next_retry_at: expect.any(String),
           last_error_code: "retryable",
         });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime Connect trigger-cycle route to drop stale key-version events", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-key-mismatch-"),
+    );
+    const rootKey = Buffer.alloc(32, 10).toString("base64");
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.endsWith("/api/v1/sync/events/push")) {
+          return Response.json(
+            { code: "SYNC_KEY_VERSION_MISMATCH", message: "key mismatch" },
+            { status: 409 },
+          );
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 7 WHERE id = 1;
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES
+            (
+              'aaaaaaaa-1111-4111-8111-111111111111',
+              'account',
+              'bbbbbbbb-2222-4222-8222-222222222222',
+              'update',
+              '2026-01-01T00:00:00Z',
+              '{}',
+              1,
+              0,
+              'pending',
+              0,
+              'device-runtime',
+              '2026-01-01T00:00:00Z'
+            ),
+            (
+              'cccccccc-3333-4333-8333-333333333333',
+              'account',
+              'dddddddd-4444-4444-8444-444444444444',
+              'update',
+              '2026-01-01T00:00:00Z',
+              '{}',
+              2,
+              0,
+              'pending',
+              0,
+              'device-runtime',
+              '2026-01-01T00:00:00Z'
+            );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        deadLetterCount: 1,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<{ event_id: string; status: string; last_error_code: string | null }, []>(
+              `
+                SELECT event_id, status, last_error_code
+                FROM sync_outbox
+                ORDER BY event_id
+              `,
+            )
+            .all(),
+        ).toEqual([
+          {
+            event_id: "aaaaaaaa-1111-4111-8111-111111111111",
+            status: "dead",
+            last_error_code: "key_version_mismatch",
+          },
+          {
+            event_id: "cccccccc-3333-4333-8333-333333333333",
+            status: "pending",
+            last_error_code: null,
+          },
+        ]);
       } finally {
         verifyDb.close();
       }
@@ -4186,6 +4327,16 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const malformedEncryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          account_type: "SECURITIES",
+          currency: "USD",
+        }),
+      )
+    ).value;
     const deviceSyncRequests: string[] = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
@@ -4209,6 +4360,20 @@ describe("TS backend runtime composition", () => {
             next_cursor: 16,
             has_more: false,
             events: [
+              {
+                event_id: "99999999-9999-4999-8999-999999999999",
+                device_id: "other-device",
+                type: "account.create.v1",
+                entity: "account",
+                entity_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: malformedEncryptedPayload,
+                payload_key_version: 5,
+                seq: 15,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
               {
                 event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
                 device_id: "other-device",
@@ -4318,6 +4483,14 @@ describe("TS backend runtime composition", () => {
           last_op: "create",
           last_seq: 16,
         });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM accounts WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'")
+            .get(),
+        ).toEqual({ count: 0 });
         expect(
           verifyDb
             .query<

@@ -9489,7 +9489,7 @@ describe("TS Connect device sync local service", () => {
       | "duplicate-float-token"
       | "duplicate-action"
       | null = null;
-    let pullMode: "empty" | "gc-watermark" | "unsafe-next" = "empty";
+    let pullMode: "empty" | "gc-watermark" | "unsafe-next" | "stuck" = "empty";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9534,6 +9534,15 @@ describe("TS Connect device sync local service", () => {
               '{"from":12,"to":13,"next_cursor":9007199254740993,"has_more":false,"events":[]}',
               { headers: { "content-type": "application/json" } },
             );
+          }
+          if (pullMode === "stuck") {
+            return Response.json({
+              from: 12,
+              to: 12,
+              next_cursor: 12,
+              has_more: true,
+              events: [],
+            });
           }
           return Response.json({ from: 12, to: 13, next_cursor: 13, has_more: false, events: [] });
         }
@@ -9605,6 +9614,14 @@ describe("TS Connect device sync local service", () => {
       await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
         status: "pull_error",
         lockVersion: 8,
+        cursor: 12,
+      });
+      pullMode = "empty";
+
+      pullMode = "stuck";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "pull_error",
+        lockVersion: 9,
         cursor: 12,
       });
       pullMode = "empty";
