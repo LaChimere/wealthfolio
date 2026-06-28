@@ -6618,6 +6618,10 @@ contract:
   Runtime-backed Connect enable now expects `/api/v1/connect/device/enable` to
   restore the Connect session, resume an existing READY sync identity, and avoid
   duplicate cloud enrollment.
+- `pr5-runtime-connect-route-review-2`: dual-model review passed. Claude Opus
+  4.8 xhigh and GPT-5.5 xhigh reviewed trigger-cycle PULL_TAIL, bootstrap
+  no-remote, generate export-gate, and enable READY route smokes and found no
+  actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
