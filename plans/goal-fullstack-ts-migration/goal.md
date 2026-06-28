@@ -5259,7 +5259,8 @@ updated_at: "2026-06-28T21:24:00+09:00"
 - Turn 943: Resolved AI replay review feedback. Thread deletes now tombstone
   existing child metadata and stale child replay against deleted threads is
   skipped/applied, while duplicate tag creates converge by remote id instead of
-  dead-lettering unique thread/tag conflicts.
+  dead-lettering unique thread/tag conflicts and preserve the canonical tag
+  created_at value.
 
 ## Deferred items
 

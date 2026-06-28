@@ -10193,6 +10193,9 @@ function localUpsertAiThreadTagReplayPayload(
         if (column === "id") {
           continue;
         }
+        if (column === "created_at" && duplicate.id === canonicalId) {
+          continue;
+        }
         assignments.push(`${quoteReplayIdentifier(column)} = ?`);
         values.push(replayValueToSqlite(value));
       }

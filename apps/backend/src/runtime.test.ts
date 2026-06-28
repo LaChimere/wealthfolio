@@ -7078,20 +7078,6 @@ describe("TS backend runtime composition", () => {
             has_more: false,
             events: [
               {
-                event_id: "acacacac-acac-4aca-8cac-acacacacacac",
-                device_id: "device-runtime",
-                type: "ai_thread_tag.create.v1",
-                entity: "ai_thread_tag",
-                entity_id: "local-tag-same-value",
-                client_timestamp: "2026-01-01T00:00:00Z",
-                payload: encryptedOwnPayload,
-                payload_key_version: 5,
-                seq: 36,
-                user_id: "user-1",
-                team_id: "team-1",
-                server_timestamp: "2026-01-01T00:00:01Z",
-              },
-              {
                 event_id: "abababab-abab-4aba-8bab-abababababab",
                 device_id: "other-device",
                 type: "ai_thread_tag.create.v1",
@@ -7104,6 +7090,20 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "acacacac-acac-4aca-8cac-acacacacacac",
+                device_id: "device-runtime",
+                type: "ai_thread_tag.create.v1",
+                entity: "ai_thread_tag",
+                entity_id: "local-tag-same-value",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedOwnPayload,
+                payload_key_version: 5,
+                seq: 36,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
               },
             ],
           });
@@ -7174,11 +7174,12 @@ describe("TS backend runtime composition", () => {
               {
                 thread_id: string;
                 tag: string;
+                created_at: string;
               },
               []
             >(
               `
-                SELECT thread_id, tag
+                SELECT thread_id, tag, created_at
                 FROM ai_thread_tags
                 WHERE id = 'tag-replay'
               `,
@@ -7187,6 +7188,7 @@ describe("TS backend runtime composition", () => {
         ).toEqual({
           thread_id: "tag-thread",
           tag: "planning",
+          created_at: "2026-01-02T00:00:00+00:00",
         });
         expect(
           verifyDb

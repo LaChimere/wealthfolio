@@ -6765,7 +6765,7 @@ contract:
   deletes now tombstone existing AI child metadata, stale message/tag replay
   after a deleted parent thread is skipped and marked applied, and duplicate
   thread-tag creates converge to the remote id instead of dead-lettering the
-  unique thread/tag conflict.
+  unique thread/tag conflict while preserving the canonical tag created_at.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
