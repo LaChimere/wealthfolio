@@ -6528,6 +6528,10 @@ contract:
   `/api/v1/connect/device/trigger-cycle` to read the current trusted device,
   handle a cloud NOOP reconcile result, return the Rust-shaped ok payload, and
   clear stale engine error state.
+- `pr5-runtime-connect-pairing-source-trigger-review`: dual-model review passed.
+  Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed pairing-source
+  ready/restore_required plus trigger-cycle READY/NOOP runtime route smokes and
+  found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
