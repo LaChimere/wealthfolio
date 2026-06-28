@@ -6519,6 +6519,10 @@ contract:
   `/api/v1/connect/device/pairing-source-status` to read the current trusted
   device, compare local and server cursors, and return the Rust-shaped ready
   response when cursors match.
+- `pr5-runtime-connect-pairing-source-restore-route-smoke`: verification passed.
+  Runtime-backed Connect pairing-source status now expects local cursor ahead of
+  the server cursor to return the Rust-shaped restore_required response through
+  the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
