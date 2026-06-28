@@ -3042,6 +3042,115 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route for ready noop", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-noop-"));
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 9 WHERE id = 1;
+          UPDATE sync_engine_state SET
+            lock_version = 4,
+            last_cycle_status = 'stale_cursor',
+            last_error = 'stale',
+            consecutive_failures = 3
+          WHERE id = 1;
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toEqual({
+        status: "ok",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 9,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                last_cycle_status: string | null;
+                last_error: string | null;
+                consecutive_failures: number;
+              },
+              []
+            >(
+              "SELECT last_cycle_status, last_error, consecutive_failures FROM sync_engine_state WHERE id = 1",
+            )
+            .get(),
+        ).toEqual({ last_cycle_status: "ok", last_error: null, consecutive_failures: 0 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];

@@ -6523,6 +6523,11 @@ contract:
   Runtime-backed Connect pairing-source status now expects local cursor ahead of
   the server cursor to return the Rust-shaped restore_required response through
   the HTTP seam.
+- `pr5-runtime-connect-trigger-cycle-noop-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now expects
+  `/api/v1/connect/device/trigger-cycle` to read the current trusted device,
+  handle a cloud NOOP reconcile result, return the Rust-shaped ok payload, and
+  clear stale engine error state.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
