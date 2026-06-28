@@ -6510,6 +6510,10 @@ contract:
   passed. Runtime-backed Connect device sync-state now expects an untrusted
   registered cloud device without trusted peers to map to REGISTERED after the
   same best-effort trusted-device and initialize probes used by Rust.
+- `pr5-runtime-connect-device-sync-state-route-review`: dual-model review
+  passed. Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed device registration
+  plus Connect device sync-state READY/STALE/REGISTERED runtime route smokes and
+  found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
