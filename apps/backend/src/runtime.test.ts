@@ -3217,6 +3217,96 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect bootstrap-snapshot route when already complete", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bootstrap-complete-"));
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 9 WHERE id = 1;
+          UPDATE sync_engine_state SET last_cycle_status = 'ok' WHERE id = 1;
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES ('device-runtime', 5, 'trusted', '2026-01-01T00:00:00Z', NULL)
+          ON CONFLICT(device_id) DO UPDATE SET
+            key_version = excluded.key_version,
+            trust_state = excluded.trust_state,
+            last_bootstrap_at = excluded.last_bootstrap_at,
+            min_snapshot_created_at = excluded.min_snapshot_created_at;
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const bootstrapResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/bootstrap-snapshot`,
+        { method: "POST" },
+      );
+      expect(bootstrapResponse.status).toBe(200);
+      await expect(bootstrapResponse.json()).resolves.toEqual({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: 9,
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect generate-snapshot route for untrusted device", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-untrusted-"));
     const deviceSyncRequests: string[] = [];
