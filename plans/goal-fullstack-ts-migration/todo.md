@@ -6551,6 +6551,9 @@ contract:
 - `pr5-runtime-connect-bootstrap-background-start-review`: dual-model review
   passed. Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed the
   bootstrap-snapshot background-start parity fix and found no actionable issues.
+- `pr5-runtime-connect-generate-uploaded-route-smoke`: verification passed.
+  Runtime-backed Connect generate-snapshot now expects trusted devices to skip
+  local export when the latest remote snapshot already covers the local cursor.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

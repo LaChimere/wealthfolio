@@ -3372,6 +3372,96 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect generate-snapshot route when latest snapshot covers cursor", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-uploaded-"));
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 10 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: 10,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 10 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const generateResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/generate-snapshot`,
+        { method: "POST" },
+      );
+      expect(generateResponse.status).toBe(200);
+      await expect(generateResponse.json()).resolves.toEqual({
+        status: "uploaded",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        oplogSeq: 10,
+        message: "Latest remote snapshot already covers current cursor",
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+        "https://api.example.test/api/v1/sync/events/cursor",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];
