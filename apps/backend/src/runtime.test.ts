@@ -3987,7 +3987,36 @@ describe("TS backend runtime composition", () => {
             to: 15,
             next_cursor: 15,
             has_more: false,
-            events: [],
+            events: [
+              {
+                event_id: "66666666-6666-4666-8666-666666666666",
+                device_id: "device-runtime",
+                type: "account.update.v1",
+                entity: "account",
+                entity_id: "77777777-7777-4777-8777-777777777777",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: "{}",
+                payload_key_version: 5,
+                seq: 13,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
+              {
+                event_id: "88888888-8888-4888-8888-888888888888",
+                device_id: "other-device",
+                type: "snapshot.gc.v1",
+                entity: "snapshot",
+                entity_id: "99999999-9999-4999-8999-999999999999",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: "{}",
+                payload_key_version: 5,
+                seq: 14,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
+            ],
           });
         }
         return Response.json({

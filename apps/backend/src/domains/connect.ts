@@ -7831,7 +7831,8 @@ async function localPullSyncEvents(
   if (
     !isRecord(parsed) ||
     !Array.isArray(parsed.events) ||
-    parsed.events.some((event) => !isRecord(event))
+    parsed.events.some((event) => !isRecord(event)) ||
+    !validLocalPullEventShapes(parsed.events as Array<Record<string, unknown>>, bodyText)
   ) {
     throw new ConnectServiceError("internal_error", "Failed to parse pull response", 500);
   }
@@ -7854,6 +7855,48 @@ async function localPullSyncEvents(
     events: parsed.events as Array<Record<string, unknown>>,
     gcWatermark,
   };
+}
+
+function validLocalPullEventShapes(
+  events: Array<Record<string, unknown>>,
+  responseText: string,
+): boolean {
+  const eventTokens = rawTokensForAliases(responseText, ["events"])[0];
+  const rawEventTokens = eventTokens ? topLevelArrayValueTokens(eventTokens) : [];
+  return events.every((event, index) => {
+    const rawEvent = rawEventTokens[index];
+    return rawEvent !== undefined && validLocalPullEventShape(event, rawEvent);
+  });
+}
+
+function validLocalPullEventShape(event: Record<string, unknown>, rawEvent: string): boolean {
+  for (const aliases of [
+    ["event_id", "eventId"],
+    ["device_id", "deviceId"],
+    ["type"],
+    ["entity"],
+    ["entity_id", "entityId"],
+    ["client_timestamp", "clientTimestamp"],
+    ["payload"],
+    ["user_id", "userId"],
+    ["team_id", "teamId"],
+    ["server_timestamp", "serverTimestamp"],
+  ]) {
+    if (
+      rawTokensForAliases(rawEvent, aliases).length !== 1 ||
+      optionalString(event[aliases[0]!] ?? event[aliases[1] ?? aliases[0]!]) === null
+    ) {
+      return false;
+    }
+  }
+  return (
+    rawTokensForAliases(rawEvent, ["payload_key_version", "payloadKeyVersion"]).length === 1 &&
+    rawTokensForAliases(rawEvent, ["seq"]).length === 1 &&
+    rawJsonI32TokenIsValid(
+      rawTokensForAliases(rawEvent, ["payload_key_version", "payloadKeyVersion"])[0] ?? "",
+    ) &&
+    rawJsonSafeI64TokenIsValid(rawTokensForAliases(rawEvent, ["seq"])[0] ?? "")
+  );
 }
 
 function localRemoteEventIsIgnorable(event: Record<string, unknown>, deviceId: string): boolean {
