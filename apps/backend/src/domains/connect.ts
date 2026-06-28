@@ -9685,6 +9685,10 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
   ) {
     return false;
   }
+  const replayIdentity =
+    operation === "delete"
+      ? { entityId, payload: null }
+      : localResolveAssetTaxonomyAssignmentReplayIdentity(db, entityId, payload);
   const metadata = db
     .query<
       { last_event_id: string; last_client_timestamp: string; last_op: string | null },
@@ -9696,7 +9700,7 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
         WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
       `,
     )
-    .get(entityId);
+    .get(replayIdentity.entityId);
   const previousOperation = metadata?.last_op ?? "update";
   const shouldApply =
     metadata === null || metadata === undefined
@@ -9713,23 +9717,52 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
             );
   if (shouldApply) {
     if (operation === "delete") {
-      db.prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?").run(entityId);
+      db.prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?").run(
+        replayIdentity.entityId,
+      );
     } else {
-      localUpsertAssetTaxonomyAssignmentReplayPayload(db, entityId, payload);
+      if (replayIdentity.payload === null) {
+        throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+      }
+      localUpsertAssetTaxonomyAssignmentReplayPayload(
+        db,
+        replayIdentity.entityId,
+        replayIdentity.payload,
+      );
+    }
+    if (replayIdentity.entityId !== entityId) {
+      db.prepare(
+        `
+          DELETE FROM sync_entity_metadata
+          WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
+        `,
+      ).run(entityId);
     }
     localUpsertSyncEntityMetadata(
       db,
       "asset_taxonomy_assignment",
-      entityId,
+      replayIdentity.entityId,
       eventId,
       clientTimestamp,
       operation,
       seq,
     );
     localMarkReplayTableState(db, "asset_taxonomy_assignments");
-    localInsertSyncAppliedEvent(db, eventId, seq, "asset_taxonomy_assignment", entityId);
+    localInsertSyncAppliedEvent(
+      db,
+      eventId,
+      seq,
+      "asset_taxonomy_assignment",
+      replayIdentity.entityId,
+    );
   } else {
-    localInsertSyncAppliedEvent(db, eventId, seq, "asset_taxonomy_assignment", entityId);
+    localInsertSyncAppliedEvent(
+      db,
+      eventId,
+      seq,
+      "asset_taxonomy_assignment",
+      replayIdentity.entityId,
+    );
   }
   return shouldApply;
 }
@@ -10516,18 +10549,61 @@ function localUpsertAiThreadTagReplayPayload(
 function localUpsertAssetTaxonomyAssignmentReplayPayload(
   db: Database,
   entityId: string,
-  rawPayload: Record<string, unknown>,
+  payload: Record<string, unknown>,
 ): void {
-  const payload = normalizeReplayPayload("asset_taxonomy_assignment", rawPayload);
-  validateAssetTaxonomyAssignmentReplayPayloadFields(payload);
+  const canonicalPayload = { ...payload, id: entityId };
   localUpsertNaturalKeyedReplayPayloadFields(db, {
     tableName: "asset_taxonomy_assignments",
     pkColumn: "id",
     entityId,
-    payload,
+    payload: canonicalPayload,
     naturalKeyColumns: ["asset_id", "taxonomy_id", "category_id"],
     preserveCanonicalColumns: ["created_at"],
   });
+}
+
+function localResolveAssetTaxonomyAssignmentReplayIdentity(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): { entityId: string; payload: Record<string, unknown> } {
+  const payload = normalizeReplayPayload("asset_taxonomy_assignment", rawPayload);
+  const id = optionalString(payload.id);
+  if (id !== null && id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  validateAssetTaxonomyAssignmentReplayPayloadFields(payload);
+  const assetId = payload.asset_id;
+  const taxonomyId = payload.taxonomy_id;
+  const categoryId = payload.category_id;
+  if (assetId === undefined || taxonomyId === undefined || categoryId === undefined) {
+    return { entityId, payload };
+  }
+  const duplicate = db
+    .query<
+      { id: string },
+      [string | number | null, string | number | null, string | number | null, string]
+    >(
+      `
+        SELECT id
+        FROM asset_taxonomy_assignments
+        WHERE asset_id = ? AND taxonomy_id = ? AND category_id = ? AND id <> ?
+      `,
+    )
+    .get(
+      replayValueToSqlite(assetId),
+      replayValueToSqlite(taxonomyId),
+      replayValueToSqlite(categoryId),
+      entityId,
+    );
+  if (!duplicate) {
+    return { entityId, payload };
+  }
+  return { entityId: duplicate.id > entityId ? duplicate.id : entityId, payload };
 }
 
 function localUpsertQuoteReplayPayload(
