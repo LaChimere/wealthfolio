@@ -7999,11 +7999,14 @@ function validLocalPullEventShape(event: Record<string, unknown>, rawEvent: stri
 
 function localRemoteEventIsIgnorable(event: Record<string, unknown>, deviceId: string): boolean {
   const remoteDeviceId = optionalString(event.device_id ?? event.deviceId);
-  if (remoteDeviceId === deviceId) {
-    return true;
-  }
   const entity = optionalString(event.entity);
   const eventType = optionalString(event.type);
+  if (remoteDeviceId === deviceId) {
+    return (
+      entity !== "ai_thread_tag" ||
+      !/^ai_thread_tag\.(create|update|delete)\.v1$/.test(eventType ?? "")
+    );
+  }
   return (
     entity === "snapshot" &&
     (eventType === null || !/\.(create|update|delete)\.v1$/.test(eventType))
@@ -10179,14 +10182,22 @@ function localUpsertAiThreadTagReplayPayload(
       )
       .get(threadId, tag, entityId);
     if (duplicate) {
-      const assignments: string[] = ["id = ?"];
-      const values: Array<string | number | null> = [entityId];
+      const canonicalId = duplicate.id > entityId ? duplicate.id : entityId;
+      const assignments: string[] = [];
+      const values: Array<string | number | null> = [];
+      if (duplicate.id !== canonicalId) {
+        assignments.push("id = ?");
+        values.push(canonicalId);
+      }
       for (const [column, value] of Object.entries(payload)) {
         if (column === "id") {
           continue;
         }
         assignments.push(`${quoteReplayIdentifier(column)} = ?`);
         values.push(replayValueToSqlite(value));
+      }
+      if (assignments.length === 0) {
+        return;
       }
       values.push(duplicate.id);
       db.prepare(
@@ -10196,9 +10207,11 @@ function localUpsertAiThreadTagReplayPayload(
           WHERE id = ?
         `,
       ).run(...values);
-      db.prepare(
-        "DELETE FROM sync_entity_metadata WHERE entity = 'ai_thread_tag' AND entity_id = ?",
-      ).run(duplicate.id);
+      if (duplicate.id !== canonicalId) {
+        db.prepare(
+          "DELETE FROM sync_entity_metadata WHERE entity = 'ai_thread_tag' AND entity_id = ?",
+        ).run(duplicate.id);
+      }
       return;
     }
   }

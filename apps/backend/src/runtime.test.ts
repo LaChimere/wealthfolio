@@ -7045,6 +7045,17 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedOwnPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "local-tag-same-value",
+          threadId: "tag-thread",
+          tag: "planning",
+          createdAt: "2026-01-01T00:00:00+00:00",
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -7066,6 +7077,20 @@ describe("TS backend runtime composition", () => {
             next_cursor: 37,
             has_more: false,
             events: [
+              {
+                event_id: "acacacac-acac-4aca-8cac-acacacacacac",
+                device_id: "device-runtime",
+                type: "ai_thread_tag.create.v1",
+                entity: "ai_thread_tag",
+                entity_id: "local-tag-same-value",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedOwnPayload,
+                payload_key_version: 5,
+                seq: 36,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
               {
                 event_id: "abababab-abab-4aba-8bab-abababababab",
                 device_id: "other-device",
@@ -7137,7 +7162,7 @@ describe("TS backend runtime composition", () => {
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
-        pulledCount: 1,
+        pulledCount: 2,
         cursor: 37,
       });
 
