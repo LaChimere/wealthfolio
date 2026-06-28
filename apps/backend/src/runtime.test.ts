@@ -3776,6 +3776,53 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect bootstrap overwrite check route with local data", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-overwrite-check-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('overwrite-account', 'Overwrite Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/bootstrap-overwrite-check`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        bootstrapRequired: true,
+        hasLocalData: true,
+        localRows: 1,
+        nonEmptyTables: [{ table: "accounts", rows: 1 }],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect generate-snapshot route for untrusted device", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-untrusted-"));
     const deviceSyncRequests: string[] = [];

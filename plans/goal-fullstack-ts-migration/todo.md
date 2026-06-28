@@ -6586,6 +6586,10 @@ contract:
   Runtime-backed Connect start-background now expects
   `/api/v1/connect/device/start-background` to read READY sync state and remain
   explicitly feature-gated until background engine runtime is migrated.
+- `pr5-runtime-connect-bootstrap-overwrite-check-route-smoke`: verification
+  passed. Runtime-backed Connect bootstrap-overwrite-check now expects local
+  syncable data to surface as Rust-shaped overwrite risk before destructive
+  bootstrap flows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
