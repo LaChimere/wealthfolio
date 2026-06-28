@@ -6783,6 +6783,12 @@ contract:
   resolved. Asset taxonomy assignment replay now evaluates LWW against existing
   natural-key row metadata, rejects present mismatched PK values, and carries
   natural-key delete payloads so canonical rows can be removed.
+- `pr5-runtime-connect-custom-taxonomy-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote custom_taxonomy
+  create/update/delete bundle events with taxonomy/category upserts,
+  stale-category deletion, system-taxonomy guards, table-state updates, and sync
+  metadata/applied-event tracking. Broad runtime/connect tests, full
+  `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
