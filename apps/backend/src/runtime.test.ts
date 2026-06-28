@@ -5299,6 +5299,183 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to goal replay", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-goal-replay-"));
+    const rootKey = Buffer.alloc(32, 16).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "goal-replay",
+          title: "Remote Goal",
+          description: "Remote save-up goal",
+          targetAmount: 50000,
+          goalType: "custom_save_up",
+          isAchieved: " TRUE ",
+          statusLifecycle: "achieved",
+          statusHealth: "on_track",
+          priority: 4,
+          coverImageKey: "cover-key",
+          currency: "USD",
+          startDate: "2026-01-01",
+          targetDate: "2026-12-31",
+          summaryCurrentValue: 1250.5,
+          summaryProgress: 2.5,
+          projectedCompletionDate: "2026-11-30",
+          projectedValueAtTargetDate: 52000,
+          summaryTargetAmount: 50000,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-02T00:00:00Z",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 27 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 27,
+            next_cursor: 27,
+            has_more: false,
+            events: [
+              {
+                event_id: "12121212-1212-4212-8212-121212121212",
+                device_id: "other-device",
+                type: "goal.create.v1",
+                entity: "goal",
+                entity_id: "goal-replay",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 27,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 27,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                title: string;
+                target_amount: number;
+                status_lifecycle: string;
+                status_health: string;
+                priority: number;
+                summary_current_value: number | null;
+                summary_target_amount: number | null;
+              },
+              []
+            >(
+              `
+                SELECT title, target_amount, status_lifecycle, status_health, priority,
+                  summary_current_value, summary_target_amount
+                FROM goals
+                WHERE id = 'goal-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          title: "Remote Goal",
+          target_amount: 50000,
+          status_lifecycle: "achieved",
+          status_health: "on_track",
+          priority: 4,
+          summary_current_value: 1250.5,
+          summary_target_amount: 50000,
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'goal'
+                  AND entity_id = 'goal-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "12121212-1212-4212-8212-121212121212",
+          last_op: "create",
+          last_seq: 27,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect account replay LWW and tombstones", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-account-lww-"));
     const rootKey = Buffer.alloc(32, 11).toString("base64");

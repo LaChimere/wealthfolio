@@ -4074,7 +4074,8 @@ type LocalReplayEntity =
   | "portfolio"
   | "portfolio_account"
   | "contribution_limit"
-  | "custom_provider";
+  | "custom_provider"
+  | "goal";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8061,6 +8062,14 @@ function localCanReplayCustomProviderEvent(event: Record<string, unknown>): bool
   );
 }
 
+function localCanReplayGoalEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "goal" && eventType !== null && /^goal\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8079,6 +8088,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayCustomProviderEvent(event)) {
     return "custom_provider";
+  }
+  if (localCanReplayGoalEvent(event)) {
+    return "goal";
   }
   return null;
 }
@@ -8248,6 +8260,8 @@ function localApplyReplayEventPrepared(
       return localApplyContributionLimitReplayEvent(db, replayEvent.event, payloads);
     case "custom_provider":
       return localApplyCustomProviderReplayEvent(db, replayEvent.event, payloads);
+    case "goal":
+      return localApplyGoalReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -8719,6 +8733,76 @@ function localApplyCustomProviderReplayEvent(
   return shouldApply;
 }
 
+function localApplyGoalReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localGoalSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'goal' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM goals WHERE id = ?").run(entityId);
+    } else {
+      localUpsertGoalReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(db, "goal", entityId, eventId, clientTimestamp, operation, seq);
+    localMarkReplayTableState(db, "goals");
+    localInsertSyncAppliedEvent(db, eventId, seq, "goal", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "goal", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -8771,6 +8855,14 @@ function localCustomProviderSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^custom_provider\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localGoalSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
+  const match = /^goal\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9102,6 +9194,81 @@ function localUpsertCustomProviderReplayPayload(
   );
 }
 
+function localUpsertGoalReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const payload = normalizeReplayPayload("goal", rawPayload);
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const title = requiredReplayString(payload.title, "goal.title");
+  const targetAmount = requiredFiniteNumber(payload.target_amount, "goal.target_amount");
+  const priority = requiredInteger(payload.priority ?? 0, "goal.priority");
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO goals (
+        id, title, description, target_amount, goal_type, status_lifecycle,
+        status_health, priority, cover_image_key, currency, start_date, target_date,
+        summary_current_value, summary_progress, projected_completion_date,
+        projected_value_at_target_date, created_at, updated_at, summary_target_amount
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        target_amount = excluded.target_amount,
+        goal_type = excluded.goal_type,
+        status_lifecycle = excluded.status_lifecycle,
+        status_health = excluded.status_health,
+        priority = excluded.priority,
+        cover_image_key = excluded.cover_image_key,
+        currency = excluded.currency,
+        start_date = excluded.start_date,
+        target_date = excluded.target_date,
+        summary_current_value = excluded.summary_current_value,
+        summary_progress = excluded.summary_progress,
+        projected_completion_date = excluded.projected_completion_date,
+        projected_value_at_target_date = excluded.projected_value_at_target_date,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        summary_target_amount = excluded.summary_target_amount
+    `,
+  ).run(
+    entityId,
+    title,
+    optionalString(payload.description) ?? null,
+    targetAmount,
+    optionalString(payload.goal_type) ?? "custom_save_up",
+    optionalString(payload.status_lifecycle) ?? "active",
+    optionalString(payload.status_health) ?? "not_applicable",
+    priority,
+    optionalString(payload.cover_image_key) ?? null,
+    optionalString(payload.currency) ?? null,
+    optionalString(payload.start_date) ?? null,
+    optionalString(payload.target_date) ?? null,
+    replayOptionalFiniteNumber(payload.summary_current_value, "goal.summary_current_value"),
+    replayOptionalFiniteNumber(payload.summary_progress, "goal.summary_progress"),
+    optionalString(payload.projected_completion_date) ?? null,
+    replayOptionalFiniteNumber(
+      payload.projected_value_at_target_date,
+      "goal.projected_value_at_target_date",
+    ),
+    createdAt,
+    updatedAt,
+    replayOptionalFiniteNumber(payload.summary_target_amount, "goal.summary_target_amount"),
+  );
+}
+
 function requiredReplayString(value: unknown, context: string): string {
   const parsed = optionalString(value);
   if (parsed === null) {
@@ -9136,6 +9303,13 @@ function replayOptionalTextValue(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+function replayOptionalFiniteNumber(value: unknown, context: string): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return requiredFiniteNumber(value, context);
+}
+
 const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   account: "accounts",
   platform: "platforms",
@@ -9143,6 +9317,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   portfolio_account: "portfolio_accounts",
   contribution_limit: "contribution_limits",
   custom_provider: "market_data_custom_providers",
+  goal: "goals",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -9210,6 +9385,27 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
+  goal: [
+    ["id"],
+    ["title"],
+    ["description"],
+    ["target_amount", "targetAmount"],
+    ["goal_type", "goalType"],
+    ["status_lifecycle", "statusLifecycle", "is_achieved", "isAchieved"],
+    ["status_health", "statusHealth"],
+    ["priority"],
+    ["cover_image_key", "coverImageKey"],
+    ["currency"],
+    ["start_date", "startDate"],
+    ["target_date", "targetDate"],
+    ["summary_current_value", "summaryCurrentValue"],
+    ["summary_progress", "summaryProgress"],
+    ["projected_completion_date", "projectedCompletionDate"],
+    ["projected_value_at_target_date", "projectedValueAtTargetDate"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+    ["summary_target_amount", "summaryTargetAmount"],
+  ],
 };
 
 function normalizeReplayPayload(
@@ -9227,8 +9423,9 @@ function normalizeReplayPayload(
         500,
       );
     }
+    const migratedValue = migrateReplayPayloadValue(entity, column, value);
     if (Object.hasOwn(normalized, column)) {
-      if (!replayJsonValuesEqual(normalized[column], value)) {
+      if (!replayJsonValuesEqual(normalized[column], migratedValue)) {
         throw new ConnectServiceError(
           "internal_error",
           `Sync payload maps multiple values to column '${column}' for table '${tableName}'`,
@@ -9237,7 +9434,7 @@ function normalizeReplayPayload(
       }
       continue;
     }
-    normalized[column] = value;
+    normalized[column] = migratedValue;
   }
   return normalized;
 }
@@ -9253,6 +9450,32 @@ function replayPayloadColumnForKey(entity: LocalReplayEntity, rawKey: string): s
 
 function replayJsonValuesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(replayJsonComparable(left)) === JSON.stringify(replayJsonComparable(right));
+}
+
+function migrateReplayPayloadValue(
+  entity: LocalReplayEntity,
+  column: string,
+  value: unknown,
+): unknown {
+  if (entity !== "goal" || column !== "status_lifecycle") {
+    return value;
+  }
+  if (value === true || value === 1) {
+    return "achieved";
+  }
+  if (value === false || value === 0 || value === null) {
+    return "active";
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") {
+      return "achieved";
+    }
+    if (normalized === "false" || normalized === "0") {
+      return "active";
+    }
+  }
+  return value;
 }
 
 function replayJsonComparable(value: unknown): unknown {
@@ -9343,7 +9566,8 @@ function localMarkReplayTableState(
     | "portfolios"
     | "portfolio_accounts"
     | "contribution_limits"
-    | "market_data_custom_providers",
+    | "market_data_custom_providers"
+    | "goals",
 ): void {
   db.prepare(
     `

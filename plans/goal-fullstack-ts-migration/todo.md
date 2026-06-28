@@ -6714,6 +6714,10 @@ contract:
   poison event forces fallback; supported replay payloads now reject unknown
   columns and conflicting aliases before upsert. Focused/full runtime and
   Connect tests passed.
+- `pr5-runtime-connect-goal-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote goal replay
+  events, including camelCase payload aliases and legacy isAchieved lifecycle
+  migration, and updates sync metadata/applied-event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
