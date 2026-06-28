@@ -7223,6 +7223,296 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to custom taxonomy replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-custom-taxonomy-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 31).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedUpdatePayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          taxonomy: {
+            id: "custom-taxonomy-replay",
+            name: "Remote Taxonomy",
+            color: "#654321",
+            description: "Synced taxonomy",
+            is_system: 0,
+            is_single_select: 1,
+            sort_order: 12,
+            created_at: "2026-01-01T00:00:00",
+            updated_at: "2026-01-02T00:00:00",
+          },
+          categories: [
+            {
+              id: "remote-category-existing",
+              taxonomy_id: "custom-taxonomy-replay",
+              parent_id: null,
+              name: "Updated Category",
+              key: "updated_category",
+              color: "#111111",
+              description: null,
+              sort_order: 1,
+              created_at: "2026-01-01T00:00:00",
+              updated_at: "2026-01-02T00:00:00",
+            },
+            {
+              id: "remote-category-new",
+              taxonomy_id: "custom-taxonomy-replay",
+              parent_id: "remote-category-existing",
+              name: "New Child",
+              key: "new_child",
+              color: "#222222",
+              description: "Child category",
+              sort_order: 2,
+              created_at: "2026-01-02T00:00:00",
+              updated_at: "2026-01-02T00:00:00",
+            },
+          ],
+        }),
+      )
+    ).value;
+    const encryptedDeletePayload = (
+      await crypto.encrypt(dek, JSON.stringify({ id: "custom-taxonomy-delete" }))
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 43 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 43,
+            next_cursor: 43,
+            has_more: false,
+            events: [
+              {
+                event_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                device_id: "other-device",
+                type: "custom_taxonomy.update.v1",
+                entity: "custom_taxonomy",
+                entity_id: "custom-taxonomy-replay",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedUpdatePayload,
+                payload_key_version: 5,
+                seq: 42,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "dededede-dede-4ded-8ede-dededededede",
+                device_id: "other-device",
+                type: "custom_taxonomy.delete.v1",
+                entity: "custom_taxonomy",
+                entity_id: "custom-taxonomy-delete",
+                client_timestamp: "2026-01-02T00:00:01Z",
+                payload: encryptedDeletePayload,
+                payload_key_version: 5,
+                seq: 43,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:02Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO taxonomies (
+            id, name, color, description, is_system, is_single_select, sort_order, created_at, updated_at
+          )
+          VALUES
+            (
+              'custom-taxonomy-replay', 'Local Taxonomy', '#000000', NULL,
+              0, 0, 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            ),
+            (
+              'custom-taxonomy-delete', 'Delete Taxonomy', '#000000', NULL,
+              0, 0, 2, '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            );
+          INSERT INTO taxonomy_categories (
+            id, taxonomy_id, parent_id, name, key, color, description, sort_order, created_at, updated_at
+          )
+          VALUES
+            (
+              'remote-category-existing', 'custom-taxonomy-replay', NULL, 'Old Category',
+              'old_category', '#000000', NULL, 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            ),
+            (
+              'stale-category', 'custom-taxonomy-replay', NULL, 'Stale Category',
+              'stale_category', '#000000', NULL, 99, '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            ),
+            (
+              'delete-category', 'custom-taxonomy-delete', NULL, 'Delete Category',
+              'delete_category', '#000000', NULL, 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 2,
+        cursor: 43,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                name: string;
+                color: string;
+                description: string | null;
+                is_single_select: number;
+                sort_order: number;
+              },
+              []
+            >(
+              `
+                SELECT name, color, description, is_single_select, sort_order
+                FROM taxonomies
+                WHERE id = 'custom-taxonomy-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          name: "Remote Taxonomy",
+          color: "#654321",
+          description: "Synced taxonomy",
+          is_single_select: 1,
+          sort_order: 12,
+        });
+        expect(
+          verifyDb
+            .query<{ id: string; name: string; parent_id: string | null; sort_order: number }, []>(
+              `
+                SELECT id, name, parent_id, sort_order
+                FROM taxonomy_categories
+                WHERE taxonomy_id = 'custom-taxonomy-replay'
+                ORDER BY sort_order ASC
+              `,
+            )
+            .all(),
+        ).toEqual([
+          {
+            id: "remote-category-existing",
+            name: "Updated Category",
+            parent_id: null,
+            sort_order: 1,
+          },
+          {
+            id: "remote-category-new",
+            name: "New Child",
+            parent_id: "remote-category-existing",
+            sort_order: 2,
+          },
+        ]);
+        expect(
+          verifyDb
+            .query<{ taxonomy_count: number; category_count: number }, []>(
+              `
+                SELECT
+                  (SELECT COUNT(*) FROM taxonomies WHERE id = 'custom-taxonomy-delete') AS taxonomy_count,
+                  (SELECT COUNT(*) FROM taxonomy_categories WHERE taxonomy_id = 'custom-taxonomy-delete') AS category_count
+              `,
+            )
+            .get(),
+        ).toEqual({ taxonomy_count: 0, category_count: 0 });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'custom_taxonomy'
+                  AND entity_id = 'custom-taxonomy-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          last_op: "update",
+          last_seq: 42,
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'custom_taxonomy'
+                  AND entity_id = 'custom-taxonomy-delete'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "dededede-dede-4ded-8ede-dededededede",
+          last_op: "delete",
+          last_seq: 43,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to asset taxonomy assignment replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-taxonomy-assignment-replay-"),

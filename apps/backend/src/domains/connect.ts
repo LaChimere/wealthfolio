@@ -4075,6 +4075,7 @@ type LocalReplayEntity =
   | "portfolio_account"
   | "contribution_limit"
   | "custom_provider"
+  | "custom_taxonomy"
   | "goal"
   | "goal_plan"
   | "goals_allocation"
@@ -8076,6 +8077,16 @@ function localCanReplayCustomProviderEvent(event: Record<string, unknown>): bool
   );
 }
 
+function localCanReplayCustomTaxonomyEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "custom_taxonomy" &&
+    eventType !== null &&
+    /^custom_taxonomy\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localCanReplayGoalEvent(event: Record<string, unknown>): boolean {
   const entity = optionalString(event.entity);
   const eventType = optionalString(event.type);
@@ -8212,6 +8223,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayCustomProviderEvent(event)) {
     return "custom_provider";
+  }
+  if (localCanReplayCustomTaxonomyEvent(event)) {
+    return "custom_taxonomy";
   }
   if (localCanReplayGoalEvent(event)) {
     return "goal";
@@ -8439,6 +8453,8 @@ function localApplyReplayEventPrepared(
       return localApplyContributionLimitReplayEvent(db, replayEvent.event, payloads);
     case "custom_provider":
       return localApplyCustomProviderReplayEvent(db, replayEvent.event, payloads);
+    case "custom_taxonomy":
+      return localApplyCustomTaxonomyReplayEvent(db, replayEvent.event, payloads);
     case "goal":
       return localApplyGoalReplayEvent(db, replayEvent.event, payloads);
     case "goal_plan":
@@ -8930,6 +8946,81 @@ function localApplyCustomProviderReplayEvent(
     localInsertSyncAppliedEvent(db, eventId, seq, "custom_provider", entityId);
   } else {
     localInsertSyncAppliedEvent(db, eventId, seq, "custom_provider", entityId);
+  }
+  return shouldApply;
+}
+
+function localApplyCustomTaxonomyReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localCustomTaxonomySyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'custom_taxonomy' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    localApplyCustomTaxonomyReplayPayload(db, entityId, operation, payload);
+    localUpsertSyncEntityMetadata(
+      db,
+      "custom_taxonomy",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "taxonomies");
+    localMarkReplayTableState(db, "taxonomy_categories");
+    localInsertSyncAppliedEvent(db, eventId, seq, "custom_taxonomy", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "custom_taxonomy", entityId);
   }
   return shouldApply;
 }
@@ -9987,6 +10078,16 @@ function localCustomProviderSyncOperationFromEventType(
   return match[1] as "create" | "update" | "delete";
 }
 
+function localCustomTaxonomySyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^custom_taxonomy\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
 function localGoalSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^goal\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -10426,6 +10527,58 @@ function localUpsertCustomProviderReplayPayload(
   );
 }
 
+function localApplyCustomTaxonomyReplayPayload(
+  db: Database,
+  entityId: string,
+  operation: "create" | "update" | "delete",
+  rawPayload: Record<string, unknown>,
+): void {
+  if (operation === "delete") {
+    db.prepare("DELETE FROM taxonomies WHERE id = ?").run(entityId);
+    return;
+  }
+
+  const bundle = normalizeCustomTaxonomyReplayBundle(entityId, rawPayload);
+  if (bundle.taxonomy.is_system !== 0 && bundle.taxonomy.id !== "custom_groups") {
+    throw new ConnectServiceError("internal_error", "Cannot sync system taxonomy", 500);
+  }
+  if (bundle.taxonomy.id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `custom_taxonomy payload id '${bundle.taxonomy.id}' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  for (const category of bundle.categories) {
+    if (category.taxonomy_id !== entityId) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `custom_taxonomy category '${category.id}' has taxonomy_id '${category.taxonomy_id}', expected '${entityId}'`,
+        500,
+      );
+    }
+  }
+
+  if (entityId !== "custom_groups") {
+    localUpsertReplayPayloadFields(db, "taxonomies", "id", entityId, bundle.taxonomy);
+  }
+  for (const category of bundle.categories) {
+    localUpsertCustomTaxonomyCategoryReplayPayload(db, entityId, category);
+  }
+  const categoryIds = bundle.categories.map((category) => category.id);
+  if (categoryIds.length === 0) {
+    db.prepare("DELETE FROM taxonomy_categories WHERE taxonomy_id = ?").run(entityId);
+    return;
+  }
+  db.prepare(
+    `
+      DELETE FROM taxonomy_categories
+      WHERE taxonomy_id = ?
+        AND id NOT IN (${categoryIds.map(() => "?").join(", ")})
+    `,
+  ).run(entityId, ...categoryIds);
+}
+
 function localUpsertGoalReplayPayload(
   db: Database,
   entityId: string,
@@ -10739,6 +10892,189 @@ function localAiThreadIsDeleted(db: Database, threadId: string): boolean {
   );
 }
 
+const CUSTOM_TAXONOMY_REPLAY_TAXONOMY_COLUMNS: ReadonlyArray<readonly string[]> = [
+  ["id"],
+  ["name"],
+  ["color"],
+  ["description"],
+  ["is_system", "isSystem"],
+  ["is_single_select", "isSingleSelect"],
+  ["sort_order", "sortOrder"],
+  ["created_at", "createdAt"],
+  ["updated_at", "updatedAt"],
+];
+
+const CUSTOM_TAXONOMY_REPLAY_CATEGORY_COLUMNS: ReadonlyArray<readonly string[]> = [
+  ["id"],
+  ["taxonomy_id", "taxonomyId"],
+  ["parent_id", "parentId"],
+  ["name"],
+  ["key"],
+  ["color"],
+  ["description"],
+  ["sort_order", "sortOrder"],
+  ["created_at", "createdAt"],
+  ["updated_at", "updatedAt"],
+];
+
+function normalizeCustomTaxonomyReplayBundle(
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): {
+  taxonomy: Record<string, unknown> & { id: string; is_system: number };
+  categories: Array<Record<string, unknown> & { id: string; taxonomy_id: string }>;
+} {
+  const taxonomy = rawPayload.taxonomy;
+  const categories = rawPayload.categories;
+  if (!isRecord(taxonomy) || !Array.isArray(categories) || !categories.every(isRecord)) {
+    throw new ConnectServiceError("internal_error", "Invalid custom_taxonomy payload", 500);
+  }
+  const normalizedTaxonomy = normalizeCustomTaxonomyReplayTaxonomyRow(taxonomy);
+  if (normalizedTaxonomy.id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `custom_taxonomy payload id '${normalizedTaxonomy.id}' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  return {
+    taxonomy: normalizedTaxonomy,
+    categories: categories.map((category) => normalizeCustomTaxonomyReplayCategoryRow(category)),
+  };
+}
+
+function normalizeCustomTaxonomyReplayTaxonomyRow(
+  rawPayload: Record<string, unknown>,
+): Record<string, unknown> & { id: string; is_system: number } {
+  const payload = normalizeCustomTaxonomyReplayRowPayload(
+    "taxonomies",
+    CUSTOM_TAXONOMY_REPLAY_TAXONOMY_COLUMNS,
+    rawPayload,
+  );
+  const id = requiredStringValue(payload.id, "custom_taxonomy.taxonomy.id");
+  const isSystem = requiredInteger(payload.is_system, "custom_taxonomy.taxonomy.is_system");
+  return {
+    id,
+    name: requiredStringValue(payload.name, "custom_taxonomy.taxonomy.name"),
+    color: requiredStringValue(payload.color, "custom_taxonomy.taxonomy.color"),
+    description: optionalReplayStringValue(
+      payload.description,
+      "custom_taxonomy.taxonomy.description",
+    ),
+    is_system: isSystem,
+    is_single_select: requiredInteger(
+      payload.is_single_select,
+      "custom_taxonomy.taxonomy.is_single_select",
+    ),
+    sort_order: requiredInteger(payload.sort_order, "custom_taxonomy.taxonomy.sort_order"),
+    created_at: requiredStringValue(payload.created_at, "custom_taxonomy.taxonomy.created_at"),
+    updated_at: requiredStringValue(payload.updated_at, "custom_taxonomy.taxonomy.updated_at"),
+  };
+}
+
+function normalizeCustomTaxonomyReplayCategoryRow(
+  rawPayload: Record<string, unknown>,
+): Record<string, unknown> & { id: string; taxonomy_id: string } {
+  const payload = normalizeCustomTaxonomyReplayRowPayload(
+    "taxonomy_categories",
+    CUSTOM_TAXONOMY_REPLAY_CATEGORY_COLUMNS,
+    rawPayload,
+  );
+  const id = requiredStringValue(payload.id, "custom_taxonomy.category.id");
+  const taxonomyId = requiredStringValue(
+    payload.taxonomy_id,
+    "custom_taxonomy.category.taxonomy_id",
+  );
+  return {
+    id,
+    taxonomy_id: taxonomyId,
+    parent_id: optionalReplayStringValue(payload.parent_id, "custom_taxonomy.category.parent_id"),
+    name: requiredStringValue(payload.name, "custom_taxonomy.category.name"),
+    key: requiredStringValue(payload.key, "custom_taxonomy.category.key"),
+    color: requiredStringValue(payload.color, "custom_taxonomy.category.color"),
+    description: optionalReplayStringValue(
+      payload.description,
+      "custom_taxonomy.category.description",
+    ),
+    sort_order: requiredInteger(payload.sort_order, "custom_taxonomy.category.sort_order"),
+    created_at: requiredStringValue(payload.created_at, "custom_taxonomy.category.created_at"),
+    updated_at: requiredStringValue(payload.updated_at, "custom_taxonomy.category.updated_at"),
+  };
+}
+
+function normalizeCustomTaxonomyReplayRowPayload(
+  tableName: string,
+  columns: ReadonlyArray<readonly string[]>,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(payload)) {
+    const aliases = columns.find((candidate) => candidate.includes(rawKey));
+    if (!aliases) {
+      continue;
+    }
+    const column = aliases[0] ?? rawKey;
+    if (Object.hasOwn(normalized, column)) {
+      if (!replayJsonValuesEqual(normalized[column], value)) {
+        throw new ConnectServiceError(
+          "internal_error",
+          `Sync payload maps multiple values to column '${column}' for table '${tableName}'`,
+          500,
+        );
+      }
+      continue;
+    }
+    normalized[column] = value;
+  }
+  return normalized;
+}
+
+function optionalReplayStringValue(value: unknown, context: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return requiredStringValue(value, context);
+}
+
+function localUpsertCustomTaxonomyCategoryReplayPayload(
+  db: Database,
+  entityId: string,
+  payload: Record<string, unknown> & { id: string; taxonomy_id: string },
+): void {
+  const existing = db
+    .query<{ count: number }, [string, string]>(
+      `
+        SELECT COUNT(*) AS count
+        FROM taxonomy_categories
+        WHERE taxonomy_id = ? AND id = ?
+      `,
+    )
+    .get(entityId, payload.id);
+  const entries = Object.entries(payload);
+  if ((existing?.count ?? 0) > 0) {
+    const updateEntries = entries.filter(([column]) => column !== "id" && column !== "taxonomy_id");
+    if (updateEntries.length === 0) {
+      return;
+    }
+    db.prepare(
+      `
+        UPDATE taxonomy_categories
+        SET ${updateEntries.map(([column]) => `${quoteReplayIdentifier(column)} = ?`).join(", ")}
+        WHERE taxonomy_id = ? AND id = ?
+      `,
+    ).run(...updateEntries.map(([, value]) => replayValueToSqlite(value)), entityId, payload.id);
+    return;
+  }
+  const columns = entries.map(([column]) => quoteReplayIdentifier(column)).join(", ");
+  const placeholders = entries.map(() => "?").join(", ");
+  db.prepare(
+    `
+      INSERT INTO taxonomy_categories (${columns})
+      VALUES (${placeholders})
+    `,
+  ).run(...entries.map(([, value]) => replayValueToSqlite(value)));
+}
+
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
   validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
@@ -11015,6 +11351,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   portfolio_account: "portfolio_accounts",
   contribution_limit: "contribution_limits",
   custom_provider: "market_data_custom_providers",
+  custom_taxonomy: "taxonomies",
   goal: "goals",
   goal_plan: "goal_plans",
   goals_allocation: "goals_allocation",
@@ -11094,6 +11431,7 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
+  custom_taxonomy: [["id"], ["taxonomy"], ["categories"]],
   goal: [
     ["id"],
     ["title"],
@@ -11414,6 +11752,8 @@ function localMarkReplayTableState(
     | "portfolio_accounts"
     | "contribution_limits"
     | "market_data_custom_providers"
+    | "taxonomies"
+    | "taxonomy_categories"
     | "goals"
     | "goal_plans"
     | "goals_allocation"
