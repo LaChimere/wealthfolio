@@ -4156,6 +4156,185 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to account replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-account-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 9).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "77777777-7777-4777-8777-777777777777",
+          name: "Remote Account",
+          account_type: "SECURITIES",
+          group: null,
+          currency: "USD",
+          is_default: false,
+          is_active: true,
+          created_at: "2026-01-01T00:00:00",
+          updated_at: "2026-01-01T00:00:00",
+          platform_id: null,
+          account_number: null,
+          meta: null,
+          provider: null,
+          provider_account_id: null,
+          is_archived: false,
+          tracking_mode: "TRANSACTIONS",
+        }),
+      )
+    ).value;
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 16 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 16,
+            next_cursor: 16,
+            has_more: false,
+            events: [
+              {
+                event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                device_id: "other-device",
+                type: "account.create.v1",
+                entity: "account",
+                entity_id: "77777777-7777-4777-8777-777777777777",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 16,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pushedCount: 0,
+        pulledCount: 1,
+        cursor: 16,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                name: string;
+                account_type: string;
+                currency: string;
+                tracking_mode: string;
+              },
+              []
+            >(
+              `
+                SELECT name, account_type, currency, tracking_mode
+                FROM accounts
+                WHERE id = '77777777-7777-4777-8777-777777777777'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          name: "Remote Account",
+          account_type: "SECURITIES",
+          currency: "USD",
+          tracking_mode: "TRANSACTIONS",
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'account'
+                  AND entity_id = '77777777-7777-4777-8777-777777777777'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          last_op: "create",
+          last_seq: 16,
+        });
+        expect(
+          verifyDb
+            .query<
+              { event_id: string; seq: number },
+              []
+            >("SELECT event_id, seq FROM sync_applied_events WHERE event_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'")
+            .get(),
+        ).toEqual({ event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", seq: 16 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect bootstrap-snapshot route for not-ready device", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bootstrap-not-ready-"));
     const deviceSyncRequests: string[] = [];

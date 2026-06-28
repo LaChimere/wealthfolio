@@ -7285,7 +7285,7 @@ async function triggerLocalDeviceSyncCycle(
           env,
           fetchImpl,
           session.accessToken,
-          identity.deviceId,
+          identity,
           cursor,
         );
       } catch (error) {
@@ -7341,7 +7341,7 @@ async function triggerLocalDeviceSyncCycle(
             env,
             fetchImpl,
             session.accessToken,
-            identity.deviceId,
+            identity,
             cursor,
           );
         } catch (error) {
@@ -7737,20 +7737,35 @@ async function localPullRemoteSyncEvents(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
-  deviceId: string,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
   localCursor: number,
 ): Promise<{ pulledCount: number; cursor: number }> {
   let cursor = localCursor;
   let pulledCount = 0;
   for (;;) {
-    const response = await localPullSyncEvents(env, fetchImpl, accessToken, deviceId, cursor, 500);
+    const response = await localPullSyncEvents(
+      env,
+      fetchImpl,
+      accessToken,
+      identity.deviceId,
+      cursor,
+      500,
+    );
     if (response.gcWatermark !== null && cursor < response.gcWatermark) {
       throw new LocalPullStaleCursorError(
         `Cursor ${cursor} is older than pull GC watermark ${response.gcWatermark}`,
       );
     }
-    if (response.events.some((event) => !localRemoteEventIsIgnorable(event, deviceId))) {
-      throw deviceSyncDisabled();
+    for (const event of response.events) {
+      if (localRemoteEventIsIgnorable(event, identity.deviceId)) {
+        continue;
+      }
+      if (!localCanReplayAccountEvent(event)) {
+        throw deviceSyncDisabled();
+      }
+      if (await localApplyAccountReplayEvent(db, event, identity)) {
+        pulledCount += 1;
+      }
     }
     if (response.nextCursor < cursor) {
       throw new ConnectServiceError(
@@ -7910,6 +7925,310 @@ function localRemoteEventIsIgnorable(event: Record<string, unknown>, deviceId: s
     entity === "snapshot" &&
     (eventType === null || !/\.(create|update|delete)\.v1$/.test(eventType))
   );
+}
+
+function localCanReplayAccountEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "account" &&
+    eventType !== null &&
+    /^account\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
+async function localApplyAccountReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): Promise<boolean> {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'account' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM accounts WHERE id = ?").run(entityId);
+    } else {
+      const payload = await localDecryptReplayPayload(event, identity);
+      localUpsertAccountReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "account",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkAccountReplayTableState(db);
+  }
+  localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
+  return shouldApply;
+}
+
+function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
+  const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function requiredLocalPullEventString(
+  event: Record<string, unknown>,
+  primary: string,
+  alias?: string,
+): string {
+  const value = optionalString(event[primary] ?? (alias ? event[alias] : undefined));
+  if (value === null) {
+    throw new ConnectServiceError("internal_error", "Failed to parse pull response", 500);
+  }
+  return value;
+}
+
+async function localDecryptReplayPayload(
+  event: Record<string, unknown>,
+  identity: ReturnType<typeof parseSyncIdentity>,
+): Promise<Record<string, unknown>> {
+  const encryptedPayload = requiredLocalPullEventString(event, "payload");
+  const payloadKeyVersion = requiredInteger(
+    event.payload_key_version ?? event.payloadKeyVersion,
+    "pull event",
+  );
+  if (!identity.rootKey) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Replay decrypt failed: No root key configured",
+      500,
+    );
+  }
+  const crypto = createSyncCryptoService();
+  const dek = (await crypto.deriveDek(identity.rootKey, payloadKeyVersion)).value;
+  const decrypted = (await crypto.decrypt(dek, encryptedPayload)).value;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decrypted);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Replay payload decode failed: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new ConnectServiceError("internal_error", "Replay payload must be a JSON object", 500);
+  }
+  return parsed;
+}
+
+function localUpsertAccountReplayPayload(
+  db: Database,
+  entityId: string,
+  payload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const name = requiredReplayString(payload.name, "account.name");
+  const accountType = requiredReplayString(
+    payload.account_type ?? payload.accountType,
+    "account.account_type",
+  );
+  const currency = requiredReplayString(payload.currency, "account.currency");
+  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO accounts (
+        id, name, account_type, "group", currency, is_default, is_active,
+        created_at, updated_at, platform_id, account_number, meta, provider,
+        provider_account_id, is_archived, tracking_mode
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        account_type = excluded.account_type,
+        "group" = excluded."group",
+        currency = excluded.currency,
+        is_default = excluded.is_default,
+        is_active = excluded.is_active,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        platform_id = excluded.platform_id,
+        account_number = excluded.account_number,
+        meta = excluded.meta,
+        provider = excluded.provider,
+        provider_account_id = excluded.provider_account_id,
+        is_archived = excluded.is_archived,
+        tracking_mode = excluded.tracking_mode
+    `,
+  ).run(
+    entityId,
+    name,
+    accountType,
+    optionalString(payload.group) ?? null,
+    currency,
+    replayBooleanToInteger(payload.is_default ?? payload.isDefault),
+    replayBooleanToInteger(payload.is_active ?? payload.isActive, true),
+    createdAt,
+    updatedAt,
+    optionalString(payload.platform_id ?? payload.platformId) ?? null,
+    optionalString(payload.account_number ?? payload.accountNumber) ?? null,
+    optionalString(payload.meta) ?? null,
+    optionalString(payload.provider) ?? null,
+    optionalString(payload.provider_account_id ?? payload.providerAccountId) ?? null,
+    replayBooleanToInteger(payload.is_archived ?? payload.isArchived),
+    optionalString(payload.tracking_mode ?? payload.trackingMode) ?? "NOT_SET",
+  );
+}
+
+function requiredReplayString(value: unknown, context: string): string {
+  const parsed = optionalString(value);
+  if (parsed === null) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return parsed;
+}
+
+function replayBooleanToInteger(value: unknown, defaultValue = false): number {
+  if (value === undefined || value === null) {
+    return defaultValue ? 1 : 0;
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  if (value === 0 || value === 1) {
+    return value;
+  }
+  throw new ConnectServiceError("internal_error", "Failed to parse account replay payload", 500);
+}
+
+function localShouldApplyLww(
+  localClientTimestamp: string,
+  localEventId: string,
+  remoteClientTimestamp: string,
+  remoteEventId: string,
+): boolean {
+  const localTime = Date.parse(localClientTimestamp);
+  const remoteTime = Date.parse(remoteClientTimestamp);
+  if (!Number.isNaN(localTime) && !Number.isNaN(remoteTime)) {
+    if (remoteTime > localTime) {
+      return true;
+    }
+    if (remoteTime === localTime) {
+      return remoteEventId > localEventId;
+    }
+    return false;
+  }
+  if (remoteClientTimestamp > localClientTimestamp) {
+    return true;
+  }
+  if (remoteClientTimestamp === localClientTimestamp) {
+    return remoteEventId > localEventId;
+  }
+  return false;
+}
+
+function localUpsertSyncEntityMetadata(
+  db: Database,
+  entity: string,
+  entityId: string,
+  eventId: string,
+  clientTimestamp: string,
+  operation: string,
+  seq: number,
+): void {
+  db.prepare(
+    `
+      INSERT INTO sync_entity_metadata (
+        entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(entity, entity_id) DO UPDATE SET
+        last_event_id = excluded.last_event_id,
+        last_client_timestamp = excluded.last_client_timestamp,
+        last_op = excluded.last_op,
+        last_seq = excluded.last_seq
+    `,
+  ).run(entity, entityId, eventId, clientTimestamp, operation, seq);
+}
+
+function localInsertSyncAppliedEvent(
+  db: Database,
+  eventId: string,
+  seq: number,
+  entity: string,
+  entityId: string,
+): void {
+  db.prepare(
+    `
+      INSERT INTO sync_applied_events (event_id, seq, entity, entity_id, applied_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(event_id) DO NOTHING
+    `,
+  ).run(eventId, seq, entity, entityId, new Date().toISOString());
+}
+
+function localMarkAccountReplayTableState(db: Database): void {
+  db.prepare(
+    `
+      INSERT INTO sync_table_state (table_name, enabled, last_incremental_apply_at)
+      VALUES ('accounts', 1, ?)
+      ON CONFLICT(table_name) DO UPDATE SET
+        enabled = 1,
+        last_incremental_apply_at = excluded.last_incremental_apply_at
+    `,
+  ).run(new Date().toISOString());
 }
 
 function localSetSyncCursor(db: Database, cursor: number): void {

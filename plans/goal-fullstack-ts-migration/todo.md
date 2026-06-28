@@ -6680,6 +6680,10 @@ contract:
   event pages now validate Rust-shaped SyncEvent fields and safe integer tokens
   before allowing self-origin or snapshot-control events to be ignored while the
   cursor advances.
+- `pr5-runtime-connect-account-replay-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now decrypts and applies remote account
+  replay events, updates sync entity metadata/applied-event tracking, and keeps
+  non-account replay entities gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
