@@ -6602,6 +6602,10 @@ contract:
   passed. Runtime-backed Connect trigger-cycle now expects covered pull-tail
   reconcile results to acquire the local sync lock, return the Rust-shaped ok
   payload, and clear stale engine error/retry state.
+- `pr5-runtime-connect-bootstrap-no-remote-route-smoke`: verification passed.
+  Runtime-backed Connect bootstrap-snapshot now expects missing remote snapshots
+  with follow-up NOOP reconcile to reset local sync state, mark bootstrap
+  complete, and return the Rust-shaped skipped response.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

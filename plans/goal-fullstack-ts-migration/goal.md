@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 904
+turns_used: 905
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-28T12:10:07+09:00"
+updated_at: "2026-06-28T12:17:02+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5113,6 +5113,10 @@ updated_at: "2026-06-28T12:10:07+09:00"
   The SQLite-backed runtime now proves covered pull-tail reconcile results
   acquire the local sync lock, return the Rust-shaped ok payload, and clear
   stale engine error/retry state.
+- Turn 905: Added runtime-backed Connect bootstrap-snapshot no-remote route
+  coverage. The SQLite-backed runtime now proves missing remote snapshots with
+  follow-up NOOP reconcile reset local sync state, mark bootstrap complete, and
+  return the Rust-shaped skipped response.
 
 ## Deferred items
 
