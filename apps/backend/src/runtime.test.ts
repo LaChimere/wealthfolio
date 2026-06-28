@@ -5654,6 +5654,184 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to goals-allocation replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-goals-allocation-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 18).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "allocation-replay",
+          goalId: "allocation-goal",
+          accountId: "allocation-account",
+          percentAllocation: 33.5,
+          taxBucket: "tfsa",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-02T00:00:00Z",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 29 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 29,
+            next_cursor: 29,
+            has_more: false,
+            events: [
+              {
+                event_id: "34343434-3434-4343-8343-343434343434",
+                device_id: "other-device",
+                type: "goals_allocation.create.v1",
+                entity: "goals_allocation",
+                entity_id: "allocation-replay",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 29,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('allocation-account', 'Allocation Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS');
+          INSERT INTO goals (
+            id, title, description, target_amount, goal_type, status_lifecycle,
+            status_health, priority, cover_image_key, currency, start_date,
+            target_date, summary_current_value, summary_progress,
+            projected_completion_date, projected_value_at_target_date,
+            created_at, updated_at, summary_target_amount
+          )
+          VALUES (
+            'allocation-goal', 'Allocation Goal', NULL, 1000, 'custom_save_up', 'active',
+            'not_applicable', 0, NULL, 'USD', NULL, NULL, NULL, NULL, NULL, NULL,
+            '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1000
+          );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 29,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                goal_id: string;
+                account_id: string;
+                share_percent: number;
+                tax_bucket: string | null;
+              },
+              []
+            >(
+              `
+                SELECT goal_id, account_id, share_percent, tax_bucket
+                FROM goals_allocation
+                WHERE id = 'allocation-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          goal_id: "allocation-goal",
+          account_id: "allocation-account",
+          share_percent: 33.5,
+          tax_bucket: "tfsa",
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'goals_allocation'
+                  AND entity_id = 'allocation-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "34343434-3434-4343-8343-343434343434",
+          last_op: "create",
+          last_seq: 29,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect account replay LWW and tombstones", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-account-lww-"));
     const rootKey = Buffer.alloc(32, 11).toString("base64");

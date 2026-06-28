@@ -4076,7 +4076,8 @@ type LocalReplayEntity =
   | "contribution_limit"
   | "custom_provider"
   | "goal"
-  | "goal_plan";
+  | "goal_plan"
+  | "goals_allocation";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8081,6 +8082,16 @@ function localCanReplayGoalPlanEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+function localCanReplayGoalsAllocationEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "goals_allocation" &&
+    eventType !== null &&
+    /^goals_allocation\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8105,6 +8116,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayGoalPlanEvent(event)) {
     return "goal_plan";
+  }
+  if (localCanReplayGoalsAllocationEvent(event)) {
+    return "goals_allocation";
   }
   return null;
 }
@@ -8278,6 +8292,8 @@ function localApplyReplayEventPrepared(
       return localApplyGoalReplayEvent(db, replayEvent.event, payloads);
     case "goal_plan":
       return localApplyGoalPlanReplayEvent(db, replayEvent.event, payloads);
+    case "goals_allocation":
+      return localApplyGoalsAllocationReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -8897,6 +8913,84 @@ function localApplyGoalPlanReplayEvent(
   return shouldApply;
 }
 
+function localApplyGoalsAllocationReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localGoalsAllocationSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'goals_allocation' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM goals_allocation WHERE id = ?").run(entityId);
+    } else {
+      localUpsertGoalsAllocationReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "goals_allocation",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "goals_allocation");
+    localInsertSyncAppliedEvent(db, eventId, seq, "goals_allocation", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "goals_allocation", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -8967,6 +9061,16 @@ function localGoalPlanSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^goal_plan\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localGoalsAllocationSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^goals_allocation\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9419,6 +9523,54 @@ function localUpsertGoalPlanReplayPayload(
   );
 }
 
+function localUpsertGoalsAllocationReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const payload = normalizeReplayPayload("goals_allocation", rawPayload);
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const goalId = requiredReplayString(payload.goal_id, "goals_allocation.goal_id");
+  const accountId = requiredReplayString(payload.account_id, "goals_allocation.account_id");
+  const sharePercent = requiredFiniteNumber(
+    payload.share_percent,
+    "goals_allocation.share_percent",
+  );
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO goals_allocation (
+        id, goal_id, account_id, share_percent, tax_bucket, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        goal_id = excluded.goal_id,
+        account_id = excluded.account_id,
+        share_percent = excluded.share_percent,
+        tax_bucket = excluded.tax_bucket,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at
+    `,
+  ).run(
+    entityId,
+    goalId,
+    accountId,
+    sharePercent,
+    optionalString(payload.tax_bucket) ?? null,
+    createdAt,
+    updatedAt,
+  );
+}
+
 function requiredReplayString(value: unknown, context: string): string {
   const parsed = optionalString(value);
   if (parsed === null) {
@@ -9469,6 +9621,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   custom_provider: "market_data_custom_providers",
   goal: "goals",
   goal_plan: "goal_plans",
+  goals_allocation: "goals_allocation",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -9564,6 +9717,15 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["settings_json", "settingsJson"],
     ["summary_json", "summaryJson"],
     ["version"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+  goals_allocation: [
+    ["id"],
+    ["goal_id", "goalId"],
+    ["account_id", "accountId"],
+    ["share_percent", "sharePercent", "percent_allocation", "percentAllocation"],
+    ["tax_bucket", "taxBucket"],
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
@@ -9729,7 +9891,8 @@ function localMarkReplayTableState(
     | "contribution_limits"
     | "market_data_custom_providers"
     | "goals"
-    | "goal_plans",
+    | "goal_plans"
+    | "goals_allocation",
 ): void {
   db.prepare(
     `
