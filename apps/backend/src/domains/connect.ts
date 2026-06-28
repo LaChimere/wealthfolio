@@ -9698,6 +9698,8 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
       `,
     )
     .get(replayIdentity.metadataEntityId);
+  const metadataWriteEntityId =
+    operation === "delete" ? replayIdentity.metadataEntityId : replayIdentity.entityId;
   const previousOperation = metadata?.last_op ?? "update";
   const shouldApply =
     metadata === null || metadata === undefined
@@ -9715,7 +9717,7 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
   if (shouldApply) {
     if (operation === "delete") {
       db.prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?").run(
-        replayIdentity.entityId,
+        replayIdentity.metadataEntityId,
       );
     } else {
       localUpsertAssetTaxonomyAssignmentReplayPayload(
@@ -9724,40 +9726,64 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
         replayIdentity.payload,
       );
     }
-    for (const staleMetadataId of new Set([entityId, replayIdentity.metadataEntityId])) {
-      if (staleMetadataId !== replayIdentity.entityId) {
-        db.prepare(
-          `
-            DELETE FROM sync_entity_metadata
-            WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
-          `,
-        ).run(staleMetadataId);
+    if (operation !== "delete") {
+      for (const staleMetadataId of new Set([entityId, replayIdentity.metadataEntityId])) {
+        if (staleMetadataId !== replayIdentity.entityId) {
+          db.prepare(
+            `
+              DELETE FROM sync_entity_metadata
+              WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
+            `,
+          ).run(staleMetadataId);
+        }
       }
     }
     localUpsertSyncEntityMetadata(
       db,
       "asset_taxonomy_assignment",
-      replayIdentity.entityId,
+      metadataWriteEntityId,
       eventId,
       clientTimestamp,
       operation,
       seq,
     );
+    if (operation === "delete" && entityId !== metadataWriteEntityId) {
+      localUpsertSyncEntityMetadata(
+        db,
+        "asset_taxonomy_assignment",
+        entityId,
+        eventId,
+        clientTimestamp,
+        operation,
+        seq,
+      );
+    }
     localMarkReplayTableState(db, "asset_taxonomy_assignments");
     localInsertSyncAppliedEvent(
       db,
       eventId,
       seq,
       "asset_taxonomy_assignment",
-      replayIdentity.entityId,
+      metadataWriteEntityId,
     );
   } else {
+    if (operation === "delete" && entityId !== metadataWriteEntityId) {
+      localUpsertSyncEntityMetadata(
+        db,
+        "asset_taxonomy_assignment",
+        entityId,
+        eventId,
+        clientTimestamp,
+        "delete",
+        seq,
+      );
+    }
     localInsertSyncAppliedEvent(
       db,
       eventId,
       seq,
       "asset_taxonomy_assignment",
-      replayIdentity.entityId,
+      metadataWriteEntityId,
     );
   }
   return shouldApply;
