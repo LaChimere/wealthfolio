@@ -6668,6 +6668,10 @@ contract:
   Runtime-backed Connect trigger-cycle now encrypts due pending outbox events,
   posts them to `/api/v1/sync/events/push`, marks accepted rows sent, records
   push completion, and returns Rust-shaped push counts when no pull is needed.
+- `pr5-runtime-connect-trigger-empty-pull-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now follows PULL_TAIL when the server
+  cursor is ahead and the pulled page is empty, advancing the local cursor and
+  recording pull completion while keeping non-empty replay explicitly gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -7239,6 +7239,35 @@ async function triggerLocalDeviceSyncCycle(
       return localSyncCycleResult("ok", acquiredLockVersion, cursor);
     }
     if (
+      reconcile.action === "PULL_TAIL" &&
+      !reconcile.cursorInvalid &&
+      localReconcileCursorOrDefault(reconcile) > cursor &&
+      !localHasPendingSyncOutbox(db)
+    ) {
+      const acquiredLockVersion = localAcquireSyncCycleLock(db);
+      let pullResult: { pulledCount: number; cursor: number };
+      try {
+        pullResult = await localPullRemoteSyncEvents(
+          db,
+          env,
+          fetchImpl,
+          session.accessToken,
+          identity.deviceId,
+          cursor,
+        );
+      } catch (error) {
+        if (error instanceof ConnectNotImplementedError) {
+          throw error;
+        }
+        markLocalSyncCycleError(db, "pull_error", `Pull failed: ${errorMessage(error)}`);
+        return localSyncCycleResult("pull_error", acquiredLockVersion, cursor);
+      }
+      markLocalSyncCycleOutcome(db, "ok");
+      return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
+        pulledCount: pullResult.pulledCount,
+      });
+    }
+    if (
       (reconcile.action === "NOOP" || reconcile.action === "PULL_TAIL") &&
       localHasPendingSyncOutbox(db)
     ) {
@@ -7258,7 +7287,31 @@ async function triggerLocalDeviceSyncCycle(
         return localSyncCycleResult("push_error", acquiredLockVersion, cursor);
       }
       if (pushResult.serverCursor > cursor) {
-        throw deviceSyncDisabled();
+        let pullResult: { pulledCount: number; cursor: number };
+        try {
+          pullResult = await localPullRemoteSyncEvents(
+            db,
+            env,
+            fetchImpl,
+            session.accessToken,
+            identity.deviceId,
+            cursor,
+          );
+        } catch (error) {
+          if (error instanceof ConnectNotImplementedError) {
+            throw error;
+          }
+          markLocalSyncCycleError(db, "pull_error", `Pull failed: ${errorMessage(error)}`);
+          return localSyncCycleResult("pull_error", acquiredLockVersion, cursor, null, null, {
+            pushedCount: pushResult.pushedCount,
+          });
+        }
+        markLocalSyncCycleOutcome(db, "ok");
+        return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
+          pushedCount: pushResult.pushedCount,
+          pulledCount: pullResult.pulledCount,
+          deadLetterCount: pushResult.deadLetterCount,
+        });
       }
       markLocalSyncCycleOutcome(db, "ok");
       return localSyncCycleResult("ok", acquiredLockVersion, cursor, null, null, {
@@ -7549,6 +7602,162 @@ function localMarkPushCompleted(db: Database): void {
 
 function localRemoteEntityIdIsValid(entityId: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entityId);
+}
+
+async function localPullRemoteSyncEvents(
+  db: Database,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  localCursor: number,
+): Promise<{ pulledCount: number; cursor: number }> {
+  let cursor = localCursor;
+  let pulledCount = 0;
+  for (;;) {
+    const response = await localPullSyncEvents(env, fetchImpl, accessToken, deviceId, cursor, 500);
+    if (response.gcWatermark !== null && cursor < response.gcWatermark) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `Cursor ${cursor} is older than pull GC watermark ${response.gcWatermark}`,
+        500,
+      );
+    }
+    if (response.events.some((event) => !localRemoteEventIsIgnorable(event, deviceId))) {
+      throw deviceSyncDisabled();
+    }
+    if (response.nextCursor < cursor) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `Server returned non-monotonic cursor (${response.nextCursor} < ${cursor})`,
+        500,
+      );
+    }
+    cursor = response.nextCursor;
+    localSetSyncCursor(db, cursor);
+    if (!response.hasMore) {
+      break;
+    }
+  }
+  localMarkPullCompleted(db);
+  return { pulledCount, cursor };
+}
+
+async function localPullSyncEvents(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  since: number,
+  limit: number,
+): Promise<{
+  nextCursor: number;
+  hasMore: boolean;
+  events: Array<Record<string, unknown>>;
+  gcWatermark: number | null;
+}> {
+  const url = `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/pull?since=${since}&limit=${limit}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+        "x-wf-device-id": deviceId,
+      },
+    });
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", errorMessage(error), 500);
+  }
+  if (!response.ok) {
+    throw new ConnectServiceError(
+      "internal_error",
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      500,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse pull response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (
+    !isRecord(parsed) ||
+    !Array.isArray(parsed.events) ||
+    parsed.events.some((event) => !isRecord(event))
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse pull response", 500);
+  }
+  const hasMore = optionalBoolean(parsed.has_more ?? parsed.hasMore);
+  if (hasMore === null) {
+    throw new ConnectServiceError("internal_error", "Failed to parse pull response", 500);
+  }
+  const gcWatermarkValue = parsed.gc_watermark ?? parsed.gcWatermark;
+  const gcWatermark =
+    gcWatermarkValue === undefined || gcWatermarkValue === null
+      ? null
+      : requiredInteger(gcWatermarkValue, "pull response");
+  return {
+    nextCursor: requiredInteger(parsed.next_cursor ?? parsed.nextCursor, "pull response"),
+    hasMore,
+    events: parsed.events as Array<Record<string, unknown>>,
+    gcWatermark,
+  };
+}
+
+function localRemoteEventIsIgnorable(event: Record<string, unknown>, deviceId: string): boolean {
+  const remoteDeviceId = optionalString(event.device_id ?? event.deviceId);
+  if (remoteDeviceId === deviceId) {
+    return true;
+  }
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "snapshot" &&
+    (eventType === null || !/\.(create|update|delete)\.v1$/.test(eventType))
+  );
+}
+
+function localSetSyncCursor(db: Database, cursor: number): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO sync_cursor (id, cursor, updated_at)
+      VALUES (1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        cursor = excluded.cursor,
+        updated_at = excluded.updated_at
+    `,
+  ).run(cursor, now);
+}
+
+function localMarkPullCompleted(db: Database): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO sync_engine_state (
+        id, last_pull_at, last_error, consecutive_failures, next_retry_at
+      )
+      VALUES (1, ?, NULL, 0, NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        last_pull_at = excluded.last_pull_at,
+        last_error = NULL,
+        consecutive_failures = 0,
+        next_retry_at = NULL
+    `,
+  ).run(now);
 }
 
 function markLocalSyncCycleError(db: Database, status: string, message: string): void {

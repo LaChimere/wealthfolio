@@ -9517,6 +9517,15 @@ describe("TS Connect device sync local service", () => {
             ? Response.json({ action: "PULL_TAIL" })
             : Response.json({ action: "PULL_TAIL", cursor: serverCursor });
         }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          return Response.json({
+            from: 12,
+            to: 13,
+            next_cursor: 13,
+            has_more: false,
+            events: [],
+          });
+        }
         return Response.json({
           id: "device-1",
           display_name: "MacBook",
@@ -9562,10 +9571,15 @@ describe("TS Connect device sync local service", () => {
       });
 
       serverCursor = 13;
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 6,
+        pulledCount: 0,
+        cursor: 13,
       });
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toEqual({ cursor: 13 });
 
       serverCursor = "bad";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
