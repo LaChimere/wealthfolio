@@ -3300,6 +3300,7 @@ describe("TS backend runtime composition", () => {
       expect(deviceSyncRequests).toEqual([
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
         "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
       ]);
     } finally {
       server.stop();

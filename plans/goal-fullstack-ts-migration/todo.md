@@ -6544,6 +6544,10 @@ contract:
   passed. Runtime-backed Connect bootstrap-snapshot now expects READY devices
   with local bootstrap complete and cloud NOOP reconcile to return the
   Rust-shaped skipped response without snapshot polling.
+- `pr5-runtime-connect-bootstrap-background-start-review-fix`: verification
+  passed. TS `/api/v1/connect/device/bootstrap-snapshot` now mirrors Rust by
+  attempting a best-effort background engine start after bootstrap while
+  preserving the original bootstrap response.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

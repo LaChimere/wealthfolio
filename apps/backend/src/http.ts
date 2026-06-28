@@ -860,7 +860,16 @@ function routeConnectDeviceSyncRequest(
 
   if (request.method === "POST" && url.pathname === "/api/v1/connect/device/bootstrap-snapshot") {
     return Promise.resolve(connectDeviceSyncService.bootstrapDeviceSnapshot())
-      .then(jsonResponse)
+      .then(async (result) => {
+        try {
+          await Promise.resolve(connectDeviceSyncService.startDeviceSyncBackgroundEngine());
+        } catch (error) {
+          console.warn(
+            `[Connect] Failed to start device sync background engine after bootstrap: ${errorMessage(error)}`,
+          );
+        }
+        return jsonResponse(result);
+      })
       .catch(domainErrorResponse);
   }
 

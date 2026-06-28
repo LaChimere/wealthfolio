@@ -5544,6 +5544,7 @@ describe("TS backend HTTP skeleton", () => {
       ["clear-sync-data", undefined],
       ["reinitialize", undefined],
       ["bootstrap-snapshot", undefined],
+      ["start-background", undefined],
       ["trigger-cycle", undefined],
       ["start-background", undefined],
       ["stop-background", undefined],
