@@ -2881,6 +2881,96 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect pairing-source status ready route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-source-"));
+    const deviceSyncRequests: Array<{ url: string; deviceId: string; requestId: string }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          deviceId: headers.get("x-wf-device-id") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 10 });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 10 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const sourceResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/pairing-source-status`,
+      );
+      expect(sourceResponse.status).toBe(200);
+      await expect(sourceResponse.json()).resolves.toEqual({
+        status: "ready",
+        message: "This device is ready to connect another device.",
+        localCursor: 10,
+        serverCursor: 10,
+      });
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          deviceId: "",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/events/cursor",
+          deviceId: "device-runtime",
+          requestId: expect.stringMatching(/^device-runtime:[0-9a-f-]{36}$/),
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];

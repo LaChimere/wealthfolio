@@ -6514,6 +6514,11 @@ contract:
   passed. Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed device registration
   plus Connect device sync-state READY/STALE/REGISTERED runtime route smokes and
   found no actionable issues.
+- `pr5-runtime-connect-pairing-source-ready-route-smoke`: verification passed.
+  Runtime-backed Connect pairing-source status now expects
+  `/api/v1/connect/device/pairing-source-status` to read the current trusted
+  device, compare local and server cursors, and return the Rust-shaped ready
+  response when cursors match.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
