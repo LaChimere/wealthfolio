@@ -2651,6 +2651,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect device sync-state route for ready device", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-connect-ready-"));
+    const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const headers = new Headers(init?.headers);
+        deviceSyncRequests.push({
+          url,
+          authorization: headers.get("authorization") ?? "",
+          requestId: headers.get("x-wf-client-request-id") ?? "",
+        });
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const syncStateResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/sync-state`);
+      expect(syncStateResponse.status).toBe(200);
+      await expect(syncStateResponse.json()).resolves.toEqual({
+        state: "READY",
+        deviceId: "device-runtime",
+        deviceName: "MacBook",
+        keyVersion: 5,
+        serverKeyVersion: 5,
+        isTrusted: true,
+        trustedDevices: [],
+      });
+      expect(deviceSyncRequests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          authorization: "Bearer access-token",
+          requestId: expect.stringMatching(/^app:[0-9a-f-]{36}$/),
+        },
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];

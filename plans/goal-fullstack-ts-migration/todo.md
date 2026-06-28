@@ -6497,6 +6497,11 @@ contract:
   Runtime-backed device registration now expects `/api/v1/sync/device/register`
   to restore Connect tokens, send the Rust-shaped enrollment request, map the
   cloud enrollment response, and persist the returned legacy device ID secret.
+- `pr5-runtime-connect-device-sync-state-ready-route-smoke`: verification
+  passed. Runtime-backed Connect device sync-state now expects
+  `/api/v1/connect/device/sync-state` to restore Connect tokens, read the
+  current cloud device with Rust-shaped request metadata, and map a trusted
+  key-version match to READY.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
