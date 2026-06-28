@@ -9685,14 +9685,7 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
   ) {
     return false;
   }
-  const replayIdentity: {
-    entityId: string;
-    metadataEntityId: string;
-    payload: Record<string, unknown> | null;
-  } =
-    operation === "delete"
-      ? { entityId, metadataEntityId: entityId, payload: null }
-      : localResolveAssetTaxonomyAssignmentReplayIdentity(db, entityId, payload);
+  const replayIdentity = localResolveAssetTaxonomyAssignmentReplayIdentity(db, entityId, payload);
   const metadata = db
     .query<
       { last_event_id: string; last_client_timestamp: string; last_op: string | null },
@@ -9725,9 +9718,6 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
         replayIdentity.entityId,
       );
     } else {
-      if (replayIdentity.payload === null) {
-        throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
-      }
       localUpsertAssetTaxonomyAssignmentReplayPayload(
         db,
         replayIdentity.entityId,

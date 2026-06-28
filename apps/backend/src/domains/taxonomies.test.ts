@@ -423,7 +423,14 @@ describe("TS taxonomies domain", () => {
       expect(assignmentEvents.at(-1)).toEqual({
         assignmentId: "assignment-1",
         operation: "Delete",
-        payload: { id: "assignment-1" },
+        payload: expect.objectContaining({
+          id: "assignment-1",
+          assetId: "asset-1",
+          taxonomyId: "asset_classes",
+          categoryId: "EQUITY",
+          weight: 5_000,
+          source: "provider",
+        }),
       });
       await expect(service.removeAssetAssignment("missing")).resolves.toBe(0);
     } finally {
@@ -486,7 +493,16 @@ describe("TS taxonomies domain", () => {
       expect(service.getAssetAssignments("asset-1")).toEqual([high]);
       expect(assignmentEvents).toEqual([
         expect.objectContaining({ assignmentId: "risk-low", operation: "Update" }),
-        { assignmentId: "risk-low", operation: "Delete", payload: { id: "risk-low" } },
+        {
+          assignmentId: "risk-low",
+          operation: "Delete",
+          payload: expect.objectContaining({
+            id: "risk-low",
+            assetId: "asset-1",
+            taxonomyId: "risk_category",
+            categoryId: "LOW",
+          }),
+        },
         expect.objectContaining({ assignmentId: "risk-high", operation: "Update" }),
       ]);
     } finally {

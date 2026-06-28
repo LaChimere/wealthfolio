@@ -7486,6 +7486,171 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("deletes canonical asset taxonomy assignment by natural-key replay payload", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-taxonomy-assignment-delete-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 30).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "local-delete-assignment",
+          assetId: "assignment-delete-asset",
+          taxonomyId: "custom_groups",
+          categoryId: "delete-replay-category",
+          weight: 5000,
+          source: "manual",
+          createdAt: "2026-01-01T00:00:00+00:00",
+          updatedAt: "2026-01-01T00:00:00+00:00",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 42 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 42,
+            next_cursor: 42,
+            has_more: false,
+            events: [
+              {
+                event_id: "dfdfdfdf-dfdf-4dfd-8fdf-dfdfdfdfdfdf",
+                device_id: "other-device",
+                type: "asset_taxonomy_assignment.delete.v1",
+                entity: "asset_taxonomy_assignment",
+                entity_id: "local-delete-assignment",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 42,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec("UPDATE sync_cursor SET cursor = 12 WHERE id = 1;");
+        seedRuntimeAsset(seedDb, "assignment-delete-asset");
+        seedDb.exec(`
+          INSERT OR IGNORE INTO taxonomy_categories (
+            id, taxonomy_id, parent_id, name, key, color, description, sort_order, created_at, updated_at
+          )
+          VALUES (
+            'delete-replay-category', 'custom_groups', NULL, 'Delete Replay Category',
+            'delete_replay_category', '#654321', NULL, 0,
+            '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+          );
+          INSERT INTO asset_taxonomy_assignments (
+            id, asset_id, taxonomy_id, category_id, weight, source, created_at, updated_at
+          )
+          VALUES (
+            'remote-delete-assignment', 'assignment-delete-asset', 'custom_groups', 'delete-replay-category',
+            5000, 'manual', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+          );
+          INSERT INTO sync_entity_metadata (
+            entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+          )
+          VALUES (
+            'asset_taxonomy_assignment', 'remote-delete-assignment', 'remote-create-event',
+            '2026-01-01T00:00:00Z', 'update', 41
+          );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 42,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM asset_taxonomy_assignments WHERE id = 'remote-delete-assignment'")
+            .get(),
+        ).toEqual({ count: 0 });
+        expect(
+          verifyDb
+            .query<{ last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'asset_taxonomy_assignment'
+                  AND entity_id = 'remote-delete-assignment'
+              `,
+            )
+            .get(),
+        ).toEqual({ last_op: "delete", last_seq: 42 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to quote replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-quote-replay-"),
@@ -14670,7 +14835,12 @@ describe("TS backend runtime composition", () => {
           weight: 5_000,
           source: "manual",
         });
-        expect(JSON.parse(String(assignmentRows[1]?.payload))).toEqual({ id: assignment.id });
+        expect(JSON.parse(String(assignmentRows[1]?.payload))).toMatchObject({
+          id: assignment.id,
+          asset_id: "runtime-taxonomy-asset",
+          taxonomy_id: taxonomy.id,
+          category_id: category.id,
+        });
       } finally {
         db.close();
       }

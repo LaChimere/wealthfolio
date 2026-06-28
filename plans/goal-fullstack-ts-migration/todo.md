@@ -6779,6 +6779,10 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote asset replay
   events into assets while ignoring generated readonly instrument_key payload
   aliases like Rust replay.
+- `pr5-runtime-connect-assignment-replay-review-fixes`: review feedback
+  resolved. Asset taxonomy assignment replay now evaluates LWW against existing
+  natural-key row metadata, rejects present mismatched PK values, and carries
+  natural-key delete payloads so canonical rows can be removed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -474,11 +474,12 @@ export function createTaxonomyRepository(
     deleteAssignment(id) {
       let affected = 0;
       db.transaction(() => {
+        const existing = readAssignmentByIdOrNull(db, id);
         affected = db
           .prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?")
           .run(id).changes;
         if (affected > 0) {
-          queueAssignmentDelete(options, id);
+          queueAssignmentDelete(options, existing ?? id);
         }
       })();
       return affected;
@@ -486,21 +487,21 @@ export function createTaxonomyRepository(
     deleteAssetAssignments(assetId, taxonomyId) {
       let affected = 0;
       db.transaction(() => {
-        const existingIds = db
-          .query<{ id: string }, [string, string]>(
+        const existingAssignments = db
+          .query<AssetTaxonomyAssignmentRow, [string, string]>(
             `
-              SELECT id
+              SELECT ${assetTaxonomyAssignmentColumns()}
               FROM asset_taxonomy_assignments
               WHERE asset_id = ? AND taxonomy_id = ?
             `,
           )
           .all(assetId, taxonomyId)
-          .map((row) => row.id);
+          .map(assetTaxonomyAssignmentFromRow);
         affected = db
           .prepare("DELETE FROM asset_taxonomy_assignments WHERE asset_id = ? AND taxonomy_id = ?")
           .run(assetId, taxonomyId).changes;
-        for (const assignmentId of existingIds) {
-          queueAssignmentDelete(options, assignmentId);
+        for (const assignment of existingAssignments) {
+          queueAssignmentDelete(options, assignment);
         }
       })();
       return affected;
@@ -852,6 +853,14 @@ function readCategoryById(db: Database, taxonomyId: string, categoryId: string):
 }
 
 function readAssignmentById(db: Database, id: string): AssetTaxonomyAssignment {
+  const assignment = readAssignmentByIdOrNull(db, id);
+  if (!assignment) {
+    throw new Error(`Record not found: taxonomy assignment ${id}`);
+  }
+  return assignment;
+}
+
+function readAssignmentByIdOrNull(db: Database, id: string): AssetTaxonomyAssignment | null {
   const row = db
     .query<AssetTaxonomyAssignmentRow, [string]>(
       `
@@ -861,10 +870,7 @@ function readAssignmentById(db: Database, id: string): AssetTaxonomyAssignment {
       `,
     )
     .get(id);
-  if (!row) {
-    throw new Error(`Record not found: taxonomy assignment ${id}`);
-  }
-  return assetTaxonomyAssignmentFromRow(row);
+  return row ? assetTaxonomyAssignmentFromRow(row) : null;
 }
 
 function findAssignmentByNaturalKey(
@@ -1475,11 +1481,15 @@ function queueAssignmentUpdate(
   });
 }
 
-function queueAssignmentDelete(options: TaxonomyRepositoryOptions, assignmentId: string): void {
+function queueAssignmentDelete(
+  options: TaxonomyRepositoryOptions,
+  assignment: AssetTaxonomyAssignment | string,
+): void {
+  const assignmentId = typeof assignment === "string" ? assignment : assignment.id;
   options.queueAssignmentSyncEvent?.({
     assignmentId,
     operation: "Delete",
-    payload: { id: assignmentId },
+    payload: typeof assignment === "string" ? { id: assignmentId } : assignment,
   });
 }
 
