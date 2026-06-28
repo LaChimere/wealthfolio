@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 941
+turns_used: 942
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-28T20:45:00+09:00"
+updated_at: "2026-06-28T21:03:00+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5253,6 +5253,9 @@ updated_at: "2026-06-28T20:45:00+09:00"
 - Turn 941: Ported bounded AI message replay through trigger-cycle. Pull-tail
   can now decrypt and apply remote ai_message create/update/delete events into
   ai_messages with parent-thread FK handling and sync metadata tracking.
+- Turn 942: Ported bounded AI thread-tag replay through trigger-cycle. Pull-tail
+  can now decrypt and apply remote ai_thread_tag create/update/delete events
+  into ai_thread_tags with parent-thread FK handling and sync metadata tracking.
 
 ## Deferred items
 
