@@ -6532,6 +6532,10 @@ contract:
   Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed pairing-source
   ready/restore_required plus trigger-cycle READY/NOOP runtime route smokes and
   found no actionable issues.
+- `pr5-runtime-connect-bootstrap-not-ready-route-smoke`: verification passed.
+  Runtime-backed Connect bootstrap-snapshot now expects
+  `/api/v1/connect/device/bootstrap-snapshot` to map non-READY local sync state
+  to the Rust-shaped skipped_not_ready response without snapshot polling.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
