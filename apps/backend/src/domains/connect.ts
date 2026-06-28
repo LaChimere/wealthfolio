@@ -4081,7 +4081,8 @@ type LocalReplayEntity =
   | "import_template"
   | "activity_import_profile"
   | "import_run"
-  | "ai_thread";
+  | "ai_thread"
+  | "ai_message";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8136,6 +8137,16 @@ function localCanReplayAiThreadEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+function localCanReplayAiMessageEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "ai_message" &&
+    eventType !== null &&
+    /^ai_message\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8175,6 +8186,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayAiThreadEvent(event)) {
     return "ai_thread";
+  }
+  if (localCanReplayAiMessageEvent(event)) {
+    return "ai_message";
   }
   return null;
 }
@@ -8380,6 +8394,8 @@ function localApplyReplayEventPrepared(
       return localApplyImportRunReplayEvent(db, replayEvent.event, payloads);
     case "ai_thread":
       return localApplyAiThreadReplayEvent(db, replayEvent.event, payloads);
+    case "ai_message":
+      return localApplyAiMessageReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9389,6 +9405,84 @@ function localApplyAiThreadReplayEvent(
   return shouldApply;
 }
 
+function localApplyAiMessageReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localAiMessageSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'ai_message' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM ai_messages WHERE id = ?").run(entityId);
+    } else {
+      localUpsertAiMessageReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "ai_message",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "ai_messages");
+    localInsertSyncAppliedEvent(db, eventId, seq, "ai_message", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "ai_message", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9509,6 +9603,16 @@ function localAiThreadSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^ai_thread\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localAiMessageSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^ai_message\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9907,6 +10011,15 @@ function localUpsertAiThreadReplayPayload(
   localUpsertReplayPayloadFields(db, "ai_threads", "id", entityId, payload);
 }
 
+function localUpsertAiMessageReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("ai_message", rawPayload);
+  localUpsertReplayPayloadFields(db, "ai_messages", "id", entityId, payload);
+}
+
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
   validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
@@ -10092,6 +10205,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   activity_import_profile: "import_account_templates",
   import_run: "import_runs",
   ai_thread: "ai_threads",
+  ai_message: "ai_messages",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -10245,6 +10359,13 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["is_pinned", "isPinned"],
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
+  ],
+  ai_message: [
+    ["id"],
+    ["thread_id", "threadId"],
+    ["role"],
+    ["content_json", "contentJson"],
+    ["created_at", "createdAt"],
   ],
 };
 
@@ -10426,7 +10547,8 @@ function localMarkReplayTableState(
     | "import_templates"
     | "import_account_templates"
     | "import_runs"
-    | "ai_threads",
+    | "ai_threads"
+    | "ai_messages",
 ): void {
   db.prepare(
     `

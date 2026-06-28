@@ -6753,6 +6753,10 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote ai_thread replay
   events into ai_threads with camelCase payload aliases and sync
   metadata/applied-event tracking.
+- `pr5-runtime-connect-ai-message-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote ai_message replay
+  events into ai_messages with parent-thread FK handling and sync
+  metadata/applied-event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
