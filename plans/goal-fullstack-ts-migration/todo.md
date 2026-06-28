@@ -6582,6 +6582,10 @@ contract:
   Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed trigger-cycle stale_cursor
   plus bootstrap-snapshot requested/newer-schema runtime route smokes and found
   no actionable issues.
+- `pr5-runtime-connect-start-background-ready-route-smoke`: verification passed.
+  Runtime-backed Connect start-background now expects
+  `/api/v1/connect/device/start-background` to read READY sync state and remain
+  explicitly feature-gated until background engine runtime is migrated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
