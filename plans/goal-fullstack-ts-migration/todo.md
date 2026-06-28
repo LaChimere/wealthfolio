@@ -6672,6 +6672,10 @@ contract:
   Runtime-backed Connect trigger-cycle now follows PULL_TAIL when the server
   cursor is ahead and the pulled page is empty, advancing the local cursor and
   recording pull completion while keeping non-empty replay explicitly gated.
+- `pr5-runtime-connect-trigger-review-fixes`: review feedback resolved.
+  Trigger-cycle now schedules/dead-letters outbox rows on push failures,
+  preserves stale-cursor pull outcomes as bootstrap-needed responses, rejects
+  unsafe i64 cloud cursor tokens, and still pulls after all-invalid outbox rows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4068,6 +4068,39 @@ interface LocalSyncOutboxRow {
   retry_count: number;
 }
 
+class LocalPullStaleCursorError extends Error {
+  constructor(
+    message: string,
+    readonly snapshotId: string | null = null,
+    readonly snapshotSeq: number | null = null,
+  ) {
+    super(message);
+    this.name = "LocalPullStaleCursorError";
+  }
+}
+
+class LocalPushSyncFailureError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly errorCode: string | null,
+  ) {
+    super(message);
+    this.name = "LocalPushSyncFailureError";
+  }
+}
+
+const STALE_PULL_ERROR_CODES = new Set([
+  "SYNC_CURSOR_TOO_OLD",
+  "SYNC_SEGMENT_OBJECT_MISSING",
+  "SYNC_SEGMENT_OFFSET_INVALID",
+  "SYNC_SEGMENT_CHECKSUM_MISMATCH",
+  "SYNC_SEGMENT_STREAM_MISMATCH",
+  "SYNC_EVENT_INDEX_MISMATCH",
+  "SYNC_SNAPSHOT_OBJECT_MISSING",
+  "SYNC_SNAPSHOT_CHECKSUM_MISMATCH",
+]);
+
 interface SyncDeviceConfigRow {
   device_id: string;
   last_bootstrap_at: string | null;
@@ -7259,6 +7292,16 @@ async function triggerLocalDeviceSyncCycle(
         if (error instanceof ConnectNotImplementedError) {
           throw error;
         }
+        if (error instanceof LocalPullStaleCursorError) {
+          markLocalSyncCycleError(db, "stale_cursor", error.message);
+          return localSyncCycleResult(
+            "stale_cursor",
+            acquiredLockVersion,
+            cursor,
+            error.snapshotId,
+            error.snapshotSeq,
+          );
+        }
         markLocalSyncCycleError(db, "pull_error", `Pull failed: ${errorMessage(error)}`);
         return localSyncCycleResult("pull_error", acquiredLockVersion, cursor);
       }
@@ -7286,7 +7329,11 @@ async function triggerLocalDeviceSyncCycle(
         markLocalSyncCycleError(db, "push_error", `Push failed: ${errorMessage(error)}`);
         return localSyncCycleResult("push_error", acquiredLockVersion, cursor);
       }
-      if (pushResult.serverCursor > cursor) {
+      const followUpCursor = Math.max(
+        pushResult.serverCursor,
+        localReconcileCursorOrDefault(reconcile),
+      );
+      if (followUpCursor > cursor) {
         let pullResult: { pulledCount: number; cursor: number };
         try {
           pullResult = await localPullRemoteSyncEvents(
@@ -7300,6 +7347,20 @@ async function triggerLocalDeviceSyncCycle(
         } catch (error) {
           if (error instanceof ConnectNotImplementedError) {
             throw error;
+          }
+          if (error instanceof LocalPullStaleCursorError) {
+            markLocalSyncCycleError(db, "stale_cursor", error.message);
+            return localSyncCycleResult(
+              "stale_cursor",
+              acquiredLockVersion,
+              cursor,
+              error.snapshotId,
+              error.snapshotSeq,
+              {
+                pushedCount: pushResult.pushedCount,
+                deadLetterCount: pushResult.deadLetterCount,
+              },
+            );
           }
           markLocalSyncCycleError(db, "pull_error", `Pull failed: ${errorMessage(error)}`);
           return localSyncCycleResult("pull_error", acquiredLockVersion, cursor, null, null, {
@@ -7411,12 +7472,15 @@ async function localPushPendingSyncOutbox(
   }
   const crypto = createSyncCryptoService();
   const events: Array<Record<string, unknown>> = [];
+  const eventIds: string[] = [];
   const invalidEntityIds: string[] = [];
+  let maxRetryCount = 0;
   for (const row of pending) {
     if (!localRemoteEntityIdIsValid(row.entity_id)) {
       invalidEntityIds.push(row.event_id);
       continue;
     }
+    maxRetryCount = Math.max(maxRetryCount, row.retry_count);
     const payloadKeyVersion = Math.max(row.payload_key_version, 1);
     if (!identity.rootKey) {
       throw new ConnectServiceError(
@@ -7437,6 +7501,7 @@ async function localPushPendingSyncOutbox(
       payload: encryptedPayload,
       payload_key_version: payloadKeyVersion,
     });
+    eventIds.push(row.event_id);
   }
   if (invalidEntityIds.length > 0) {
     localMarkSyncOutboxDead(
@@ -7449,13 +7514,15 @@ async function localPushPendingSyncOutbox(
   if (events.length === 0) {
     return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: 0 };
   }
-  const response = await localPushSyncEvents(
-    env,
-    fetchImpl,
-    accessToken,
-    identity.deviceId,
-    events,
-  );
+  let response: { sentEventIds: string[]; serverCursor: number };
+  try {
+    response = await localPushSyncEvents(env, fetchImpl, accessToken, identity.deviceId, events);
+  } catch (error) {
+    if (error instanceof LocalPushSyncFailureError) {
+      localApplyPushFailureToOutbox(db, eventIds, error, maxRetryCount);
+    }
+    throw error;
+  }
   localMarkSyncOutboxSent(db, response.sentEventIds);
   localMarkPushCompleted(db);
   return {
@@ -7516,10 +7583,11 @@ async function localPushSyncEvents(
     throw new ConnectServiceError("internal_error", `Push failed: ${errorMessage(error)}`, 500);
   }
   if (!response.ok) {
-    throw new ConnectServiceError(
-      "internal_error",
+    const parsedError = parseDeviceSyncApiError(bodyText);
+    throw new LocalPushSyncFailureError(
       `Push failed: ${connectDeviceSyncApiErrorMessage(response.status, bodyText)}`,
-      500,
+      response.status,
+      parsedError?.code ?? null,
     );
   }
   let parsed: unknown;
@@ -7535,8 +7603,9 @@ async function localPushSyncEvents(
   if (!isRecord(parsed) || !Array.isArray(parsed.accepted) || !Array.isArray(parsed.duplicate)) {
     throw new ConnectServiceError("internal_error", "Failed to parse push response", 500);
   }
-  const serverCursor = requiredInteger(
-    parsed.server_cursor ?? parsed.serverCursor,
+  const serverCursor = requiredSafeI64FromRawJson(
+    bodyText,
+    ["server_cursor", "serverCursor"],
     "push response",
   );
   const sentEventIds = [...parsed.accepted, ...parsed.duplicate]
@@ -7583,6 +7652,65 @@ function localMarkSyncOutboxDead(
   ).run(lastError, lastErrorCode, ...eventIds);
 }
 
+function localApplyPushFailureToOutbox(
+  db: Database,
+  eventIds: string[],
+  error: LocalPushSyncFailureError,
+  maxRetryCount: number,
+): void {
+  if (eventIds.length === 0) {
+    return;
+  }
+  if (error.errorCode === "KEY_VERSION_MISMATCH") {
+    localMarkSyncOutboxDead(db, eventIds, error.message, "key_version_mismatch");
+    return;
+  }
+  if (error.status === 401 || error.status === 403) {
+    localScheduleSyncOutboxRetry(db, eventIds, 30, error.message, "reauth_required");
+    return;
+  }
+  if (error.status === 408 || error.status === 429 || error.status >= 500) {
+    localScheduleSyncOutboxRetry(
+      db,
+      eventIds,
+      localBackoffSeconds(maxRetryCount),
+      error.message,
+      "retryable",
+    );
+    return;
+  }
+  localMarkSyncOutboxDead(db, eventIds, error.message, "permanent");
+}
+
+function localScheduleSyncOutboxRetry(
+  db: Database,
+  eventIds: string[],
+  delaySeconds: number,
+  lastError: string,
+  lastErrorCode: string,
+): void {
+  if (eventIds.length === 0) {
+    return;
+  }
+  const retryAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+  const placeholders = eventIds.map(() => "?").join(", ");
+  db.prepare(
+    `
+      UPDATE sync_outbox
+      SET retry_count = retry_count + 1,
+          next_retry_at = ?,
+          last_error = ?,
+          last_error_code = ?
+      WHERE event_id IN (${placeholders})
+    `,
+  ).run(retryAt, lastError, lastErrorCode, ...eventIds);
+}
+
+function localBackoffSeconds(retryCount: number): number {
+  const capped = Math.max(0, Math.min(Math.trunc(retryCount), 8));
+  return 2 ** capped * 5;
+}
+
 function localMarkPushCompleted(db: Database): void {
   const now = new Date().toISOString();
   db.prepare(
@@ -7617,10 +7745,8 @@ async function localPullRemoteSyncEvents(
   for (;;) {
     const response = await localPullSyncEvents(env, fetchImpl, accessToken, deviceId, cursor, 500);
     if (response.gcWatermark !== null && cursor < response.gcWatermark) {
-      throw new ConnectServiceError(
-        "internal_error",
+      throw new LocalPullStaleCursorError(
         `Cursor ${cursor} is older than pull GC watermark ${response.gcWatermark}`,
-        500,
       );
     }
     if (response.events.some((event) => !localRemoteEventIsIgnorable(event, deviceId))) {
@@ -7677,6 +7803,15 @@ async function localPullSyncEvents(
     throw new ConnectServiceError("internal_error", errorMessage(error), 500);
   }
   if (!response.ok) {
+    const parsedError = parseDeviceSyncApiError(bodyText);
+    if (parsedError?.code && STALE_PULL_ERROR_CODES.has(parsedError.code)) {
+      const hints = localBootstrapHintsFromErrorDetails(parsedError.details);
+      throw new LocalPullStaleCursorError(
+        connectDeviceSyncApiErrorMessage(response.status, bodyText),
+        hints.snapshotId,
+        hints.snapshotSeq,
+      );
+    }
     throw new ConnectServiceError(
       "internal_error",
       connectDeviceSyncApiErrorMessage(response.status, bodyText),
@@ -7704,13 +7839,17 @@ async function localPullSyncEvents(
   if (hasMore === null) {
     throw new ConnectServiceError("internal_error", "Failed to parse pull response", 500);
   }
-  const gcWatermarkValue = parsed.gc_watermark ?? parsed.gcWatermark;
-  const gcWatermark =
-    gcWatermarkValue === undefined || gcWatermarkValue === null
-      ? null
-      : requiredInteger(gcWatermarkValue, "pull response");
+  const gcWatermark = optionalSafeI64FromRawJson(
+    bodyText,
+    ["gc_watermark", "gcWatermark"],
+    "pull response",
+  );
   return {
-    nextCursor: requiredInteger(parsed.next_cursor ?? parsed.nextCursor, "pull response"),
+    nextCursor: requiredSafeI64FromRawJson(
+      bodyText,
+      ["next_cursor", "nextCursor"],
+      "pull response",
+    ),
     hasMore,
     events: parsed.events as Array<Record<string, unknown>>,
     gcWatermark,
@@ -7758,6 +7897,84 @@ function localMarkPullCompleted(db: Database): void {
         next_retry_at = NULL
     `,
   ).run(now);
+}
+
+function parseDeviceSyncApiError(
+  bodyText: string,
+): { code: string | null; details: unknown } | null {
+  const trimmed = bodyText.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!isRecord(parsed) || !validDeviceSyncApiErrorResponseShape(trimmed, parsed)) {
+      return null;
+    }
+    return {
+      code: optionalString(parsed.code) ?? optionalString(parsed.error),
+      details: parsed.details,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function localBootstrapHintsFromErrorDetails(details: unknown): {
+  snapshotId: string | null;
+  snapshotSeq: number | null;
+} {
+  if (!isRecord(details)) {
+    return { snapshotId: null, snapshotSeq: null };
+  }
+  const snapshotId = optionalString(details.latestSnapshotId);
+  const snapshotSeqValue = details.latestSnapshotSeq;
+  const snapshotSeq =
+    typeof snapshotSeqValue === "number" &&
+    Number.isSafeInteger(snapshotSeqValue) &&
+    snapshotSeqValue >= 0
+      ? snapshotSeqValue
+      : null;
+  return { snapshotId, snapshotSeq };
+}
+
+function requiredSafeI64FromRawJson(text: string, aliases: string[], context: string): number {
+  const tokens = rawTokensForAliases(text, aliases);
+  if (tokens.length !== 1 || !rawJsonSafeI64TokenIsValid(tokens[0] ?? "")) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return Number(tokens[0]!.trim());
+}
+
+function optionalSafeI64FromRawJson(
+  text: string,
+  aliases: string[],
+  context: string,
+): number | null {
+  const tokens = rawTokensForAliases(text, aliases);
+  if (tokens.length === 0) {
+    return null;
+  }
+  const token = tokens[0] ?? "";
+  if (tokens.length !== 1) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  if (token.trim() === "null") {
+    return null;
+  }
+  if (!rawJsonSafeI64TokenIsValid(token)) {
+    throw new ConnectServiceError("internal_error", `Failed to parse ${context}`, 500);
+  }
+  return Number(token.trim());
+}
+
+function rawJsonSafeI64TokenIsValid(token: string): boolean {
+  const trimmed = token.trim();
+  if (!rawJsonI64TokenIsValid(trimmed)) {
+    return false;
+  }
+  const parsed = BigInt(trimmed);
+  return parsed >= BigInt(Number.MIN_SAFE_INTEGER) && parsed <= BigInt(Number.MAX_SAFE_INTEGER);
 }
 
 function markLocalSyncCycleError(db: Database, status: string, message: string): void {

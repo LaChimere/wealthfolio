@@ -3485,6 +3485,133 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to schedule push retry", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-push-retry-"));
+    const rootKey = Buffer.alloc(32, 8).toString("base64");
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.endsWith("/api/v1/sync/events/push")) {
+          return Response.json({ code: "TEMPORARY", message: "try later" }, { status: 500 });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 7 WHERE id = 1;
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES (
+            '44444444-4444-4444-8444-444444444444',
+            'account',
+            '55555555-5555-4555-8555-555555555555',
+            'update',
+            '2026-01-01T00:00:00Z',
+            '{"id":"55555555-5555-4555-8555-555555555555","name":"Retry"}',
+            2,
+            0,
+            'pending',
+            2,
+            'device-runtime',
+            '2026-01-01T00:00:00Z'
+          );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "push_error",
+        lockVersion: 1,
+        pushedCount: 0,
+        cursor: 7,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                status: string;
+                sent: number;
+                retry_count: number;
+                next_retry_at: string | null;
+                last_error_code: string | null;
+              },
+              []
+            >(
+              `
+                SELECT status, sent, retry_count, next_retry_at, last_error_code
+                FROM sync_outbox
+                WHERE event_id = '44444444-4444-4444-8444-444444444444'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          status: "pending",
+          sent: 0,
+          retry_count: 3,
+          next_retry_at: expect.any(String),
+          last_error_code: "retryable",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to wait-snapshot state", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-wait-"));
     const deviceSyncRequests: string[] = [];
@@ -3900,6 +4027,24 @@ describe("TS backend runtime composition", () => {
             consecutive_failures = 3,
             next_retry_at = '2030-01-01T00:00:00Z'
           WHERE id = 1;
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES (
+            '33333333-3333-4333-8333-333333333333',
+            'account',
+            'not-a-uuid',
+            'update',
+            '2026-01-01T00:00:00Z',
+            '{}',
+            5,
+            0,
+            'pending',
+            0,
+            'device-runtime',
+            '2026-01-01T00:00:00Z'
+          );
         `);
       } finally {
         seedDb.close();
@@ -3952,9 +4097,13 @@ describe("TS backend runtime composition", () => {
                        sync_engine_state.last_cycle_status,
                        sync_engine_state.last_error,
                        sync_engine_state.consecutive_failures,
-                       sync_engine_state.next_retry_at
+                       sync_engine_state.next_retry_at,
+                       sync_outbox.status AS outbox_status,
+                       sync_outbox.last_error_code AS outbox_error
                 FROM sync_cursor
                 JOIN sync_engine_state ON sync_engine_state.id = sync_cursor.id
+                LEFT JOIN sync_outbox
+                  ON sync_outbox.event_id = '33333333-3333-4333-8333-333333333333'
                 WHERE sync_cursor.id = 1
               `,
             )
@@ -3966,6 +4115,8 @@ describe("TS backend runtime composition", () => {
           last_error: null,
           consecutive_failures: 0,
           next_retry_at: null,
+          outbox_status: "dead",
+          outbox_error: "invalid_entity_id",
         });
       } finally {
         verifyDb.close();

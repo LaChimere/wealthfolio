@@ -9489,6 +9489,7 @@ describe("TS Connect device sync local service", () => {
       | "duplicate-float-token"
       | "duplicate-action"
       | null = null;
+    let pullMode: "empty" | "gc-watermark" | "unsafe-next" = "empty";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9518,13 +9519,23 @@ describe("TS Connect device sync local service", () => {
             : Response.json({ action: "PULL_TAIL", cursor: serverCursor });
         }
         if (url.includes("/api/v1/sync/events/pull")) {
-          return Response.json({
-            from: 12,
-            to: 13,
-            next_cursor: 13,
-            has_more: false,
-            events: [],
-          });
+          if (pullMode === "gc-watermark") {
+            return Response.json({
+              from: 12,
+              to: 13,
+              next_cursor: 13,
+              has_more: false,
+              events: [],
+              gc_watermark: 20,
+            });
+          }
+          if (pullMode === "unsafe-next") {
+            return new Response(
+              '{"from":12,"to":13,"next_cursor":9007199254740993,"has_more":false,"events":[]}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return Response.json({ from: 12, to: 13, next_cursor: 13, has_more: false, events: [] });
         }
         return Response.json({
           id: "device-1",
@@ -9580,6 +9591,23 @@ describe("TS Connect device sync local service", () => {
       expect(
         db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
       ).toEqual({ cursor: 13 });
+
+      db.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+      pullMode = "gc-watermark";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "stale_cursor",
+        lockVersion: 7,
+        cursor: 12,
+        needsBootstrap: true,
+      });
+
+      pullMode = "unsafe-next";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "pull_error",
+        lockVersion: 8,
+        cursor: 12,
+      });
+      pullMode = "empty";
 
       serverCursor = "bad";
       await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
