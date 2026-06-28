@@ -4,7 +4,7 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 944
+turns_used: 945
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
@@ -5265,6 +5265,9 @@ updated_at: "2026-06-28T20:19:53+09:00"
   trigger-cycle. Pull-tail can now decrypt and apply remote
   asset_taxonomy_assignment create/update/delete events into
   asset_taxonomy_assignments with natural-key duplicate convergence.
+- Turn 945: Ported bounded quote replay through trigger-cycle. Pull-tail can now
+  decrypt and apply remote quote create/update/delete events into quotes with
+  asset FK handling and sync metadata tracking.
 
 ## Deferred items
 

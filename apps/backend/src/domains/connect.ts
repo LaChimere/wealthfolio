@@ -4084,7 +4084,8 @@ type LocalReplayEntity =
   | "ai_thread"
   | "ai_message"
   | "ai_thread_tag"
-  | "asset_taxonomy_assignment";
+  | "asset_taxonomy_assignment"
+  | "quote";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8172,6 +8173,16 @@ function localCanReplayAssetTaxonomyAssignmentEvent(event: Record<string, unknow
   );
 }
 
+function localCanReplayQuoteEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "quote" &&
+    eventType !== null &&
+    /^quote\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8220,6 +8231,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayAssetTaxonomyAssignmentEvent(event)) {
     return "asset_taxonomy_assignment";
+  }
+  if (localCanReplayQuoteEvent(event)) {
+    return "quote";
   }
   return null;
 }
@@ -8431,6 +8445,8 @@ function localApplyReplayEventPrepared(
       return localApplyAiThreadTagReplayEvent(db, replayEvent.event, payloads);
     case "asset_taxonomy_assignment":
       return localApplyAssetTaxonomyAssignmentReplayEvent(db, replayEvent.event, payloads);
+    case "quote":
+      return localApplyQuoteReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9702,6 +9718,76 @@ function localApplyAssetTaxonomyAssignmentReplayEvent(
   return shouldApply;
 }
 
+function localApplyQuoteReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localQuoteSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'quote' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM quotes WHERE id = ?").run(entityId);
+    } else {
+      localUpsertQuoteReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(db, "quote", entityId, eventId, clientTimestamp, operation, seq);
+    localMarkReplayTableState(db, "quotes");
+    localInsertSyncAppliedEvent(db, eventId, seq, "quote", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "quote", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9852,6 +9938,14 @@ function localAssetTaxonomyAssignmentSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^asset_taxonomy_assignment\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localQuoteSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
+  const match = /^quote\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -10342,6 +10436,15 @@ function localUpsertAssetTaxonomyAssignmentReplayPayload(
   });
 }
 
+function localUpsertQuoteReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("quote", rawPayload);
+  localUpsertReplayPayloadFields(db, "quotes", "id", entityId, payload);
+}
+
 function localAiThreadChildIds(
   db: Database,
   threadId: string,
@@ -10713,6 +10816,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   ai_message: "ai_messages",
   ai_thread_tag: "ai_thread_tags",
   asset_taxonomy_assignment: "asset_taxonomy_assignments",
+  quote: "quotes",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -10884,6 +10988,22 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["source"],
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
+  ],
+  quote: [
+    ["id"],
+    ["asset_id", "assetId"],
+    ["day"],
+    ["source"],
+    ["open"],
+    ["high"],
+    ["low"],
+    ["close"],
+    ["adjclose"],
+    ["volume"],
+    ["currency"],
+    ["notes"],
+    ["created_at", "createdAt"],
+    ["timestamp"],
   ],
 };
 
@@ -11068,7 +11188,8 @@ function localMarkReplayTableState(
     | "ai_threads"
     | "ai_messages"
     | "ai_thread_tags"
-    | "asset_taxonomy_assignments",
+    | "asset_taxonomy_assignments"
+    | "quotes",
 ): void {
   db.prepare(
     `
