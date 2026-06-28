@@ -6749,6 +6749,10 @@ contract:
   transient missing dependencies, returns pull_error, preserves the local
   cursor, and leaves the event unapplied for retry instead of dead-lettering
   child rows.
+- `pr5-runtime-connect-ai-thread-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote ai_thread replay
+  events into ai_threads with camelCase payload aliases and sync
+  metadata/applied-event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
