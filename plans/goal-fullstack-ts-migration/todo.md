@@ -6562,6 +6562,10 @@ contract:
   Runtime-backed Connect trigger-cycle now expects cloud WAIT_SNAPSHOT reconcile
   results to return the Rust-shaped wait_snapshot payload and preserve stale
   engine error metadata while scheduling retry.
+- `pr5-runtime-connect-generate-trigger-review`: dual-model review passed.
+  Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed generate-snapshot
+  uploaded/restore-required plus trigger-cycle wait_snapshot runtime route
+  smokes and found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
