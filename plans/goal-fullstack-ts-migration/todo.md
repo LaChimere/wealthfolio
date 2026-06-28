@@ -6558,6 +6558,10 @@ contract:
   Runtime-backed Connect generate-snapshot now expects a local cursor ahead of
   the server cursor to surface the Rust-shaped restore-required internal error
   before snapshot metadata lookup.
+- `pr5-runtime-connect-trigger-cycle-wait-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now expects cloud WAIT_SNAPSHOT reconcile
+  results to return the Rust-shaped wait_snapshot payload and preserve stale
+  engine error metadata while scheduling retry.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
