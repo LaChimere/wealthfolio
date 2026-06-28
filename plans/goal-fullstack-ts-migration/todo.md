@@ -6606,6 +6606,10 @@ contract:
   Runtime-backed Connect bootstrap-snapshot now expects missing remote snapshots
   with follow-up NOOP reconcile to reset local sync state, mark bootstrap
   complete, and return the Rust-shaped skipped response.
+- `pr5-runtime-connect-generate-export-gate-route-smoke`: verification passed.
+  Runtime-backed Connect generate-snapshot now expects trusted devices with no
+  covering remote snapshot to reach the explicit local snapshot export feature
+  gate after device, cursor, and latest-snapshot preflights.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
