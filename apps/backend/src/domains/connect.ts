@@ -4078,7 +4078,8 @@ type LocalReplayEntity =
   | "goal"
   | "goal_plan"
   | "goals_allocation"
-  | "import_template";
+  | "import_template"
+  | "activity_import_profile";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8103,6 +8104,16 @@ function localCanReplayImportTemplateEvent(event: Record<string, unknown>): bool
   );
 }
 
+function localCanReplayActivityImportProfileEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "activity_import_profile" &&
+    eventType !== null &&
+    /^activity_import_profile\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8133,6 +8144,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayImportTemplateEvent(event)) {
     return "import_template";
+  }
+  if (localCanReplayActivityImportProfileEvent(event)) {
+    return "activity_import_profile";
   }
   return null;
 }
@@ -8310,6 +8324,8 @@ function localApplyReplayEventPrepared(
       return localApplyGoalsAllocationReplayEvent(db, replayEvent.event, payloads);
     case "import_template":
       return localApplyImportTemplateReplayEvent(db, replayEvent.event, payloads);
+    case "activity_import_profile":
+      return localApplyActivityImportProfileReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9085,6 +9101,84 @@ function localApplyImportTemplateReplayEvent(
   return shouldApply;
 }
 
+function localApplyActivityImportProfileReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localActivityImportProfileSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'activity_import_profile' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM import_account_templates WHERE id = ?").run(entityId);
+    } else {
+      localUpsertActivityImportProfileReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "activity_import_profile",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "import_account_templates");
+    localInsertSyncAppliedEvent(db, eventId, seq, "activity_import_profile", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "activity_import_profile", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9175,6 +9269,16 @@ function localImportTemplateSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^import_template\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localActivityImportProfileSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^activity_import_profile\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9546,6 +9650,15 @@ function localUpsertImportTemplateReplayPayload(
   localUpsertReplayPayloadFields(db, "import_templates", "id", entityId, payload);
 }
 
+function localUpsertActivityImportProfileReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("activity_import_profile", rawPayload);
+  localUpsertReplayPayloadFields(db, "import_account_templates", "id", entityId, payload);
+}
+
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
   validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
@@ -9728,6 +9841,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   goal_plan: "goal_plans",
   goals_allocation: "goals_allocation",
   import_template: "import_templates",
+  activity_import_profile: "import_account_templates",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -9846,6 +9960,15 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
+  activity_import_profile: [
+    ["id"],
+    ["account_id", "accountId"],
+    ["context_kind", "contextKind", "import_type", "importType"],
+    ["source_system", "sourceSystem"],
+    ["template_id", "templateId"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
 };
 
 function normalizeReplayPayload(
@@ -9898,6 +10021,9 @@ function migrateReplayPayloadValue(
   value: unknown,
 ): unknown {
   if (entity !== "goal" || column !== "status_lifecycle") {
+    if (entity === "activity_import_profile" && column === "context_kind") {
+      return migrateReplayContextKindValue(value);
+    }
     return value;
   }
   if (value === true || value === 1) {
@@ -9914,6 +10040,16 @@ function migrateReplayPayloadValue(
     if (normalized === "false" || normalized === "0") {
       return "active";
     }
+  }
+  return value;
+}
+
+function migrateReplayContextKindValue(value: unknown): unknown {
+  if (value === "ACTIVITY") {
+    return "CSV_ACTIVITY";
+  }
+  if (value === "HOLDINGS") {
+    return "CSV_HOLDINGS";
   }
   return value;
 }
@@ -10010,7 +10146,8 @@ function localMarkReplayTableState(
     | "goals"
     | "goal_plans"
     | "goals_allocation"
-    | "import_templates",
+    | "import_templates"
+    | "import_account_templates",
 ): void {
   db.prepare(
     `
