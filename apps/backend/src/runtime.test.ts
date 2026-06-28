@@ -4492,6 +4492,170 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect clear sync-data route to local cleanup", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-clear-sync-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      await runtime.options.secretService?.setSecret("sync_device_id", "device-runtime");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES ('clear-account', 'Clear Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_outbox (
+              event_id, entity, entity_id, op, client_timestamp, payload,
+              payload_key_version, sent, status, retry_count, device_id, created_at
+            )
+            VALUES (
+              'clear-event', 'account', 'clear-account', 'update',
+              '2026-01-01T00:00:00Z', '{}', 5, 0, 'pending', 0,
+              'device-runtime', '2026-01-01T00:00:00Z'
+            )
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_entity_metadata (
+              entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+            )
+            VALUES ('account', 'clear-account', 'clear-event', '2026-01-01T00:00:00Z', 'update', 9)
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_applied_events (event_id, seq, entity, entity_id, applied_at)
+            VALUES ('applied-event', 10, 'account', 'clear-account', '2026-01-01T00:00:00Z')
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 5, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z')
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_table_state (table_name, enabled)
+            VALUES ('accounts', 1)
+            ON CONFLICT(table_name) DO UPDATE SET enabled = excluded.enabled
+          `,
+          )
+          .run();
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 55 WHERE id = 1").run();
+        seedDb
+          .prepare(
+            `
+            UPDATE sync_engine_state
+            SET lock_version = 8,
+                last_error = 'stale',
+                consecutive_failures = 2,
+                last_cycle_status = 'failed',
+                last_cycle_duration_ms = 99
+            WHERE id = 1
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/connect/device/sync-data`, {
+        method: "DELETE",
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toBeNull();
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBeNull();
+      expect(await runtime.options.secretService?.getSecret("sync_identity")).toBe(
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: null,
+          rootKey: null,
+          keyVersion: null,
+          deviceSecretKey: null,
+          devicePublicKey: null,
+        }),
+      );
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM accounts").get(),
+        ).toEqual({ count: 1 });
+        for (const tableName of [
+          "sync_outbox",
+          "sync_entity_metadata",
+          "sync_applied_events",
+          "sync_table_state",
+          "sync_device_config",
+        ]) {
+          expect(
+            verifyDb
+              .query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM "${tableName}"`)
+              .get(),
+          ).toEqual({ count: 0 });
+        }
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get(),
+        ).toEqual({ cursor: 0 });
+        expect(
+          verifyDb
+            .query<
+              { lock_version: number; last_error: string | null; last_cycle_status: string | null },
+              []
+            >("SELECT lock_version, last_error, last_cycle_status FROM sync_engine_state WHERE id = 1")
+            .get(),
+        ).toEqual({ lock_version: 0, last_error: null, last_cycle_status: null });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect reinitialize route through reset and reenroll", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-reinitialize-"));
     const deviceSyncRequests: Array<{ url: string; body: Record<string, unknown> | null }> = [];

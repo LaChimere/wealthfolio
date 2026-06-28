@@ -6651,6 +6651,10 @@ contract:
   Runtime-backed Connect enable now expects fresh BOOTSTRAP enrollment to
   initialize and commit E2EE keys, persist local identity material, and mark
   local bootstrap complete through the HTTP seam.
+- `pr5-runtime-connect-clear-sync-data-route-smoke`: verification passed.
+  Runtime-backed Connect clear sync-data now expects
+  `/api/v1/connect/device/sync-data` to clear local sync identity, legacy device
+  ID, sync tables, cursor, and engine state while preserving user data.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
