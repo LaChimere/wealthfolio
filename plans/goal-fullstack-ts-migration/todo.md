@@ -6775,6 +6775,10 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote quote replay
   events into quotes with asset FK handling and sync metadata/applied-event
   tracking.
+- `pr5-runtime-connect-asset-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote asset replay
+  events into assets while ignoring generated readonly instrument_key payload
+  aliases like Rust replay.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

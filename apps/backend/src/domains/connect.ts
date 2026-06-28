@@ -4085,7 +4085,8 @@ type LocalReplayEntity =
   | "ai_message"
   | "ai_thread_tag"
   | "asset_taxonomy_assignment"
-  | "quote";
+  | "quote"
+  | "asset";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8183,6 +8184,16 @@ function localCanReplayQuoteEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+function localCanReplayAssetEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "asset" &&
+    eventType !== null &&
+    /^asset\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8234,6 +8245,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayQuoteEvent(event)) {
     return "quote";
+  }
+  if (localCanReplayAssetEvent(event)) {
+    return "asset";
   }
   return null;
 }
@@ -8447,6 +8461,8 @@ function localApplyReplayEventPrepared(
       return localApplyAssetTaxonomyAssignmentReplayEvent(db, replayEvent.event, payloads);
     case "quote":
       return localApplyQuoteReplayEvent(db, replayEvent.event, payloads);
+    case "asset":
+      return localApplyAssetReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9788,6 +9804,76 @@ function localApplyQuoteReplayEvent(
   return shouldApply;
 }
 
+function localApplyAssetReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localAssetSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'asset' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM assets WHERE id = ?").run(entityId);
+    } else {
+      localUpsertAssetReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(db, "asset", entityId, eventId, clientTimestamp, operation, seq);
+    localMarkReplayTableState(db, "assets");
+    localInsertSyncAppliedEvent(db, eventId, seq, "asset", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "asset", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9946,6 +10032,14 @@ function localAssetTaxonomyAssignmentSyncOperationFromEventType(
 
 function localQuoteSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^quote\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localAssetSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
+  const match = /^asset\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -10445,6 +10539,16 @@ function localUpsertQuoteReplayPayload(
   localUpsertReplayPayloadFields(db, "quotes", "id", entityId, payload);
 }
 
+function localUpsertAssetReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("asset", rawPayload);
+  validateAssetReplayPayloadFields(payload);
+  localUpsertReplayPayloadFields(db, "assets", "id", entityId, payload);
+}
+
 function localAiThreadChildIds(
   db: Database,
   threadId: string,
@@ -10571,6 +10675,10 @@ function validateAssetTaxonomyAssignmentReplayPayloadFields(
   payload: Record<string, unknown>,
 ): void {
   validateReplayIntegerIfPresent(payload, "weight", "asset_taxonomy_assignment.weight");
+}
+
+function validateAssetReplayPayloadFields(payload: Record<string, unknown>): void {
+  validateReplayIntegerIfPresent(payload, "is_active", "asset.is_active");
 }
 
 function validateReplayFiniteNumberIfPresent(
@@ -10817,6 +10925,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   ai_thread_tag: "ai_thread_tags",
   asset_taxonomy_assignment: "asset_taxonomy_assignments",
   quote: "quotes",
+  asset: "assets",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -11005,6 +11114,28 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["created_at", "createdAt"],
     ["timestamp"],
   ],
+  asset: [
+    ["id"],
+    ["kind"],
+    ["name"],
+    ["display_code", "displayCode"],
+    ["notes"],
+    ["metadata"],
+    ["is_active", "isActive"],
+    ["quote_mode", "quoteMode"],
+    ["quote_ccy", "quoteCcy"],
+    ["instrument_type", "instrumentType"],
+    ["instrument_symbol", "instrumentSymbol"],
+    ["instrument_exchange_mic", "instrumentExchangeMic"],
+    ["instrument_key", "instrumentKey"],
+    ["provider_config", "providerConfig"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+};
+
+const REPLAY_READONLY_PAYLOAD_COLUMNS: Partial<Record<LocalReplayEntity, ReadonlySet<string>>> = {
+  asset: new Set(["instrument_key"]),
 };
 
 function normalizeReplayPayload(
@@ -11021,6 +11152,9 @@ function normalizeReplayPayload(
         `Sync payload column '${rawKey}' is not valid for table '${tableName}'`,
         500,
       );
+    }
+    if (REPLAY_READONLY_PAYLOAD_COLUMNS[entity]?.has(column)) {
+      continue;
     }
     const migratedValue = migrateReplayPayloadValue(entity, column, value);
     if (Object.hasOwn(normalized, column)) {
@@ -11189,7 +11323,8 @@ function localMarkReplayTableState(
     | "ai_messages"
     | "ai_thread_tags"
     | "asset_taxonomy_assignments"
-    | "quotes",
+    | "quotes"
+    | "assets",
 ): void {
   db.prepare(
     `
