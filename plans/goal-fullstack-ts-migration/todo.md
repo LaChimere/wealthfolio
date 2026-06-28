@@ -6639,6 +6639,10 @@ contract:
   `/api/v1/connect/device/reinitialize` to reset team sync first, preserve the
   existing device nonce, reenroll, and return the Rust-shaped
   registered/pairing-required result.
+- `pr5-runtime-connect-enable-fresh-pair-route-smoke`: verification passed.
+  Runtime-backed Connect enable now expects `/api/v1/connect/device/enable` to
+  enroll a fresh device into the pairing-required state, persist the generated
+  identity, and avoid bootstrap key initialization when trusted devices exist.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
