@@ -4068,6 +4068,13 @@ interface LocalSyncOutboxRow {
   retry_count: number;
 }
 
+type LocalReplayEntity =
+  | "account"
+  | "platform"
+  | "portfolio"
+  | "portfolio_account"
+  | "contribution_limit";
+
 class LocalPullStaleCursorError extends Error {
   constructor(
     message: string,
@@ -8033,9 +8040,19 @@ function localCanReplayPortfolioAccountEvent(event: Record<string, unknown>): bo
   );
 }
 
+function localCanReplayContributionLimitEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "contribution_limit" &&
+    eventType !== null &&
+    /^contribution_limit\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(
   event: Record<string, unknown>,
-): "account" | "platform" | "portfolio" | "portfolio_account" | null {
+): "account" | "platform" | "portfolio" | "portfolio_account" | "contribution_limit" | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
   }
@@ -8048,6 +8065,9 @@ function localReplayEntity(
   if (localCanReplayPortfolioAccountEvent(event)) {
     return "portfolio_account";
   }
+  if (localCanReplayContributionLimitEvent(event)) {
+    return "contribution_limit";
+  }
   return null;
 }
 
@@ -8058,7 +8078,7 @@ async function localApplyReplayEventsPage(
 ): Promise<number> {
   const replayEvents: Array<{
     event: Record<string, unknown>;
-    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+    replayEntity: LocalReplayEntity;
   }> = [];
   for (const event of events) {
     if (localRemoteEventIsIgnorable(event, identity.deviceId)) {
@@ -8101,7 +8121,7 @@ async function localApplyReplayEventsBatch(
   db: Database,
   replayEvents: Array<{
     event: Record<string, unknown>;
-    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+    replayEntity: LocalReplayEntity;
   }>,
   identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
 ): Promise<number> {
@@ -8133,7 +8153,7 @@ async function localApplyReplayEvent(
   db: Database,
   replayEvent: {
     event: Record<string, unknown>;
-    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+    replayEntity: LocalReplayEntity;
   },
   identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
 ): Promise<boolean> {
@@ -8154,7 +8174,7 @@ function localApplyReplayEventPrepared(
   db: Database,
   replayEvent: {
     event: Record<string, unknown>;
-    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+    replayEntity: LocalReplayEntity;
   },
   payloads: Map<string, Record<string, unknown>>,
 ): boolean {
@@ -8167,6 +8187,8 @@ function localApplyReplayEventPrepared(
       return localApplyPortfolioReplayEvent(db, replayEvent.event, payloads);
     case "portfolio_account":
       return localApplyPortfolioAccountReplayEvent(db, replayEvent.event, payloads);
+    case "contribution_limit":
+      return localApplyContributionLimitReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -8482,6 +8504,84 @@ function localApplyPortfolioAccountReplayEvent(
   return shouldApply;
 }
 
+function localApplyContributionLimitReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localContributionLimitSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'contribution_limit' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM contribution_limits WHERE id = ?").run(entityId);
+    } else {
+      localUpsertContributionLimitReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "contribution_limit",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "contribution_limits");
+    localInsertSyncAppliedEvent(db, eventId, seq, "contribution_limit", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "contribution_limit", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -8514,6 +8614,16 @@ function localPortfolioAccountSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^portfolio_account\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localContributionLimitSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^contribution_limit\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -8751,6 +8861,64 @@ function localUpsertPortfolioAccountReplayPayload(
   ).run(entityId, portfolioId, accountId, sortOrder, createdAt);
 }
 
+function localUpsertContributionLimitReplayPayload(
+  db: Database,
+  entityId: string,
+  payload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const groupName = requiredReplayString(
+    payload.group_name ?? payload.groupName,
+    "contribution_limit.group_name",
+  );
+  const contributionYear = requiredInteger(
+    payload.contribution_year ?? payload.contributionYear,
+    "contribution_limit.contribution_year",
+  );
+  const limitAmount = requiredFiniteNumber(
+    payload.limit_amount ?? payload.limitAmount,
+    "contribution_limit.limit_amount",
+  );
+  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO contribution_limits (
+        id, group_name, contribution_year, limit_amount, account_ids,
+        created_at, updated_at, start_date, end_date
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        group_name = excluded.group_name,
+        contribution_year = excluded.contribution_year,
+        limit_amount = excluded.limit_amount,
+        account_ids = excluded.account_ids,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        start_date = excluded.start_date,
+        end_date = excluded.end_date
+    `,
+  ).run(
+    entityId,
+    groupName,
+    contributionYear,
+    limitAmount,
+    optionalString(payload.account_ids ?? payload.accountIds) ?? null,
+    createdAt,
+    updatedAt,
+    optionalString(payload.start_date ?? payload.startDate) ?? null,
+    optionalString(payload.end_date ?? payload.endDate) ?? null,
+  );
+}
+
 function requiredReplayString(value: unknown, context: string): string {
   const parsed = optionalString(value);
   if (parsed === null) {
@@ -8840,7 +9008,7 @@ function localInsertSyncAppliedEvent(
 
 function localMarkReplayTableState(
   db: Database,
-  tableName: "accounts" | "platforms" | "portfolios" | "portfolio_accounts",
+  tableName: "accounts" | "platforms" | "portfolios" | "portfolio_accounts" | "contribution_limits",
 ): void {
   db.prepare(
     `

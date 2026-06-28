@@ -6700,6 +6700,10 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote portfolio and
   portfolio-account replay events, updates sync metadata/applied-event tracking,
   and keeps broader replay entities gated.
+- `pr5-runtime-connect-contribution-limit-replay-route-smoke`: verification
+  passed. Runtime-backed trigger-cycle now decrypts and applies remote
+  contribution_limit replay events and updates sync metadata/applied-event
+  tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
