@@ -6718,6 +6718,10 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote goal replay
   events, including camelCase payload aliases and legacy isAchieved lifecycle
   migration, and updates sync metadata/applied-event tracking.
+- `pr5-runtime-connect-goal-plan-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote goal_plan replay
+  events into goal_plans with camelCase payload aliases and sync
+  metadata/applied event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
