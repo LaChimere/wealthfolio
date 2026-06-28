@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 915
+turns_used: 916
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-28T13:26:18+09:00"
+updated_at: "2026-06-28T13:31:01+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5154,6 +5154,10 @@ updated_at: "2026-06-28T13:26:18+09:00"
 - Turn 915: Ran dual-model review with Claude Opus 4.8 xhigh and GPT-5.5 xhigh
   over Connect enable STALE/REGISTERED/FRESH-PAIR and reinitialize
   reset+reenroll runtime route smokes; no actionable issues were found.
+- Turn 916: Added runtime-backed Connect enable BOOTSTRAP initialization
+  coverage. The SQLite-backed runtime now proves fresh enable can enroll a
+  bootstrap device, initialize and commit E2EE keys, persist local identity
+  material, and mark local bootstrap complete through the HTTP seam.
 
 ## Deferred items
 

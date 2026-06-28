@@ -4354,6 +4354,144 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect enable route through bootstrap key initialization", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-enable-bootstrap-"));
+    const deviceSyncRequests: Array<{
+      url: string;
+      method: string;
+      body: Record<string, unknown> | null;
+    }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        const body =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : null;
+        deviceSyncRequests.push({ url, method: init?.method ?? "GET", body });
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-runtime",
+            e2ee_key_version: 7,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-runtime",
+            nonce: "nonce-runtime",
+            key_version: 7,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const enableResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/enable`, {
+        method: "POST",
+      });
+      expect(enableResponse.status).toBe(200);
+      await expect(enableResponse.json()).resolves.toEqual({
+        deviceId: "device-runtime",
+        state: "READY",
+        keyVersion: 7,
+        serverKeyVersion: 7,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+
+      const enrollRequest = deviceSyncRequests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/devices"),
+      );
+      expect(enrollRequest).toMatchObject({
+        method: "POST",
+        body: {
+          device_nonce: expect.any(String),
+          display_name: "Wealthfolio Server",
+        },
+      });
+
+      const commitRequest = deviceSyncRequests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/keys/initialize/commit"),
+      );
+      expect(commitRequest?.body).toMatchObject({
+        device_id: "device-runtime",
+        key_version: 7,
+        challenge_response: "0e3c1f799a2688e6a4094ab62dfd050dad7e109d10882a646e7f09d9fbd7247f",
+      });
+      expect(typeof commitRequest?.body?.device_key_envelope).toBe("string");
+      expect(typeof commitRequest?.body?.signature).toBe("string");
+      expect(commitRequest?.body).not.toHaveProperty("recovery_envelope");
+
+      const identityRaw = await runtime.options.secretService?.getSecret("sync_identity");
+      const identity = JSON.parse(identityRaw ?? "{}") as Record<string, unknown>;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: "device-runtime",
+        keyVersion: 7,
+      });
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(typeof identity.rootKey).toBe("string");
+      expect(typeof identity.deviceSecretKey).toBe("string");
+      expect(typeof identity.devicePublicKey).toBe("string");
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
+        "device-runtime",
+      );
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                key_version: number;
+                trust_state: string;
+                last_bootstrap_at: string | null;
+                min_snapshot_created_at: string | null;
+              },
+              []
+            >(
+              "SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-runtime'",
+            )
+            .get(),
+        ).toMatchObject({
+          key_version: 7,
+          trust_state: "trusted",
+          last_bootstrap_at: expect.any(String),
+          min_snapshot_created_at: null,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect reinitialize route through reset and reenroll", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-reinitialize-"));
     const deviceSyncRequests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
