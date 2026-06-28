@@ -4057,6 +4057,17 @@ interface SyncCursorRow {
   cursor: number;
 }
 
+interface LocalSyncOutboxRow {
+  event_id: string;
+  entity: string;
+  entity_id: string;
+  op: string;
+  client_timestamp: string;
+  payload: string;
+  payload_key_version: number;
+  retry_count: number;
+}
+
 interface SyncDeviceConfigRow {
   device_id: string;
   last_bootstrap_at: string | null;
@@ -7184,8 +7195,9 @@ async function triggerLocalDeviceSyncCycle(
       markLocalSyncCycleOutcome(db, "not_ready");
       return localSyncCycleResult("not_ready", lockVersion, cursor);
     }
+    const identity = await requireLocalSyncIdentity(secretService);
     try {
-      persistReadyDeviceConfigFromIdentity(db, await requireLocalSyncIdentity(secretService));
+      persistReadyDeviceConfigFromIdentity(db, identity);
     } catch (error) {
       console.warn(`[Connect] Failed to persist READY device sync config: ${errorMessage(error)}`);
     }
@@ -7225,6 +7237,34 @@ async function triggerLocalDeviceSyncCycle(
       const acquiredLockVersion = localAcquireSyncCycleLock(db);
       markLocalSyncCycleOutcome(db, "ok");
       return localSyncCycleResult("ok", acquiredLockVersion, cursor);
+    }
+    if (
+      (reconcile.action === "NOOP" || reconcile.action === "PULL_TAIL") &&
+      localHasPendingSyncOutbox(db)
+    ) {
+      const acquiredLockVersion = localAcquireSyncCycleLock(db);
+      let pushResult: { pushedCount: number; serverCursor: number; deadLetterCount: number };
+      try {
+        pushResult = await localPushPendingSyncOutbox(
+          db,
+          env,
+          fetchImpl,
+          session.accessToken,
+          identity,
+          cursor,
+        );
+      } catch (error) {
+        markLocalSyncCycleError(db, "push_error", `Push failed: ${errorMessage(error)}`);
+        return localSyncCycleResult("push_error", acquiredLockVersion, cursor);
+      }
+      if (pushResult.serverCursor > cursor) {
+        throw deviceSyncDisabled();
+      }
+      markLocalSyncCycleOutcome(db, "ok");
+      return localSyncCycleResult("ok", acquiredLockVersion, cursor, null, null, {
+        pushedCount: pushResult.pushedCount,
+        deadLetterCount: pushResult.deadLetterCount,
+      });
     }
     throw deviceSyncDisabled();
   } catch (error) {
@@ -7289,18 +7329,226 @@ function localSyncCycleResult(
   cursor: number,
   bootstrapSnapshotId: string | null = null,
   bootstrapSnapshotSeq: number | null = null,
+  counts: { pushedCount?: number; pulledCount?: number; deadLetterCount?: number } = {},
 ): Record<string, unknown> {
   return {
     status,
     lockVersion,
-    pushedCount: 0,
-    pulledCount: 0,
+    pushedCount: counts.pushedCount ?? 0,
+    pulledCount: counts.pulledCount ?? 0,
     cursor,
     needsBootstrap: status === "stale_cursor",
     bootstrapSnapshotId,
     bootstrapSnapshotSeq,
+    deadLetterCount: counts.deadLetterCount ?? 0,
+  };
+}
+
+async function localPushPendingSyncOutbox(
+  db: Database,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+  localCursor: number,
+): Promise<{ pushedCount: number; serverCursor: number; deadLetterCount: number }> {
+  const pending = localPendingSyncOutboxRows(db, 500);
+  if (pending.length === 0) {
+    return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: 0 };
+  }
+  const crypto = createSyncCryptoService();
+  const events: Array<Record<string, unknown>> = [];
+  const invalidEntityIds: string[] = [];
+  for (const row of pending) {
+    if (!localRemoteEntityIdIsValid(row.entity_id)) {
+      invalidEntityIds.push(row.event_id);
+      continue;
+    }
+    const payloadKeyVersion = Math.max(row.payload_key_version, 1);
+    if (!identity.rootKey) {
+      throw new ConnectServiceError(
+        "internal_error",
+        "Push payload encryption failed: No root key configured",
+        500,
+      );
+    }
+    const dek = (await crypto.deriveDek(identity.rootKey, payloadKeyVersion)).value;
+    const encryptedPayload = (await crypto.encrypt(dek, row.payload)).value;
+    events.push({
+      event_id: row.event_id,
+      device_id: identity.deviceId,
+      type: `${row.entity}.${row.op}.v1`,
+      entity: row.entity,
+      entity_id: row.entity_id,
+      client_timestamp: row.client_timestamp,
+      payload: encryptedPayload,
+      payload_key_version: payloadKeyVersion,
+    });
+  }
+  if (invalidEntityIds.length > 0) {
+    localMarkSyncOutboxDead(
+      db,
+      invalidEntityIds,
+      "Remote sync requires UUID entity_id",
+      "invalid_entity_id",
+    );
+  }
+  if (events.length === 0) {
+    return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: 0 };
+  }
+  const response = await localPushSyncEvents(
+    env,
+    fetchImpl,
+    accessToken,
+    identity.deviceId,
+    events,
+  );
+  localMarkSyncOutboxSent(db, response.sentEventIds);
+  localMarkPushCompleted(db);
+  return {
+    pushedCount: response.sentEventIds.length,
+    serverCursor: response.serverCursor,
     deadLetterCount: 0,
   };
+}
+
+function localPendingSyncOutboxRows(db: Database, limit: number): LocalSyncOutboxRow[] {
+  const now = new Date().toISOString();
+  return db
+    .query<LocalSyncOutboxRow, [string, number]>(
+      `
+        SELECT
+          event_id, entity, entity_id, op, client_timestamp, payload,
+          payload_key_version, retry_count
+        FROM sync_outbox
+        WHERE status = 'pending'
+          AND sent = 0
+          AND (next_retry_at IS NULL OR next_retry_at <= ?)
+        ORDER BY created_at ASC
+        LIMIT ?
+      `,
+    )
+    .all(now, limit);
+}
+
+async function localPushSyncEvents(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  events: Array<Record<string, unknown>>,
+): Promise<{ sentEventIds: string[]; serverCursor: number }> {
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/events/push`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+        },
+        body: JSON.stringify({ events }),
+      },
+    );
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", `Push failed: ${errorMessage(error)}`, 500);
+  }
+  let bodyText: string;
+  try {
+    bodyText = await response.text();
+  } catch (error) {
+    throw new ConnectServiceError("internal_error", `Push failed: ${errorMessage(error)}`, 500);
+  }
+  if (!response.ok) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Push failed: ${connectDeviceSyncApiErrorMessage(response.status, bodyText)}`,
+      500,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse push response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed.accepted) || !Array.isArray(parsed.duplicate)) {
+    throw new ConnectServiceError("internal_error", "Failed to parse push response", 500);
+  }
+  const serverCursor = requiredInteger(
+    parsed.server_cursor ?? parsed.serverCursor,
+    "push response",
+  );
+  const sentEventIds = [...parsed.accepted, ...parsed.duplicate]
+    .map((item) => (isRecord(item) ? optionalString(item.event_id ?? item.eventId) : null))
+    .filter((eventId): eventId is string => eventId !== null);
+  return { sentEventIds, serverCursor };
+}
+
+function localMarkSyncOutboxSent(db: Database, eventIds: string[]): void {
+  if (eventIds.length === 0) {
+    return;
+  }
+  const placeholders = eventIds.map(() => "?").join(", ");
+  db.prepare(
+    `
+      UPDATE sync_outbox
+      SET sent = 1,
+          status = 'sent',
+          last_error = NULL,
+          last_error_code = NULL
+      WHERE event_id IN (${placeholders})
+    `,
+  ).run(...eventIds);
+}
+
+function localMarkSyncOutboxDead(
+  db: Database,
+  eventIds: string[],
+  lastError: string,
+  lastErrorCode: string,
+): void {
+  if (eventIds.length === 0) {
+    return;
+  }
+  const placeholders = eventIds.map(() => "?").join(", ");
+  db.prepare(
+    `
+      UPDATE sync_outbox
+      SET status = 'dead',
+          last_error = ?,
+          last_error_code = ?
+      WHERE event_id IN (${placeholders})
+    `,
+  ).run(lastError, lastErrorCode, ...eventIds);
+}
+
+function localMarkPushCompleted(db: Database): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `
+      INSERT INTO sync_engine_state (
+        id, last_push_at, last_error, consecutive_failures, next_retry_at
+      )
+      VALUES (1, ?, NULL, 0, NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        last_push_at = excluded.last_push_at,
+        last_error = NULL,
+        consecutive_failures = 0,
+        next_retry_at = NULL
+    `,
+  ).run(now);
+}
+
+function localRemoteEntityIdIsValid(entityId: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entityId);
 }
 
 function markLocalSyncCycleError(db: Database, status: string, message: string): void {

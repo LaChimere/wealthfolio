@@ -21,6 +21,7 @@ import {
   HOLDINGS_CHANGED_EVENT,
   MANUAL_SNAPSHOT_SAVED_EVENT,
 } from "./domain-events/planner";
+import { createSyncCryptoService } from "./domains/sync-crypto";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../../..");
 const config: BackendRuntimeConfig = {
@@ -3299,6 +3300,182 @@ describe("TS backend runtime composition", () => {
             )
             .get(),
         ).toEqual({ last_cycle_status: "ok", last_error: null, consecutive_failures: 0 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime Connect trigger-cycle route to push pending outbox", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-push-"));
+    const rootKey = Buffer.alloc(32, 7).toString("base64");
+    const deviceSyncRequests: string[] = [];
+    const pushBodies: Array<Record<string, unknown>> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.endsWith("/api/v1/sync/events/push")) {
+          pushBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return Response.json({
+            accepted: [{ event_id: "11111111-1111-4111-8111-111111111111", seq: 8 }],
+            duplicate: [],
+            server_cursor: 7,
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            UPDATE sync_cursor
+            SET cursor = 7
+            WHERE id = 1
+          `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_outbox (
+              event_id, entity, entity_id, op, client_timestamp, payload,
+              payload_key_version, sent, status, retry_count, device_id, created_at
+            )
+            VALUES (
+              '11111111-1111-4111-8111-111111111111',
+              'account',
+              '22222222-2222-4222-8222-222222222222',
+              'update',
+              '2026-01-01T00:00:00Z',
+              '{"id":"22222222-2222-4222-8222-222222222222","name":"Synced"}',
+              2,
+              0,
+              'pending',
+              0,
+              'device-runtime',
+              '2026-01-01T00:00:00Z'
+            )
+          `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toEqual({
+        status: "ok",
+        lockVersion: 1,
+        pushedCount: 1,
+        pulledCount: 0,
+        cursor: 7,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/events/push",
+      ]);
+      expect(pushBodies).toHaveLength(1);
+      const pushedEvent = (pushBodies[0]?.events as Array<Record<string, unknown>>)[0];
+      expect(pushedEvent).toMatchObject({
+        event_id: "11111111-1111-4111-8111-111111111111",
+        device_id: "device-runtime",
+        type: "account.update.v1",
+        entity: "account",
+        entity_id: "22222222-2222-4222-8222-222222222222",
+        client_timestamp: "2026-01-01T00:00:00Z",
+        payload_key_version: 2,
+      });
+      const crypto = createSyncCryptoService();
+      const dek = (await crypto.deriveDek(rootKey, 2)).value;
+      expect(await crypto.decrypt(dek, String(pushedEvent?.payload))).toEqual({
+        value: '{"id":"22222222-2222-4222-8222-222222222222","name":"Synced"}',
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<{ sent: number; status: string; last_error: string | null }, []>(
+              `
+                SELECT sent, status, last_error
+                FROM sync_outbox
+                WHERE event_id = '11111111-1111-4111-8111-111111111111'
+              `,
+            )
+            .get(),
+        ).toEqual({ sent: 1, status: "sent", last_error: null });
+        expect(
+          verifyDb
+            .query<
+              {
+                last_push_at: string | null;
+                last_cycle_status: string | null;
+                last_error: string | null;
+              },
+              []
+            >(
+              "SELECT last_push_at, last_cycle_status, last_error FROM sync_engine_state WHERE id = 1",
+            )
+            .get(),
+        ).toEqual({
+          last_push_at: expect.any(String),
+          last_cycle_status: "ok",
+          last_error: null,
+        });
       } finally {
         verifyDb.close();
       }

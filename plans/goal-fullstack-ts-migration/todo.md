@@ -6664,6 +6664,10 @@ contract:
   Broker activity mapping now falls back from top-level activity currency to
   broker `symbol.currency.code` before account/base currencies across cash,
   existing-asset, provider-asset, and broker-described asset create paths.
+- `pr5-runtime-connect-trigger-push-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now encrypts due pending outbox events,
+  posts them to `/api/v1/sync/events/push`, marks accepted rows sent, records
+  push completion, and returns Rust-shaped push counts when no pull is needed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -9125,9 +9125,23 @@ describe("TS Connect device sync local service", () => {
           )
         `,
       ).run();
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 5,
+        pushedCount: 0,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { status: string; last_error: string | null; last_error_code: string | null },
+            []
+          >("SELECT status, last_error, last_error_code FROM sync_outbox WHERE event_id = 'event-1'")
+          .get(),
+      ).toEqual({
+        status: "dead",
+        last_error: "Remote sync requires UUID entity_id",
+        last_error_code: "invalid_entity_id",
       });
     } finally {
       db.close();
