@@ -6502,6 +6502,10 @@ contract:
   `/api/v1/connect/device/sync-state` to restore Connect tokens, read the
   current cloud device with Rust-shaped request metadata, and map a trusted
   key-version match to READY.
+- `pr5-runtime-connect-device-sync-state-stale-route-smoke`: verification
+  passed. Runtime-backed Connect device sync-state now expects a trusted cloud
+  device with a newer server key version to map to STALE and load trusted-device
+  summaries through the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
