@@ -4087,6 +4087,7 @@ type LocalReplayEntity =
   | "ai_thread_tag"
   | "asset_taxonomy_assignment"
   | "quote"
+  | "snapshot"
   | "asset";
 
 class LocalPullStaleCursorError extends Error {
@@ -8195,6 +8196,16 @@ function localCanReplayQuoteEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+function localCanReplaySnapshotEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "snapshot" &&
+    eventType !== null &&
+    /^snapshot\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localCanReplayAssetEvent(event: Record<string, unknown>): boolean {
   const entity = optionalString(event.entity);
   const eventType = optionalString(event.type);
@@ -8259,6 +8270,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayQuoteEvent(event)) {
     return "quote";
+  }
+  if (localCanReplaySnapshotEvent(event)) {
+    return "snapshot";
   }
   if (localCanReplayAssetEvent(event)) {
     return "asset";
@@ -8477,6 +8491,8 @@ function localApplyReplayEventPrepared(
       return localApplyAssetTaxonomyAssignmentReplayEvent(db, replayEvent.event, payloads);
     case "quote":
       return localApplyQuoteReplayEvent(db, replayEvent.event, payloads);
+    case "snapshot":
+      return localApplySnapshotReplayEvent(db, replayEvent.event, payloads);
     case "asset":
       return localApplyAssetReplayEvent(db, replayEvent.event, payloads);
   }
@@ -9950,6 +9966,85 @@ function localApplyQuoteReplayEvent(
   return shouldApply;
 }
 
+function localApplySnapshotReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localSnapshotSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'snapshot' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM holdings_snapshots WHERE id = ?").run(entityId);
+    } else {
+      localUpsertSnapshotReplayPayload(db, entityId, payload);
+      db.prepare("DELETE FROM snapshot_positions WHERE snapshot_id = ?").run(entityId);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "snapshot",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "holdings_snapshots");
+    localInsertSyncAppliedEvent(db, eventId, seq, "snapshot", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "snapshot", entityId);
+  }
+  return shouldApply;
+}
+
 function localApplyAssetReplayEvent(
   db: Database,
   event: Record<string, unknown>,
@@ -10188,6 +10283,16 @@ function localAssetTaxonomyAssignmentSyncOperationFromEventType(
 
 function localQuoteSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^quote\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localSnapshotSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^snapshot\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -10793,6 +10898,15 @@ function localUpsertQuoteReplayPayload(
   localUpsertReplayPayloadFields(db, "quotes", "id", entityId, payload);
 }
 
+function localUpsertSnapshotReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("snapshot", rawPayload);
+  localUpsertReplayPayloadFields(db, "holdings_snapshots", "id", entityId, payload);
+}
+
 function localUpsertAssetReplayPayload(
   db: Database,
   entityId: string,
@@ -11363,6 +11477,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   ai_thread_tag: "ai_thread_tags",
   asset_taxonomy_assignment: "asset_taxonomy_assignments",
   quote: "quotes",
+  snapshot: "holdings_snapshots",
   asset: "assets",
 };
 
@@ -11552,6 +11667,21 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["notes"],
     ["created_at", "createdAt"],
     ["timestamp"],
+  ],
+  snapshot: [
+    ["id"],
+    ["account_id", "accountId"],
+    ["snapshot_date", "snapshotDate"],
+    ["currency"],
+    ["positions"],
+    ["cash_balances", "cashBalances"],
+    ["cost_basis", "costBasis"],
+    ["net_contribution", "netContribution"],
+    ["calculated_at", "calculatedAt"],
+    ["net_contribution_base", "netContributionBase"],
+    ["cash_total_account_currency", "cashTotalAccountCurrency"],
+    ["cash_total_base_currency", "cashTotalBaseCurrency"],
+    ["source"],
   ],
   asset: [
     ["id"],
@@ -11765,6 +11895,7 @@ function localMarkReplayTableState(
     | "ai_thread_tags"
     | "asset_taxonomy_assignments"
     | "quotes"
+    | "holdings_snapshots"
     | "assets",
 ): void {
   db.prepare(

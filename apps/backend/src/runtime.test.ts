@@ -8112,6 +8112,227 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to snapshot replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-snapshot-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 32).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const snapshotId = "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2";
+    const remotePositions = JSON.stringify({
+      "snapshot-new-asset": {
+        assetId: "snapshot-new-asset",
+        quantity: "7",
+        averageCost: "110",
+        totalCostBasis: "770",
+        currency: "USD",
+        inceptionDate: "2026-01-01T00:00:00Z",
+        contractMultiplier: "1",
+        createdAt: "2026-01-02T00:00:00Z",
+        lastUpdated: "2026-01-02T00:00:00Z",
+      },
+    });
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: snapshotId,
+          accountId: "snapshot-account",
+          snapshotDate: "2026-01-01",
+          currency: "USD",
+          positions: remotePositions,
+          cashBalances: "{}",
+          costBasis: "770",
+          netContribution: "700",
+          calculatedAt: "2026-02-01T00:00:00Z",
+          netContributionBase: "700",
+          cashTotalAccountCurrency: "0",
+          cashTotalBaseCurrency: "0",
+          source: "MANUAL_ENTRY",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 44 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 44,
+            next_cursor: 44,
+            has_more: false,
+            events: [
+              {
+                event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                device_id: "other-device",
+                type: "snapshot.update.v1",
+                entity: "snapshot",
+                entity_id: snapshotId,
+                client_timestamp: "2026-02-01T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 44,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-02-01T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('snapshot-account', 'Snapshot Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS');
+          INSERT INTO assets (
+            id, kind, name, display_code, notes, metadata, is_active, quote_mode,
+            quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic,
+            provider_config, created_at, updated_at
+          )
+          VALUES
+            ('snapshot-old-asset', 'INVESTMENT', 'Old Asset', 'OLD', NULL, NULL, 1, 'MANUAL',
+              'USD', 'EQUITY', 'OLD', NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('snapshot-new-asset', 'INVESTMENT', 'New Asset', 'NEW', NULL, NULL, 1, 'MANUAL',
+              'USD', 'EQUITY', 'NEW', NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+          INSERT INTO holdings_snapshots (
+            id, account_id, snapshot_date, currency, positions, cash_balances,
+            cost_basis, net_contribution, calculated_at, net_contribution_base,
+            cash_total_account_currency, cash_total_base_currency, source
+          )
+          VALUES (
+            '${snapshotId}', 'snapshot-account', '2026-01-01', 'USD', '{}', '{}',
+            '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY'
+          );
+          INSERT INTO snapshot_positions (
+            snapshot_id, asset_id, quantity, average_cost, total_cost_basis, currency,
+            inception_date, is_alternative, contract_multiplier, created_at, last_updated
+          )
+          VALUES (
+            '${snapshotId}', 'snapshot-old-asset', '5', '100', '500', 'USD',
+            '2026-01-01T00:00:00Z', 0, '1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+          );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 44,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                positions: string;
+                cost_basis: string;
+                net_contribution: string;
+                calculated_at: string;
+              },
+              []
+            >(
+              `
+                SELECT positions, cost_basis, net_contribution, calculated_at
+                FROM holdings_snapshots
+                WHERE id = ?
+              `,
+            )
+            .get(snapshotId),
+        ).toEqual({
+          positions: remotePositions,
+          cost_basis: "770",
+          net_contribution: "700",
+          calculated_at: "2026-02-01T00:00:00Z",
+        });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              [string]
+            >("SELECT COUNT(*) AS count FROM snapshot_positions WHERE snapshot_id = ?")
+            .get(snapshotId),
+        ).toEqual({ count: 0 });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, [string]>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'snapshot'
+                  AND entity_id = ?
+              `,
+            )
+            .get(snapshotId),
+        ).toEqual({
+          last_event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          last_op: "update",
+          last_seq: 44,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to asset replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-asset-replay-"),
