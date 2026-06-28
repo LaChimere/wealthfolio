@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 930
+turns_used: 931
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-28T17:22:00+09:00"
+updated_at: "2026-06-28T17:45:00+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5213,6 +5213,11 @@ updated_at: "2026-06-28T17:22:00+09:00"
   Pull-tail can now decrypt and apply remote custom_provider
   create/update/delete events into market_data_custom_providers, persist sync
   metadata, and keep broader replay entities gated.
+- Turn 931: Resolved replay milestone review findings. Fallback replay now
+  retries failed events after later page events apply so valid out-of-order FK
+  rows are not dead-lettered by unrelated poison events, and supported replay
+  payloads now reject unknown columns or conflicting snake/camel aliases before
+  upsert instead of silently dropping data.
 
 ## Deferred items
 

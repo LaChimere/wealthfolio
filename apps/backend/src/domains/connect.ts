@@ -8109,23 +8109,67 @@ async function localApplyReplayEventsPage(
   try {
     return await localApplyReplayEventsBatch(db, replayEvents, identity);
   } catch (error) {
-    let applied = 0;
-    for (const replayEvent of replayEvents) {
+    return await localApplyReplayEventsIndividually(db, replayEvents, identity);
+  }
+}
+
+async function localApplyReplayEventsIndividually(
+  db: Database,
+  replayEvents: Array<{
+    event: Record<string, unknown>;
+    replayEntity: LocalReplayEntity;
+  }>,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): Promise<number> {
+  let applied = 0;
+  let pending = replayEvents;
+  const lastErrors = new Map<string, string>();
+  for (let pass = 0; pass < replayEvents.length; pass += 1) {
+    const failed: typeof pending = [];
+    let completedThisPass = 0;
+    for (const replayEvent of pending) {
       try {
         if (await localApplyReplayEvent(db, replayEvent, identity)) {
           applied += 1;
         }
+        completedThisPass += 1;
       } catch (eventError) {
         if (eventError instanceof LocalReplayApplyError) {
-          console.warn(
-            `[Connect] Dead-lettering replay event due to apply error: ${eventError.message}`,
-          );
+          const eventId = requiredLocalPullEventString(replayEvent.event, "event_id", "eventId");
+          lastErrors.set(eventId, eventError.message);
+          failed.push(replayEvent);
           continue;
         }
         throw eventError;
       }
     }
-    return applied;
+    if (failed.length === 0) {
+      return applied;
+    }
+    if (completedThisPass === 0) {
+      localWarnDeadLetteredReplayEvents(failed, lastErrors);
+      return applied;
+    }
+    pending = failed;
+  }
+  localWarnDeadLetteredReplayEvents(pending, lastErrors);
+  return applied;
+}
+
+function localWarnDeadLetteredReplayEvents(
+  replayEvents: Array<{
+    event: Record<string, unknown>;
+    replayEntity: LocalReplayEntity;
+  }>,
+  lastErrors: Map<string, string>,
+): void {
+  for (const replayEvent of replayEvents) {
+    const eventId = requiredLocalPullEventString(replayEvent.event, "event_id", "eventId");
+    console.warn(
+      `[Connect] Dead-lettering replay event due to apply error: ${
+        lastErrors.get(eventId) ?? "unknown replay apply error"
+      }`,
+    );
   }
 }
 
@@ -8172,9 +8216,10 @@ async function localApplyReplayEvent(
   const eventId = requiredLocalPullEventString(replayEvent.event, "event_id", "eventId");
   const payloads = new Map<string, Record<string, unknown>>();
   payloads.set(eventId, await localDecryptReplayPayload(replayEvent.event, identity));
-  const applyTransaction = db.transaction(() =>
-    localApplyReplayEventPrepared(db, replayEvent, payloads),
-  );
+  const applyTransaction = db.transaction(() => {
+    db.prepare("PRAGMA defer_foreign_keys = ON").run();
+    return localApplyReplayEventPrepared(db, replayEvent, payloads);
+  });
   try {
     return applyTransaction();
   } catch (error) {
@@ -8782,9 +8827,10 @@ async function localDecryptReplayPayload(
 function localUpsertAccountReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
   fallbackTimestamp: string,
 ): void {
+  const payload = normalizeReplayPayload("account", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -8794,13 +8840,10 @@ function localUpsertAccountReplayPayload(
     );
   }
   const name = requiredReplayString(payload.name, "account.name");
-  const accountType = requiredReplayString(
-    payload.account_type ?? payload.accountType,
-    "account.account_type",
-  );
+  const accountType = requiredReplayString(payload.account_type, "account.account_type");
   const currency = requiredReplayString(payload.currency, "account.currency");
-  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
   db.prepare(
     `
       INSERT INTO accounts (
@@ -8832,25 +8875,26 @@ function localUpsertAccountReplayPayload(
     accountType,
     optionalString(payload.group) ?? null,
     currency,
-    replayBooleanToInteger(payload.is_default ?? payload.isDefault),
-    replayBooleanToInteger(payload.is_active ?? payload.isActive, true),
+    replayBooleanToInteger(payload.is_default),
+    replayBooleanToInteger(payload.is_active, true),
     createdAt,
     updatedAt,
-    optionalString(payload.platform_id ?? payload.platformId) ?? null,
-    optionalString(payload.account_number ?? payload.accountNumber) ?? null,
+    optionalString(payload.platform_id) ?? null,
+    optionalString(payload.account_number) ?? null,
     optionalString(payload.meta) ?? null,
     optionalString(payload.provider) ?? null,
-    optionalString(payload.provider_account_id ?? payload.providerAccountId) ?? null,
-    replayBooleanToInteger(payload.is_archived ?? payload.isArchived),
-    optionalString(payload.tracking_mode ?? payload.trackingMode) ?? "NOT_SET",
+    optionalString(payload.provider_account_id) ?? null,
+    replayBooleanToInteger(payload.is_archived),
+    optionalString(payload.tracking_mode) ?? "NOT_SET",
   );
 }
 
 function localUpsertPlatformReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
 ): void {
+  const payload = normalizeReplayPayload("platform", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -8876,19 +8920,20 @@ function localUpsertPlatformReplayPayload(
     entityId,
     optionalString(payload.name) ?? null,
     url,
-    optionalString(payload.external_id ?? payload.externalId) ?? null,
+    optionalString(payload.external_id) ?? null,
     optionalString(payload.kind) ?? "BROKERAGE",
-    optionalString(payload.website_url ?? payload.websiteUrl) ?? null,
-    optionalString(payload.logo_url ?? payload.logoUrl) ?? null,
+    optionalString(payload.website_url) ?? null,
+    optionalString(payload.logo_url) ?? null,
   );
 }
 
 function localUpsertPortfolioReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
   fallbackTimestamp: string,
 ): void {
+  const payload = normalizeReplayPayload("portfolio", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -8898,10 +8943,10 @@ function localUpsertPortfolioReplayPayload(
     );
   }
   const name = requiredReplayString(payload.name, "portfolio.name");
-  const sortOrderValue = payload.sort_order ?? payload.sortOrder ?? 0;
+  const sortOrderValue = payload.sort_order ?? 0;
   const sortOrder = requiredInteger(sortOrderValue, "portfolio.sort_order");
-  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
   db.prepare(
     `
       INSERT INTO portfolios (id, name, description, sort_order, created_at, updated_at)
@@ -8926,9 +8971,10 @@ function localUpsertPortfolioReplayPayload(
 function localUpsertPortfolioAccountReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
   fallbackTimestamp: string,
 ): void {
+  const payload = normalizeReplayPayload("portfolio_account", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -8937,19 +8983,10 @@ function localUpsertPortfolioAccountReplayPayload(
       500,
     );
   }
-  const portfolioId = requiredReplayString(
-    payload.portfolio_id ?? payload.portfolioId,
-    "portfolio_account.portfolio_id",
-  );
-  const accountId = requiredReplayString(
-    payload.account_id ?? payload.accountId,
-    "portfolio_account.account_id",
-  );
-  const sortOrder = requiredInteger(
-    payload.sort_order ?? payload.sortOrder ?? 0,
-    "portfolio_account.sort_order",
-  );
-  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
+  const portfolioId = requiredReplayString(payload.portfolio_id, "portfolio_account.portfolio_id");
+  const accountId = requiredReplayString(payload.account_id, "portfolio_account.account_id");
+  const sortOrder = requiredInteger(payload.sort_order ?? 0, "portfolio_account.sort_order");
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
   db.prepare(
     `
       INSERT INTO portfolio_accounts (id, portfolio_id, account_id, sort_order, created_at)
@@ -8966,9 +9003,10 @@ function localUpsertPortfolioAccountReplayPayload(
 function localUpsertContributionLimitReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
   fallbackTimestamp: string,
 ): void {
+  const payload = normalizeReplayPayload("contribution_limit", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -8977,20 +9015,14 @@ function localUpsertContributionLimitReplayPayload(
       500,
     );
   }
-  const groupName = requiredReplayString(
-    payload.group_name ?? payload.groupName,
-    "contribution_limit.group_name",
-  );
+  const groupName = requiredReplayString(payload.group_name, "contribution_limit.group_name");
   const contributionYear = requiredInteger(
-    payload.contribution_year ?? payload.contributionYear,
+    payload.contribution_year,
     "contribution_limit.contribution_year",
   );
-  const limitAmount = requiredFiniteNumber(
-    payload.limit_amount ?? payload.limitAmount,
-    "contribution_limit.limit_amount",
-  );
-  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  const limitAmount = requiredFiniteNumber(payload.limit_amount, "contribution_limit.limit_amount");
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
   db.prepare(
     `
       INSERT INTO contribution_limits (
@@ -9013,20 +9045,21 @@ function localUpsertContributionLimitReplayPayload(
     groupName,
     contributionYear,
     limitAmount,
-    optionalString(payload.account_ids ?? payload.accountIds) ?? null,
+    optionalString(payload.account_ids) ?? null,
     createdAt,
     updatedAt,
-    optionalString(payload.start_date ?? payload.startDate) ?? null,
-    optionalString(payload.end_date ?? payload.endDate) ?? null,
+    optionalString(payload.start_date) ?? null,
+    optionalString(payload.end_date) ?? null,
   );
 }
 
 function localUpsertCustomProviderReplayPayload(
   db: Database,
   entityId: string,
-  payload: Record<string, unknown>,
+  rawPayload: Record<string, unknown>,
   fallbackTimestamp: string,
 ): void {
+  const payload = normalizeReplayPayload("custom_provider", rawPayload);
   const id = optionalString(payload.id) ?? entityId;
   if (id !== entityId) {
     throw new ConnectServiceError(
@@ -9038,8 +9071,8 @@ function localUpsertCustomProviderReplayPayload(
   const code = requiredReplayString(payload.code, "custom_provider.code");
   const name = requiredReplayString(payload.name, "custom_provider.name");
   const priority = requiredInteger(payload.priority ?? 50, "custom_provider.priority");
-  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
   db.prepare(
     `
       INSERT INTO market_data_custom_providers (
@@ -9101,6 +9134,139 @@ function replayOptionalTextValue(value: unknown): string | null {
     return String(value);
   }
   return JSON.stringify(value);
+}
+
+const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
+  account: "accounts",
+  platform: "platforms",
+  portfolio: "portfolios",
+  portfolio_account: "portfolio_accounts",
+  contribution_limit: "contribution_limits",
+  custom_provider: "market_data_custom_providers",
+};
+
+const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
+  account: [
+    ["id"],
+    ["name"],
+    ["account_type", "accountType"],
+    ["group"],
+    ["currency"],
+    ["is_default", "isDefault"],
+    ["is_active", "isActive"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+    ["platform_id", "platformId"],
+    ["account_number", "accountNumber"],
+    ["meta"],
+    ["provider"],
+    ["provider_account_id", "providerAccountId"],
+    ["is_archived", "isArchived"],
+    ["tracking_mode", "trackingMode"],
+  ],
+  platform: [
+    ["id"],
+    ["name"],
+    ["url"],
+    ["external_id", "externalId"],
+    ["kind"],
+    ["website_url", "websiteUrl"],
+    ["logo_url", "logoUrl"],
+  ],
+  portfolio: [
+    ["id"],
+    ["name"],
+    ["description"],
+    ["sort_order", "sortOrder"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+  portfolio_account: [
+    ["id"],
+    ["portfolio_id", "portfolioId"],
+    ["account_id", "accountId"],
+    ["sort_order", "sortOrder"],
+    ["created_at", "createdAt"],
+  ],
+  contribution_limit: [
+    ["id"],
+    ["group_name", "groupName"],
+    ["contribution_year", "contributionYear"],
+    ["limit_amount", "limitAmount"],
+    ["account_ids", "accountIds"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+    ["start_date", "startDate"],
+    ["end_date", "endDate"],
+  ],
+  custom_provider: [
+    ["id"],
+    ["code"],
+    ["name"],
+    ["description"],
+    ["enabled"],
+    ["priority"],
+    ["config"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+};
+
+function normalizeReplayPayload(
+  entity: LocalReplayEntity,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  const tableName = REPLAY_ENTITY_TABLE_NAMES[entity];
+  for (const [rawKey, value] of Object.entries(payload)) {
+    const column = replayPayloadColumnForKey(entity, rawKey);
+    if (column === null) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `Sync payload column '${rawKey}' is not valid for table '${tableName}'`,
+        500,
+      );
+    }
+    if (Object.hasOwn(normalized, column)) {
+      if (!replayJsonValuesEqual(normalized[column], value)) {
+        throw new ConnectServiceError(
+          "internal_error",
+          `Sync payload maps multiple values to column '${column}' for table '${tableName}'`,
+          500,
+        );
+      }
+      continue;
+    }
+    normalized[column] = value;
+  }
+  return normalized;
+}
+
+function replayPayloadColumnForKey(entity: LocalReplayEntity, rawKey: string): string | null {
+  for (const aliases of REPLAY_PAYLOAD_COLUMNS[entity]) {
+    if (aliases.includes(rawKey)) {
+      return aliases[0] ?? rawKey;
+    }
+  }
+  return null;
+}
+
+function replayJsonValuesEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(replayJsonComparable(left)) === JSON.stringify(replayJsonComparable(right));
+}
+
+function replayJsonComparable(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => replayJsonComparable(entry));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, entry]) => [key, replayJsonComparable(entry)]),
+    );
+  }
+  return value;
 }
 
 function localShouldApplyLww(

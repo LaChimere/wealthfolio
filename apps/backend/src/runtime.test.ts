@@ -4703,6 +4703,9 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedInvalidPayload = (
+      await crypto.encrypt(dek, JSON.stringify({ id: "invalid-replay-account" }))
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -4739,6 +4742,20 @@ describe("TS backend runtime composition", () => {
                 server_timestamp: "2026-01-01T00:00:01Z",
               },
               {
+                event_id: "dadadada-dada-4dad-8dad-dadadadadada",
+                device_id: "other-device",
+                type: "account.create.v1",
+                entity: "account",
+                entity_id: "invalid-replay-account",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedInvalidPayload,
+                payload_key_version: 5,
+                seq: 19,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
+              {
                 event_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
                 device_id: "other-device",
                 type: "portfolio.create.v1",
@@ -4747,7 +4764,7 @@ describe("TS backend runtime composition", () => {
                 client_timestamp: "2026-01-01T00:00:00Z",
                 payload: encryptedPayload,
                 payload_key_version: 5,
-                seq: 19,
+                seq: 20,
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-01T00:00:01Z",
@@ -4853,7 +4870,7 @@ describe("TS backend runtime composition", () => {
         ).toEqual({
           last_event_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           last_op: "create",
-          last_seq: 19,
+          last_seq: 20,
         });
         expect(
           verifyDb
@@ -5078,6 +5095,40 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedUnknownPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "provider-replay",
+          code: "remote-provider",
+          name: "Unknown Column Provider",
+          description: "Remote custom source",
+          enabled: true,
+          priority: 18,
+          config: configJson,
+          createdAt: "2026-01-01T00:00:00+00:00",
+          updatedAt: "2026-01-03T00:00:00+00:00",
+          unknownField: "must reject",
+        }),
+      )
+    ).value;
+    const encryptedConflictingAliasPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "provider-replay",
+          code: "remote-provider",
+          name: "Conflicting Alias Provider",
+          description: "Remote custom source",
+          enabled: true,
+          priority: 19,
+          config: configJson,
+          createdAt: "2026-01-01T00:00:00+00:00",
+          created_at: "2025-01-01T00:00:00+00:00",
+          updatedAt: "2026-01-04T00:00:00+00:00",
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -5090,13 +5141,13 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 24 });
+          return Response.json({ action: "PULL_TAIL", cursor: 26 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 24,
-            next_cursor: 24,
+            to: 26,
+            next_cursor: 26,
             has_more: false,
             events: [
               {
@@ -5112,6 +5163,34 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1",
+                device_id: "other-device",
+                type: "custom_provider.update.v1",
+                entity: "custom_provider",
+                entity_id: "provider-replay",
+                client_timestamp: "2026-01-03T00:00:00Z",
+                payload: encryptedUnknownPayload,
+                payload_key_version: 5,
+                seq: 25,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-03T00:00:01Z",
+              },
+              {
+                event_id: "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2",
+                device_id: "other-device",
+                type: "custom_provider.update.v1",
+                entity: "custom_provider",
+                entity_id: "provider-replay",
+                client_timestamp: "2026-01-04T00:00:00Z",
+                payload: encryptedConflictingAliasPayload,
+                payload_key_version: 5,
+                seq: 26,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-04T00:00:01Z",
               },
             ],
           });
@@ -5162,7 +5241,7 @@ describe("TS backend runtime composition", () => {
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
         pulledCount: 1,
-        cursor: 24,
+        cursor: 26,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);

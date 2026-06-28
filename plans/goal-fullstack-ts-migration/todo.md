@@ -6708,6 +6708,12 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote custom_provider
   replay events into market_data_custom_providers and updates sync
   metadata/applied-event tracking.
+- `pr5-runtime-connect-replay-milestone-review-fixes`: dual-model review
+  feedback resolved. Fallback replay now retries failed events after later page
+  events apply, preserving valid out-of-order FK-dependent rows when a separate
+  poison event forces fallback; supported replay payloads now reject unknown
+  columns and conflicting aliases before upsert. Focused/full runtime and
+  Connect tests passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
