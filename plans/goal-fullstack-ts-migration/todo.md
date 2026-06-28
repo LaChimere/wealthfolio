@@ -6548,6 +6548,9 @@ contract:
   passed. TS `/api/v1/connect/device/bootstrap-snapshot` now mirrors Rust by
   attempting a best-effort background engine start after bootstrap while
   preserving the original bootstrap response.
+- `pr5-runtime-connect-bootstrap-background-start-review`: dual-model review
+  passed. Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed the
+  bootstrap-snapshot background-start parity fix and found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
