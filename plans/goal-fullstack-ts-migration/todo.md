@@ -6594,6 +6594,10 @@ contract:
   Runtime-backed Connect reconcile-ready-state now expects non-READY local sync
   state to return the Rust-shaped skipped_not_ready reconcile response through
   the HTTP seam.
+- `pr5-runtime-connect-misc-route-review`: dual-model review passed. Claude Opus
+  4.8 xhigh and GPT-5.5 xhigh reviewed start-background READY gate,
+  bootstrap-overwrite-check, and reconcile-ready-state not-ready runtime route
+  smokes and found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
