@@ -4073,7 +4073,8 @@ type LocalReplayEntity =
   | "platform"
   | "portfolio"
   | "portfolio_account"
-  | "contribution_limit";
+  | "contribution_limit"
+  | "custom_provider";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8050,9 +8051,17 @@ function localCanReplayContributionLimitEvent(event: Record<string, unknown>): b
   );
 }
 
-function localReplayEntity(
-  event: Record<string, unknown>,
-): "account" | "platform" | "portfolio" | "portfolio_account" | "contribution_limit" | null {
+function localCanReplayCustomProviderEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "custom_provider" &&
+    eventType !== null &&
+    /^custom_provider\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
+function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
   }
@@ -8067,6 +8076,9 @@ function localReplayEntity(
   }
   if (localCanReplayContributionLimitEvent(event)) {
     return "contribution_limit";
+  }
+  if (localCanReplayCustomProviderEvent(event)) {
+    return "custom_provider";
   }
   return null;
 }
@@ -8189,6 +8201,8 @@ function localApplyReplayEventPrepared(
       return localApplyPortfolioAccountReplayEvent(db, replayEvent.event, payloads);
     case "contribution_limit":
       return localApplyContributionLimitReplayEvent(db, replayEvent.event, payloads);
+    case "custom_provider":
+      return localApplyCustomProviderReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -8582,6 +8596,84 @@ function localApplyContributionLimitReplayEvent(
   return shouldApply;
 }
 
+function localApplyCustomProviderReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localCustomProviderSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'custom_provider' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM market_data_custom_providers WHERE id = ?").run(entityId);
+    } else {
+      localUpsertCustomProviderReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "custom_provider",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "market_data_custom_providers");
+    localInsertSyncAppliedEvent(db, eventId, seq, "custom_provider", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "custom_provider", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -8624,6 +8716,16 @@ function localContributionLimitSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^contribution_limit\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localCustomProviderSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^custom_provider\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -8919,6 +9021,54 @@ function localUpsertContributionLimitReplayPayload(
   );
 }
 
+function localUpsertCustomProviderReplayPayload(
+  db: Database,
+  entityId: string,
+  payload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const code = requiredReplayString(payload.code, "custom_provider.code");
+  const name = requiredReplayString(payload.name, "custom_provider.name");
+  const priority = requiredInteger(payload.priority ?? 50, "custom_provider.priority");
+  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
+  const updatedAt = optionalString(payload.updated_at ?? payload.updatedAt) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO market_data_custom_providers (
+        id, code, name, description, enabled, priority, config, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        code = excluded.code,
+        name = excluded.name,
+        description = excluded.description,
+        enabled = excluded.enabled,
+        priority = excluded.priority,
+        config = excluded.config,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at
+    `,
+  ).run(
+    entityId,
+    code,
+    name,
+    optionalString(payload.description) ?? "",
+    replayBooleanToInteger(payload.enabled, true),
+    priority,
+    replayOptionalTextValue(payload.config),
+    createdAt,
+    updatedAt,
+  );
+}
+
 function requiredReplayString(value: unknown, context: string): string {
   const parsed = optionalString(value);
   if (parsed === null) {
@@ -8938,6 +9088,19 @@ function replayBooleanToInteger(value: unknown, defaultValue = false): number {
     return value;
   }
   throw new ConnectServiceError("internal_error", "Failed to parse account replay payload", 500);
+}
+
+function replayOptionalTextValue(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }
 
 function localShouldApplyLww(
@@ -9008,7 +9171,13 @@ function localInsertSyncAppliedEvent(
 
 function localMarkReplayTableState(
   db: Database,
-  tableName: "accounts" | "platforms" | "portfolios" | "portfolio_accounts" | "contribution_limits",
+  tableName:
+    | "accounts"
+    | "platforms"
+    | "portfolios"
+    | "portfolio_accounts"
+    | "contribution_limits"
+    | "market_data_custom_providers",
 ): void {
   db.prepare(
     `
