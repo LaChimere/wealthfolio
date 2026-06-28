@@ -8824,7 +8824,7 @@ function localApplyGoalReplayEvent(
     if (operation === "delete") {
       db.prepare("DELETE FROM goals WHERE id = ?").run(entityId);
     } else {
-      localUpsertGoalReplayPayload(db, entityId, payload, clientTimestamp);
+      localUpsertGoalReplayPayload(db, entityId, payload);
     }
     localUpsertSyncEntityMetadata(db, "goal", entityId, eventId, clientTimestamp, operation, seq);
     localMarkReplayTableState(db, "goals");
@@ -8894,7 +8894,7 @@ function localApplyGoalPlanReplayEvent(
     if (operation === "delete") {
       db.prepare("DELETE FROM goal_plans WHERE goal_id = ?").run(entityId);
     } else {
-      localUpsertGoalPlanReplayPayload(db, entityId, payload, clientTimestamp);
+      localUpsertGoalPlanReplayPayload(db, entityId, payload);
     }
     localUpsertSyncEntityMetadata(
       db,
@@ -8972,7 +8972,7 @@ function localApplyGoalsAllocationReplayEvent(
     if (operation === "delete") {
       db.prepare("DELETE FROM goals_allocation WHERE id = ?").run(entityId);
     } else {
-      localUpsertGoalsAllocationReplayPayload(db, entityId, payload, clientTimestamp);
+      localUpsertGoalsAllocationReplayPayload(db, entityId, payload);
     }
     localUpsertSyncEntityMetadata(
       db,
@@ -9406,169 +9406,163 @@ function localUpsertGoalReplayPayload(
   db: Database,
   entityId: string,
   rawPayload: Record<string, unknown>,
-  fallbackTimestamp: string,
 ): void {
   const payload = normalizeReplayPayload("goal", rawPayload);
-  const id = optionalString(payload.id) ?? entityId;
-  if (id !== entityId) {
-    throw new ConnectServiceError(
-      "internal_error",
-      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
-      500,
-    );
-  }
-  const title = requiredReplayString(payload.title, "goal.title");
-  const targetAmount = requiredFiniteNumber(payload.target_amount, "goal.target_amount");
-  const priority = requiredInteger(payload.priority ?? 0, "goal.priority");
-  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
-  db.prepare(
-    `
-      INSERT INTO goals (
-        id, title, description, target_amount, goal_type, status_lifecycle,
-        status_health, priority, cover_image_key, currency, start_date, target_date,
-        summary_current_value, summary_progress, projected_completion_date,
-        projected_value_at_target_date, created_at, updated_at, summary_target_amount
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title,
-        description = excluded.description,
-        target_amount = excluded.target_amount,
-        goal_type = excluded.goal_type,
-        status_lifecycle = excluded.status_lifecycle,
-        status_health = excluded.status_health,
-        priority = excluded.priority,
-        cover_image_key = excluded.cover_image_key,
-        currency = excluded.currency,
-        start_date = excluded.start_date,
-        target_date = excluded.target_date,
-        summary_current_value = excluded.summary_current_value,
-        summary_progress = excluded.summary_progress,
-        projected_completion_date = excluded.projected_completion_date,
-        projected_value_at_target_date = excluded.projected_value_at_target_date,
-        created_at = excluded.created_at,
-        updated_at = excluded.updated_at,
-        summary_target_amount = excluded.summary_target_amount
-    `,
-  ).run(
-    entityId,
-    title,
-    optionalString(payload.description) ?? null,
-    targetAmount,
-    optionalString(payload.goal_type) ?? "custom_save_up",
-    optionalString(payload.status_lifecycle) ?? "active",
-    optionalString(payload.status_health) ?? "not_applicable",
-    priority,
-    optionalString(payload.cover_image_key) ?? null,
-    optionalString(payload.currency) ?? null,
-    optionalString(payload.start_date) ?? null,
-    optionalString(payload.target_date) ?? null,
-    replayOptionalFiniteNumber(payload.summary_current_value, "goal.summary_current_value"),
-    replayOptionalFiniteNumber(payload.summary_progress, "goal.summary_progress"),
-    optionalString(payload.projected_completion_date) ?? null,
-    replayOptionalFiniteNumber(
-      payload.projected_value_at_target_date,
-      "goal.projected_value_at_target_date",
-    ),
-    createdAt,
-    updatedAt,
-    replayOptionalFiniteNumber(payload.summary_target_amount, "goal.summary_target_amount"),
-  );
+  validateGoalReplayPayloadFields(payload);
+  localUpsertReplayPayloadFields(db, "goals", "id", entityId, payload);
 }
 
 function localUpsertGoalPlanReplayPayload(
   db: Database,
   entityId: string,
   rawPayload: Record<string, unknown>,
-  fallbackTimestamp: string,
 ): void {
   const payload = normalizeReplayPayload("goal_plan", rawPayload);
-  const goalId = optionalString(payload.goal_id) ?? entityId;
-  if (goalId !== entityId) {
-    throw new ConnectServiceError(
-      "internal_error",
-      `Sync payload PK 'goal_id' does not match entity_id '${entityId}'`,
-      500,
-    );
-  }
-  const planKind = requiredReplayString(payload.plan_kind, "goal_plan.plan_kind");
-  const version = requiredInteger(payload.version ?? 1, "goal_plan.version");
-  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
-  db.prepare(
-    `
-      INSERT INTO goal_plans (
-        goal_id, plan_kind, planner_mode, settings_json, summary_json, version, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(goal_id) DO UPDATE SET
-        plan_kind = excluded.plan_kind,
-        planner_mode = excluded.planner_mode,
-        settings_json = excluded.settings_json,
-        summary_json = excluded.summary_json,
-        version = excluded.version,
-        created_at = excluded.created_at,
-        updated_at = excluded.updated_at
-    `,
-  ).run(
-    entityId,
-    planKind,
-    optionalString(payload.planner_mode) ?? null,
-    optionalString(payload.settings_json) ?? "{}",
-    optionalString(payload.summary_json) ?? "{}",
-    version,
-    createdAt,
-    updatedAt,
-  );
+  validateGoalPlanReplayPayloadFields(payload);
+  localUpsertReplayPayloadFields(db, "goal_plans", "goal_id", entityId, payload);
 }
 
 function localUpsertGoalsAllocationReplayPayload(
   db: Database,
   entityId: string,
   rawPayload: Record<string, unknown>,
-  fallbackTimestamp: string,
 ): void {
   const payload = normalizeReplayPayload("goals_allocation", rawPayload);
-  const id = optionalString(payload.id) ?? entityId;
-  if (id !== entityId) {
-    throw new ConnectServiceError(
-      "internal_error",
-      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
-      500,
-    );
-  }
-  const goalId = requiredReplayString(payload.goal_id, "goals_allocation.goal_id");
-  const accountId = requiredReplayString(payload.account_id, "goals_allocation.account_id");
-  const sharePercent = requiredFiniteNumber(
-    payload.share_percent,
-    "goals_allocation.share_percent",
+  validateGoalsAllocationReplayPayloadFields(payload);
+  localUpsertReplayPayloadFields(db, "goals_allocation", "id", entityId, payload);
+}
+
+function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
+  validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
+  validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
+  validateReplayFiniteNumberIfPresent(
+    payload,
+    "summary_current_value",
+    "goal.summary_current_value",
   );
-  const createdAt = optionalString(payload.created_at) ?? fallbackTimestamp;
-  const updatedAt = optionalString(payload.updated_at) ?? fallbackTimestamp;
+  validateReplayFiniteNumberIfPresent(payload, "summary_progress", "goal.summary_progress");
+  validateReplayFiniteNumberIfPresent(
+    payload,
+    "projected_value_at_target_date",
+    "goal.projected_value_at_target_date",
+  );
+  validateReplayFiniteNumberIfPresent(
+    payload,
+    "summary_target_amount",
+    "goal.summary_target_amount",
+  );
+}
+
+function validateGoalPlanReplayPayloadFields(payload: Record<string, unknown>): void {
+  validateReplayIntegerIfPresent(payload, "version", "goal_plan.version");
+}
+
+function validateGoalsAllocationReplayPayloadFields(payload: Record<string, unknown>): void {
+  validateReplayFiniteNumberIfPresent(payload, "share_percent", "goals_allocation.share_percent");
+}
+
+function validateReplayFiniteNumberIfPresent(
+  payload: Record<string, unknown>,
+  column: string,
+  context: string,
+): void {
+  if (Object.hasOwn(payload, column)) {
+    requiredFiniteNumber(payload[column], context);
+  }
+}
+
+function validateReplayIntegerIfPresent(
+  payload: Record<string, unknown>,
+  column: string,
+  context: string,
+): void {
+  if (Object.hasOwn(payload, column)) {
+    requiredInteger(payload[column], context);
+  }
+}
+
+function localUpsertReplayPayloadFields(
+  db: Database,
+  tableName: string,
+  pkColumn: string,
+  entityId: string,
+  payload: Record<string, unknown>,
+): void {
+  const fields = { ...payload };
+  if (Object.hasOwn(fields, pkColumn)) {
+    const pkValue = fields[pkColumn];
+    if (!replayPayloadValueMatchesEntityId(pkValue, entityId)) {
+      throw new ConnectServiceError(
+        "internal_error",
+        `Sync payload PK '${pkColumn}' does not match entity_id '${entityId}'`,
+        500,
+      );
+    }
+  } else {
+    fields[pkColumn] = entityId;
+  }
+  const existing = db
+    .query<{ count: number }, [string]>(
+      `
+        SELECT COUNT(*) AS count
+        FROM ${quoteReplayIdentifier(tableName)}
+        WHERE ${quoteReplayIdentifier(pkColumn)} = ?
+      `,
+    )
+    .get(entityId);
+  const entries = Object.entries(fields);
+  if ((existing?.count ?? 0) > 0) {
+    const updateEntries = entries.filter(([column]) => column !== pkColumn);
+    if (updateEntries.length === 0) {
+      return;
+    }
+    const assignments = updateEntries
+      .map(([column]) => `${quoteReplayIdentifier(column)} = ?`)
+      .join(", ");
+    db.prepare(
+      `
+        UPDATE ${quoteReplayIdentifier(tableName)}
+        SET ${assignments}
+        WHERE ${quoteReplayIdentifier(pkColumn)} = ?
+      `,
+    ).run(...updateEntries.map(([, value]) => replayValueToSqlite(value)), entityId);
+    return;
+  }
+  const columns = entries.map(([column]) => quoteReplayIdentifier(column)).join(", ");
+  const placeholders = entries.map(() => "?").join(", ");
   db.prepare(
     `
-      INSERT INTO goals_allocation (
-        id, goal_id, account_id, share_percent, tax_bucket, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        goal_id = excluded.goal_id,
-        account_id = excluded.account_id,
-        share_percent = excluded.share_percent,
-        tax_bucket = excluded.tax_bucket,
-        created_at = excluded.created_at,
-        updated_at = excluded.updated_at
+      INSERT INTO ${quoteReplayIdentifier(tableName)} (${columns})
+      VALUES (${placeholders})
     `,
-  ).run(
-    entityId,
-    goalId,
-    accountId,
-    sharePercent,
-    optionalString(payload.tax_bucket) ?? null,
-    createdAt,
-    updatedAt,
-  );
+  ).run(...entries.map(([, value]) => replayValueToSqlite(value)));
+}
+
+function replayPayloadValueMatchesEntityId(value: unknown, entityId: string): boolean {
+  if (typeof value === "string") {
+    return value === entityId;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value) === entityId;
+  }
+  return false;
+}
+
+function replayValueToSqlite(value: unknown): string | number | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
+function quoteReplayIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 function requiredReplayString(value: unknown, context: string): string {
@@ -9603,13 +9597,6 @@ function replayOptionalTextValue(value: unknown): string | null {
     return String(value);
   }
   return JSON.stringify(value);
-}
-
-function replayOptionalFiniteNumber(value: unknown, context: string): number | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  return requiredFiniteNumber(value, context);
 }
 
 const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {

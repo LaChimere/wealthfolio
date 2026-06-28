@@ -6726,6 +6726,11 @@ contract:
   passed. Runtime-backed trigger-cycle now decrypts and applies remote
   goals_allocation replay events with Rust-compatible percentAllocation legacy
   alias handling and sync metadata/applied-event tracking.
+- `pr5-runtime-connect-goal-family-partial-replay-review-fix`: review feedback
+  resolved. Goal, goal_plan, and goals_allocation replay now preserves omitted
+  columns on partial update payloads by updating only present fields for
+  existing rows, matching Rust generic replay semantics. Focused/full runtime
+  and Connect tests passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

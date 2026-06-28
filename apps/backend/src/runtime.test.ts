@@ -5331,6 +5331,17 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedUpdatePayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "goal-replay",
+          title: "Remote Goal Updated",
+          targetAmount: 60000,
+          isAchieved: false,
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -5343,13 +5354,13 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 27 });
+          return Response.json({ action: "PULL_TAIL", cursor: 28 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 27,
-            next_cursor: 27,
+            to: 28,
+            next_cursor: 28,
             has_more: false,
             events: [
               {
@@ -5365,6 +5376,20 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "13131313-1313-4313-8313-131313131313",
+                device_id: "other-device",
+                type: "goal.update.v1",
+                entity: "goal",
+                entity_id: "goal-replay",
+                client_timestamp: "2026-01-03T00:00:00Z",
+                payload: encryptedUpdatePayload,
+                payload_key_version: 5,
+                seq: 28,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-03T00:00:01Z",
               },
             ],
           });
@@ -5414,8 +5439,8 @@ describe("TS backend runtime composition", () => {
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
-        pulledCount: 1,
-        cursor: 27,
+        pulledCount: 2,
+        cursor: 28,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
@@ -5443,9 +5468,9 @@ describe("TS backend runtime composition", () => {
             )
             .get(),
         ).toEqual({
-          title: "Remote Goal",
-          target_amount: 50000,
-          status_lifecycle: "achieved",
+          title: "Remote Goal Updated",
+          target_amount: 60000,
+          status_lifecycle: "active",
           status_health: "on_track",
           priority: 4,
           summary_current_value: 1250.5,
@@ -5463,9 +5488,9 @@ describe("TS backend runtime composition", () => {
             )
             .get(),
         ).toEqual({
-          last_event_id: "12121212-1212-4212-8212-121212121212",
-          last_op: "create",
-          last_seq: 27,
+          last_event_id: "13131313-1313-4313-8313-131313131313",
+          last_op: "update",
+          last_seq: 28,
         });
       } finally {
         verifyDb.close();
@@ -5500,6 +5525,17 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const updatedSettingsJson = JSON.stringify({ targetDate: "2027-12-31" });
+    const encryptedUpdatePayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          goalId: "goal-plan-replay",
+          settingsJson: updatedSettingsJson,
+          version: 4,
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -5512,13 +5548,13 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 28 });
+          return Response.json({ action: "PULL_TAIL", cursor: 29 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 28,
-            next_cursor: 28,
+            to: 29,
+            next_cursor: 29,
             has_more: false,
             events: [
               {
@@ -5534,6 +5570,20 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "24242424-2424-4242-8242-242424242424",
+                device_id: "other-device",
+                type: "goal_plan.update.v1",
+                entity: "goal_plan",
+                entity_id: "goal-plan-replay",
+                client_timestamp: "2026-01-03T00:00:00Z",
+                payload: encryptedUpdatePayload,
+                payload_key_version: 5,
+                seq: 29,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-03T00:00:01Z",
               },
             ],
           });
@@ -5597,8 +5647,8 @@ describe("TS backend runtime composition", () => {
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
-        pulledCount: 1,
-        cursor: 28,
+        pulledCount: 2,
+        cursor: 29,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
@@ -5625,9 +5675,9 @@ describe("TS backend runtime composition", () => {
         ).toEqual({
           plan_kind: "save_up",
           planner_mode: "simple",
-          settings_json: settingsJson,
+          settings_json: updatedSettingsJson,
           summary_json: summaryJson,
-          version: 3,
+          version: 4,
         });
         expect(
           verifyDb
@@ -5641,9 +5691,9 @@ describe("TS backend runtime composition", () => {
             )
             .get(),
         ).toEqual({
-          last_event_id: "23232323-2323-4232-8232-232323232323",
-          last_op: "create",
-          last_seq: 28,
+          last_event_id: "24242424-2424-4242-8242-242424242424",
+          last_op: "update",
+          last_seq: 29,
         });
       } finally {
         verifyDb.close();
@@ -5675,6 +5725,15 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedUpdatePayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "allocation-replay",
+          percentAllocation: 44.5,
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -5687,13 +5746,13 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 29 });
+          return Response.json({ action: "PULL_TAIL", cursor: 30 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 29,
-            next_cursor: 29,
+            to: 30,
+            next_cursor: 30,
             has_more: false,
             events: [
               {
@@ -5709,6 +5768,20 @@ describe("TS backend runtime composition", () => {
                 user_id: "user-1",
                 team_id: "team-1",
                 server_timestamp: "2026-01-02T00:00:01Z",
+              },
+              {
+                event_id: "35353535-3535-4353-8353-353535353535",
+                device_id: "other-device",
+                type: "goals_allocation.update.v1",
+                entity: "goals_allocation",
+                entity_id: "allocation-replay",
+                client_timestamp: "2026-01-03T00:00:00Z",
+                payload: encryptedUpdatePayload,
+                payload_key_version: 5,
+                seq: 30,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-03T00:00:01Z",
               },
             ],
           });
@@ -5777,8 +5850,8 @@ describe("TS backend runtime composition", () => {
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
-        pulledCount: 1,
-        cursor: 29,
+        pulledCount: 2,
+        cursor: 30,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
@@ -5804,7 +5877,7 @@ describe("TS backend runtime composition", () => {
         ).toEqual({
           goal_id: "allocation-goal",
           account_id: "allocation-account",
-          share_percent: 33.5,
+          share_percent: 44.5,
           tax_bucket: "tfsa",
         });
         expect(
@@ -5819,9 +5892,9 @@ describe("TS backend runtime composition", () => {
             )
             .get(),
         ).toEqual({
-          last_event_id: "34343434-3434-4343-8343-343434343434",
-          last_op: "create",
-          last_seq: 29,
+          last_event_id: "35353535-3535-4353-8353-353535353535",
+          last_op: "update",
+          last_seq: 30,
         });
       } finally {
         verifyDb.close();
