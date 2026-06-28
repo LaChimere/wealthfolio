@@ -6634,6 +6634,11 @@ contract:
   Opus 4.8 xhigh and GPT-5.5 xhigh reviewed Connect enable
   READY/STALE/REGISTERED resume runtime route smokes and found no actionable
   issues.
+- `pr5-runtime-connect-reinitialize-route-smoke`: verification passed.
+  Runtime-backed Connect reinitialize now expects
+  `/api/v1/connect/device/reinitialize` to reset team sync first, preserve the
+  existing device nonce, reenroll, and return the Rust-shaped
+  registered/pairing-required result.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
