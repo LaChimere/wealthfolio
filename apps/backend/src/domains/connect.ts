@@ -1869,7 +1869,14 @@ async function syncEmptyTransactionActivityPages(
             exchangeMetadata,
             symbolSearch,
             providerSearchCache,
-          ));
+          )) ??
+          brokerUnresolvedAssetActivityCreateInput(
+            activity,
+            account.id,
+            account.currency,
+            baseCurrency,
+            exchangeMetadata,
+          );
         if (createInput === null) {
           hasUnsupportedMappableActivity = true;
         } else if (!brokerActivityAlreadyImported(db, activity, createInput)) {
@@ -2711,6 +2718,82 @@ async function brokerProviderAssetActivityCreateInput(
   };
 }
 
+function brokerUnresolvedAssetActivityCreateInput(
+  activity: unknown,
+  accountId: string,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+  exchangeMetadata: Pick<ExchangeMetadata, "yahooSuffixToMic"> | undefined,
+): Record<string, unknown> | null {
+  if (!isRecord(activity)) {
+    return null;
+  }
+  const activityId = optionalString(activity.id);
+  const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
+  const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
+  if (!activityId || !assetSymbol) {
+    return null;
+  }
+  const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
+  const activityType = rawActivityType.toUpperCase();
+  if (
+    BROKER_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    !BROKER_ASSET_BACKED_CASH_LIKE_ACTIVITY_TYPES.has(activityType) &&
+    activityType !== "UNKNOWN"
+  ) {
+    return null;
+  }
+  const instrumentType = brokerActivityInstrumentType(activity, assetSymbol);
+  if (!instrumentType) {
+    return null;
+  }
+  const currency =
+    brokerActivityCurrency(activity) ??
+    optionalString(accountCurrency) ??
+    optionalString(baseCurrency) ??
+    "USD";
+  const sourceSystem =
+    optionalString(activity.source_system ?? activity.provider_type) ?? "SNAPTRADE";
+  const needsReview = brokerActivityNeedsReview(activity);
+  const asset: Record<string, unknown> = {
+    symbol: assetSymbol.symbol,
+    instrumentType,
+  };
+  if (assetSymbol.exchangeMic) {
+    asset.exchangeMic = assetSymbol.exchangeMic;
+  }
+  const quoteCcy = brokerActivitySymbolCurrency(activity);
+  if (quoteCcy) {
+    asset.quoteCcy = quoteCcy;
+  }
+  const name = brokerActivityAssetName(activity);
+  if (name) {
+    asset.name = name;
+  }
+  return {
+    accountId,
+    activityType,
+    subtype: optionalString(activity.subtype ?? activity.option_type ?? activity.raw_type),
+    activityDate:
+      optionalString(activity.trade_date ?? activity.settlement_date) ?? new Date().toISOString(),
+    quantity: brokerActivityAbsoluteNumberString(activity.units),
+    unitPrice: brokerActivityAbsoluteNumberString(activity.price),
+    amount: brokerActivityAbsoluteNumberString(activity.amount),
+    fee: brokerActivityAbsoluteNumberString(activity.fee),
+    currency,
+    asset,
+    comment: optionalString(activity.description ?? activity.external_reference_id),
+    fxRate: brokerActivityNumberString(activity.fx_rate),
+    sourceSystem,
+    sourceRecordId,
+    sourceGroupId: optionalString(activity.source_group_id),
+    idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
+    status: needsReview ? "DRAFT" : "POSTED",
+    needsReview,
+    metadata: brokerActivityMetadata(activity),
+  };
+}
+
 async function resolveBrokerProviderAsset(
   assetSymbol: BrokerActivityAssetSymbol,
   symbolSearch: NonNullable<LocalConnectServiceDependencies["symbolSearch"]>,
@@ -2824,6 +2907,57 @@ function brokerActivitySymbol(
   }
   const parsed = parseKnownYahooSuffix(displaySymbol, exchangeMetadata);
   return { symbol: parsed.symbol.toUpperCase(), exchangeMic: parsed.exchangeMic ?? exchangeMic };
+}
+
+function brokerActivityInstrumentType(
+  activity: Record<string, unknown>,
+  assetSymbol: BrokerActivityAssetSymbol,
+): string | null {
+  const optionSymbol = activity.option_symbol;
+  if (isRecord(optionSymbol) && optionalNonEmptyString(optionSymbol.ticker)) {
+    return "OPTION";
+  }
+  if (optionalNonEmptyString(activity.option_type)) {
+    return "OPTION";
+  }
+  const symbol = activity.symbol;
+  if (isRecord(symbol)) {
+    const symbolType = symbol.type;
+    const symbolTypeCode = isRecord(symbolType)
+      ? optionalString(symbolType.code)?.toUpperCase()
+      : null;
+    if (symbolTypeCode === "CRYPTOCURRENCY" || symbolTypeCode === "CRYPTO") {
+      return "CRYPTO";
+    }
+  }
+  return assetSymbol.exchangeMic ? "EQUITY" : null;
+}
+
+function brokerActivitySymbolCurrency(activity: Record<string, unknown>): string | null {
+  const symbol = activity.symbol;
+  if (!isRecord(symbol)) {
+    return null;
+  }
+  const currency = symbol.currency;
+  return isRecord(currency) ? optionalNonEmptyString(currency.code) : null;
+}
+
+function brokerActivityAssetName(activity: Record<string, unknown>): string | null {
+  const symbol = activity.symbol;
+  if (isRecord(symbol)) {
+    const description = optionalNonEmptyString(symbol.description);
+    if (description) {
+      return description;
+    }
+  }
+  const optionSymbol = activity.option_symbol;
+  if (isRecord(optionSymbol)) {
+    const underlying = optionSymbol.underlying_symbol;
+    if (isRecord(underlying)) {
+      return optionalNonEmptyString(underlying.description);
+    }
+  }
+  return null;
 }
 
 function brokerActivitySymbolExchangeMic(symbol: Record<string, unknown>): string | null {

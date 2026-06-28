@@ -6655,6 +6655,11 @@ contract:
   Runtime-backed Connect clear sync-data now expects
   `/api/v1/connect/device/sync-data` to clear local sync identity, legacy device
   ID, sync tables, cursor, and engine state while preserving user data.
+- `pr5-connect-broker-described-asset-sync`: verification passed. Connect
+  transaction activity sync now maps asset-backed broker rows with
+  broker-provided exchange MIC/currency metadata into activity-created assets
+  through `/api/v1/connect/sync/activities` even when provider search does not
+  resolve the symbol.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
