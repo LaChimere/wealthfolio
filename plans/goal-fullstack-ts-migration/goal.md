@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 907
+turns_used: 908
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-28T12:32:02+09:00"
+updated_at: "2026-06-28T12:34:46+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5125,6 +5125,10 @@ updated_at: "2026-06-28T12:32:02+09:00"
   over trigger-cycle PULL_TAIL, bootstrap-snapshot no-remote, and
   generate-snapshot export-gate runtime route smokes; no actionable issues were
   found.
+- Turn 908: Added runtime-backed Connect enable READY resume route coverage. The
+  SQLite-backed runtime now proves `/api/v1/connect/device/enable` restores the
+  Connect session, resumes an existing READY sync identity, and avoids duplicate
+  cloud enrollment.
 
 ## Deferred items
 
