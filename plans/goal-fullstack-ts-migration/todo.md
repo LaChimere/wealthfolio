@@ -6766,6 +6766,11 @@ contract:
   after a deleted parent thread is skipped and marked applied, and duplicate
   thread-tag creates converge to the remote id instead of dead-lettering the
   unique thread/tag conflict while preserving the canonical tag created_at.
+- `pr5-runtime-connect-asset-taxonomy-assignment-replay-route-smoke`:
+  verification passed. Runtime-backed trigger-cycle now decrypts and applies
+  remote asset_taxonomy_assignment replay events into asset_taxonomy_assignments
+  with natural-key duplicate convergence and sync metadata/applied-event
+  tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

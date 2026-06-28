@@ -4083,7 +4083,8 @@ type LocalReplayEntity =
   | "import_run"
   | "ai_thread"
   | "ai_message"
-  | "ai_thread_tag";
+  | "ai_thread_tag"
+  | "asset_taxonomy_assignment";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8161,6 +8162,16 @@ function localCanReplayAiThreadTagEvent(event: Record<string, unknown>): boolean
   );
 }
 
+function localCanReplayAssetTaxonomyAssignmentEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "asset_taxonomy_assignment" &&
+    eventType !== null &&
+    /^asset_taxonomy_assignment\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8206,6 +8217,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayAiThreadTagEvent(event)) {
     return "ai_thread_tag";
+  }
+  if (localCanReplayAssetTaxonomyAssignmentEvent(event)) {
+    return "asset_taxonomy_assignment";
   }
   return null;
 }
@@ -8415,6 +8429,8 @@ function localApplyReplayEventPrepared(
       return localApplyAiMessageReplayEvent(db, replayEvent.event, payloads);
     case "ai_thread_tag":
       return localApplyAiThreadTagReplayEvent(db, replayEvent.event, payloads);
+    case "asset_taxonomy_assignment":
+      return localApplyAssetTaxonomyAssignmentReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9608,6 +9624,84 @@ function localApplyAiThreadTagReplayEvent(
   return shouldApply;
 }
 
+function localApplyAssetTaxonomyAssignmentReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localAssetTaxonomyAssignmentSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM asset_taxonomy_assignments WHERE id = ?").run(entityId);
+    } else {
+      localUpsertAssetTaxonomyAssignmentReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "asset_taxonomy_assignment",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "asset_taxonomy_assignments");
+    localInsertSyncAppliedEvent(db, eventId, seq, "asset_taxonomy_assignment", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "asset_taxonomy_assignment", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9748,6 +9842,16 @@ function localAiThreadTagSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^ai_thread_tag\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localAssetTaxonomyAssignmentSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^asset_taxonomy_assignment\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -10221,6 +10325,23 @@ function localUpsertAiThreadTagReplayPayload(
   localUpsertReplayPayloadFields(db, "ai_thread_tags", "id", entityId, payload);
 }
 
+function localUpsertAssetTaxonomyAssignmentReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("asset_taxonomy_assignment", rawPayload);
+  validateAssetTaxonomyAssignmentReplayPayloadFields(payload);
+  localUpsertNaturalKeyedReplayPayloadFields(db, {
+    tableName: "asset_taxonomy_assignments",
+    pkColumn: "id",
+    entityId,
+    payload,
+    naturalKeyColumns: ["asset_id", "taxonomy_id", "category_id"],
+    preserveCanonicalColumns: ["created_at"],
+  });
+}
+
 function localAiThreadChildIds(
   db: Database,
   threadId: string,
@@ -10343,6 +10464,12 @@ function validateImportTemplateReplayPayloadFields(payload: Record<string, unkno
   validateReplayIntegerIfPresent(payload, "config_version", "import_template.config_version");
 }
 
+function validateAssetTaxonomyAssignmentReplayPayloadFields(
+  payload: Record<string, unknown>,
+): void {
+  validateReplayIntegerIfPresent(payload, "weight", "asset_taxonomy_assignment.weight");
+}
+
 function validateReplayFiniteNumberIfPresent(
   payload: Record<string, unknown>,
   column: string,
@@ -10418,6 +10545,94 @@ function localUpsertReplayPayloadFields(
       VALUES (${placeholders})
     `,
   ).run(...entries.map(([, value]) => replayValueToSqlite(value)));
+}
+
+function localUpsertNaturalKeyedReplayPayloadFields(
+  db: Database,
+  options: {
+    tableName: string;
+    pkColumn: string;
+    entityId: string;
+    payload: Record<string, unknown>;
+    naturalKeyColumns: string[];
+    preserveCanonicalColumns: string[];
+  },
+): void {
+  const naturalKeyValues = options.naturalKeyColumns.map((column) => options.payload[column]);
+  if (naturalKeyValues.every((value) => value !== undefined && value !== null)) {
+    const duplicate = db
+      .query<{ id: string }, [...Array<string | number | null>, string]>(
+        `
+          SELECT ${quoteReplayIdentifier(options.pkColumn)} AS id
+          FROM ${quoteReplayIdentifier(options.tableName)}
+          WHERE ${options.naturalKeyColumns
+            .map((column) => `${quoteReplayIdentifier(column)} = ?`)
+            .join(" AND ")}
+            AND ${quoteReplayIdentifier(options.pkColumn)} <> ?
+        `,
+      )
+      .get(...naturalKeyValues.map((value) => replayValueToSqlite(value)), options.entityId);
+    if (duplicate) {
+      localMergeNaturalKeyedReplayDuplicate(db, options, duplicate.id);
+      return;
+    }
+  }
+  localUpsertReplayPayloadFields(
+    db,
+    options.tableName,
+    options.pkColumn,
+    options.entityId,
+    options.payload,
+  );
+}
+
+function localMergeNaturalKeyedReplayDuplicate(
+  db: Database,
+  options: {
+    tableName: string;
+    pkColumn: string;
+    entityId: string;
+    payload: Record<string, unknown>;
+    preserveCanonicalColumns: string[];
+  },
+  duplicateId: string,
+): void {
+  const canonicalId = duplicateId > options.entityId ? duplicateId : options.entityId;
+  const assignments: string[] = [];
+  const values: Array<string | number | null> = [];
+  if (duplicateId !== canonicalId) {
+    assignments.push(`${quoteReplayIdentifier(options.pkColumn)} = ?`);
+    values.push(canonicalId);
+  }
+  for (const [column, value] of Object.entries(options.payload)) {
+    if (column === options.pkColumn) {
+      continue;
+    }
+    if (duplicateId === canonicalId && options.preserveCanonicalColumns.includes(column)) {
+      continue;
+    }
+    assignments.push(`${quoteReplayIdentifier(column)} = ?`);
+    values.push(replayValueToSqlite(value));
+  }
+  if (assignments.length === 0) {
+    return;
+  }
+  values.push(duplicateId);
+  db.prepare(
+    `
+      UPDATE ${quoteReplayIdentifier(options.tableName)}
+      SET ${assignments.join(", ")}
+      WHERE ${quoteReplayIdentifier(options.pkColumn)} = ?
+    `,
+  ).run(...values);
+  if (duplicateId !== canonicalId) {
+    db.prepare(
+      `
+        DELETE FROM sync_entity_metadata
+        WHERE entity = 'asset_taxonomy_assignment' AND entity_id = ?
+      `,
+    ).run(duplicateId);
+  }
 }
 
 function replayPayloadValueMatchesEntityId(value: unknown, entityId: string): boolean {
@@ -10497,6 +10712,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   ai_thread: "ai_threads",
   ai_message: "ai_messages",
   ai_thread_tag: "ai_thread_tags",
+  asset_taxonomy_assignment: "asset_taxonomy_assignments",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -10659,6 +10875,16 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["created_at", "createdAt"],
   ],
   ai_thread_tag: [["id"], ["thread_id", "threadId"], ["tag"], ["created_at", "createdAt"]],
+  asset_taxonomy_assignment: [
+    ["id"],
+    ["asset_id", "assetId"],
+    ["taxonomy_id", "taxonomyId"],
+    ["category_id", "categoryId"],
+    ["weight"],
+    ["source"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
 };
 
 function normalizeReplayPayload(
@@ -10841,7 +11067,8 @@ function localMarkReplayTableState(
     | "import_runs"
     | "ai_threads"
     | "ai_messages"
-    | "ai_thread_tags",
+    | "ai_thread_tags"
+    | "asset_taxonomy_assignments",
 ): void {
   db.prepare(
     `
