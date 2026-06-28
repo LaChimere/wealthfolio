@@ -6574,6 +6574,10 @@ contract:
   Runtime-backed Connect bootstrap-snapshot now expects missing remote snapshots
   with WAIT_SNAPSHOT reconcile to return the Rust-shaped requested response and
   still attempt the best-effort background start.
+- `pr5-runtime-connect-bootstrap-newer-schema-route-smoke`: verification passed.
+  Runtime-backed Connect bootstrap-snapshot now expects newer remote snapshot
+  schema metadata to surface the Rust-shaped update-required internal error
+  before background-start side effects.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
