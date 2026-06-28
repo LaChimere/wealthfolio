@@ -6789,6 +6789,12 @@ contract:
   stale-category deletion, system-taxonomy guards, table-state updates, and sync
   metadata/applied-event tracking. Broad runtime/connect tests, full
   `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-snapshot-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote snapshot
+  create/update/delete events into holdings_snapshots, clears stale
+  snapshot_positions rows after synced JSON upserts like Rust, and tracks sync
+  metadata/applied events. Broad runtime/connect tests, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
