@@ -2343,7 +2343,6 @@ describe("TS backend runtime composition", () => {
                 units: 2,
                 price: 150,
                 amount: 300,
-                currency: { code: "USD" },
                 provider_type: "SNAPTRADE",
                 symbol: {
                   symbol: "AAPL",

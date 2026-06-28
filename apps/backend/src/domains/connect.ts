@@ -2544,11 +2544,7 @@ function brokerCashActivityCreateInput(
     return null;
   }
 
-  const currency =
-    brokerActivityCurrency(activity) ??
-    optionalString(accountCurrency) ??
-    optionalString(baseCurrency) ??
-    "USD";
+  const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
   const needsReview = brokerActivityNeedsReview(activity);
   return {
     accountId,
@@ -2617,11 +2613,7 @@ function brokerExistingAssetActivityCreateInput(
   if (assetId === null) {
     return null;
   }
-  const currency =
-    brokerActivityCurrency(activity) ??
-    optionalString(accountCurrency) ??
-    optionalString(baseCurrency) ??
-    "USD";
+  const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
   const sourceSystem =
     optionalString(activity.source_system ?? activity.provider_type) ?? "SNAPTRADE";
   const needsReview = brokerActivityNeedsReview(activity);
@@ -2686,11 +2678,7 @@ async function brokerProviderAssetActivityCreateInput(
   if (!providerAsset) {
     return null;
   }
-  const currency =
-    brokerActivityCurrency(activity) ??
-    optionalString(accountCurrency) ??
-    optionalString(baseCurrency) ??
-    "USD";
+  const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
   const sourceSystem =
     optionalString(activity.source_system ?? activity.provider_type) ?? "SNAPTRADE";
   const needsReview = brokerActivityNeedsReview(activity);
@@ -2747,11 +2735,7 @@ function brokerUnresolvedAssetActivityCreateInput(
   if (!instrumentType) {
     return null;
   }
-  const currency =
-    brokerActivityCurrency(activity) ??
-    optionalString(accountCurrency) ??
-    optionalString(baseCurrency) ??
-    "USD";
+  const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
   const sourceSystem =
     optionalString(activity.source_system ?? activity.provider_type) ?? "SNAPTRADE";
   const needsReview = brokerActivityNeedsReview(activity);
@@ -2966,6 +2950,20 @@ function brokerActivitySymbolExchangeMic(symbol: Record<string, unknown>): strin
     return null;
   }
   return optionalNonEmptyString(exchange.mic_code ?? exchange.code)?.toUpperCase() ?? null;
+}
+
+function brokerActivityResolvedCurrency(
+  activity: Record<string, unknown>,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+): string {
+  return (
+    brokerActivityCurrency(activity) ??
+    brokerActivitySymbolCurrency(activity) ??
+    optionalString(accountCurrency) ??
+    optionalString(baseCurrency) ??
+    "USD"
+  );
 }
 
 function optionalNonEmptyString(value: unknown): string | null {

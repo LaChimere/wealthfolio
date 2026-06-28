@@ -4727,7 +4727,6 @@ describe("TS Connect local session service", () => {
               units: 2,
               price: 150,
               amount: 300,
-              currency: { code: "USD" },
               provider_type: "SNAPTRADE",
               symbol: {
                 symbol: "AAPL",
@@ -4747,7 +4746,7 @@ describe("TS Connect local session service", () => {
             name: "Transactions",
             accountType: "SECURITIES",
             group: null,
-            currency: "USD",
+            currency: "CAD",
             isDefault: false,
             isActive: true,
             isArchived: false,

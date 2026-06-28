@@ -6660,6 +6660,10 @@ contract:
   broker-provided exchange MIC/currency metadata into activity-created assets
   through `/api/v1/connect/sync/activities` even when provider search does not
   resolve the symbol.
+- `pr5-connect-broker-symbol-currency-review-fix`: review feedback resolved.
+  Broker activity mapping now falls back from top-level activity currency to
+  broker `symbol.currency.code` before account/base currencies across cash,
+  existing-asset, provider-asset, and broker-described asset create paths.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
