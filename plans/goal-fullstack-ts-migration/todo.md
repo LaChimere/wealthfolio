@@ -6578,6 +6578,10 @@ contract:
   Runtime-backed Connect bootstrap-snapshot now expects newer remote snapshot
   schema metadata to surface the Rust-shaped update-required internal error
   before background-start side effects.
+- `pr5-runtime-connect-trigger-bootstrap-review`: dual-model review passed.
+  Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed trigger-cycle stale_cursor
+  plus bootstrap-snapshot requested/newer-schema runtime route smokes and found
+  no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
