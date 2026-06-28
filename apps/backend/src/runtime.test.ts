@@ -3267,6 +3267,123 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to stale-cursor state", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-stale-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({
+            action: "BOOTSTRAP_SNAPSHOT",
+            latest_snapshot: {
+              snapshot_id: "snapshot-1",
+              schema_version: 1,
+              oplog_seq: 99,
+            },
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          UPDATE sync_engine_state SET
+            lock_version = 4,
+            last_cycle_status = 'state_error',
+            last_error = 'stale error',
+            consecutive_failures = 3,
+            next_retry_at = '2030-01-01T00:00:00Z'
+          WHERE id = 1;
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toEqual({
+        status: "stale_cursor",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 12,
+        needsBootstrap: true,
+        bootstrapSnapshotId: "snapshot-1",
+        bootstrapSnapshotSeq: 99,
+        deadLetterCount: 0,
+      });
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                last_cycle_status: string | null;
+                last_error: string | null;
+                consecutive_failures: number;
+                next_retry_at: string | null;
+              },
+              []
+            >(
+              "SELECT last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+            )
+            .get(),
+        ).toEqual({
+          last_cycle_status: "stale_cursor",
+          last_error: "stale error",
+          consecutive_failures: 3,
+          next_retry_at: null,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect bootstrap-snapshot route for not-ready device", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bootstrap-not-ready-"));
     const deviceSyncRequests: string[] = [];

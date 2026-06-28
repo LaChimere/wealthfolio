@@ -6566,6 +6566,10 @@ contract:
   Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed generate-snapshot
   uploaded/restore-required plus trigger-cycle wait_snapshot runtime route
   smokes and found no actionable issues.
+- `pr5-runtime-connect-trigger-cycle-stale-route-smoke`: verification passed.
+  Runtime-backed Connect trigger-cycle now expects cloud BOOTSTRAP_SNAPSHOT
+  reconcile metadata to return the Rust-shaped stale_cursor payload and clear
+  the pending retry timestamp while preserving stale error metadata.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
