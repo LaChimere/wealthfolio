@@ -6688,6 +6688,10 @@ contract:
   Push retries now include Rust retryable statuses and transport errors,
   key-version mismatches preserve current-key pending rows, replay apply errors
   are skipped so the cursor can advance, and stuck pull pagination fails closed.
+- `pr5-runtime-connect-account-replay-lww-tombstones`: verification passed.
+  Runtime-backed account replay now proves stale updates are skipped, delete
+  tombstones dominate older metadata, later updates cannot resurrect deleted
+  accounts, and skipped events are still recorded as applied.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
