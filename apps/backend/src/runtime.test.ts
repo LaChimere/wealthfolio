@@ -6882,6 +6882,151 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("skips stale AI child replay after parent thread tombstone", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-ai-child-tombstone-"),
+    );
+    const rootKey = Buffer.alloc(32, 26).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "deleted-thread-message",
+          threadId: "deleted-thread",
+          role: "user",
+          contentJson: JSON.stringify({
+            schemaVersion: 1,
+            parts: [{ type: "text", text: "stale" }],
+          }),
+          createdAt: "2026-01-02T00:00:00+00:00",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 38 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 38,
+            next_cursor: 38,
+            has_more: false,
+            events: [
+              {
+                event_id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc",
+                device_id: "other-device",
+                type: "ai_message.create.v1",
+                entity: "ai_message",
+                entity_id: "deleted-thread-message",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 38,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO sync_entity_metadata (
+            entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+          )
+          VALUES (
+            'ai_thread', 'deleted-thread', 'thread-delete-event',
+            '2026-01-03T00:00:00Z', 'delete', 37
+          );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 0,
+        cursor: 38,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM ai_messages WHERE id = 'deleted-thread-message'")
+            .get(),
+        ).toEqual({ count: 0 });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = 'bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc'")
+            .get(),
+        ).toEqual({ count: 1 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to AI thread-tag replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-ai-tag-replay-"),
@@ -6973,6 +7118,8 @@ describe("TS backend runtime composition", () => {
             'tag-thread', 'Tagged Thread', NULL, 0,
             '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
           );
+          INSERT INTO ai_thread_tags (id, thread_id, tag, created_at)
+          VALUES ('local-tag-same-value', 'tag-thread', 'planning', '2026-01-01T00:00:00+00:00');
         `);
       } finally {
         seedDb.close();
@@ -7016,6 +7163,14 @@ describe("TS backend runtime composition", () => {
           thread_id: "tag-thread",
           tag: "planning",
         });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM ai_thread_tags WHERE thread_id = 'tag-thread' AND tag = 'planning'")
+            .get(),
+        ).toEqual({ count: 1 });
         expect(
           verifyDb
             .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(

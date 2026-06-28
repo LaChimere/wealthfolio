@@ -9400,7 +9400,9 @@ function localApplyAiThreadReplayEvent(
             );
   if (shouldApply) {
     if (operation === "delete") {
+      const childIds = localAiThreadChildIds(db, entityId);
       db.prepare("DELETE FROM ai_threads WHERE id = ?").run(entityId);
+      localTombstoneAiThreadChildren(db, childIds, eventId, clientTimestamp, seq);
     } else {
       localUpsertAiThreadReplayPayload(db, entityId, payload);
     }
@@ -9479,6 +9481,19 @@ function localApplyAiMessageReplayEvent(
   if (shouldApply) {
     if (operation === "delete") {
       db.prepare("DELETE FROM ai_messages WHERE id = ?").run(entityId);
+    } else if (
+      localSkipAiChildReplayForDeletedThread(
+        db,
+        "ai_message",
+        "ai_messages",
+        entityId,
+        payload,
+        eventId,
+        clientTimestamp,
+        seq,
+      )
+    ) {
+      return false;
     } else {
       localUpsertAiMessageReplayPayload(db, entityId, payload);
     }
@@ -9557,6 +9572,19 @@ function localApplyAiThreadTagReplayEvent(
   if (shouldApply) {
     if (operation === "delete") {
       db.prepare("DELETE FROM ai_thread_tags WHERE id = ?").run(entityId);
+    } else if (
+      localSkipAiChildReplayForDeletedThread(
+        db,
+        "ai_thread_tag",
+        "ai_thread_tags",
+        entityId,
+        payload,
+        eventId,
+        clientTimestamp,
+        seq,
+      )
+    ) {
+      return false;
     } else {
       localUpsertAiThreadTagReplayPayload(db, entityId, payload);
     }
@@ -10130,7 +10158,140 @@ function localUpsertAiThreadTagReplayPayload(
   rawPayload: Record<string, unknown>,
 ): void {
   const payload = normalizeReplayPayload("ai_thread_tag", rawPayload);
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const threadId = optionalString(payload.thread_id);
+  const tag = optionalString(payload.tag);
+  if (threadId !== null && tag !== null) {
+    const duplicate = db
+      .query<{ id: string }, [string, string, string]>(
+        `
+          SELECT id
+          FROM ai_thread_tags
+          WHERE thread_id = ? AND tag = ? AND id <> ?
+        `,
+      )
+      .get(threadId, tag, entityId);
+    if (duplicate) {
+      const assignments: string[] = ["id = ?"];
+      const values: Array<string | number | null> = [entityId];
+      for (const [column, value] of Object.entries(payload)) {
+        if (column === "id") {
+          continue;
+        }
+        assignments.push(`${quoteReplayIdentifier(column)} = ?`);
+        values.push(replayValueToSqlite(value));
+      }
+      values.push(duplicate.id);
+      db.prepare(
+        `
+          UPDATE ai_thread_tags
+          SET ${assignments.join(", ")}
+          WHERE id = ?
+        `,
+      ).run(...values);
+      db.prepare(
+        "DELETE FROM sync_entity_metadata WHERE entity = 'ai_thread_tag' AND entity_id = ?",
+      ).run(duplicate.id);
+      return;
+    }
+  }
   localUpsertReplayPayloadFields(db, "ai_thread_tags", "id", entityId, payload);
+}
+
+function localAiThreadChildIds(
+  db: Database,
+  threadId: string,
+): { messageIds: string[]; tagIds: string[] } {
+  return {
+    messageIds: db
+      .query<{ id: string }, [string]>("SELECT id FROM ai_messages WHERE thread_id = ?")
+      .all(threadId)
+      .map((row) => row.id),
+    tagIds: db
+      .query<{ id: string }, [string]>("SELECT id FROM ai_thread_tags WHERE thread_id = ?")
+      .all(threadId)
+      .map((row) => row.id),
+  };
+}
+
+function localTombstoneAiThreadChildren(
+  db: Database,
+  childIds: { messageIds: string[]; tagIds: string[] },
+  eventId: string,
+  clientTimestamp: string,
+  seq: number,
+): void {
+  for (const messageId of childIds.messageIds) {
+    localUpsertSyncEntityMetadata(
+      db,
+      "ai_message",
+      messageId,
+      eventId,
+      clientTimestamp,
+      "delete",
+      seq,
+    );
+  }
+  for (const tagId of childIds.tagIds) {
+    localUpsertSyncEntityMetadata(
+      db,
+      "ai_thread_tag",
+      tagId,
+      eventId,
+      clientTimestamp,
+      "delete",
+      seq,
+    );
+  }
+  if (childIds.messageIds.length > 0) {
+    localMarkReplayTableState(db, "ai_messages");
+  }
+  if (childIds.tagIds.length > 0) {
+    localMarkReplayTableState(db, "ai_thread_tags");
+  }
+}
+
+function localSkipAiChildReplayForDeletedThread(
+  db: Database,
+  entity: "ai_message" | "ai_thread_tag",
+  tableName: "ai_messages" | "ai_thread_tags",
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+  eventId: string,
+  clientTimestamp: string,
+  seq: number,
+): boolean {
+  const payload = normalizeReplayPayload(entity, rawPayload);
+  const threadId = optionalString(payload.thread_id);
+  if (threadId === null || !localAiThreadIsDeleted(db, threadId)) {
+    return false;
+  }
+  db.prepare(`DELETE FROM ${quoteReplayIdentifier(tableName)} WHERE id = ?`).run(entityId);
+  localUpsertSyncEntityMetadata(db, entity, entityId, eventId, clientTimestamp, "delete", seq);
+  localMarkReplayTableState(db, tableName);
+  localInsertSyncAppliedEvent(db, eventId, seq, entity, entityId);
+  return true;
+}
+
+function localAiThreadIsDeleted(db: Database, threadId: string): boolean {
+  return (
+    db
+      .query<{ last_op: string | null }, [string]>(
+        `
+          SELECT last_op
+          FROM sync_entity_metadata
+          WHERE entity = 'ai_thread' AND entity_id = ?
+        `,
+      )
+      .get(threadId)?.last_op === "delete"
+  );
 }
 
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {

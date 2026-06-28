@@ -6761,6 +6761,11 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote ai_thread_tag
   replay events into ai_thread_tags with parent-thread FK handling and sync
   metadata/applied-event tracking.
+- `pr5-runtime-connect-ai-replay-review-fixes`: review feedback resolved. Thread
+  deletes now tombstone existing AI child metadata, stale message/tag replay
+  after a deleted parent thread is skipped and marked applied, and duplicate
+  thread-tag creates converge to the remote id instead of dead-lettering the
+  unique thread/tag conflict.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
