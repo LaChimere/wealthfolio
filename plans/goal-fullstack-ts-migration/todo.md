@@ -6610,6 +6610,10 @@ contract:
   Runtime-backed Connect generate-snapshot now expects trusted devices with no
   covering remote snapshot to reach the explicit local snapshot export feature
   gate after device, cursor, and latest-snapshot preflights.
+- `pr5-runtime-connect-pull-bootstrap-generate-review`: dual-model review
+  passed. Claude Opus 4.8 xhigh and GPT-5.5 xhigh reviewed trigger-cycle
+  PULL_TAIL, bootstrap-snapshot no-remote, and generate-snapshot export-gate
+  runtime route smokes and found no actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
