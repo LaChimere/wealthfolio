@@ -6243,6 +6243,144 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("keeps Connect trigger-cycle cursor pinned on missing replay dependencies", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-replay-missing-dependency-"),
+    );
+    const rootKey = Buffer.alloc(32, 22).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "missing-dependency-link",
+          accountId: "missing-dependency-account",
+          importType: "ACTIVITY",
+          templateId: "missing-template",
+          createdAt: "2026-01-01T00:00:00",
+          updatedAt: "2026-01-02T00:00:00",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 34 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 34,
+            next_cursor: 34,
+            has_more: false,
+            events: [
+              {
+                event_id: "79797979-7979-4797-8797-797979797979",
+                device_id: "other-device",
+                type: "activity_import_profile.create.v1",
+                entity: "activity_import_profile",
+                entity_id: "missing-dependency-link",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 34,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('missing-dependency-account', 'Missing Dependency Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS');
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "pull_error",
+        pulledCount: 0,
+        cursor: 12,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get(),
+        ).toEqual({ cursor: 12 });
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = '79797979-7979-4797-8797-797979797979'")
+            .get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to import-run replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-import-run-replay-"),

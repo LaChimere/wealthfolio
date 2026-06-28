@@ -6744,6 +6744,11 @@ contract:
   Runtime-backed trigger-cycle now decrypts and applies remote import_run replay
   events into import_runs with SQLite-backed run payload fields and sync
   metadata/applied-event tracking.
+- `pr5-runtime-connect-import-replay-missing-dependency-review-fix`: review
+  feedback resolved. Fallback replay now treats foreign-key apply failures as
+  transient missing dependencies, returns pull_error, preserves the local
+  cursor, and leaves the event unapplied for retry instead of dead-lettering
+  child rows.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

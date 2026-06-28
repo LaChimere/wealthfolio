@@ -8229,13 +8229,35 @@ async function localApplyReplayEventsIndividually(
       return applied;
     }
     if (completedThisPass === 0) {
+      localThrowIfTransientReplayDependencyFailure(failed, lastErrors);
       localWarnDeadLetteredReplayEvents(failed, lastErrors);
       return applied;
     }
     pending = failed;
   }
+  localThrowIfTransientReplayDependencyFailure(pending, lastErrors);
   localWarnDeadLetteredReplayEvents(pending, lastErrors);
   return applied;
+}
+
+function localThrowIfTransientReplayDependencyFailure(
+  replayEvents: Array<{
+    event: Record<string, unknown>;
+    replayEntity: LocalReplayEntity;
+  }>,
+  lastErrors: Map<string, string>,
+): void {
+  for (const replayEvent of replayEvents) {
+    const eventId = requiredLocalPullEventString(replayEvent.event, "event_id", "eventId");
+    const message = lastErrors.get(eventId);
+    if (message && localReplayApplyErrorIsTransientDependency(message)) {
+      throw new LocalReplayApplyError(message);
+    }
+  }
+}
+
+function localReplayApplyErrorIsTransientDependency(message: string): boolean {
+  return /foreign key/i.test(message);
 }
 
 function localWarnDeadLetteredReplayEvents(
