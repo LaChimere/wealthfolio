@@ -6731,6 +6731,10 @@ contract:
   columns on partial update payloads by updating only present fields for
   existing rows, matching Rust generic replay semantics. Focused/full runtime
   and Connect tests passed.
+- `pr5-runtime-connect-import-template-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote import_template
+  replay events into import_templates with camelCase payload aliases and sync
+  metadata/applied-event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4077,7 +4077,8 @@ type LocalReplayEntity =
   | "custom_provider"
   | "goal"
   | "goal_plan"
-  | "goals_allocation";
+  | "goals_allocation"
+  | "import_template";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8092,6 +8093,16 @@ function localCanReplayGoalsAllocationEvent(event: Record<string, unknown>): boo
   );
 }
 
+function localCanReplayImportTemplateEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "import_template" &&
+    eventType !== null &&
+    /^import_template\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8119,6 +8130,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayGoalsAllocationEvent(event)) {
     return "goals_allocation";
+  }
+  if (localCanReplayImportTemplateEvent(event)) {
+    return "import_template";
   }
   return null;
 }
@@ -8294,6 +8308,8 @@ function localApplyReplayEventPrepared(
       return localApplyGoalPlanReplayEvent(db, replayEvent.event, payloads);
     case "goals_allocation":
       return localApplyGoalsAllocationReplayEvent(db, replayEvent.event, payloads);
+    case "import_template":
+      return localApplyImportTemplateReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -8991,6 +9007,84 @@ function localApplyGoalsAllocationReplayEvent(
   return shouldApply;
 }
 
+function localApplyImportTemplateReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localImportTemplateSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'import_template' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM import_templates WHERE id = ?").run(entityId);
+    } else {
+      localUpsertImportTemplateReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "import_template",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "import_templates");
+    localInsertSyncAppliedEvent(db, eventId, seq, "import_template", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "import_template", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9071,6 +9165,16 @@ function localGoalsAllocationSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^goals_allocation\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localImportTemplateSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^import_template\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9432,6 +9536,16 @@ function localUpsertGoalsAllocationReplayPayload(
   localUpsertReplayPayloadFields(db, "goals_allocation", "id", entityId, payload);
 }
 
+function localUpsertImportTemplateReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("import_template", rawPayload);
+  validateImportTemplateReplayPayloadFields(payload);
+  localUpsertReplayPayloadFields(db, "import_templates", "id", entityId, payload);
+}
+
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
   validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
@@ -9459,6 +9573,10 @@ function validateGoalPlanReplayPayloadFields(payload: Record<string, unknown>): 
 
 function validateGoalsAllocationReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "share_percent", "goals_allocation.share_percent");
+}
+
+function validateImportTemplateReplayPayloadFields(payload: Record<string, unknown>): void {
+  validateReplayIntegerIfPresent(payload, "config_version", "import_template.config_version");
 }
 
 function validateReplayFiniteNumberIfPresent(
@@ -9609,6 +9727,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   goal: "goals",
   goal_plan: "goal_plans",
   goals_allocation: "goals_allocation",
+  import_template: "import_templates",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -9713,6 +9832,17 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["account_id", "accountId"],
     ["share_percent", "sharePercent", "percent_allocation", "percentAllocation"],
     ["tax_bucket", "taxBucket"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+  import_template: [
+    ["id"],
+    ["name"],
+    ["scope"],
+    ["kind"],
+    ["source_system", "sourceSystem"],
+    ["config_version", "configVersion"],
+    ["config"],
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
@@ -9879,7 +10009,8 @@ function localMarkReplayTableState(
     | "market_data_custom_providers"
     | "goals"
     | "goal_plans"
-    | "goals_allocation",
+    | "goals_allocation"
+    | "import_templates",
 ): void {
   db.prepare(
     `

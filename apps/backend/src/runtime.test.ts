@@ -5905,6 +5905,172 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to import-template replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-import-template-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 19).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const configJson = JSON.stringify({ fieldMappings: { date: "Date" } });
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "template-replay",
+          name: "Remote Template",
+          scope: "USER",
+          kind: "CSV_ACTIVITY",
+          sourceSystem: "",
+          configVersion: 2,
+          config: configJson,
+          createdAt: "2026-01-01T00:00:00",
+          updatedAt: "2026-01-02T00:00:00",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 31 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 31,
+            next_cursor: 31,
+            has_more: false,
+            events: [
+              {
+                event_id: "46464646-4646-4464-8464-464646464646",
+                device_id: "other-device",
+                type: "import_template.create.v1",
+                entity: "import_template",
+                entity_id: "template-replay",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 31,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 31,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                name: string;
+                scope: string;
+                kind: string;
+                source_system: string;
+                config_version: number;
+                config: string;
+              },
+              []
+            >(
+              `
+                SELECT name, scope, kind, source_system, config_version, config
+                FROM import_templates
+                WHERE id = 'template-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          name: "Remote Template",
+          scope: "USER",
+          kind: "CSV_ACTIVITY",
+          source_system: "",
+          config_version: 2,
+          config: configJson,
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'import_template'
+                  AND entity_id = 'template-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "46464646-4646-4464-8464-464646464646",
+          last_op: "create",
+          last_seq: 31,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect account replay LWW and tombstones", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-account-lww-"));
     const rootKey = Buffer.alloc(32, 11).toString("base64");
