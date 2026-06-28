@@ -6590,6 +6590,10 @@ contract:
   passed. Runtime-backed Connect bootstrap-overwrite-check now expects local
   syncable data to surface as Rust-shaped overwrite risk before destructive
   bootstrap flows.
+- `pr5-runtime-connect-reconcile-not-ready-route-smoke`: verification passed.
+  Runtime-backed Connect reconcile-ready-state now expects non-READY local sync
+  state to return the Rust-shaped skipped_not_ready reconcile response through
+  the HTTP seam.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
