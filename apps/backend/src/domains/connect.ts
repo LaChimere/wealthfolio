@@ -7832,40 +7832,7 @@ async function localPullRemoteSyncEvents(
         `Cursor ${cursor} is older than pull GC watermark ${response.gcWatermark}`,
       );
     }
-    for (const event of response.events) {
-      if (localRemoteEventIsIgnorable(event, identity.deviceId)) {
-        continue;
-      }
-      const replayEntity = localReplayEntity(event);
-      if (replayEntity === null) {
-        throw deviceSyncDisabled();
-      }
-      let applied = false;
-      try {
-        switch (replayEntity) {
-          case "account":
-            applied = await localApplyAccountReplayEvent(db, event, identity);
-            break;
-          case "platform":
-            applied = await localApplyPlatformReplayEvent(db, event, identity);
-            break;
-          case "portfolio":
-            applied = await localApplyPortfolioReplayEvent(db, event, identity);
-            break;
-        }
-      } catch (error) {
-        if (error instanceof LocalReplayApplyError) {
-          console.warn(
-            `[Connect] Dead-lettering replay event due to apply error: ${error.message}`,
-          );
-          continue;
-        }
-        throw error;
-      }
-      if (applied) {
-        pulledCount += 1;
-      }
-    }
+    pulledCount += await localApplyReplayEventsPage(db, response.events, identity);
     if (response.nextCursor < cursor || (response.hasMore && response.nextCursor <= cursor)) {
       throw new ConnectServiceError(
         "internal_error",
@@ -8056,9 +8023,19 @@ function localCanReplayPortfolioEvent(event: Record<string, unknown>): boolean {
   );
 }
 
+function localCanReplayPortfolioAccountEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "portfolio_account" &&
+    eventType !== null &&
+    /^portfolio_account\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(
   event: Record<string, unknown>,
-): "account" | "platform" | "portfolio" | null {
+): "account" | "platform" | "portfolio" | "portfolio_account" | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
   }
@@ -8068,14 +8045,136 @@ function localReplayEntity(
   if (localCanReplayPortfolioEvent(event)) {
     return "portfolio";
   }
+  if (localCanReplayPortfolioAccountEvent(event)) {
+    return "portfolio_account";
+  }
   return null;
 }
 
-async function localApplyAccountReplayEvent(
+async function localApplyReplayEventsPage(
   db: Database,
-  event: Record<string, unknown>,
+  events: Array<Record<string, unknown>>,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): Promise<number> {
+  const replayEvents: Array<{
+    event: Record<string, unknown>;
+    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+  }> = [];
+  for (const event of events) {
+    if (localRemoteEventIsIgnorable(event, identity.deviceId)) {
+      continue;
+    }
+    const replayEntity = localReplayEntity(event);
+    if (replayEntity === null) {
+      throw deviceSyncDisabled();
+    }
+    replayEvents.push({ event, replayEntity });
+  }
+  if (replayEvents.length === 0) {
+    return 0;
+  }
+
+  try {
+    return await localApplyReplayEventsBatch(db, replayEvents, identity);
+  } catch (error) {
+    let applied = 0;
+    for (const replayEvent of replayEvents) {
+      try {
+        if (await localApplyReplayEvent(db, replayEvent, identity)) {
+          applied += 1;
+        }
+      } catch (eventError) {
+        if (eventError instanceof LocalReplayApplyError) {
+          console.warn(
+            `[Connect] Dead-lettering replay event due to apply error: ${eventError.message}`,
+          );
+          continue;
+        }
+        throw eventError;
+      }
+    }
+    return applied;
+  }
+}
+
+async function localApplyReplayEventsBatch(
+  db: Database,
+  replayEvents: Array<{
+    event: Record<string, unknown>;
+    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+  }>,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): Promise<number> {
+  const payloads = new Map<string, Record<string, unknown>>();
+  for (const { event } of replayEvents) {
+    payloads.set(
+      requiredLocalPullEventString(event, "event_id", "eventId"),
+      await localDecryptReplayPayload(event, identity),
+    );
+  }
+  const applyTransaction = db.transaction(() => {
+    db.prepare("PRAGMA defer_foreign_keys = ON").run();
+    let applied = 0;
+    for (const replayEvent of replayEvents) {
+      if (localApplyReplayEventPrepared(db, replayEvent, payloads)) {
+        applied += 1;
+      }
+    }
+    return applied;
+  });
+  try {
+    return applyTransaction();
+  } catch (error) {
+    throw new LocalReplayApplyError(errorMessage(error));
+  }
+}
+
+async function localApplyReplayEvent(
+  db: Database,
+  replayEvent: {
+    event: Record<string, unknown>;
+    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+  },
   identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
 ): Promise<boolean> {
+  const eventId = requiredLocalPullEventString(replayEvent.event, "event_id", "eventId");
+  const payloads = new Map<string, Record<string, unknown>>();
+  payloads.set(eventId, await localDecryptReplayPayload(replayEvent.event, identity));
+  const applyTransaction = db.transaction(() =>
+    localApplyReplayEventPrepared(db, replayEvent, payloads),
+  );
+  try {
+    return applyTransaction();
+  } catch (error) {
+    throw new LocalReplayApplyError(errorMessage(error));
+  }
+}
+
+function localApplyReplayEventPrepared(
+  db: Database,
+  replayEvent: {
+    event: Record<string, unknown>;
+    replayEntity: "account" | "platform" | "portfolio" | "portfolio_account";
+  },
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  switch (replayEvent.replayEntity) {
+    case "account":
+      return localApplyAccountReplayEvent(db, replayEvent.event, payloads);
+    case "platform":
+      return localApplyPlatformReplayEvent(db, replayEvent.event, payloads);
+    case "portfolio":
+      return localApplyPortfolioReplayEvent(db, replayEvent.event, payloads);
+    case "portfolio_account":
+      return localApplyPortfolioAccountReplayEvent(db, replayEvent.event, payloads);
+  }
+}
+
+function localApplyAccountReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
   const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
   const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
   const eventType = requiredLocalPullEventString(event, "type");
@@ -8086,7 +8185,10 @@ async function localApplyAccountReplayEvent(
     "clientTimestamp",
   );
   const seq = requiredInteger(event.seq, "pull event");
-  const payload = await localDecryptReplayPayload(event, identity);
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
   if (
     db
       .query<
@@ -8124,40 +8226,33 @@ async function localApplyAccountReplayEvent(
               eventId,
             );
   if (shouldApply) {
-    const applyTransaction = db.transaction(() => {
-      if (operation === "delete") {
-        db.prepare("DELETE FROM accounts WHERE id = ?").run(entityId);
-      } else {
-        localUpsertAccountReplayPayload(db, entityId, payload, clientTimestamp);
-      }
-      localUpsertSyncEntityMetadata(
-        db,
-        "account",
-        entityId,
-        eventId,
-        clientTimestamp,
-        operation,
-        seq,
-      );
-      localMarkReplayTableState(db, "accounts");
-      localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
-    });
-    try {
-      applyTransaction();
-    } catch (error) {
-      throw new LocalReplayApplyError(errorMessage(error));
+    if (operation === "delete") {
+      db.prepare("DELETE FROM accounts WHERE id = ?").run(entityId);
+    } else {
+      localUpsertAccountReplayPayload(db, entityId, payload, clientTimestamp);
     }
+    localUpsertSyncEntityMetadata(
+      db,
+      "account",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "accounts");
+    localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
   } else {
     localInsertSyncAppliedEvent(db, eventId, seq, "account", entityId);
   }
   return shouldApply;
 }
 
-async function localApplyPlatformReplayEvent(
+function localApplyPlatformReplayEvent(
   db: Database,
   event: Record<string, unknown>,
-  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
-): Promise<boolean> {
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
   const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
   const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
   const eventType = requiredLocalPullEventString(event, "type");
@@ -8168,7 +8263,10 @@ async function localApplyPlatformReplayEvent(
     "clientTimestamp",
   );
   const seq = requiredInteger(event.seq, "pull event");
-  const payload = await localDecryptReplayPayload(event, identity);
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
   if (
     db
       .query<
@@ -8206,40 +8304,33 @@ async function localApplyPlatformReplayEvent(
               eventId,
             );
   if (shouldApply) {
-    const applyTransaction = db.transaction(() => {
-      if (operation === "delete") {
-        db.prepare("DELETE FROM platforms WHERE id = ?").run(entityId);
-      } else {
-        localUpsertPlatformReplayPayload(db, entityId, payload);
-      }
-      localUpsertSyncEntityMetadata(
-        db,
-        "platform",
-        entityId,
-        eventId,
-        clientTimestamp,
-        operation,
-        seq,
-      );
-      localMarkReplayTableState(db, "platforms");
-      localInsertSyncAppliedEvent(db, eventId, seq, "platform", entityId);
-    });
-    try {
-      applyTransaction();
-    } catch (error) {
-      throw new LocalReplayApplyError(errorMessage(error));
+    if (operation === "delete") {
+      db.prepare("DELETE FROM platforms WHERE id = ?").run(entityId);
+    } else {
+      localUpsertPlatformReplayPayload(db, entityId, payload);
     }
+    localUpsertSyncEntityMetadata(
+      db,
+      "platform",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "platforms");
+    localInsertSyncAppliedEvent(db, eventId, seq, "platform", entityId);
   } else {
     localInsertSyncAppliedEvent(db, eventId, seq, "platform", entityId);
   }
   return shouldApply;
 }
 
-async function localApplyPortfolioReplayEvent(
+function localApplyPortfolioReplayEvent(
   db: Database,
   event: Record<string, unknown>,
-  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
-): Promise<boolean> {
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
   const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
   const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
   const eventType = requiredLocalPullEventString(event, "type");
@@ -8250,7 +8341,10 @@ async function localApplyPortfolioReplayEvent(
     "clientTimestamp",
   );
   const seq = requiredInteger(event.seq, "pull event");
-  const payload = await localDecryptReplayPayload(event, identity);
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
   if (
     db
       .query<
@@ -8288,31 +8382,102 @@ async function localApplyPortfolioReplayEvent(
               eventId,
             );
   if (shouldApply) {
-    const applyTransaction = db.transaction(() => {
-      if (operation === "delete") {
-        db.prepare("DELETE FROM portfolios WHERE id = ?").run(entityId);
-      } else {
-        localUpsertPortfolioReplayPayload(db, entityId, payload, clientTimestamp);
-      }
-      localUpsertSyncEntityMetadata(
-        db,
-        "portfolio",
-        entityId,
-        eventId,
-        clientTimestamp,
-        operation,
-        seq,
-      );
-      localMarkReplayTableState(db, "portfolios");
-      localInsertSyncAppliedEvent(db, eventId, seq, "portfolio", entityId);
-    });
-    try {
-      applyTransaction();
-    } catch (error) {
-      throw new LocalReplayApplyError(errorMessage(error));
+    if (operation === "delete") {
+      db.prepare("DELETE FROM portfolios WHERE id = ?").run(entityId);
+    } else {
+      localUpsertPortfolioReplayPayload(db, entityId, payload, clientTimestamp);
     }
+    localUpsertSyncEntityMetadata(
+      db,
+      "portfolio",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "portfolios");
+    localInsertSyncAppliedEvent(db, eventId, seq, "portfolio", entityId);
   } else {
     localInsertSyncAppliedEvent(db, eventId, seq, "portfolio", entityId);
+  }
+  return shouldApply;
+}
+
+function localApplyPortfolioAccountReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localPortfolioAccountSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'portfolio_account' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM portfolio_accounts WHERE id = ?").run(entityId);
+    } else {
+      localUpsertPortfolioAccountReplayPayload(db, entityId, payload, clientTimestamp);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "portfolio_account",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "portfolio_accounts");
+    localInsertSyncAppliedEvent(db, eventId, seq, "portfolio_account", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "portfolio_account", entityId);
   }
   return shouldApply;
 }
@@ -8339,6 +8504,16 @@ function localPortfolioSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^portfolio\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localPortfolioAccountSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^portfolio_account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -8536,6 +8711,46 @@ function localUpsertPortfolioReplayPayload(
   );
 }
 
+function localUpsertPortfolioAccountReplayPayload(
+  db: Database,
+  entityId: string,
+  payload: Record<string, unknown>,
+  fallbackTimestamp: string,
+): void {
+  const id = optionalString(payload.id) ?? entityId;
+  if (id !== entityId) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Sync payload PK 'id' does not match entity_id '${entityId}'`,
+      500,
+    );
+  }
+  const portfolioId = requiredReplayString(
+    payload.portfolio_id ?? payload.portfolioId,
+    "portfolio_account.portfolio_id",
+  );
+  const accountId = requiredReplayString(
+    payload.account_id ?? payload.accountId,
+    "portfolio_account.account_id",
+  );
+  const sortOrder = requiredInteger(
+    payload.sort_order ?? payload.sortOrder ?? 0,
+    "portfolio_account.sort_order",
+  );
+  const createdAt = optionalString(payload.created_at ?? payload.createdAt) ?? fallbackTimestamp;
+  db.prepare(
+    `
+      INSERT INTO portfolio_accounts (id, portfolio_id, account_id, sort_order, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        portfolio_id = excluded.portfolio_id,
+        account_id = excluded.account_id,
+        sort_order = excluded.sort_order,
+        created_at = excluded.created_at
+    `,
+  ).run(entityId, portfolioId, accountId, sortOrder, createdAt);
+}
+
 function requiredReplayString(value: unknown, context: string): string {
   const parsed = optionalString(value);
   if (parsed === null) {
@@ -8625,7 +8840,7 @@ function localInsertSyncAppliedEvent(
 
 function localMarkReplayTableState(
   db: Database,
-  tableName: "accounts" | "platforms" | "portfolios",
+  tableName: "accounts" | "platforms" | "portfolios" | "portfolio_accounts",
 ): void {
   db.prepare(
     `

@@ -4691,6 +4691,18 @@ describe("TS backend runtime composition", () => {
         }),
       )
     ).value;
+    const encryptedMembershipPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "pfm_portfolio-replay_replay-account",
+          portfolioId: "portfolio-replay",
+          accountId: "replay-account",
+          sortOrder: 0,
+          createdAt: "2026-01-01T00:00:00Z",
+        }),
+      )
+    ).value;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -4703,15 +4715,29 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 19 });
+          return Response.json({ action: "PULL_TAIL", cursor: 20 });
         }
         if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
           return Response.json({
             from: 12,
-            to: 19,
-            next_cursor: 19,
+            to: 20,
+            next_cursor: 20,
             has_more: false,
             events: [
+              {
+                event_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                device_id: "other-device",
+                type: "portfolio_account.create.v1",
+                entity: "portfolio_account",
+                entity_id: "pfm_portfolio-replay_replay-account",
+                client_timestamp: "2026-01-01T00:00:00Z",
+                payload: encryptedMembershipPayload,
+                payload_key_version: 5,
+                seq: 18,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-01T00:00:01Z",
+              },
               {
                 event_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
                 device_id: "other-device",
@@ -4757,7 +4783,14 @@ describe("TS backend runtime composition", () => {
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
-        seedDb.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('replay-account', 'Replay Account', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS');
+        `);
       } finally {
         seedDb.close();
       }
@@ -4774,8 +4807,8 @@ describe("TS backend runtime composition", () => {
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
-        pulledCount: 1,
-        cursor: 19,
+        pulledCount: 2,
+        cursor: 20,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
@@ -4821,6 +4854,21 @@ describe("TS backend runtime composition", () => {
           last_event_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           last_op: "create",
           last_seq: 19,
+        });
+        expect(
+          verifyDb
+            .query<{ portfolio_id: string; account_id: string; sort_order: number }, []>(
+              `
+                SELECT portfolio_id, account_id, sort_order
+                FROM portfolio_accounts
+                WHERE id = 'pfm_portfolio-replay_replay-account'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          portfolio_id: "portfolio-replay",
+          account_id: "replay-account",
+          sort_order: 0,
         });
       } finally {
         verifyDb.close();

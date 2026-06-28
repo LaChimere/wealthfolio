@@ -5202,8 +5202,9 @@ updated_at: "2026-06-28T16:20:39+09:00"
   now decrypt and apply remote platform create/update/delete events, persist
   platform sync metadata, and keep unsupported replay entities gated.
 - Turn 928: Ported bounded portfolio replay through trigger-cycle. Pull-tail can
-  now decrypt and apply remote portfolio create/update/delete events, persist
-  portfolio sync metadata, and keep portfolio-account replay as a follow-up.
+  now decrypt and apply remote portfolio plus portfolio-account
+  create/update/delete events, persist sync metadata, and keep broader replay
+  entities gated.
 
 ## Deferred items
 

@@ -6697,9 +6697,9 @@ contract:
   events, updates platform sync metadata/applied-event tracking, and keeps
   unsupported replay entities gated.
 - `pr5-runtime-connect-portfolio-replay-route-smoke`: verification passed.
-  Runtime-backed trigger-cycle now decrypts and applies remote portfolio replay
-  events, updates portfolio sync metadata/applied-event tracking, and keeps
-  portfolio-account replay as a follow-up.
+  Runtime-backed trigger-cycle now decrypts and applies remote portfolio and
+  portfolio-account replay events, updates sync metadata/applied-event tracking,
+  and keeps broader replay entities gated.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
