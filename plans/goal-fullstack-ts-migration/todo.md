@@ -6536,6 +6536,10 @@ contract:
   Runtime-backed Connect bootstrap-snapshot now expects
   `/api/v1/connect/device/bootstrap-snapshot` to map non-READY local sync state
   to the Rust-shaped skipped_not_ready response without snapshot polling.
+- `pr5-runtime-connect-generate-untrusted-route-smoke`: verification passed.
+  Runtime-backed Connect generate-snapshot now expects
+  `/api/v1/connect/device/generate-snapshot` to map untrusted cloud device state
+  to the Rust-shaped skipped response before cursor or snapshot polling.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -3217,6 +3217,70 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect generate-snapshot route for untrusted device", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-untrusted-"));
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "untrusted",
+          trusted_key_version: 2,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+        }),
+      );
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const generateResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/generate-snapshot`,
+        { method: "POST" },
+      );
+      expect(generateResponse.status).toBe(200);
+      await expect(generateResponse.json()).resolves.toEqual({
+        status: "skipped",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Current device is not trusted",
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];
