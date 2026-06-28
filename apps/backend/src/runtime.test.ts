@@ -6071,6 +6071,204 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect trigger-cycle route to activity replay", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-activity-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 33).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const encryptedPayload = (
+      await crypto.encrypt(
+        dek,
+        JSON.stringify({
+          id: "activity-replay",
+          account_id: "activity-account",
+          asset_id: "activity-asset",
+          activity_type: "BUY",
+          activity_type_override: null,
+          source_type: null,
+          subtype: null,
+          status: "POSTED",
+          activity_date: "2026-01-02T00:00:00",
+          settlement_date: null,
+          quantity: "3",
+          unit_price: "12.50",
+          amount: "37.50",
+          fee: "1.00",
+          currency: "USD",
+          fx_rate: null,
+          notes: "remote activity",
+          metadata: JSON.stringify({ broker: "remote" }),
+          source_system: "broker",
+          source_record_id: "remote-activity-1",
+          source_group_id: null,
+          idempotency_key: "broker:remote-activity-1",
+          import_run_id: null,
+          is_user_modified: 1,
+          needs_review: 0,
+          created_at: "2026-01-02T00:00:00+00:00",
+          updated_at: "2026-01-02T00:00:00+00:00",
+        }),
+      )
+    ).value;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 32 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 32,
+            next_cursor: 32,
+            has_more: false,
+            events: [
+              {
+                event_id: "53535353-5353-4535-8535-535353535353",
+                device_id: "other-device",
+                type: "activity.create.v1",
+                entity: "activity",
+                entity_id: "activity-replay",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 5,
+                seq: 32,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('activity-account', 'Activity Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS');
+        `);
+        seedRuntimeAsset(seedDb, "activity-asset");
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        pulledCount: 1,
+        cursor: 32,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                account_id: string;
+                asset_id: string | null;
+                activity_type: string;
+                quantity: string | null;
+                unit_price: string | null;
+                amount: string | null;
+                fee: string | null;
+                source_record_id: string | null;
+                is_user_modified: number;
+              },
+              []
+            >(
+              `
+                SELECT account_id, asset_id, activity_type, quantity, unit_price,
+                  amount, fee, source_record_id, is_user_modified
+                FROM activities
+                WHERE id = 'activity-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          account_id: "activity-account",
+          asset_id: "activity-asset",
+          activity_type: "BUY",
+          quantity: "3",
+          unit_price: "12.50",
+          amount: "37.50",
+          fee: "1.00",
+          source_record_id: "remote-activity-1",
+          is_user_modified: 1,
+        });
+        expect(
+          verifyDb
+            .query<{ last_event_id: string; last_op: string; last_seq: number }, []>(
+              `
+                SELECT last_event_id, last_op, last_seq
+                FROM sync_entity_metadata
+                WHERE entity = 'activity'
+                  AND entity_id = 'activity-replay'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          last_event_id: "53535353-5353-4535-8535-535353535353",
+          last_op: "create",
+          last_seq: 32,
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to activity-import-profile replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-import-profile-replay-"),
