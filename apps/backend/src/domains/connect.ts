@@ -4079,7 +4079,8 @@ type LocalReplayEntity =
   | "goal_plan"
   | "goals_allocation"
   | "import_template"
-  | "activity_import_profile";
+  | "activity_import_profile"
+  | "import_run";
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -8114,6 +8115,16 @@ function localCanReplayActivityImportProfileEvent(event: Record<string, unknown>
   );
 }
 
+function localCanReplayImportRunEvent(event: Record<string, unknown>): boolean {
+  const entity = optionalString(event.entity);
+  const eventType = optionalString(event.type);
+  return (
+    entity === "import_run" &&
+    eventType !== null &&
+    /^import_run\.(create|update|delete)\.v1$/.test(eventType)
+  );
+}
+
 function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | null {
   if (localCanReplayAccountEvent(event)) {
     return "account";
@@ -8147,6 +8158,9 @@ function localReplayEntity(event: Record<string, unknown>): LocalReplayEntity | 
   }
   if (localCanReplayActivityImportProfileEvent(event)) {
     return "activity_import_profile";
+  }
+  if (localCanReplayImportRunEvent(event)) {
+    return "import_run";
   }
   return null;
 }
@@ -8326,6 +8340,8 @@ function localApplyReplayEventPrepared(
       return localApplyImportTemplateReplayEvent(db, replayEvent.event, payloads);
     case "activity_import_profile":
       return localApplyActivityImportProfileReplayEvent(db, replayEvent.event, payloads);
+    case "import_run":
+      return localApplyImportRunReplayEvent(db, replayEvent.event, payloads);
   }
 }
 
@@ -9179,6 +9195,84 @@ function localApplyActivityImportProfileReplayEvent(
   return shouldApply;
 }
 
+function localApplyImportRunReplayEvent(
+  db: Database,
+  event: Record<string, unknown>,
+  payloads: Map<string, Record<string, unknown>>,
+): boolean {
+  const eventId = requiredLocalPullEventString(event, "event_id", "eventId");
+  const entityId = requiredLocalPullEventString(event, "entity_id", "entityId");
+  const eventType = requiredLocalPullEventString(event, "type");
+  const operation = localImportRunSyncOperationFromEventType(eventType);
+  const clientTimestamp = requiredLocalPullEventString(
+    event,
+    "client_timestamp",
+    "clientTimestamp",
+  );
+  const seq = requiredInteger(event.seq, "pull event");
+  const payload = payloads.get(eventId);
+  if (!payload) {
+    throw new ConnectServiceError("internal_error", "Replay payload missing", 500);
+  }
+  if (
+    db
+      .query<
+        { count: number },
+        [string]
+      >("SELECT COUNT(*) AS count FROM sync_applied_events WHERE event_id = ?")
+      .get(eventId)?.count
+  ) {
+    return false;
+  }
+  const metadata = db
+    .query<
+      { last_event_id: string; last_client_timestamp: string; last_op: string | null },
+      [string]
+    >(
+      `
+        SELECT last_event_id, last_client_timestamp, last_op
+        FROM sync_entity_metadata
+        WHERE entity = 'import_run' AND entity_id = ?
+      `,
+    )
+    .get(entityId);
+  const previousOperation = metadata?.last_op ?? "update";
+  const shouldApply =
+    metadata === null || metadata === undefined
+      ? true
+      : operation === "delete" && previousOperation !== "delete"
+        ? true
+        : previousOperation === "delete" && (operation === "create" || operation === "update")
+          ? false
+          : localShouldApplyLww(
+              metadata.last_client_timestamp,
+              metadata.last_event_id,
+              clientTimestamp,
+              eventId,
+            );
+  if (shouldApply) {
+    if (operation === "delete") {
+      db.prepare("DELETE FROM import_runs WHERE id = ?").run(entityId);
+    } else {
+      localUpsertImportRunReplayPayload(db, entityId, payload);
+    }
+    localUpsertSyncEntityMetadata(
+      db,
+      "import_run",
+      entityId,
+      eventId,
+      clientTimestamp,
+      operation,
+      seq,
+    );
+    localMarkReplayTableState(db, "import_runs");
+    localInsertSyncAppliedEvent(db, eventId, seq, "import_run", entityId);
+  } else {
+    localInsertSyncAppliedEvent(db, eventId, seq, "import_run", entityId);
+  }
+  return shouldApply;
+}
+
 function localSyncOperationFromEventType(eventType: string): "create" | "update" | "delete" {
   const match = /^account\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
@@ -9279,6 +9373,16 @@ function localActivityImportProfileSyncOperationFromEventType(
   eventType: string,
 ): "create" | "update" | "delete" {
   const match = /^activity_import_profile\.(create|update|delete)\.v1$/.exec(eventType);
+  if (!match) {
+    throw deviceSyncDisabled();
+  }
+  return match[1] as "create" | "update" | "delete";
+}
+
+function localImportRunSyncOperationFromEventType(
+  eventType: string,
+): "create" | "update" | "delete" {
+  const match = /^import_run\.(create|update|delete)\.v1$/.exec(eventType);
   if (!match) {
     throw deviceSyncDisabled();
   }
@@ -9659,6 +9763,15 @@ function localUpsertActivityImportProfileReplayPayload(
   localUpsertReplayPayloadFields(db, "import_account_templates", "id", entityId, payload);
 }
 
+function localUpsertImportRunReplayPayload(
+  db: Database,
+  entityId: string,
+  rawPayload: Record<string, unknown>,
+): void {
+  const payload = normalizeReplayPayload("import_run", rawPayload);
+  localUpsertReplayPayloadFields(db, "import_runs", "id", entityId, payload);
+}
+
 function validateGoalReplayPayloadFields(payload: Record<string, unknown>): void {
   validateReplayFiniteNumberIfPresent(payload, "target_amount", "goal.target_amount");
   validateReplayIntegerIfPresent(payload, "priority", "goal.priority");
@@ -9842,6 +9955,7 @@ const REPLAY_ENTITY_TABLE_NAMES: Record<LocalReplayEntity, string> = {
   goals_allocation: "goals_allocation",
   import_template: "import_templates",
   activity_import_profile: "import_account_templates",
+  import_run: "import_runs",
 };
 
 const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly string[]>> = {
@@ -9966,6 +10080,25 @@ const REPLAY_PAYLOAD_COLUMNS: Record<LocalReplayEntity, ReadonlyArray<readonly s
     ["context_kind", "contextKind", "import_type", "importType"],
     ["source_system", "sourceSystem"],
     ["template_id", "templateId"],
+    ["created_at", "createdAt"],
+    ["updated_at", "updatedAt"],
+  ],
+  import_run: [
+    ["id"],
+    ["account_id", "accountId"],
+    ["source_system", "sourceSystem"],
+    ["run_type", "runType"],
+    ["mode"],
+    ["status"],
+    ["started_at", "startedAt"],
+    ["finished_at", "finishedAt"],
+    ["review_mode", "reviewMode"],
+    ["applied_at", "appliedAt"],
+    ["checkpoint_in", "checkpointIn"],
+    ["checkpoint_out", "checkpointOut"],
+    ["summary"],
+    ["warnings"],
+    ["error"],
     ["created_at", "createdAt"],
     ["updated_at", "updatedAt"],
   ],
@@ -10147,7 +10280,8 @@ function localMarkReplayTableState(
     | "goal_plans"
     | "goals_allocation"
     | "import_templates"
-    | "import_account_templates",
+    | "import_account_templates"
+    | "import_runs",
 ): void {
   db.prepare(
     `

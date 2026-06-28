@@ -6740,6 +6740,10 @@ contract:
   activity_import_profile replay events into import_account_templates with
   legacy importType context-kind migration and sync metadata/applied-event
   tracking.
+- `pr5-runtime-connect-import-run-replay-route-smoke`: verification passed.
+  Runtime-backed trigger-cycle now decrypts and applies remote import_run replay
+  events into import_runs with SQLite-backed run payload fields and sync
+  metadata/applied-event tracking.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
