@@ -2645,6 +2645,139 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect broker activity sync to unresolved review draft", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-connect-broker-review-draft-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.includes("/api/v1/sync/brokerage/accounts/provider-account-review/activities")) {
+          return Response.json({
+            data: [
+              {
+                id: "broker-review-1",
+                type: "BUY",
+                trade_date: "2026-01-05T10:00:00Z",
+                units: 4,
+                price: 25,
+                amount: 100,
+                currency: { code: "USD" },
+                provider_type: "SNAPTRADE",
+                symbol: {
+                  symbol: "UNLISTED",
+                  raw_symbol: "UNLISTED",
+                  description: "Unlisted Security",
+                },
+              },
+            ],
+            pagination: { has_more: false, total: 1, limit: 1000 },
+          });
+        }
+        if (url.includes("finance/search")) {
+          return Response.json({ quotes: [] });
+        }
+        return Response.json({});
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const seedDb = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedDb
+        .prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode, provider, provider_account_id
+            )
+            VALUES (
+              'broker-review-account', 'Broker Review Account', 'SECURITIES', NULL,
+              'USD', 0, 1, 0, 'TRANSACTIONS', 'SNAPTRADE', 'provider-account-review'
+            )
+          `,
+        )
+        .run();
+    } finally {
+      seedDb.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const syncActivitiesResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/sync/activities`,
+        { method: "POST" },
+      );
+      expect(syncActivitiesResponse.status).toBe(200);
+      await expect(syncActivitiesResponse.json()).resolves.toMatchObject({
+        accountsSynced: 1,
+        activitiesUpserted: 1,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                activity_type: string;
+                asset_id: string | null;
+                quantity: string | null;
+                unit_price: string | null;
+                amount: string | null;
+                currency: string;
+                status: string;
+                needs_review: number;
+                source_record_id: string | null;
+              },
+              []
+            >(
+              `
+                SELECT activity_type, asset_id, quantity, unit_price, amount, currency, status, needs_review, source_record_id
+                FROM activities
+                WHERE source_record_id = 'broker-review-1'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          activity_type: "BUY",
+          asset_id: null,
+          quantity: "4",
+          unit_price: "25",
+          amount: "100",
+          currency: "USD",
+          status: "DRAFT",
+          needs_review: 1,
+          source_record_id: "broker-review-1",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires disabled device sync runtime behavior", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-device-sync-disabled-"),
