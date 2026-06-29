@@ -16299,6 +16299,108 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to Finnhub provider quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-finnhub-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://finnhub.io/api/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const headers = init?.headers as Record<string, string> | undefined;
+        expect(headers?.["X-Finnhub-Token"]).toBe("finnhub-key");
+        calls.push(url);
+        const parsed = new URL(url);
+        expect(parsed.pathname).toBe("/api/v1/stock/candle");
+        expect(parsed.searchParams.get("symbol")).toBe("AAPL");
+        expect(parsed.searchParams.get("resolution")).toBe("D");
+        return Promise.resolve(
+          Response.json({
+            s: "ok",
+            t: [1767571200],
+            o: [10],
+            h: [12],
+            l: [9],
+            c: [11],
+            v: [123456],
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("FINNHUB", "finnhub-key");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-finnhub-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "AAPL",
+            "WRONG",
+            "XNAS",
+            JSON.stringify({
+              preferred_provider: "FINNHUB",
+              overrides: { FINNHUB: { symbol: "AAPL" } },
+            }),
+            "runtime-finnhub-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-finnhub-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(calls).toHaveLength(1);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                source: string;
+                open: string | null;
+                high: string | null;
+                low: string | null;
+                close: string;
+                volume: string | null;
+                currency: string;
+              },
+              []
+            >(
+              "SELECT source, open, high, low, close, volume, currency FROM quotes WHERE asset_id = 'runtime-finnhub-asset'",
+            )
+            .get(),
+        ).toEqual({
+          source: "FINNHUB",
+          open: "10",
+          high: "12",
+          low: "9",
+          close: "11",
+          volume: "123456",
+          currency: "USD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime quote resolution route to Alpha Vantage option quotes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-option-route-"));
     const calls: string[] = [];
