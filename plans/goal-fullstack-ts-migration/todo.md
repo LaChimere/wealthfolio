@@ -6809,6 +6809,14 @@ contract:
   rechecking remote snapshot coverage. Broad runtime/connect tests, full
   `bun run check`, `git diff --check`, and dual Claude/GPT xhigh re-review
   passed.
+- `pr5-runtime-connect-bootstrap-snapshot-apply-route-smoke`: verification
+  passed. Bootstrap snapshot now downloads and checksum-validates encrypted
+  blobs, decrypts/base64-decodes SQLite images, restores covered APP_SYNC_TABLES
+  with Rust filters/common-column matching and deferred FK checks, resets sync
+  control state, rejects over-JS-safe snapshot cursors before restore, publishes
+  `device_sync_pull_complete`, and returns Rust-shaped applied responses. Broad
+  runtime/connect tests, full `bun run check`, `git diff --check`, and repeated
+  dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
