@@ -1530,6 +1530,92 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime legacy classification health issue affected items", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-health-classification-issue-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const legacyMetadata = JSON.stringify({
+          identifiers: { symbol: "LEGACY" },
+          legacy: {
+            sectors: [{ name: "Technology", weight: 1 }],
+            countries: [{ name: "United States", weight: 1 }],
+          },
+        });
+        seedRuntimeAsset(seedDb, "legacy-health-a");
+        seedDb
+          .prepare(
+            "UPDATE assets SET name = ?, display_code = ?, instrument_symbol = ?, metadata = ? WHERE id = ?",
+          )
+          .run("Legacy Health A", "LHA", "LHA", legacyMetadata, "legacy-health-a");
+        seedRuntimeAsset(seedDb, "legacy/health-b");
+        seedDb
+          .prepare(
+            "UPDATE assets SET name = ?, display_code = ?, instrument_symbol = ?, metadata = ? WHERE id = ?",
+          )
+          .run("Legacy Health B", "LHB", "LHB", legacyMetadata, "legacy/health-b");
+      } finally {
+        seedDb.close();
+      }
+
+      const settingsResponse = await fetch(`${server.baseUrl}/api/v1/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timezone: "UTC" }),
+      });
+      expect(settingsResponse.status).toBe(200);
+
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "WARNING",
+        issueCounts: { WARNING: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^classification:legacy_migration:/),
+            category: "CLASSIFICATION",
+            title: "2 assets have legacy classification data",
+            affectedCount: 2,
+            affectedItems: [
+              {
+                id: "legacy-health-a",
+                name: "Legacy Health A",
+                symbol: "LHA",
+                route: "/holdings/legacy-health-a",
+              },
+              {
+                id: "legacy/health-b",
+                name: "Legacy Health B",
+                symbol: "LHB",
+                route: "/holdings/legacy%2Fhealth-b",
+              },
+            ],
+            fixAction: {
+              id: "migrate_legacy_classifications",
+              label: "Start Migration",
+              payload: null,
+            },
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime full classification health fix to all legacy assets", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-health-full-classification-fix-"),
