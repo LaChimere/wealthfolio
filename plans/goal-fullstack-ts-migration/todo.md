@@ -6999,6 +6999,13 @@ contract:
   failures instead of stale feature-disabled `not_implemented`/501 responses,
   and still makes no cloud approve/complete calls before those prerequisites
   pass. Full device-sync domain suite and backend type-check passed.
+- `pr5-runtime-connect-device-sync-explicit-interfaces`: verification passed.
+  Migrated local Connect, Connect device-sync, and standalone device-sync
+  factories no longer spread disabled-service fallback objects; each runtime
+  factory now explicitly implements the full service interface, making future
+  missing methods a type-check failure instead of a silent `not_implemented`
+  fallback. Full Connect/device-sync domain suites and backend type-check
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
