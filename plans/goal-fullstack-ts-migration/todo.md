@@ -6971,6 +6971,12 @@ contract:
   `internal_error` failures before snapshot generation or cloud approve/complete
   calls. Full device-sync domain tests, full runtime suite, and backend
   type-check passed.
+- `pr5-runtime-connect-sync-status-contract`: verification passed. Removed the
+  stale `not_implemented` Connect broker-sync status from the domain/HTTP
+  contract; migrated runtime sync now returns `accepted`/`forbidden` or raises a
+  real service error, and invalid stub statuses map to the existing unsupported
+  status 400 instead of a production 501 branch. Full HTTP and Connect domain
+  suites plus backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
