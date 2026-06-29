@@ -2678,6 +2678,16 @@ describe("TS backend runtime composition", () => {
                   description: "Unlisted Security",
                 },
               },
+              {
+                id: "broker-review-2",
+                type: "BUY",
+                trade_date: "2026-01-06T10:00:00Z",
+                units: 3,
+                price: 40,
+                amount: 120,
+                currency: { code: "USD" },
+                provider_type: "SNAPTRADE",
+              },
             ],
             pagination: { has_more: false, total: 1, limit: 1000 },
           });
@@ -2726,7 +2736,7 @@ describe("TS backend runtime composition", () => {
       expect(syncActivitiesResponse.status).toBe(200);
       await expect(syncActivitiesResponse.json()).resolves.toMatchObject({
         accountsSynced: 1,
-        activitiesUpserted: 1,
+        activitiesUpserted: 2,
         assetsInserted: 0,
         accountsFailed: 0,
         accountsWarned: 0,
@@ -2754,21 +2764,35 @@ describe("TS backend runtime composition", () => {
               `
                 SELECT activity_type, asset_id, quantity, unit_price, amount, currency, status, needs_review, source_record_id
                 FROM activities
-                WHERE source_record_id = 'broker-review-1'
+                WHERE source_record_id IN ('broker-review-1', 'broker-review-2')
+                ORDER BY source_record_id
               `,
             )
-            .get(),
-        ).toEqual({
-          activity_type: "BUY",
-          asset_id: null,
-          quantity: "4",
-          unit_price: "25",
-          amount: "100",
-          currency: "USD",
-          status: "DRAFT",
-          needs_review: 1,
-          source_record_id: "broker-review-1",
-        });
+            .all(),
+        ).toEqual([
+          {
+            activity_type: "BUY",
+            asset_id: null,
+            quantity: "4",
+            unit_price: "25",
+            amount: "100",
+            currency: "USD",
+            status: "DRAFT",
+            needs_review: 1,
+            source_record_id: "broker-review-1",
+          },
+          {
+            activity_type: "BUY",
+            asset_id: null,
+            quantity: "3",
+            unit_price: "40",
+            amount: "120",
+            currency: "USD",
+            status: "DRAFT",
+            needs_review: 1,
+            source_record_id: "broker-review-2",
+          },
+        ]);
       } finally {
         verifyDb.close();
       }
