@@ -7018,6 +7018,11 @@ contract:
   asset migrates into GICS/region assignments, migrated metadata is cleaned,
   unrequested legacy assets remain untouched, and `asset_taxonomy_assignment`
   sync-outbox rows are queued. Full runtime suite and backend type-check passed.
+- `pr5-health-sync-prices-runtime-smoke`: verification passed. The runtime
+  `/api/v1/health/fix` route now has SQLite-backed coverage for a non-empty
+  `sync_prices` payload, proving the Health Center fix calls the migrated
+  market-data sync provider path and persists the requested asset's Yahoo quote.
+  Full runtime suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
