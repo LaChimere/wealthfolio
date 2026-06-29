@@ -17594,6 +17594,93 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to US Treasury calculated bond quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-treasury-resolve-"));
+    const years: string[] = [];
+    const treasuryXml = `<feed>
+      <entry><content><m:properties>
+        <d:NEW_DATE>2026-06-29T00:00:00</d:NEW_DATE>
+        <d:BC_1YEAR>4</d:BC_1YEAR>
+        <d:BC_2YEAR>4</d:BC_2YEAR>
+        <d:BC_5YEAR>4</d:BC_5YEAR>
+        <d:BC_10YEAR>4</d:BC_10YEAR>
+      </m:properties></content></entry>
+      <entry><content><m:properties>
+        <d:NEW_DATE>2026-06-30T00:00:00</d:NEW_DATE>
+        <d:BC_1YEAR>4.1</d:BC_1YEAR>
+        <d:BC_2YEAR>4.1</d:BC_2YEAR>
+        <d:BC_5YEAR>4.1</d:BC_5YEAR>
+        <d:BC_10YEAR>4.1</d:BC_10YEAR>
+      </m:properties></content></entry>
+    </feed>`;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (
+          !url.startsWith(
+            "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+          )
+        ) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("data")).toBe("daily_treasury_yield_curve");
+        years.push(parsed.searchParams.get("field_tdr_date_value") ?? "");
+        return Promise.resolve(new Response(treasuryXml));
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-treasury-resolve-bond");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_type = ?, instrument_symbol = ?, provider_config = ?, metadata = ? WHERE id = ?",
+          )
+          .run(
+            "T 5%",
+            "USD",
+            "BOND",
+            "US912810TH12",
+            JSON.stringify({ preferred_provider: "US_TREASURY_CALC" }),
+            JSON.stringify({
+              bond: {
+                maturityDate: "2031-06-30",
+                couponRate: 0.05,
+                faceValue: 1000,
+                couponFrequency: "SEMI_ANNUAL",
+              },
+            }),
+            "runtime-treasury-resolve-bond",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=US912810TH12&instrumentType=BOND&quoteCcy=USD&providerId=US_TREASURY_CALC`,
+      );
+      expect(response.status).toBe(200);
+      const resolved = (await response.json()) as {
+        currency: string;
+        price: number | null;
+        resolvedProviderId: string | null;
+      };
+      expect(resolved.currency).toBe("USD");
+      expect(resolved.resolvedProviderId).toBe("US_TREASURY_CALC");
+      expect(resolved.price ?? 0).toBeGreaterThan(1);
+      expect(years).toEqual(["2026"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
