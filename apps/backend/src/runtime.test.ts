@@ -12712,6 +12712,105 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime pairing transfer route to stop on non-ok cycle", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-cycle-gate-"));
+    const requests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT", cursor: 0 });
+        }
+        return Response.json({ success: true });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+            INSERT INTO sync_device_config (
+              device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+            )
+            VALUES ('device-runtime', 2, 'trusted', '2026-05-14T00:00:00Z', NULL)
+          `,
+          )
+          .run();
+        seedDb.prepare("UPDATE sync_engine_state SET last_cycle_status = 'ok' WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+      requests.length = 0;
+
+      const response = await fetch(
+        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      );
+      expect(response.status).toBe(501);
+      await expect(response.json()).resolves.toMatchObject({ code: "not_implemented" });
+      expect(requests.map((request) => request.split("/").pop())).toEqual([
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing transfer route to upload bootstrap snapshot", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-bootstrap-"));
     const requests: string[] = [];
