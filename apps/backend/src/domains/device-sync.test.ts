@@ -2598,6 +2598,19 @@ describe("TS local device sync service", () => {
         return Response.json({ success: true });
       },
     });
+    const snapshotCallbackMissingService = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      triggerSyncCycle: () => ({ status: "ok", deadLetterCount: 0 }),
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ success: true });
+      },
+    });
     const uploadingService = createLocalDeviceSyncService({
       db,
       secretService,
@@ -2652,8 +2665,17 @@ describe("TS local device sync service", () => {
 
     try {
       await expect(service.completePairingWithTransfer?.(request)).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Sync cycle is not configured for pairing transfer",
+      });
+      expect(requests).toEqual([]);
+      await expect(
+        snapshotCallbackMissingService.completePairingWithTransfer?.(request),
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot upload is not configured for pairing transfer",
       });
       expect(requests).toEqual([]);
       await expect(uploadingService.completePairingWithTransfer?.(request)).resolves.toEqual({

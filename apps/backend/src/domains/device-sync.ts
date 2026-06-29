@@ -628,7 +628,7 @@ export function createLocalDeviceSyncService({
       const deviceId = await requireCompositePairingDeviceIdOrDisabled(secretService);
       if (db) {
         if (!triggerSyncCycle) {
-          throw deviceSyncDisabled();
+          throw pairingTransferGateError("Sync cycle is not configured for pairing transfer");
         }
         const cycleResult = await Promise.resolve(triggerSyncCycle());
         if (!pairingTransferCycleCanProceed(cycleResult)) {
@@ -2874,7 +2874,7 @@ async function runPairingTransferSnapshot(
   generateSnapshot: (() => Promise<unknown> | unknown) | undefined,
 ): Promise<void> {
   if (!generateSnapshot) {
-    throw deviceSyncDisabled();
+    throw pairingTransferGateError("Snapshot upload is not configured for pairing transfer");
   }
   const result = await Promise.resolve(generateSnapshot());
   if (!isRecord(result)) {
