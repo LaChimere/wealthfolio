@@ -6987,6 +6987,12 @@ contract:
   `fetch_fx` sync fixes, matching `sync_prices` and `retry_sync`, while keeping
   success toasts for non-sync fixes. Focused Vitest hook coverage and frontend
   type-check passed.
+- `pr5-ai-unsupported-media-error-code`: verification passed. Unsupported
+  multimodal attachments such as SVG images for Anthropic and PDFs for Ollama
+  now fail as `invalid_input`/400 instead of stale `not_implemented`/501,
+  preserving the existing preflight/no-chat-row behavior and detailed
+  provider/model error message. Full AI chat domain suite and backend type-check
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
