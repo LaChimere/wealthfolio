@@ -16163,6 +16163,79 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data search route to Finnhub fallback", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-finnhub-search-route-"),
+    );
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP") {
+          return Promise.resolve(
+            Response.json({
+              quotes: [
+                {
+                  symbol: "SHOP",
+                  exchange: "UNKNOWN",
+                  quoteType: "EQUITY",
+                  shortname: "Shopify no MIC",
+                },
+              ],
+            }),
+          );
+        }
+        if (url === "https://finnhub.io/api/v1/search?q=SHOP") {
+          expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+          return Promise.resolve(
+            Response.json({
+              result: [
+                {
+                  description: "Shopify Inc.",
+                  displaySymbol: "SHOP.TO",
+                  symbol: "SHOP.TO",
+                  type: "Common Stock",
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("FINNHUB", "finnhub-key");
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SHOP`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "SHOP.TO",
+          shortName: "Shopify Inc.",
+          exchangeMic: "XTSE",
+          exchangeName: "TSX",
+          quoteType: "Stock",
+          currency: "CAD",
+          currencySource: "exchange_inferred",
+          dataSource: "YAHOO",
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+        "https://finnhub.io/api/v1/search?q=SHOP",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data search route to OpenFIGI bond mapping fallback", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-openfigi-search-route-"),
