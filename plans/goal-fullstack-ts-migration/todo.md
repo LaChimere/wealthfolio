@@ -6831,6 +6831,12 @@ contract:
   drains timers/in-flight cycles before stop, clear-sync-data, database restore,
   and runtime close. Broad runtime/connect tests, full `bun run check`,
   `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-background-outbox-prune`: verification passed. The local
+  device-sync background loop now prunes sent sync_outbox rows older than 7 days
+  and dead rows older than 30 days, preserves pending/new rows, and runs pruning
+  after attempted background cycles even when trigger-cycle fails. Broad
+  runtime/connect tests, full `bun run check`, `git diff --check`, and dual
+  Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
