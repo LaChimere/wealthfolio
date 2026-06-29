@@ -1530,6 +1530,136 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime full classification health fix to all legacy assets", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-health-full-classification-fix-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const legacyMetadata = JSON.stringify({
+          identifiers: { symbol: "LEGACY" },
+          legacy: {
+            sectors: [{ name: "Technology", weight: 1 }],
+            countries: [{ name: "United States", weight: 1 }],
+          },
+        });
+        seedRuntimeAsset(seedDb, "full-legacy-asset-a");
+        seedDb
+          .prepare(
+            "UPDATE assets SET metadata = ?, display_code = ?, instrument_symbol = ? WHERE id = ?",
+          )
+          .run(legacyMetadata, "FULLA", "FULLA", "full-legacy-asset-a");
+        seedRuntimeAsset(seedDb, "full-legacy-asset-b");
+        seedDb
+          .prepare(
+            "UPDATE assets SET metadata = ?, display_code = ?, instrument_symbol = ? WHERE id = ?",
+          )
+          .run(legacyMetadata, "FULLB", "FULLB", "full-legacy-asset-b");
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "migrate_legacy_classifications",
+          label: "Start Migration",
+          payload: null,
+        }),
+      });
+      expect(response.status).toBe(200);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                asset_id: string;
+                taxonomy_id: string;
+                category_id: string;
+                weight: number;
+                source: string;
+              },
+              []
+            >(
+              `
+                SELECT asset_id, taxonomy_id, category_id, weight, source
+                FROM asset_taxonomy_assignments
+                WHERE asset_id IN ('full-legacy-asset-a', 'full-legacy-asset-b')
+                ORDER BY asset_id ASC, taxonomy_id ASC
+              `,
+            )
+            .all(),
+        ).toEqual([
+          {
+            asset_id: "full-legacy-asset-a",
+            taxonomy_id: "industries_gics",
+            category_id: "45",
+            weight: 10000,
+            source: "migrated",
+          },
+          {
+            asset_id: "full-legacy-asset-a",
+            taxonomy_id: "regions",
+            category_id: "country_US",
+            weight: 10000,
+            source: "migrated",
+          },
+          {
+            asset_id: "full-legacy-asset-b",
+            taxonomy_id: "industries_gics",
+            category_id: "45",
+            weight: 10000,
+            source: "migrated",
+          },
+          {
+            asset_id: "full-legacy-asset-b",
+            taxonomy_id: "regions",
+            category_id: "country_US",
+            weight: 10000,
+            source: "migrated",
+          },
+        ]);
+        expect(
+          verifyDb
+            .query<{ id: string; metadata: string | null }, []>(
+              `
+                SELECT id, metadata
+                FROM assets
+                WHERE id IN ('full-legacy-asset-a', 'full-legacy-asset-b')
+                ORDER BY id ASC
+              `,
+            )
+            .all()
+            .map((row) => ({ ...row, metadata: JSON.parse(row.metadata ?? "{}") })),
+        ).toEqual([
+          { id: "full-legacy-asset-a", metadata: { identifiers: { symbol: "LEGACY" } } },
+          { id: "full-legacy-asset-b", metadata: { identifiers: { symbol: "LEGACY" } } },
+        ]);
+        expect(
+          readRuntimeSyncOutbox(verifyDb).filter(
+            (row) => row.entity === "asset_taxonomy_assignment",
+          ),
+        ).toHaveLength(4);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime health price sync fix to provider quote persistence", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-price-fix-"));
     const chartSymbols: string[] = [];
