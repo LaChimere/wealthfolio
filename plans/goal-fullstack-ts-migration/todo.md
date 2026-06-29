@@ -6957,6 +6957,13 @@ contract:
   account-failure branch now that broker cash, existing-asset,
   provider-resolved, unresolved-symbol, and no-symbol review-draft paths cover
   mappable broker rows. Full Connect domain suite and backend type-check passed.
+- `pr5-runtime-device-sync-pairing-flow-snapshot-apply`: verification passed.
+  The runtime `/api/v1/sync/pairing/flow/state` route now has SQLite-backed
+  coverage proving a `waiting_snapshot` flow applies an available encrypted
+  remote snapshot, restores synced quote rows, advances `sync_cursor`, clears
+  `min_snapshot_created_at`, returns success, and removes the completed flow.
+  Targeted pairing-flow tests, full runtime suite, and backend type-check
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

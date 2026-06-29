@@ -8,7 +8,7 @@ turns_used: 972
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T04:28:10+09:00"
+updated_at: "2026-06-30T04:35:09+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5420,6 +5420,11 @@ updated_at: "2026-06-30T04:28:10+09:00"
   only rows that Rust would skip, instead of failing account sync with a legacy
   `not_implemented` error after mappable broker rows have migrated; full Connect
   validation and backend type-check passed.
+- Turn 974: Strengthened pairing-flow bootstrap runtime evidence. The
+  SQLite-backed flow state route now proves a waiting pairing flow applies a
+  newly available encrypted remote snapshot, restores quote rows, advances the
+  sync cursor, clears the freshness gate, completes the flow, and removes the
+  flow state; targeted/full runtime validation and backend type-check passed.
 
 ## Deferred items
 
