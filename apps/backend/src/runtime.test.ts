@@ -16571,6 +16571,114 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data history sync route to Yahoo quote persistence", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-market-history-route-"),
+    );
+    const chartSymbols: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=history-sync; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=history-sync");
+          return Promise.resolve(new Response("history-sync-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/HISTORY?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=history-sync");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("interval")).toBe("1d");
+          expect(parsed.searchParams.get("events")).toBe("history");
+          expect(parsed.searchParams.get("crumb")).toBe("history-sync-crumb");
+          chartSymbols.push("HISTORY");
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    meta: { currency: "USD" },
+                    timestamp: [1767571200],
+                    indicators: {
+                      quote: [{ open: [10], high: [11], low: [9], close: [10.5], volume: [12345] }],
+                      adjclose: [{ adjclose: [10.25] }],
+                    },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-history-sync-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ? WHERE id = ?",
+          )
+          .run("HISTORY", "HISTORY", "XNAS", "runtime-history-sync-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync/history`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(204);
+      expect(chartSymbols).toEqual(["HISTORY"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                source: string;
+                open: string | null;
+                high: string | null;
+                low: string | null;
+                close: string;
+                adjclose: string | null;
+                volume: string | null;
+                currency: string;
+              },
+              []
+            >(
+              "SELECT source, open, high, low, close, adjclose, volume, currency FROM quotes WHERE asset_id = 'runtime-history-sync-asset'",
+            )
+            .get(),
+        ).toEqual({
+          source: "YAHOO",
+          open: "10",
+          high: "11",
+          low: "9",
+          close: "10.5",
+          adjclose: "10.25",
+          volume: "12345",
+          currency: "USD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
