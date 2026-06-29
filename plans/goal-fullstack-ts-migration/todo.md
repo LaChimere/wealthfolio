@@ -7068,6 +7068,12 @@ contract:
   resolves the matching ISIN, fetches daily history with the Rust-compatible
   user agent, and persists the EUR `BOERSE_FRANKFURT` provider quote. Full
   runtime suite and backend type-check passed.
+- `pr5-alpha-vantage-fx-crypto-route-provider-smoke`: verification passed. The
+  runtime `/api/v1/market-data/sync` route now has SQLite-backed coverage for
+  Alpha Vantage FX and crypto assets with a backend-stored API key, proving the
+  route dispatches `FX_DAILY` and `DIGITAL_CURRENCY_DAILY`, preserves USD/CAD
+  quote currencies, and persists both provider quotes. Full runtime suite and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
