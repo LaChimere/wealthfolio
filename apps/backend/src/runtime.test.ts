@@ -1392,6 +1392,144 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime targeted classification health fix to selected legacy assets", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-health-classification-fix-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "target-legacy-asset");
+        seedDb
+          .prepare("UPDATE assets SET instrument_symbol = ?, display_code = ? WHERE id = ?")
+          .run("TARGET", "TARGET", "target-legacy-asset");
+        seedRuntimeAsset(seedDb, "other-legacy-asset");
+        const legacyMetadata = JSON.stringify({
+          identifiers: { symbol: "LEGACY" },
+          legacy: {
+            sectors: [{ name: "Technology", weight: 1 }],
+            countries: [{ name: "United States", weight: 1 }],
+          },
+        });
+        seedDb
+          .prepare("UPDATE assets SET metadata = ? WHERE id = ?")
+          .run(legacyMetadata, "target-legacy-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET metadata = ?, display_code = ?, instrument_symbol = ? WHERE id = ?",
+          )
+          .run(legacyMetadata, "OTHER", "OTHER", "other-legacy-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "migrate_classifications",
+          label: "Migrate Classifications",
+          payload: ["target-legacy-asset"],
+        }),
+      });
+      expect(response.status).toBe(200);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { taxonomy_id: string; category_id: string; weight: number; source: string },
+              []
+            >(
+              `
+                SELECT taxonomy_id, category_id, weight, source
+                FROM asset_taxonomy_assignments
+                WHERE asset_id = 'target-legacy-asset'
+                ORDER BY taxonomy_id ASC
+              `,
+            )
+            .all(),
+        ).toEqual([
+          {
+            taxonomy_id: "industries_gics",
+            category_id: "45",
+            weight: 10000,
+            source: "migrated",
+          },
+          {
+            taxonomy_id: "regions",
+            category_id: "country_US",
+            weight: 10000,
+            source: "migrated",
+          },
+        ]);
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM asset_taxonomy_assignments WHERE asset_id = 'other-legacy-asset'")
+            .get()?.count,
+        ).toBe(0);
+        const targetMetadata = verifyDb
+          .query<
+            { metadata: string | null },
+            []
+          >("SELECT metadata FROM assets WHERE id = 'target-legacy-asset'")
+          .get()?.metadata;
+        const otherMetadata = verifyDb
+          .query<
+            { metadata: string | null },
+            []
+          >("SELECT metadata FROM assets WHERE id = 'other-legacy-asset'")
+          .get()?.metadata;
+        expect(JSON.parse(targetMetadata ?? "{}")).toEqual({ identifiers: { symbol: "LEGACY" } });
+        expect(JSON.parse(otherMetadata ?? "{}")).toMatchObject({ legacy: expect.any(Object) });
+        expect(
+          readRuntimeSyncOutbox(verifyDb)
+            .filter((row) => row.entity === "asset_taxonomy_assignment")
+            .map((row) => ({
+              entity: row.entity,
+              op: row.op,
+              payload: JSON.parse(String(row.payload)),
+            })),
+        ).toEqual([
+          {
+            entity: "asset_taxonomy_assignment",
+            op: "update",
+            payload: expect.objectContaining({
+              asset_id: "target-legacy-asset",
+              category_id: "45",
+              taxonomy_id: "industries_gics",
+            }),
+          },
+          {
+            entity: "asset_taxonomy_assignment",
+            op: "update",
+            payload: expect.objectContaining({
+              asset_id: "target-legacy-asset",
+              category_id: "country_US",
+              taxonomy_id: "regions",
+            }),
+          },
+        ]);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime database backup list download and delete routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-backup-routes-"));
     const runtime = createSqliteBackedBackendServices({
