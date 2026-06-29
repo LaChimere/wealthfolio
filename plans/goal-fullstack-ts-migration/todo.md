@@ -6952,6 +6952,11 @@ contract:
   `asset_id = NULL` alongside provider-unresolved symbol records. Targeted
   broker route smoke, full runtime suite, full `bun run check`, and
   `git diff --check` passed.
+- `pr5-runtime-connect-broker-mapping-gate-cleanup`: verification passed.
+  Removed the stale `Broker activity mapping is not available in this build`
+  account-failure branch now that broker cash, existing-asset,
+  provider-resolved, unresolved-symbol, and no-symbol review-draft paths cover
+  mappable broker rows. Full Connect domain suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

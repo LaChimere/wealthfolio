@@ -8,7 +8,7 @@ turns_used: 972
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T04:20:30+09:00"
+updated_at: "2026-06-30T04:28:10+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5415,6 +5415,11 @@ updated_at: "2026-06-30T04:20:30+09:00"
   `/api/v1/connect/sync/activities` smoke now proves both provider-unresolved
   and no-symbol broker BUY records persist as DRAFT review activities with
   `asset_id = NULL`; targeted/full runtime validation plus repo check passed.
+- Turn 973: Removed the stale broker activity mapping feature gate. Transaction
+  broker sync now relies on the completed Rust-parity mapper chain and skips
+  only rows that Rust would skip, instead of failing account sync with a legacy
+  `not_implemented` error after mappable broker rows have migrated; full Connect
+  validation and backend type-check passed.
 
 ## Deferred items
 
