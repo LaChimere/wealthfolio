@@ -6982,6 +6982,11 @@ contract:
   `Provider not supported for market sync: <PROVIDER>` instead of migration-era
   `Provider not implemented`, and a focused no-network unit test pins the skip
   result. Full market-data domain suite and backend type-check passed.
+- `pr5-health-fetch-fx-toast-parity`: verification passed. Frontend
+  `useExecuteHealthFix` now suppresses duplicate generic success toasts for
+  `fetch_fx` sync fixes, matching `sync_prices` and `retry_sync`, while keeping
+  success toasts for non-sync fixes. Focused Vitest hook coverage and frontend
+  type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
