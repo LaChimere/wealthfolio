@@ -6933,6 +6933,12 @@ contract:
   `state_error` and the expected last_error through the HTTP seam. The runtime
   background wake smoke now waits across the intentional debounce window. Full
   runtime suite, full `bun run check`, and `git diff --check` passed.
+- `pr5-runtime-device-sync-transfer-cycle-gate-route-smoke`: verification
+  passed. The runtime `/api/v1/sync/pairing/complete-with-transfer` route now
+  has SQLite-backed coverage proving a non-`ok` pre-transfer sync cycle blocks
+  before snapshot generation, cloud approve, or cloud complete. Targeted pairing
+  transfer route suite, full runtime suite, full `bun run check`, and
+  `git diff --check` passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
