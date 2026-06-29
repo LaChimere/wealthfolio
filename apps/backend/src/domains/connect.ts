@@ -52,7 +52,7 @@ export interface LocalConnectDeviceSyncServiceDependencies {
   backgroundOutboxPruneIntervalMs?: number;
 }
 
-export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
+export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden";
 
 export interface ConnectSyncBrokerDataResult {
   status: ConnectSyncBrokerDataStatus;

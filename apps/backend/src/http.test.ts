@@ -5166,7 +5166,7 @@ describe("TS backend HTTP skeleton", () => {
         )
       ).status,
     ).toBe(403);
-    syncBrokerDataStatus = "not_implemented";
+    syncBrokerDataStatus = "unexpected" as ConnectSyncBrokerDataStatus;
     expect(
       (
         await handler(
@@ -5176,7 +5176,7 @@ describe("TS backend HTTP skeleton", () => {
           }),
         )
       ).status,
-    ).toBe(501);
+    ).toBe(400);
     await expect(
       (
         await handler(

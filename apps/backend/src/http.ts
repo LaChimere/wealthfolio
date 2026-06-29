@@ -4826,8 +4826,6 @@ function connectSyncBrokerDataResponse(result: ConnectSyncBrokerDataResult): Res
       return new Response(null, { status: 202 });
     case "forbidden":
       return new Response(null, { status: 403 });
-    case "not_implemented":
-      return new Response(null, { status: 501 });
   }
   return jsonResponse(
     { code: 400, message: `Unsupported Connect sync status: ${String(status)}` },
