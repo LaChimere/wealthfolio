@@ -2763,7 +2763,11 @@ describe("TS local device sync service", () => {
           sasProof: { ok: true },
           signature: "signature",
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Pending sync cycle did not complete cleanly before transfer",
+      });
       expect(snapshotUploads).toBe(1);
       expect(requests).toEqual([]);
 
@@ -2778,7 +2782,11 @@ describe("TS local device sync service", () => {
           sasProof: { ok: true },
           signature: "signature",
         }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Pending sync outbox rows remain after transfer sync cycle",
+      });
       expect(requests).toEqual([]);
     } finally {
       db.close();

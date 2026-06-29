@@ -12679,9 +12679,10 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
       );
-      expect(deadLetteredResponse.status).toBe(501);
+      expect(deadLetteredResponse.status).toBe(500);
       await expect(deadLetteredResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
+        code: "internal_error",
+        message: "Pending sync cycle did not complete cleanly before transfer",
       });
       expect(requests.map((request) => request.split("/").pop()).slice(0, 4)).toEqual([
         "token?grant_type=refresh_token",
@@ -12721,9 +12722,10 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
       );
-      expect(invalidEntityResponse.status).toBe(501);
+      expect(invalidEntityResponse.status).toBe(500);
       await expect(invalidEntityResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
+        code: "internal_error",
+        message: "Pending sync cycle did not complete cleanly before transfer",
       });
       expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
         "token?grant_type=refresh_token",
@@ -12822,8 +12824,11 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
       );
-      expect(response.status).toBe(501);
-      await expect(response.json()).resolves.toMatchObject({ code: "not_implemented" });
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "internal_error",
+        message: "Pending sync cycle did not complete cleanly before transfer",
+      });
       expect(requests.map((request) => request.split("/").pop())).toEqual([
         "token?grant_type=refresh_token",
         "device-runtime",

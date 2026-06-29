@@ -632,10 +632,14 @@ export function createLocalDeviceSyncService({
         }
         const cycleResult = await Promise.resolve(triggerSyncCycle());
         if (!pairingTransferCycleCanProceed(cycleResult)) {
-          throw deviceSyncDisabled();
+          throw pairingTransferGateError(
+            "Pending sync cycle did not complete cleanly before transfer",
+          );
         }
         if (localHasPendingSyncOutbox(db)) {
-          throw deviceSyncDisabled();
+          throw pairingTransferGateError(
+            "Pending sync outbox rows remain after transfer sync cycle",
+          );
         }
         await runPairingTransferSnapshot(generateSnapshot);
       }
@@ -2860,6 +2864,10 @@ function pairingTransferCycleCanProceed(cycleResult: unknown): boolean {
   }
   const deadLetterCount = cycleResult.deadLetterCount ?? 0;
   return status === "ok" && deadLetterCount === 0;
+}
+
+function pairingTransferGateError(message: string): DeviceSyncServiceError {
+  return new DeviceSyncServiceError("internal_error", message, 500);
 }
 
 async function runPairingTransferSnapshot(
