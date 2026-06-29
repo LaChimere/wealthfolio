@@ -17304,6 +17304,82 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to Finnhub quote summaries", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-finnhub-resolve-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://finnhub.io/api/v1/quote?")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+        const symbol = new URL(url).searchParams.get("symbol") ?? "";
+        calls.push(symbol);
+        const prices: Record<string, number> = {
+          SHOP: 25.5,
+          "OANDA:EUR_USD": 1.15,
+          "BINANCE:BTCUSDT": 44000,
+        };
+        const price = prices[symbol];
+        if (price === undefined) {
+          throw new Error(`unexpected Finnhub quote symbol: ${symbol}`);
+        }
+        return Promise.resolve(
+          Response.json({
+            c: price,
+            o: price,
+            h: price,
+            l: price,
+            t: 1767657600,
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("FINNHUB", "finnhub-key");
+
+      const equityResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=SHOP&exchangeMic=XTSE&instrumentType=EQUITY&quoteCcy=EUR&providerId=FINNHUB`,
+      );
+      expect(equityResponse.status).toBe(200);
+      await expect(equityResponse.json()).resolves.toEqual({
+        currency: "CAD",
+        price: 25.5,
+        resolvedProviderId: "FINNHUB",
+      });
+
+      const fxResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=EUR&instrumentType=FX&quoteCcy=USD&providerId=FINNHUB`,
+      );
+      expect(fxResponse.status).toBe(200);
+      await expect(fxResponse.json()).resolves.toEqual({
+        currency: "USD",
+        price: 1.15,
+        resolvedProviderId: "FINNHUB",
+      });
+
+      const cryptoResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=BTC&instrumentType=CRYPTO&quoteCcy=USDT&providerId=FINNHUB`,
+      );
+      expect(cryptoResponse.status).toBe(200);
+      await expect(cryptoResponse.json()).resolves.toEqual({
+        currency: "USDT",
+        price: 44000,
+        resolvedProviderId: "FINNHUB",
+      });
+      expect(calls).toEqual(["SHOP", "OANDA:EUR_USD", "BINANCE:BTCUSDT"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
