@@ -6872,6 +6872,13 @@ contract:
   clean up approvals on terminal errors, and preserve legacy no-apply fallback
   behavior. Broad runtime/connect/device-sync tests, full `bun run check`,
   `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-device-sync-pairing-transfer-outbox-flush`: verification passed.
+  Standalone complete-with-transfer now flushes due local sync_outbox work
+  through the migrated Connect trigger-cycle path before approving or completing
+  the cloud pairing, proceeds only on `ok` cycles with zero dead letters and no
+  remaining pending rows, and blocks stale-key plus invalid-entity dead-letter
+  outcomes. Broad runtime/connect/device-sync tests, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
