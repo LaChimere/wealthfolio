@@ -2552,7 +2552,7 @@ describe("TS local device sync service", () => {
     ]);
   });
 
-  test("keeps composite pairing transfer gated when local snapshot bootstrap is required", async () => {
+  test("uploads snapshot before composite pairing transfer when local snapshot bootstrap is required", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_device_config (
@@ -2583,6 +2583,7 @@ describe("TS local device sync service", () => {
       JSON.stringify({ version: 2, deviceId: "device-1" }),
     );
     const requests: string[] = [];
+    let snapshotUploads = 0;
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -2595,16 +2596,69 @@ describe("TS local device sync service", () => {
         return Response.json({ success: true });
       },
     });
+    const uploadingService = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      generateSnapshot: () => {
+        snapshotUploads += 1;
+        return {
+          status: "uploaded",
+          snapshotId: "snapshot-1",
+          oplogSeq: 1,
+          message: "Snapshot uploaded",
+        };
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ success: true });
+      },
+    });
+    const skippedService = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      generateSnapshot: () => ({
+        status: "skipped",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Current device is not trusted",
+      }),
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ success: true });
+      },
+    });
+    const request = {
+      pairingId: "pairing-1",
+      encryptedKeyBundle: "bundle",
+      sasProof: { ok: true },
+      signature: "signature",
+    };
 
     try {
-      await expect(
-        service.completePairingWithTransfer?.({
-          pairingId: "pairing-1",
-          encryptedKeyBundle: "bundle",
-          sasProof: { ok: true },
-          signature: "signature",
-        }),
-      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      await expect(service.completePairingWithTransfer?.(request)).rejects.toMatchObject({
+        code: "not_implemented",
+        status: 501,
+      });
+      expect(requests).toEqual([]);
+      await expect(uploadingService.completePairingWithTransfer?.(request)).resolves.toEqual({
+        success: true,
+      });
+      expect(snapshotUploads).toBe(1);
+      expect(requests.map((request) => request.split("/").pop())).toEqual(["approve", "complete"]);
+      requests.length = 0;
+      await expect(skippedService.completePairingWithTransfer?.(request)).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot upload failed: Current device is not trusted",
+      });
       expect(requests).toEqual([]);
     } finally {
       db.close();
@@ -2656,6 +2710,12 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      generateSnapshot: () => ({
+        status: "uploaded",
+        snapshotId: "snapshot-1",
+        oplogSeq: 1,
+        message: "Snapshot uploaded",
+      }),
       fetch: async (input) => {
         requests.push(String(input));
         return Response.json({ success: true });

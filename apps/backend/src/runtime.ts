@@ -598,6 +598,7 @@ function createServicesFromDatabase(
       onPairingComplete: () => connectDeviceSyncService.startDeviceSyncBackgroundEngine(),
       bootstrapSnapshot: () => connectDeviceSyncService.bootstrapDeviceSnapshot(),
       triggerSyncCycle: () => connectDeviceSyncService.triggerDeviceSyncCycle(),
+      generateSnapshot: () => connectDeviceSyncService.generateDeviceSnapshotNow(),
     }),
     exchangeRateService,
     goalService,

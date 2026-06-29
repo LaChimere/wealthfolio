@@ -12235,6 +12235,20 @@ describe("TS backend runtime composition", () => {
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
           return Response.json({ action: "NOOP", cursor: 0 });
         }
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "55555555-5555-4555-8555-555555555555",
+            schema_version: 1,
+            covers_tables: [],
+            oplog_seq: 0,
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+            created_at: "2026-05-14T00:00:00Z",
+          });
+        }
         if (url.endsWith("/api/v1/sync/events/push")) {
           if (pushKeyMismatch) {
             return Response.json(
@@ -12308,8 +12322,12 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 7)).toEqual([
         "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "cursor",
+        "latest",
         "approve",
         "complete",
       ]);
@@ -12344,12 +12362,16 @@ describe("TS backend runtime composition", () => {
       );
       expect(blockedResponse.status).toBe(200);
       await expect(blockedResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 6)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 10)).toEqual([
         "token?grant_type=refresh_token",
         "token?grant_type=refresh_token",
         "device-runtime",
         "reconcile-ready-state",
         "push",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "cursor",
+        "latest",
         "approve",
       ]);
       requests.length = 0;
@@ -12443,9 +12465,10 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime pairing transfer route to bootstrap gate", async () => {
+  test("wires runtime pairing transfer route to upload bootstrap snapshot", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-bootstrap-"));
     const requests: string[] = [];
+    let uploadAttempts = 0;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -12457,6 +12480,33 @@ describe("TS backend runtime composition", () => {
         requests.push(url);
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/upload")) {
+          uploadAttempts += 1;
+          return Response.json({
+            snapshot_id: "snapshot-transfer",
+            oplog_seq: 0,
+            r2_key: "snapshots/snapshot-transfer",
+            created_at: "2026-05-14T00:00:00Z",
+          });
         }
         return Response.json({ success: true });
       }) as typeof fetch,
@@ -12509,7 +12559,7 @@ describe("TS backend runtime composition", () => {
       expect(sessionResponse.status).toBe(200);
       requests.length = 0;
 
-      const blockedResponse = await fetch(
+      const completeResponse = await fetch(
         jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
           pairingId: "pairing-1",
           encryptedKeyBundle: "bundle",
@@ -12517,12 +12567,18 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
       );
-      expect(blockedResponse.status).toBe(501);
-      await expect(blockedResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-      });
-      expect(requests.map((request) => request.split("/").pop())).toEqual([
+      expect(completeResponse.status).toBe(200);
+      await expect(completeResponse.json()).resolves.toEqual({ success: true });
+      expect(uploadAttempts).toBe(1);
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 8)).toEqual([
         "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "cursor",
+        "latest",
+        "upload",
+        "approve",
+        "complete",
       ]);
     } finally {
       server.stop();
@@ -12544,6 +12600,29 @@ describe("TS backend runtime composition", () => {
         requests.push(url);
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "66666666-6666-4666-8666-666666666666",
+            schema_version: 1,
+            covers_tables: [],
+            oplog_seq: 0,
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+            created_at: "2026-05-14T00:00:00Z",
+          });
         }
         if (url.endsWith("/approve")) {
           return Response.json(
@@ -12612,8 +12691,12 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 7)).toEqual([
         "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "cursor",
+        "latest",
         "approve",
         "complete",
       ]);
@@ -12639,6 +12722,29 @@ describe("TS backend runtime composition", () => {
         requests.push(url);
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "77777777-7777-4777-8777-777777777777",
+            schema_version: 1,
+            covers_tables: [],
+            oplog_seq: 0,
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+            created_at: "2026-05-14T00:00:00Z",
+          });
         }
         if (url.endsWith("/approve")) {
           return Response.json({ code: "PAIRING_CLOSED", message: "closed" }, { status: 409 });
@@ -12707,8 +12813,12 @@ describe("TS backend runtime composition", () => {
         code: "internal_error",
         message: expect.stringContaining("PAIRING_CLOSED"),
       });
-      expect(requests.map((request) => request.split("/").pop())).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 6)).toEqual([
         "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "cursor",
+        "latest",
         "approve",
       ]);
     } finally {

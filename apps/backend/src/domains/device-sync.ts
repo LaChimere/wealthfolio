@@ -167,6 +167,7 @@ export interface LocalDeviceSyncServiceDependencies {
   onPairingComplete?: () => Promise<unknown> | unknown;
   bootstrapSnapshot?: () => Promise<unknown> | unknown;
   triggerSyncCycle?: () => Promise<unknown> | unknown;
+  generateSnapshot?: () => Promise<unknown> | unknown;
 }
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
@@ -261,6 +262,7 @@ export function createLocalDeviceSyncService({
   onPairingComplete,
   bootstrapSnapshot,
   triggerSyncCycle,
+  generateSnapshot,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
@@ -628,9 +630,6 @@ export function createLocalDeviceSyncService({
           connectService,
           secretService,
         );
-      if (db && localBootstrapRequired(db, deviceId)) {
-        throw deviceSyncDisabled();
-      }
       if (db && localHasPendingSyncOutbox(db)) {
         if (!triggerSyncCycle) {
           throw deviceSyncDisabled();
@@ -642,6 +641,9 @@ export function createLocalDeviceSyncService({
         if (localHasPendingSyncOutbox(db)) {
           throw deviceSyncDisabled();
         }
+      }
+      if (db) {
+        await runPairingTransferSnapshot(generateSnapshot);
       }
       try {
         await fetchDeviceSyncJsonRaw(
@@ -2847,6 +2849,29 @@ function pairingTransferCycleCanProceed(cycleResult: unknown): boolean {
   }
   const deadLetterCount = cycleResult.deadLetterCount ?? 0;
   return status === "ok" && deadLetterCount === 0;
+}
+
+async function runPairingTransferSnapshot(
+  generateSnapshot: (() => Promise<unknown> | unknown) | undefined,
+): Promise<void> {
+  if (!generateSnapshot) {
+    throw deviceSyncDisabled();
+  }
+  const result = await Promise.resolve(generateSnapshot());
+  if (!isRecord(result)) {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      "Failed to parse snapshot upload response",
+      500,
+    );
+  }
+  if (optionalString(result.status) !== "uploaded") {
+    throw new DeviceSyncServiceError(
+      "internal_error",
+      `Snapshot upload failed: ${optionalString(result.message) ?? "Snapshot upload did not complete"}`,
+      500,
+    );
+  }
 }
 
 function localBootstrapRequired(db: Database, deviceId: string): boolean {
