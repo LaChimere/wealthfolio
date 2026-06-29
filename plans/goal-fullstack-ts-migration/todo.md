@@ -7006,6 +7006,12 @@ contract:
   missing methods a type-check failure instead of a silent `not_implemented`
   fallback. Full Connect/device-sync domain suites and backend type-check
   passed.
+- `pr5-runtime-sync-dead-disabled-factory-cleanup`: verification passed. Removed
+  the now-unreferenced disabled Connect, Connect device-sync, and standalone
+  device-sync factory exports plus their stale feature-disabled fallback bodies,
+  leaving only the explicit error helpers still used by real runtime
+  precondition gates. Full Connect/device-sync domain suites and backend
+  type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
