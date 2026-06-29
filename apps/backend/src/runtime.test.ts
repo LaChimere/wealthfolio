@@ -16202,6 +16202,115 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to fall back from OpenFIGI to Yahoo quotes", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-openfigi-fallback-route-"),
+    );
+    const chartSymbols: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith("https://api.openfigi.com/")) {
+          throw new Error(`unexpected OpenFIGI quote fetch: ${url}`);
+        }
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=openfigi-fallback; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=openfigi-fallback");
+          return Promise.resolve(new Response("openfigi-fallback-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=openfigi-fallback");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("crumb")).toBe("openfigi-fallback-crumb");
+          chartSymbols.push("AAPL");
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    meta: { currency: "USD" },
+                    timestamp: [1767571200],
+                    indicators: { quote: [{ close: [10.5] }] },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-openfigi-fallback-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "AAPL",
+            "AAPL",
+            "XNAS",
+            JSON.stringify({ preferred_provider: "OPENFIGI" }),
+            "runtime-openfigi-fallback-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assetIds: ["runtime-openfigi-fallback-asset"],
+          refetchAll: false,
+        }),
+      });
+      expect(response.status).toBe(204);
+      expect(chartSymbols).toEqual(["AAPL"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { quote_source: string; close: string; currency: string; state_source: string },
+              []
+            >(
+              `
+                SELECT q.source AS quote_source, q.close, q.currency, s.data_source AS state_source
+                FROM quotes q
+                JOIN quote_sync_state s ON s.asset_id = q.asset_id
+                WHERE q.asset_id = 'runtime-openfigi-fallback-asset'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          quote_source: "YAHOO",
+          close: "10.5",
+          currency: "USD",
+          state_source: "YAHOO",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to MarketData.app provider quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-marketdata-app-route-"),
