@@ -9230,9 +9230,8 @@ describe("TS Connect device sync local service", () => {
           keyVersion: 1,
         }),
       );
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
     } finally {
       db.close();
@@ -9368,9 +9367,8 @@ describe("TS Connect device sync local service", () => {
       ]);
       reconcileMode = "duplicate-action";
       requests.length = 0;
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
       reconcileMode = "noop";
 
@@ -9656,27 +9654,23 @@ describe("TS Connect device sync local service", () => {
       });
 
       latestSnapshotMode = "missing-schema";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       latestSnapshotMode = "float-seq";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       latestSnapshotMode = "duplicate-float-seq";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       latestSnapshotMode = "unsafe-seq";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
     } finally {
       db.close();
@@ -9888,27 +9882,23 @@ describe("TS Connect device sync local service", () => {
       pullMode = "empty";
 
       serverCursor = "bad";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       serverCursor = "float-token";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       serverCursor = "duplicate-float-token";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
 
       serverCursor = "duplicate-action";
-      await expect(service.triggerDeviceSyncCycle()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
       });
     } finally {
       db.close();

@@ -8134,7 +8134,11 @@ async function triggerLocalDeviceSyncCycle(
       deviceId,
     );
     if (reconcile.actionInvalid || reconcile.cursorInvalid || reconcile.latestSnapshotInvalid) {
-      throw deviceSyncDisabled();
+      throw new ConnectServiceError(
+        "internal_error",
+        "Failed to parse reconcile-ready-state response",
+        500,
+      );
     }
     if (reconcile.action === "NOOP" && !localHasPendingSyncOutbox(db)) {
       markLocalSyncCycleOutcome(db, "ok");
