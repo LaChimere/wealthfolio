@@ -474,6 +474,7 @@ function createServicesFromDatabase(
     env: runtimeOptions.env,
     fetch: runtimeOptions.marketDataFetch,
     restoreSyncSession: () => connectService.restoreSyncSession(),
+    eventBus,
     appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),
   });
   const options: BackendRequestHandlerOptions = {

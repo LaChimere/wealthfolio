@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 
+import { DEVICE_SYNC_PULL_COMPLETE_EVENT } from "../domain-events/planner";
 import type { BackendEventBus } from "../events";
 import type { AccountService } from "./accounts";
 import { ACTIVITY_BULK_CREATED_ASSET_IDS, type ActivityService } from "./activities";
@@ -43,6 +44,7 @@ export interface LocalConnectDeviceSyncServiceDependencies {
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   restoreSyncSession?: () => Promise<unknown> | unknown;
+  eventBus?: BackendEventBus;
   appVersion?: string;
   deviceDisplayName?: string;
   platform?: string;
@@ -4196,6 +4198,7 @@ export function createLocalConnectDeviceSyncService({
   env = process.env,
   fetch: fetchImpl = fetch,
   restoreSyncSession,
+  eventBus,
   appVersion,
   deviceDisplayName = DEVICE_ENROLL_DISPLAY_NAME,
   platform = detectDevicePlatform(process.platform),
@@ -4297,6 +4300,7 @@ export function createLocalConnectDeviceSyncService({
           env,
           fetchImpl,
           restoreDeviceSyncSession,
+          eventBus,
         );
         const bootstrapStatus = optionalString(bootstrap.status) ?? "not_attempted";
         const bootstrapSnapshotId = optionalString(bootstrap.snapshotId);
@@ -4360,6 +4364,7 @@ export function createLocalConnectDeviceSyncService({
         env,
         fetchImpl,
         restoreDeviceSyncSession,
+        eventBus,
       );
     },
     async generateDeviceSnapshotNow() {
@@ -6301,6 +6306,7 @@ async function bootstrapSnapshotIfNotReady(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   restoreSession?: RestoreConnectSession,
+  eventBus?: BackendEventBus,
 ): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
@@ -6418,13 +6424,52 @@ async function bootstrapSnapshotIfNotReady(
     };
   }
   if (latestSnapshotStatus.kind === "present") {
-    await assertLocalSnapshotDownloadPreconditions(
+    const safeSnapshotCursor = i64ToSafeNumberOrNull(latestSnapshotStatus.oplogSeq);
+    if (safeSnapshotCursor === null) {
+      throw new ConnectServiceError(
+        "internal_error",
+        "Snapshot oplog_seq is outside JavaScript safe integer range",
+        500,
+      );
+    }
+    const blob = await downloadLocalSnapshotWithPreconditions(
       env,
       fetchImpl,
       session.accessToken,
       deviceId,
       latestSnapshotStatus,
     );
+    const sqliteImage = await decodeLocalSnapshotSqlitePayload(blob, identity);
+    const tablesToRestore = localSnapshotTablesToRestore(latestSnapshotStatus.coversTables);
+    const snapshotPath = join(tmpdir(), `wf_snapshot_server_${randomUUID()}.db`);
+    try {
+      writeFileSync(snapshotPath, sqliteImage);
+      restoreLocalSnapshotTablesFromFile(
+        db,
+        snapshotPath,
+        tablesToRestore,
+        safeSnapshotCursor,
+        identity,
+      );
+      eventBus?.publish({ name: DEVICE_SYNC_PULL_COMPLETE_EVENT });
+      try {
+        clearLocalMinSnapshotCreatedAt(db, deviceId);
+      } catch (error) {
+        console.warn(`[Connect] Failed to clear snapshot freshness gate: ${errorMessage(error)}`);
+      }
+    } finally {
+      try {
+        rmSync(snapshotPath, { force: true });
+      } catch (error) {
+        console.warn(`[Connect] Failed to remove temporary snapshot file: ${errorMessage(error)}`);
+      }
+    }
+    return {
+      status: "applied",
+      message: "Snapshot bootstrap completed",
+      snapshotId: latestSnapshotStatus.snapshotId,
+      cursor: safeSnapshotCursor,
+    };
   }
   throw deviceSyncDisabled();
 }
@@ -6514,6 +6559,7 @@ type LocalLatestSnapshotStatus =
       oplogSeq: I64Value;
       createdAt: string;
       checksum: string | null;
+      coversTables: string[];
     }
   | { kind: "unknown" };
 
@@ -6567,6 +6613,7 @@ async function localLatestSnapshotStatusBestEffort(
         oplogSeq: requiredI64FromRawJson(bodyText, ["oplogSeq", "oplog_seq"]),
         createdAt: requiredStringValue(parsed.createdAt ?? parsed.created_at, "snapshot metadata"),
         checksum: optionalString(parsed.checksum),
+        coversTables: parseSnapshotCoversTables(parsed.coversTables ?? parsed.covers_tables),
       };
       if (snapshotId !== null && isBackendStrictUuid(snapshotId)) {
         return latestStatus;
@@ -6658,6 +6705,7 @@ async function localCursorLatestSnapshotStatusBestEffort(
       oplogSeq: requiredI64FromRawJson(latestSnapshotRawToken ?? "", ["oplogSeq", "oplog_seq"]),
       createdAt: "",
       checksum: null,
+      coversTables: [],
     };
   } catch {
     return { kind: "unknown" };
@@ -6772,13 +6820,13 @@ async function localEventsCursorBestEffort(
   }
 }
 
-async function assertLocalSnapshotDownloadPreconditions(
+async function downloadLocalSnapshotWithPreconditions(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   accessToken: string,
   deviceId: string,
   latest: Extract<LocalLatestSnapshotStatus, { kind: "present" }>,
-): Promise<void> {
+): Promise<Uint8Array> {
   let response: Response;
   try {
     response = await fetchImpl(
@@ -6842,6 +6890,7 @@ async function assertLocalSnapshotDownloadPreconditions(
       500,
     );
   }
+  return blob;
 }
 
 function parseRequiredSnapshotStringHeader(headers: Headers, name: string): string {
@@ -6862,6 +6911,229 @@ function parseRequiredSnapshotI32Header(headers: Headers, name: string): number 
     throw new ConnectServiceError("internal_error", `Invalid request: Invalid header ${name}`, 500);
   }
   return parsed;
+}
+
+async function decodeLocalSnapshotSqlitePayload(
+  blob: Uint8Array,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): Promise<Buffer> {
+  if (!identity.rootKey) {
+    throw new ConnectServiceError("internal_error", "Missing root_key in sync identity", 500);
+  }
+  if (!identity.keyVersion || identity.keyVersion <= 0) {
+    throw new ConnectServiceError("internal_error", "Invalid key version in sync identity", 500);
+  }
+  const encryptedPayload = Buffer.from(blob).toString("utf8").trim();
+  const crypto = createSyncCryptoService();
+  let dek: string;
+  try {
+    dek = (await crypto.deriveDek(identity.rootKey, identity.keyVersion)).value;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to derive snapshot DEK: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  let decrypted: string;
+  try {
+    decrypted = (await crypto.decrypt(dek, encryptedPayload)).value;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to decrypt snapshot payload: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  const sqliteBytes = Buffer.from(decrypted.trim(), "base64");
+  if (sqliteBytes.subarray(0, 16).toString("utf8") !== "SQLite format 3\u0000") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Decrypted snapshot is not a valid SQLite image",
+      500,
+    );
+  }
+  return sqliteBytes;
+}
+
+function localSnapshotTablesToRestore(
+  coversTables: string[],
+): Array<(typeof APP_SYNC_TABLES)[number]> {
+  const tables = coversTables.filter((table): table is (typeof APP_SYNC_TABLES)[number] =>
+    (APP_SYNC_TABLES as readonly string[]).includes(table),
+  );
+  return tables.length > 0 ? tables : [...APP_SYNC_TABLES];
+}
+
+function restoreLocalSnapshotTablesFromFile(
+  db: Database,
+  snapshotPath: string,
+  tablesToRestore: Array<(typeof APP_SYNC_TABLES)[number]>,
+  cursor: number,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+): void {
+  const alias = `snapshot_${randomUUID().replaceAll("-", "")}`;
+  let attached = false;
+  try {
+    db.prepare(
+      `ATTACH DATABASE '${escapeSqliteString(snapshotPath)}' AS ${quoteReplayIdentifier(alias)}`,
+    ).run();
+    attached = true;
+    const restoreTransaction = db.transaction(() => {
+      db.prepare("PRAGMA defer_foreign_keys = ON").run();
+      const now = snapshotMetadataTimestampNow();
+      db.prepare("DELETE FROM sync_outbox").run();
+      db.prepare("DELETE FROM sync_entity_metadata").run();
+      db.prepare("DELETE FROM sync_applied_events").run();
+      db.prepare("DELETE FROM sync_table_state").run();
+      db.prepare("DELETE FROM sync_device_config WHERE device_id <> ?").run(identity.deviceId);
+
+      for (const table of tablesToRestore) {
+        const targetColumns = localVisibleTableColumns(db, "main", table);
+        const sourceColumns = localVisibleTableColumns(db, alias, table);
+        if (sourceColumns.length === 0) {
+          continue;
+        }
+        const sourceColumnSet = new Set(sourceColumns);
+        const commonColumns = targetColumns.filter((column) => sourceColumnSet.has(column));
+        if (commonColumns.length === 0) {
+          throw new ConnectServiceError(
+            "internal_error",
+            `Snapshot table '${table}' has no compatible columns to restore`,
+            500,
+          );
+        }
+        const tableIdent = quoteReplayIdentifier(table);
+        const aliasIdent = quoteReplayIdentifier(alias);
+        const columnsSql = commonColumns.map(quoteReplayIdentifier).join(", ");
+        const filter = SNAPSHOT_EXPORT_FILTERS[table];
+        const clearSql =
+          filter === undefined
+            ? `DELETE FROM ${tableIdent}`
+            : `DELETE FROM ${tableIdent} WHERE ${filter}`;
+        db.prepare(clearSql).run();
+        db.prepare(
+          `
+            INSERT INTO ${tableIdent} (${columnsSql})
+            SELECT ${columnsSql} FROM ${aliasIdent}.${tableIdent}
+          `,
+        ).run();
+        db.prepare(
+          `
+            INSERT INTO sync_table_state (
+              table_name, enabled, last_snapshot_restore_at, last_incremental_apply_at
+            )
+            VALUES (?, 1, ?, NULL)
+            ON CONFLICT(table_name) DO UPDATE SET
+              enabled = 1,
+              last_snapshot_restore_at = excluded.last_snapshot_restore_at
+          `,
+        ).run(table, now);
+      }
+
+      db.prepare(
+        `
+          INSERT INTO sync_cursor (id, cursor, updated_at)
+          VALUES (1, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            cursor = excluded.cursor,
+            updated_at = excluded.updated_at
+        `,
+      ).run(cursor, now);
+      upsertRestoredLocalDeviceConfig(db, identity, now);
+      db.prepare(
+        `
+          INSERT INTO sync_engine_state (
+            id, lock_version, last_push_at, last_pull_at, last_error,
+            consecutive_failures, next_retry_at, last_cycle_status, last_cycle_duration_ms
+          )
+          VALUES (1, 0, NULL, ?, NULL, 0, NULL, 'ok', NULL)
+          ON CONFLICT(id) DO UPDATE SET
+            last_pull_at = excluded.last_pull_at,
+            last_error = NULL,
+            consecutive_failures = 0,
+            next_retry_at = NULL,
+            last_cycle_status = 'ok'
+        `,
+      ).run(now);
+    });
+    restoreTransaction();
+    try {
+      db.prepare(`DETACH DATABASE ${quoteReplayIdentifier(alias)}`).run();
+      attached = false;
+    } catch (error) {
+      console.warn(`[Connect] Failed to detach restored snapshot database: ${errorMessage(error)}`);
+    }
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to restore snapshot SQLite image: ${errorMessage(error)}`,
+      500,
+    );
+  } finally {
+    if (attached) {
+      try {
+        db.prepare(`DETACH DATABASE ${quoteReplayIdentifier(alias)}`).run();
+      } catch {
+        // Best-effort cleanup mirrors Rust's detach-on-error behavior.
+      }
+    }
+  }
+}
+
+function localVisibleTableColumns(db: Database, schema: "main" | string, table: string): string[] {
+  return db
+    .query<{ name: string; hidden: number }, [string]>(
+      `SELECT name, hidden FROM ${quoteReplayIdentifier(schema)}.pragma_table_xinfo(?)`,
+    )
+    .all(table)
+    .filter((column) => column.hidden === 0)
+    .map((column) => column.name);
+}
+
+function upsertRestoredLocalDeviceConfig(
+  db: Database,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+  now: string,
+): void {
+  if (sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    db.prepare(
+      `
+        INSERT INTO sync_device_config (
+          device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+        )
+        VALUES (?, ?, 'trusted', ?, NULL)
+        ON CONFLICT(device_id) DO UPDATE SET
+          key_version = excluded.key_version,
+          trust_state = 'trusted',
+          last_bootstrap_at = excluded.last_bootstrap_at
+      `,
+    ).run(identity.deviceId, identity.keyVersion, now);
+    return;
+  }
+  db.prepare(
+    `
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES (?, ?, 'trusted', ?)
+      ON CONFLICT(device_id) DO UPDATE SET
+        key_version = excluded.key_version,
+        trust_state = 'trusted',
+        last_bootstrap_at = excluded.last_bootstrap_at
+    `,
+  ).run(identity.deviceId, identity.keyVersion, now);
+}
+
+function clearLocalMinSnapshotCreatedAt(db: Database, deviceId: string): void {
+  if (!sqliteColumnExists(db, "sync_device_config", "min_snapshot_created_at")) {
+    return;
+  }
+  db.prepare(
+    `
+      UPDATE sync_device_config
+      SET min_snapshot_created_at = NULL
+      WHERE device_id = ?
+    `,
+  ).run(deviceId);
 }
 
 function chooseLocalSnapshotStatus(
@@ -6941,6 +7213,13 @@ function validSnapshotLatestMetadataRawShape(text: string): boolean {
     rawJsonStringTokenIsValid(checksumTokens[0] ?? "") &&
     rawJsonStringTokenIsValid(createdAtTokens[0] ?? "")
   );
+}
+
+function parseSnapshotCoversTables(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === "string");
 }
 
 function validSyncLatestSnapshotRefShape(value: unknown): value is Record<string, unknown> {
@@ -7252,7 +7531,16 @@ async function uploadLocalDeviceSnapshot(
   const keyVersion = Math.max(1, identity.keyVersion ?? 1);
   const sqliteBytes = exportLocalSnapshotSqliteImage(db);
   const crypto = createSyncCryptoService();
-  const dek = (await crypto.deriveDek(identity.rootKey, keyVersion)).value;
+  let dek: string;
+  try {
+    dek = (await crypto.deriveDek(identity.rootKey, keyVersion)).value;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to derive snapshot DEK: ${errorMessage(error)}`,
+      500,
+    );
+  }
   const encryptedSnapshot = (await crypto.encrypt(dek, sqliteBytes.toString("base64"))).value;
   const payload = Buffer.from(encryptedSnapshot, "utf8");
   const checksum = `sha256:${createHash("sha256").update(payload).digest("hex")}`;

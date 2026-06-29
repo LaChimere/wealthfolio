@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -19,6 +19,7 @@ import {
   ACTIVITIES_CHANGED_EVENT,
   ASSETS_CREATED_EVENT,
   ASSETS_UPDATED_EVENT,
+  DEVICE_SYNC_PULL_COMPLETE_EVENT,
   HOLDINGS_CHANGED_EVENT,
   MANUAL_SNAPSHOT_SAVED_EVENT,
 } from "./domain-events/planner";
@@ -9317,6 +9318,236 @@ describe("TS backend runtime composition", () => {
         "https://api.example.test/api/v1/sync/snapshots/latest",
       ]);
     } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime Connect bootstrap-snapshot route to apply downloaded snapshot", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-bootstrap-apply-"));
+    const rootKey = Buffer.alloc(32, 35).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const snapshotPath = path.join(appDataDir, "remote-snapshot.db");
+    let encryptedBlob = Buffer.alloc(0);
+    let checksum = "";
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "BOOTSTRAP_SNAPSHOT" });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: 77,
+            created_at: "2026-01-02T00:00:00Z",
+            schema_version: 1,
+            covers_tables: ["quotes"],
+            size_bytes: encryptedBlob.byteLength,
+            checksum,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return new Response(new Uint8Array(encryptedBlob), {
+            headers: {
+              "content-type": "application/octet-stream",
+              "x-snapshot-schema-version": "1",
+              "x-snapshot-covers-tables": "quotes",
+              "x-snapshot-checksum": checksum,
+            },
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    copyFileSync(runtime.dbPath, snapshotPath);
+    const snapshotDb = openSqliteDatabase(snapshotPath);
+    try {
+      seedRuntimeAsset(snapshotDb, "bootstrap-asset");
+      snapshotDb.exec(`
+        INSERT INTO quotes (
+          id, asset_id, day, source, close, currency, created_at, timestamp
+        )
+        VALUES (
+          'bootstrap-remote-manual', 'bootstrap-asset', '2026-01-02',
+          'MANUAL', '123', 'USD', '2026-01-02T00:00:00+00:00',
+          '2026-01-02T00:00:00+00:00'
+        );
+      `);
+      snapshotDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } finally {
+      snapshotDb.close();
+    }
+    const snapshotBytes = readFileSync(snapshotPath);
+    encryptedBlob = Buffer.from(
+      (await crypto.encrypt(dek, snapshotBytes.toString("base64"))).value,
+      "utf8",
+    );
+    checksum = `sha256:${createHash("sha256").update(encryptedBlob).digest("hex")}`;
+    const server = startBackendServer(config, runtime.options);
+    const events: string[] = [];
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event.name);
+    });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "bootstrap-asset");
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 3 WHERE id = 1;
+          UPDATE sync_engine_state
+          SET last_cycle_status = 'stale_cursor', last_error = 'stale'
+          WHERE id = 1;
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES (
+            'bootstrap-outbox', 'quote', 'local-manual', 'create',
+            '2026-01-01T00:00:00Z', '{}', 5, 0, 'pending', 0,
+            'device-runtime', '2026-01-01T00:00:00Z'
+          );
+          INSERT INTO quotes (
+            id, asset_id, day, source, close, currency, created_at, timestamp
+          )
+          VALUES
+            (
+              'bootstrap-local-manual', 'bootstrap-asset', '2026-01-01',
+              'MANUAL', '10', 'USD', '2026-01-01T00:00:00+00:00',
+              '2026-01-01T00:00:00+00:00'
+            ),
+            (
+              'bootstrap-local-provider', 'bootstrap-asset', '2026-01-03',
+              'YAHOO', '99', 'USD', '2026-01-03T00:00:00+00:00',
+              '2026-01-03T00:00:00+00:00'
+            );
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const bootstrapResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/bootstrap-snapshot`,
+        { method: "POST" },
+      );
+      expect(bootstrapResponse.status).toBe(200);
+      await expect(bootstrapResponse.json()).resolves.toEqual({
+        status: "applied",
+        message: "Snapshot bootstrap completed",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        cursor: 77,
+      });
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { id: string; source: string; close: string },
+              []
+            >("SELECT id, source, close FROM quotes ORDER BY id ASC")
+            .all(),
+        ).toEqual([
+          { id: "bootstrap-local-provider", source: "YAHOO", close: "99" },
+          { id: "bootstrap-remote-manual", source: "MANUAL", close: "123" },
+        ]);
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get(),
+        ).toEqual({ cursor: 77 });
+        expect(
+          verifyDb
+            .query<
+              {
+                key_version: number;
+                trust_state: string;
+                last_bootstrap_at: string | null;
+                min_snapshot_created_at: string | null;
+              },
+              []
+            >(
+              `
+                SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+                FROM sync_device_config
+                WHERE device_id = 'device-runtime'
+              `,
+            )
+            .get(),
+        ).toMatchObject({
+          key_version: 5,
+          trust_state: "trusted",
+          min_snapshot_created_at: null,
+        });
+        expect(
+          verifyDb.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          verifyDb
+            .query<
+              { last_cycle_status: string | null; last_error: string | null },
+              []
+            >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+            .get(),
+        ).toEqual({ last_cycle_status: "ok", last_error: null });
+        expect(
+          verifyDb
+            .query<
+              { last_snapshot_restore_at: string | null },
+              []
+            >("SELECT last_snapshot_restore_at FROM sync_table_state WHERE table_name = 'quotes'")
+            .get()?.last_snapshot_restore_at,
+        ).toEqual(expect.any(String));
+        expect(events).toContain(DEVICE_SYNC_PULL_COMPLETE_EVENT);
+      } finally {
+        verifyDb.close();
+      }
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+        "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+      ]);
+    } finally {
+      unsubscribe?.();
       server.stop();
       await runtime.close();
     }

@@ -10402,8 +10402,9 @@ describe("TS Connect device sync local service", () => {
         '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740993,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
       cursorBody = '{"cursor":9007199254740992,"latest_snapshot":null}';
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot oplog_seq is outside JavaScript safe integer range",
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
@@ -11599,8 +11600,9 @@ describe("TS Connect device sync local service", () => {
       });
       cursorMode = "normal";
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
       });
       latestSchemaVersion = 1;
       cursorSchemaVersion = 2;
@@ -11625,7 +11627,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps READY bootstrap feature-gated when latest snapshot exists", async () => {
+  test("keeps READY bootstrap bounded at snapshot decode when latest snapshot exists", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (
@@ -11707,8 +11709,9 @@ describe("TS Connect device sync local service", () => {
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
@@ -11718,7 +11721,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps READY bootstrap feature-gated when cursor fallback has latest snapshot", async () => {
+  test("keeps READY bootstrap bounded at snapshot decode when cursor fallback has latest snapshot", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (
@@ -11810,8 +11813,9 @@ describe("TS Connect device sync local service", () => {
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
