@@ -2739,7 +2739,12 @@ function brokerUnresolvedAssetActivityCreateInput(
   }
   const instrumentType = brokerActivityInstrumentType(activity, assetSymbol);
   if (!instrumentType) {
-    return null;
+    return brokerUnresolvedReviewActivityCreateInput(
+      activity,
+      accountId,
+      accountCurrency,
+      baseCurrency,
+    );
   }
   const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
   const sourceSystem =
@@ -2781,6 +2786,45 @@ function brokerUnresolvedAssetActivityCreateInput(
     status: needsReview ? "DRAFT" : "POSTED",
     needsReview,
     metadata: brokerActivityMetadata(activity),
+  };
+}
+
+function brokerUnresolvedReviewActivityCreateInput(
+  activity: Record<string, unknown>,
+  accountId: string,
+  accountCurrency: string | null,
+  baseCurrency: string | null,
+): Record<string, unknown> | null {
+  const activityId = optionalString(activity.id);
+  if (!activityId) {
+    return null;
+  }
+  const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
+  const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
+  const currency = brokerActivityResolvedCurrency(activity, accountCurrency, baseCurrency);
+  const sourceSystem =
+    optionalString(activity.source_system ?? activity.provider_type) ?? "SNAPTRADE";
+  return {
+    accountId,
+    activityType: rawActivityType.toUpperCase(),
+    subtype: optionalString(activity.subtype ?? activity.option_type ?? activity.raw_type),
+    activityDate:
+      optionalString(activity.trade_date ?? activity.settlement_date) ?? new Date().toISOString(),
+    quantity: brokerActivityAbsoluteNumberString(activity.units),
+    unitPrice: brokerActivityAbsoluteNumberString(activity.price),
+    amount: brokerActivityAbsoluteNumberString(activity.amount),
+    fee: brokerActivityAbsoluteNumberString(activity.fee),
+    currency,
+    comment: optionalString(activity.description ?? activity.external_reference_id),
+    fxRate: brokerActivityNumberString(activity.fx_rate),
+    sourceSystem,
+    sourceRecordId,
+    sourceGroupId: optionalString(activity.source_group_id),
+    idempotencyKey: brokerActivityIdempotencyKey(accountId, sourceSystem, sourceRecordId),
+    status: "DRAFT",
+    needsReview: true,
+    metadata: brokerActivityMetadata(activity),
+    allowMissingAsset: true,
   };
 }
 

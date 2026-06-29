@@ -2478,7 +2478,7 @@ describe("TS Connect local session service", () => {
     }
   });
 
-  test("keeps transaction-mode activity sync feature-gated until broker activity mapping lands", async () => {
+  test("syncs unresolved broker activities as review drafts", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE brokers_sync_state (
@@ -2497,6 +2497,7 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
     const service = createLocalConnectService({
       db,
       secretService,
@@ -2537,14 +2538,31 @@ describe("TS Connect local session service", () => {
       activityService: {
         getBrokerSyncProfile: () => null,
         saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
       },
     });
 
     try {
-      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
       });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+          metadata: expect.objectContaining({
+            symbol: expect.objectContaining({ symbol: "AAPL", raw_symbol: "AAPL" }),
+          }),
+        }),
+      ]);
       expect(
         db
           .query<
@@ -2560,8 +2578,8 @@ describe("TS Connect local session service", () => {
           )
           .get(),
       ).toEqual({
-        sync_status: "FAILED",
-        last_error: "Broker activity mapping is not available in this build.",
+        sync_status: "IDLE",
+        last_error: null,
         last_attempted_at: expect.stringMatching(/\+00:00$/),
         updated_at: expect.stringMatching(/\+00:00$/),
       });
@@ -4592,7 +4610,7 @@ describe("TS Connect local session service", () => {
     }
   });
 
-  test("keeps asset-backed broker activities feature-gated when the symbol is not local", async () => {
+  test("syncs asset-backed broker activities as review drafts when the symbol is not local", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE brokers_sync_state (
@@ -4616,6 +4634,7 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
     const service = createLocalConnectService({
       db,
       secretService,
@@ -4669,17 +4688,32 @@ describe("TS Connect local session service", () => {
         getBrokerSyncProfile: () => null,
         saveBrokerSyncProfileRules: (request) => request,
         checkExistingDuplicates: () => ({}),
-        bulkMutateActivities: () => {
-          throw new Error("should not import unknown broker symbols yet");
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
         },
       },
     });
 
     try {
-      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
       });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          currency: "USD",
+          sourceRecordId: "buy-activity-1",
+        }),
+      ]);
     } finally {
       db.close();
     }
@@ -5680,7 +5714,7 @@ describe("TS Connect local session service", () => {
     }
   });
 
-  test("recognizes broker activity page data aliases before applying mapper gate", async () => {
+  test("recognizes broker activity page data aliases before review-draft import", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE brokers_sync_state (
@@ -5699,6 +5733,7 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
     const service = createLocalConnectService({
       db,
       secretService,
@@ -5741,14 +5776,28 @@ describe("TS Connect local session service", () => {
       activityService: {
         getBrokerSyncProfile: () => null,
         saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
       },
     });
 
     try {
-      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
       });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+        }),
+      ]);
       expect(
         db
           .query<
@@ -5757,8 +5806,8 @@ describe("TS Connect local session service", () => {
           >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
           .get(),
       ).toEqual({
-        sync_status: "FAILED",
-        last_error: "Broker activity mapping is not available in this build.",
+        sync_status: "IDLE",
+        last_error: null,
       });
     } finally {
       db.close();
@@ -6459,7 +6508,7 @@ describe("TS Connect local session service", () => {
     }
   });
 
-  test("keeps broker activity mapper gate ahead of stuck pagination guard", async () => {
+  test("runs stuck pagination guard after unresolved review-draft imports", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE brokers_sync_state (
@@ -6478,6 +6527,7 @@ describe("TS Connect local session service", () => {
     `);
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
     const service = createLocalConnectService({
       db,
       secretService,
@@ -6532,14 +6582,28 @@ describe("TS Connect local session service", () => {
       activityService: {
         getBrokerSyncProfile: () => null,
         saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
       },
     });
 
     try {
-      await expect(service.syncBrokerActivities()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+        activitiesUpserted: 1,
       });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+        }),
+      ]);
       expect(
         db
           .query<
@@ -6549,7 +6613,8 @@ describe("TS Connect local session service", () => {
           .get(),
       ).toEqual({
         sync_status: "FAILED",
-        last_error: "Broker activity mapping is not available in this build.",
+        last_error:
+          "Pagination appears stuck (same first activity id returned for multiple pages).",
       });
     } finally {
       db.close();
