@@ -10870,6 +10870,181 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect snapshot upload cancellation into generate-snapshot retry", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-cancel-"));
+    const rootKey = Buffer.alloc(32, 36).toString("base64");
+    const uploadEventIds: string[] = [];
+    let uploadAttempts = 0;
+    let server: ReturnType<typeof startBackendServer>;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 10 });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/upload")) {
+          uploadAttempts += 1;
+          const headers = new Headers(init?.headers);
+          uploadEventIds.push(headers.get("x-snapshot-event-id") ?? "");
+          await fetch(`${server.baseUrl}/api/v1/connect/device/cancel-snapshot`, {
+            method: "POST",
+          });
+          return Response.json(
+            { code: "SYNC_TRANSACTION_FAILED", message: "temporary transaction failure" },
+            { status: 500 },
+          );
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.prepare("UPDATE sync_cursor SET cursor = 10 WHERE id = 1").run();
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const generateResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/generate-snapshot`,
+        { method: "POST" },
+      );
+      expect(generateResponse.status).toBe(200);
+      await expect(generateResponse.json()).resolves.toEqual({
+        status: "cancelled",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Snapshot upload cancelled during transfer",
+      });
+      expect(uploadAttempts).toBe(1);
+      expect(uploadEventIds[0]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime Connect snapshot cancellation during generate-snapshot preflight", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-generate-cancel-preflight-"),
+    );
+    const rootKey = Buffer.alloc(32, 37).toString("base64");
+    const deviceSyncRequests: string[] = [];
+    let server: ReturnType<typeof startBackendServer>;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          await fetch(`${server.baseUrl}/api/v1/connect/device/cancel-snapshot`, {
+            method: "POST",
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const generateResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/device/generate-snapshot`,
+        { method: "POST" },
+      );
+      expect(generateResponse.status).toBe(200);
+      await expect(generateResponse.json()).resolves.toEqual({
+        status: "cancelled",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Snapshot upload cancelled before export",
+      });
+      expect(deviceSyncRequests).toEqual([
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime device cloud read routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-device-read-"));
     const deviceSyncRequests: Array<{ url: string; authorization: string; requestId: string }> = [];

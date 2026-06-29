@@ -4207,7 +4207,9 @@ export function createLocalConnectDeviceSyncService({
   const disabledService = createDisabledConnectDeviceSyncService();
   const runWithEnrollLock = createAsyncOperationLock();
   const runWithSessionRestoreLock = createAsyncOperationLock();
+  const runWithSnapshotGenerationLock = createAsyncOperationLock();
   const readyStateOverwriteApprovals = new Set<string>();
+  let snapshotUploadCancelled = false;
   const restoreDeviceSyncSession = () => {
     if (!secretService) {
       throw deviceSyncDisabled();
@@ -4368,13 +4370,17 @@ export function createLocalConnectDeviceSyncService({
       );
     },
     async generateDeviceSnapshotNow() {
-      return await generateSnapshotIfTrusted(
-        db,
-        secretService,
-        env,
-        fetchImpl,
-        restoreDeviceSyncSession,
-      );
+      return await runWithSnapshotGenerationLock(async () => {
+        snapshotUploadCancelled = false;
+        return await generateSnapshotIfTrusted(
+          db,
+          secretService,
+          env,
+          fetchImpl,
+          restoreDeviceSyncSession,
+          () => snapshotUploadCancelled,
+        );
+      });
     },
     async startDeviceSyncBackgroundEngine() {
       if (!(await localSyncIdentityCanRunBackground(secretService))) {
@@ -4428,6 +4434,7 @@ export function createLocalConnectDeviceSyncService({
       );
     },
     cancelDeviceSnapshotUpload() {
+      snapshotUploadCancelled = true;
       return {
         status: "cancel_requested",
         message: "Snapshot upload cancellation requested",
@@ -7454,6 +7461,7 @@ async function generateSnapshotIfTrusted(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   restoreSession?: RestoreConnectSession,
+  isSnapshotUploadCancelled: () => boolean = () => false,
 ): Promise<Record<string, unknown>> {
   if (!secretService) {
     throw deviceSyncDisabled();
@@ -7471,6 +7479,9 @@ async function generateSnapshotIfTrusted(
       oplogSeq: null,
       message: "Current device is not trusted",
     };
+  }
+  if (isSnapshotUploadCancelled()) {
+    return snapshotUploadCancelledResult("Snapshot upload cancelled before export");
   }
   const localCursor = getLocalSyncCursor(db);
   const serverCursor = await fetchLocalEventsCursorOrThrow(
@@ -7510,6 +7521,7 @@ async function generateSnapshotIfTrusted(
     session.accessToken,
     identity,
     localCursor,
+    isSnapshotUploadCancelled,
   );
 }
 
@@ -7520,6 +7532,7 @@ async function uploadLocalDeviceSnapshot(
   accessToken: string,
   identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
   baseSeq: number,
+  isSnapshotUploadCancelled: () => boolean,
 ): Promise<Record<string, unknown>> {
   if (!identity.rootKey) {
     throw new ConnectServiceError(
@@ -7529,7 +7542,13 @@ async function uploadLocalDeviceSnapshot(
     );
   }
   const keyVersion = Math.max(1, identity.keyVersion ?? 1);
+  if (isSnapshotUploadCancelled()) {
+    return snapshotUploadCancelledResult("Snapshot upload cancelled before export");
+  }
   const sqliteBytes = exportLocalSnapshotSqliteImage(db);
+  if (isSnapshotUploadCancelled()) {
+    return snapshotUploadCancelledResult("Snapshot upload cancelled after export");
+  }
   const crypto = createSyncCryptoService();
   let dek: string;
   try {
@@ -7566,6 +7585,9 @@ async function uploadLocalDeviceSnapshot(
   };
   let response: { snapshotId: string; oplogSeq: I64Value };
   for (let attempt = 1; ; attempt += 1) {
+    if (isSnapshotUploadCancelled()) {
+      return snapshotUploadCancelledResult("Snapshot upload cancelled during transfer");
+    }
     try {
       response = await postLocalSnapshotUpload(
         env,
@@ -7582,6 +7604,9 @@ async function uploadLocalDeviceSnapshot(
         localSnapshotUploadErrorIsRetryable(error) &&
         attempt < SNAPSHOT_UPLOAD_MAX_ATTEMPTS
       ) {
+        if (isSnapshotUploadCancelled()) {
+          return snapshotUploadCancelledResult("Snapshot upload cancelled during transfer");
+        }
         await delay(snapshotUploadBackoffMs(attempt));
         continue;
       }
@@ -7764,6 +7789,15 @@ function parseLocalSnapshotUploadError(
   } catch {
     return { code: null, message: bodyText.trim() || `HTTP ${status}` };
   }
+}
+
+function snapshotUploadCancelledResult(message: string): Record<string, unknown> {
+  return {
+    status: "cancelled",
+    snapshotId: null,
+    oplogSeq: null,
+    message,
+  };
 }
 
 function localSnapshotUploadErrorIsRetryable(error: LocalSnapshotUploadError): boolean {
