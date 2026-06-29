@@ -16086,6 +16086,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data search route to Alpha Vantage fallback", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-search-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT") {
+          return Promise.resolve(Response.json({ quotes: [] }));
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/finance/search?q=MSFT") {
+          return Promise.resolve(Response.json({ quotes: [] }));
+        }
+        if (url === "https://finnhub.io/api/v1/search?q=MSFT") {
+          expect((init?.headers as Record<string, string>)["X-Finnhub-Token"]).toBe("finnhub-key");
+          return Promise.resolve(Response.json({ result: [] }));
+        }
+        if (url.startsWith("https://www.alphavantage.co/query?")) {
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("function")).toBe("SYMBOL_SEARCH");
+          expect(parsed.searchParams.get("keywords")).toBe("MSFT");
+          expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+          return Promise.resolve(
+            Response.json({
+              bestMatches: [
+                {
+                  "1. symbol": "MSFT",
+                  "2. name": "Microsoft Corporation",
+                  "3. type": "Equity",
+                  "4. region": "NMS",
+                  "8. currency": "USD",
+                  "9. matchScore": "0.8000",
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("FINNHUB", "finnhub-key");
+      await runtime.options.secretService?.setSecret("ALPHA_VANTAGE", "alpha-key");
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/search?query=MSFT`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "MSFT",
+          shortName: "Microsoft Corporation",
+          exchange: "NMS",
+          exchangeMic: "XNAS",
+          exchangeName: "NASDAQ",
+          quoteType: "EQUITY",
+          currency: "USD",
+          currencySource: "provider",
+          dataSource: "ALPHA_VANTAGE",
+          score: 0.8,
+        }),
+      ]);
+      expect(calls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=MSFT",
+        "https://finnhub.io/api/v1/search?q=MSFT",
+        expect.stringContaining("https://www.alphavantage.co/query?"),
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
