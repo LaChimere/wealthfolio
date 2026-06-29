@@ -6879,6 +6879,12 @@ contract:
   remaining pending rows, and blocks stale-key plus invalid-entity dead-letter
   outcomes. Broad runtime/connect/device-sync tests, full `bun run check`,
   `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-broker-provider-asset-route-smoke`: verification passed.
+  The runtime `/api/v1/connect/sync/activities` route now has SQLite-backed
+  coverage proving symbol-only broker BUY records can use the migrated
+  market-data provider search seam to create provider-resolved equity assets and
+  persist linked broker activities. Targeted provider-resolved route smoke, full
+  runtime suite, full `bun run check`, and `git diff --check` passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
