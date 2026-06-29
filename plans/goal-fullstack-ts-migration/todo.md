@@ -7023,6 +7023,12 @@ contract:
   `sync_prices` payload, proving the Health Center fix calls the migrated
   market-data sync provider path and persists the requested asset's Yahoo quote.
   Full runtime suite and backend type-check passed.
+- `pr5-market-data-sync-route-provider-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync` route now has SQLite-backed coverage for a
+  non-empty asset target, proving the route calls the migrated Yahoo provider
+  sync, persists the quote, emits market/portfolio events, and enqueues the
+  bounded portfolio job with the requested asset target. Full runtime suite and
+  backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
