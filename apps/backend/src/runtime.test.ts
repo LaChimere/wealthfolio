@@ -17258,6 +17258,52 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to MarketData.app quote summaries", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-marketdata-resolve-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.marketdata.app/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
+        calls.push(url);
+        const parsed = new URL(url);
+        expect(parsed.pathname).toBe("/v1/stocks/prices/SHOP/");
+        return Promise.resolve(
+          Response.json({
+            s: "ok",
+            mid: [25.5],
+            updated: [1767657600],
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("MARKETDATA_APP", "test-key");
+
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=SHOP&exchangeMic=XTSE&instrumentType=EQUITY&quoteCcy=EUR&providerId=MARKETDATA_APP`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        currency: "CAD",
+        price: 25.5,
+        resolvedProviderId: "MARKETDATA_APP",
+      });
+      expect(calls).toEqual(["https://api.marketdata.app/v1/stocks/prices/SHOP/"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
