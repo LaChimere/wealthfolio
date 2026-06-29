@@ -8393,7 +8393,7 @@ async function localPushPendingSyncOutbox(
     );
   }
   if (events.length === 0) {
-    return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: 0 };
+    return { pushedCount: 0, serverCursor: localCursor, deadLetterCount: invalidEntityIds.length };
   }
   let response: { sentEventIds: string[]; serverCursor: number };
   try {
@@ -8409,7 +8409,12 @@ async function localPushPendingSyncOutbox(
         maxRetryCount,
       );
       if (handled) {
-        return { pushedCount: 0, serverCursor: localCursor, ...handled };
+        return {
+          pushedCount: 0,
+          serverCursor: localCursor,
+          ...handled,
+          deadLetterCount: handled.deadLetterCount + invalidEntityIds.length,
+        };
       }
     }
     throw error;
@@ -8419,7 +8424,7 @@ async function localPushPendingSyncOutbox(
   return {
     pushedCount: response.sentEventIds.length,
     serverCursor: response.serverCursor,
-    deadLetterCount: 0,
+    deadLetterCount: invalidEntityIds.length,
   };
 }
 

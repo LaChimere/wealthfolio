@@ -9325,7 +9325,7 @@ describe("TS Connect device sync local service", () => {
         status: "ok",
         lockVersion: 5,
         pushedCount: 0,
-        deadLetterCount: 0,
+        deadLetterCount: 1,
       });
       expect(
         db

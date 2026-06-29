@@ -166,6 +166,7 @@ export interface LocalDeviceSyncServiceDependencies {
   fetch?: typeof fetch;
   onPairingComplete?: () => Promise<unknown> | unknown;
   bootstrapSnapshot?: () => Promise<unknown> | unknown;
+  triggerSyncCycle?: () => Promise<unknown> | unknown;
 }
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
@@ -259,6 +260,7 @@ export function createLocalDeviceSyncService({
   fetch: fetchImpl = fetch,
   onPairingComplete,
   bootstrapSnapshot,
+  triggerSyncCycle,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
@@ -630,7 +632,16 @@ export function createLocalDeviceSyncService({
         throw deviceSyncDisabled();
       }
       if (db && localHasPendingSyncOutbox(db)) {
-        throw deviceSyncDisabled();
+        if (!triggerSyncCycle) {
+          throw deviceSyncDisabled();
+        }
+        const cycleResult = await Promise.resolve(triggerSyncCycle());
+        if (!pairingTransferCycleCanProceed(cycleResult)) {
+          throw deviceSyncDisabled();
+        }
+        if (localHasPendingSyncOutbox(db)) {
+          throw deviceSyncDisabled();
+        }
       }
       try {
         await fetchDeviceSyncJsonRaw(
@@ -2820,6 +2831,22 @@ function pairingBootstrapPhaseIsError(phase: Record<string, unknown>): phase is 
   message: string;
 } {
   return phase.phase === "error" && typeof phase.message === "string";
+}
+
+function pairingTransferCycleCanProceed(cycleResult: unknown): boolean {
+  if (!isRecord(cycleResult)) {
+    return false;
+  }
+  const status = optionalString(cycleResult.status);
+  if (
+    cycleResult.deadLetterCount !== undefined &&
+    (typeof cycleResult.deadLetterCount !== "number" ||
+      !Number.isFinite(cycleResult.deadLetterCount))
+  ) {
+    return false;
+  }
+  const deadLetterCount = cycleResult.deadLetterCount ?? 0;
+  return status === "ok" && deadLetterCount === 0;
 }
 
 function localBootstrapRequired(db: Database, deviceId: string): boolean {

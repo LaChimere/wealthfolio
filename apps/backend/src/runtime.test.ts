@@ -4256,7 +4256,7 @@ describe("TS backend runtime composition", () => {
         needsBootstrap: false,
         bootstrapSnapshotId: null,
         bootstrapSnapshotSeq: null,
-        deadLetterCount: 0,
+        deadLetterCount: 1,
       });
       expect(deviceSyncRequests).toEqual([
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
@@ -12040,9 +12040,10 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime pairing transfer route with pending outbox gate", async () => {
+  test("wires runtime pairing transfer route to flush pending outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-transfer-"));
     const requests: string[] = [];
+    let pushKeyMismatch = false;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -12054,6 +12055,31 @@ describe("TS backend runtime composition", () => {
         requests.push(url);
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/events/push")) {
+          if (pushKeyMismatch) {
+            return Response.json(
+              { code: "KEY_VERSION_MISMATCH", message: "old key" },
+              { status: 400 },
+            );
+          }
+          return Response.json({
+            accepted: [{ event_id: "pending-event" }],
+            duplicate: [],
+            server_cursor: 0,
+          });
         }
         return Response.json({ success: true });
       }) as typeof fetch,
@@ -12131,7 +12157,7 @@ describe("TS backend runtime composition", () => {
               payload_key_version, sent, status, retry_count, device_id, created_at
             )
             VALUES (
-              'pending-event', 'account', 'account-1', 'create',
+              'pending-event', 'account', '33333333-3333-4333-8333-333333333333', 'create',
               '2026-05-14T00:00:00Z', '{}', 2, 0, 'pending', 0,
               'device-runtime', '2026-05-14T00:00:00Z'
             )
@@ -12149,12 +12175,100 @@ describe("TS backend runtime composition", () => {
           signature: "signature",
         }),
       );
-      expect(blockedResponse.status).toBe(501);
-      await expect(blockedResponse.json()).resolves.toMatchObject({
+      expect(blockedResponse.status).toBe(200);
+      await expect(blockedResponse.json()).resolves.toEqual({ success: true });
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 6)).toEqual([
+        "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
+        "push",
+        "approve",
+      ]);
+      requests.length = 0;
+      pushKeyMismatch = true;
+
+      const blockedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        blockedDb
+          .prepare(
+            `
+            INSERT INTO sync_outbox (
+              event_id, entity, entity_id, op, client_timestamp, payload,
+              payload_key_version, sent, status, retry_count, device_id, created_at
+            )
+            VALUES (
+              'stale-event', 'account', '44444444-4444-4444-8444-444444444444', 'create',
+              '2026-05-14T00:00:00Z', '{}', 1, 0, 'pending', 0,
+              'device-runtime', '2026-05-14T00:00:00Z'
+            )
+          `,
+          )
+          .run();
+      } finally {
+        blockedDb.close();
+      }
+
+      const deadLetteredResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      );
+      expect(deadLetteredResponse.status).toBe(501);
+      await expect(deadLetteredResponse.json()).resolves.toMatchObject({
         code: "not_implemented",
       });
-      expect(requests.map((request) => request.split("/").pop())).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 5)).toEqual([
         "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
+        "push",
+      ]);
+      requests.length = 0;
+      pushKeyMismatch = false;
+
+      const invalidEntityDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        invalidEntityDb
+          .prepare(
+            `
+            INSERT INTO sync_outbox (
+              event_id, entity, entity_id, op, client_timestamp, payload,
+              payload_key_version, sent, status, retry_count, device_id, created_at
+            )
+            VALUES (
+              'invalid-entity-event', 'account', 'not-a-uuid', 'create',
+              '2026-05-14T00:00:00Z', '{}', 2, 0, 'pending', 0,
+              'device-runtime', '2026-05-14T00:00:00Z'
+            )
+          `,
+          )
+          .run();
+      } finally {
+        invalidEntityDb.close();
+      }
+
+      const invalidEntityResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/complete-with-transfer", {
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      );
+      expect(invalidEntityResponse.status).toBe(501);
+      await expect(invalidEntityResponse.json()).resolves.toMatchObject({
+        code: "not_implemented",
+      });
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 4)).toEqual([
+        "token?grant_type=refresh_token",
+        "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
       ]);
     } finally {
       server.stop();
