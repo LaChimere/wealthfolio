@@ -7139,6 +7139,12 @@ contract:
   OpenFIGI mapping for exact bond identifiers, duplicate rows are deduplicated,
   and the route returns the Rust-shaped bond search payload. Full runtime suite
   and full repository check passed.
+- `pr5-boerse-frankfurt-route-search-smoke`: verification passed. The runtime
+  `/api/v1/market-data/search` route now has coverage for Börse Frankfurt
+  fallback search, proving empty Yahoo and OpenFIGI results fall through to
+  TradingView search, requests use the Rust-compatible user agent, XETR exchange
+  metadata maps to EUR, and the route returns the Rust-shaped search payload.
+  Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
