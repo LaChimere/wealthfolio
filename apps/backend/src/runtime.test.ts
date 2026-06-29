@@ -16502,6 +16502,174 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to Alpha Vantage FX and crypto quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-pairs-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        expect(init).toBeUndefined();
+        const url = String(input);
+        if (!url.startsWith("https://www.alphavantage.co/query")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+        const fn = parsed.searchParams.get("function");
+        if (fn === "FX_DAILY") {
+          expect(parsed.searchParams.get("from_symbol")).toBe("EUR");
+          expect(parsed.searchParams.get("to_symbol")).toBe("USD");
+          expect(parsed.searchParams.get("outputsize")).toBe("full");
+          calls.push("FX_DAILY:EUR:USD:full");
+          return Promise.resolve(
+            Response.json({
+              "Time Series FX (Daily)": {
+                "2026-06-29": {
+                  "1. open": "1.1",
+                  "2. high": "1.3",
+                  "3. low": "1.0",
+                  "4. close": "1.2",
+                },
+              },
+            }),
+          );
+        }
+        if (fn === "DIGITAL_CURRENCY_DAILY") {
+          expect(parsed.searchParams.get("symbol")).toBe("BTC");
+          expect(parsed.searchParams.get("market")).toBe("CAD");
+          expect(parsed.searchParams.has("outputsize")).toBe(false);
+          calls.push("DIGITAL_CURRENCY_DAILY:BTC:CAD");
+          return Promise.resolve(
+            Response.json({
+              "Time Series (Digital Currency Daily)": {
+                "2026-06-29": {
+                  "1a. open (CAD)": "140",
+                  "1b. open (USD)": "100",
+                  "2a. high (CAD)": "168",
+                  "2b. high (USD)": "120",
+                  "3a. low (CAD)": "126",
+                  "3b. low (USD)": "90",
+                  "4a. close (CAD)": "154",
+                  "4b. close (USD)": "110",
+                  "5. volume": "7",
+                },
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected Alpha Vantage function: ${fn ?? ""}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("ALPHA_VANTAGE", "alpha-key");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-alpha-fx-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET kind = ?, display_code = ?, quote_ccy = ?, instrument_type = ?, instrument_symbol = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "FX",
+            "EUR/USD",
+            "USD",
+            "FX",
+            "EUR",
+            JSON.stringify({
+              preferred_provider: "ALPHA_VANTAGE",
+              overrides: { ALPHA_VANTAGE: { type: "fx_pair", from: "EUR", to: "USD" } },
+            }),
+            "runtime-alpha-fx-asset",
+          );
+        seedRuntimeAsset(seedDb, "runtime-alpha-crypto-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_type = ?, instrument_symbol = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "BTC-CAD",
+            "CAD",
+            "CRYPTO",
+            "BTC",
+            JSON.stringify({
+              preferred_provider: "ALPHA_VANTAGE",
+              overrides: { ALPHA_VANTAGE: { type: "crypto_pair", symbol: "BTC", market: "CAD" } },
+            }),
+            "runtime-alpha-crypto-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assetIds: ["runtime-alpha-fx-asset", "runtime-alpha-crypto-asset"],
+          refetchAll: false,
+        }),
+      });
+      expect(response.status).toBe(204);
+      expect([...calls].sort()).toEqual([
+        "DIGITAL_CURRENCY_DAILY:BTC:CAD",
+        "FX_DAILY:EUR:USD:full",
+      ]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                asset_id: string;
+                source: string;
+                open: string | null;
+                high: string | null;
+                low: string | null;
+                close: string;
+                volume: string | null;
+                currency: string;
+              },
+              []
+            >(
+              "SELECT asset_id, source, open, high, low, close, volume, currency FROM quotes WHERE asset_id IN ('runtime-alpha-fx-asset', 'runtime-alpha-crypto-asset') ORDER BY asset_id",
+            )
+            .all(),
+        ).toEqual([
+          {
+            asset_id: "runtime-alpha-crypto-asset",
+            source: "ALPHA_VANTAGE",
+            open: "140",
+            high: "168",
+            low: "126",
+            close: "154",
+            volume: "7",
+            currency: "CAD",
+          },
+          {
+            asset_id: "runtime-alpha-fx-asset",
+            source: "ALPHA_VANTAGE",
+            open: "1.1",
+            high: "1.3",
+            low: "1.0",
+            close: "1.2",
+            volume: null,
+            currency: "USD",
+          },
+        ]);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to Boerse Frankfurt quotes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-boerse-route-"));
     const calls: string[] = [];
