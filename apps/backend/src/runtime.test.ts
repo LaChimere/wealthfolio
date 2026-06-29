@@ -16398,6 +16398,87 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Yahoo dividends route to crumb-authenticated chart fetches", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-yahoo-dividends-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=yahoo-dividend; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-dividend");
+          return Promise.resolve(new Response("dividend crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=yahoo-dividend");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("interval")).toBe("1d");
+          expect(parsed.searchParams.get("events")).toBe("div");
+          expect(parsed.searchParams.get("crumb")).toBe("dividend crumb");
+          expect(Number(parsed.searchParams.get("period2"))).toBeGreaterThan(
+            Number(parsed.searchParams.get("period1")),
+          );
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    events: {
+                      dividends: {
+                        latest: { amount: 0.24, date: 1735689600 },
+                        earlier: { amount: 0.22, date: 1704067200 },
+                      },
+                    },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const firstResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/yahoo/dividends?symbol=AAPL`,
+      );
+      expect(firstResponse.status).toBe(200);
+      await expect(firstResponse.json()).resolves.toEqual([
+        { amount: 0.22, date: 1704067200 },
+        { amount: 0.24, date: 1735689600 },
+      ]);
+
+      const secondResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/yahoo/dividends?symbol=AAPL`,
+      );
+      expect(secondResponse.status).toBe(200);
+      await expect(secondResponse.json()).resolves.toHaveLength(2);
+      expect(calls.filter((url) => url === "https://fc.yahoo.com")).toHaveLength(1);
+      expect(
+        calls.filter((url) => url === "https://query1.finance.yahoo.com/v1/test/getcrumb"),
+      ).toHaveLength(1);
+      expect(
+        calls.filter((url) =>
+          url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?"),
+        ),
+      ).toHaveLength(2);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
