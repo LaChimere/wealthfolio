@@ -17380,6 +17380,94 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to Boerse Frankfurt quote summaries", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-boerse-resolve-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.live.deutsche-boerse.com/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        expect((init?.headers as Record<string, string>)["User-Agent"]).toContain(
+          "Chrome/131.0.0.0",
+        );
+        calls.push(url);
+        const parsed = new URL(url);
+        if (parsed.pathname === "/v1/tradingview/search") {
+          expect(parsed.searchParams.get("query")).toBe("SAP");
+          expect(parsed.searchParams.get("limit")).toBe("5");
+          return Promise.resolve(
+            Response.json([
+              {
+                symbol: "XETR:DE0007164600",
+                description: "SAP SE",
+                exchange: "Xetra",
+                type: "Aktie",
+              },
+            ]),
+          );
+        }
+        if (parsed.pathname === "/v1/data/price_information/single") {
+          const key = `${parsed.searchParams.get("mic")}:${parsed.searchParams.get("isin")}`;
+          const payloads: Record<string, unknown> = {
+            "XETR:DE0007164600": {
+              lastPrice: 70.02,
+              timestampLastPrice: "2026-03-14T15:42:00+01:00",
+              tradedInPercent: false,
+              currency: { originalValue: "EUR" },
+            },
+            "XFRA:XS2530331413": {
+              lastPrice: 97.025,
+              timestampLastPrice: "2026-03-14T15:42:00+01:00",
+              tradedInPercent: true,
+              currency: { originalValue: "EUR" },
+            },
+          };
+          const payload = payloads[key];
+          if (!payload) {
+            throw new Error(`unexpected Boerse price key: ${key}`);
+          }
+          return Promise.resolve(Response.json(payload));
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const equityResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=SAP&exchangeMic=XETR&instrumentType=EQUITY&providerId=BOERSE_FRANKFURT`,
+      );
+      expect(equityResponse.status).toBe(200);
+      await expect(equityResponse.json()).resolves.toEqual({
+        currency: "EUR",
+        price: 70.02,
+        resolvedProviderId: "BOERSE_FRANKFURT",
+      });
+
+      const bondResponse = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=XS2530331413&instrumentType=BOND&providerId=BOERSE_FRANKFURT`,
+      );
+      expect(bondResponse.status).toBe(200);
+      await expect(bondResponse.json()).resolves.toEqual({
+        currency: "EUR",
+        price: 0.97025,
+        resolvedProviderId: "BOERSE_FRANKFURT",
+      });
+      expect(calls.filter((url) => url.includes("/tradingview/search?"))).toHaveLength(1);
+      expect(calls.filter((url) => url.includes("/data/price_information/single?"))).toHaveLength(
+        2,
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
