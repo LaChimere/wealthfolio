@@ -1393,7 +1393,7 @@ async function syncMarketDataExecution(
       continue;
     }
     if (provider !== DEFAULT_MARKET_DATA_PROVIDER) {
-      addMarketSyncSkip(result, asset.id, `Provider not implemented: ${provider}`);
+      addMarketSyncSkip(result, asset.id, `Provider not supported for market sync: ${provider}`);
       continue;
     }
     if (

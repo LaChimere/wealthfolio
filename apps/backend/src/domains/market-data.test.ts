@@ -192,6 +192,42 @@ describe("TS market data domain", () => {
     }
   });
 
+  test("skips unsupported preferred providers without migration-era wording", async () => {
+    const db = createMarketDataDb();
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: (() => Promise.reject(new Error("fetch should not be called"))) as typeof fetch,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "asset-unsupported-provider",
+        display_code: "UNSUPPORTED",
+        instrument_symbol: "UNSUPPORTED",
+        instrument_exchange_mic: "XNAS",
+        provider_config: JSON.stringify({ preferred_provider: "legacy_provider" }),
+      });
+
+      await expect(
+        service.syncMarketData?.({
+          type: "incremental",
+          asset_ids: ["asset-unsupported-provider"],
+        }),
+      ).resolves.toMatchObject({
+        synced: 0,
+        failed: 0,
+        skipped: 1,
+        quotesSynced: 0,
+        failures: [],
+        skippedReasons: [
+          ["asset-unsupported-provider", "Provider not supported for market sync: LEGACY_PROVIDER"],
+        ],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("syncs broad Yahoo and Boerse Frankfurt market assets", async () => {
     const db = createMarketDataDb();
     const chartSymbols: string[] = [];
