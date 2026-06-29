@@ -17681,6 +17681,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to Yahoo quote summaries with auth retry", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-yahoo-resolve-"));
+    const calls: string[] = [];
+    let cookieCount = 0;
+    let quoteCount = 0;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "https://fc.yahoo.com") {
+          cookieCount += 1;
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": `B=resolve-cookie-${cookieCount}` } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe(
+            `B=resolve-cookie-${cookieCount}`,
+          );
+          return Promise.resolve(new Response(`resolve-crumb-${cookieCount}`));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/AZN.L?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe(
+            `B=resolve-cookie-${cookieCount}`,
+          );
+          quoteCount += 1;
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("modules")).toBe("price");
+          expect(parsed.searchParams.get("crumb")).toBe(`resolve-crumb-${cookieCount}`);
+          if (quoteCount === 1) {
+            return Promise.resolve(new Response("", { status: 401, statusText: "Unauthorized" }));
+          }
+          return Promise.resolve(
+            Response.json({
+              quoteSummary: {
+                result: [
+                  {
+                    price: {
+                      currency: "GBp",
+                      regularMarketPrice: { raw: 123.45 },
+                    },
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=AZN.L&exchangeMic=xlon&instrumentType=equity&quoteCcy=GBP`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        currency: "GBp",
+        price: 123.45,
+        resolvedProviderId: "YAHOO",
+      });
+      expect(calls.filter((url) => url === "https://fc.yahoo.com")).toHaveLength(2);
+      expect(
+        calls.filter((url) =>
+          url.startsWith("https://query1.finance.yahoo.com/v10/finance/quoteSummary/AZN.L?"),
+        ),
+      ).toHaveLength(2);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
