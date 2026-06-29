@@ -14173,6 +14173,207 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime pairing flow state to apply available snapshot", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-state-apply-"));
+    const rootKey = Buffer.alloc(32, 46).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 2)).value;
+    const snapshotPath = path.join(appDataDir, "flow-remote-snapshot.db");
+    let latestAvailable = false;
+    let encryptedBlob = Buffer.alloc(0);
+    let checksum = "";
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/pairings/pairing-apply-flow/confirm")) {
+          return Response.json({ success: true, key_version: 2, remote_seed_present: true });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          if (!latestAvailable) {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: 88,
+            created_at: "2026-01-02T00:01:00Z",
+            schema_version: 1,
+            covers_tables: ["quotes"],
+            size_bytes: encryptedBlob.byteLength,
+            checksum,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return new Response(new Uint8Array(encryptedBlob), {
+            headers: {
+              "content-type": "application/octet-stream",
+              "x-snapshot-schema-version": "1",
+              "x-snapshot-covers-tables": "quotes",
+              "x-snapshot-checksum": checksum,
+            },
+          });
+        }
+        return Response.json({
+          cursor: 0,
+          latest_snapshot: null,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    copyFileSync(runtime.dbPath, snapshotPath);
+    const snapshotDb = openSqliteDatabase(snapshotPath);
+    try {
+      seedRuntimeAsset(snapshotDb, "flow-bootstrap-asset");
+      snapshotDb.exec(`
+        INSERT INTO quotes (
+          id, asset_id, day, source, close, currency, created_at, timestamp
+        )
+        VALUES (
+          'flow-remote-manual', 'flow-bootstrap-asset', '2026-01-02',
+          'MANUAL', '789', 'USD', '2026-01-02T00:00:00+00:00',
+          '2026-01-02T00:00:00+00:00'
+        );
+      `);
+      snapshotDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } finally {
+      snapshotDb.close();
+    }
+    const snapshotBytes = readFileSync(snapshotPath);
+    encryptedBlob = Buffer.from(
+      (await crypto.encrypt(dek, snapshotBytes.toString("base64"))).value,
+      "utf8",
+    );
+    checksum = `sha256:${createHash("sha256").update(encryptedBlob).digest("hex")}`;
+    const server = startBackendServer(config, runtime.options);
+    const jsonRequest = (pathName: string, body: Record<string, unknown>) =>
+      new Request(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "flow-bootstrap-asset");
+        seedDb.exec(`
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES ('device-runtime', 2, 'trusted', NULL, NULL);
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const beginResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/begin", {
+          pairingId: "pairing-apply-flow",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-02T00:00:00Z",
+        }),
+      );
+      const beginBody = await beginResponse.text();
+      expect(beginResponse.status, beginBody).toBe(200);
+      const begin = JSON.parse(beginBody) as { flowId?: unknown; phase?: unknown };
+      const flowId = begin.flowId;
+      expect(typeof flowId, beginBody).toBe("string");
+      if (typeof flowId !== "string") {
+        throw new Error("Expected pairing flow id");
+      }
+      expect(begin).toEqual({
+        flowId,
+        phase: { phase: "syncing", detail: "waiting_snapshot" },
+      });
+
+      latestAvailable = true;
+      const stateResponse = await fetch(jsonRequest("/api/v1/sync/pairing/flow/state", { flowId }));
+      const stateBody = await stateResponse.text();
+      expect(stateResponse.status, stateBody).toBe(200);
+      expect(JSON.parse(stateBody)).toEqual({ flowId, phase: { phase: "success" } });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { id: string; close: string },
+              []
+            >("SELECT id, close FROM quotes WHERE source = 'MANUAL' ORDER BY id ASC")
+            .all(),
+        ).toEqual([{ id: "flow-remote-manual", close: "789" }]);
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get()?.cursor,
+        ).toBe(88);
+        expect(
+          verifyDb
+            .query<
+              { min_snapshot_created_at: string | null },
+              []
+            >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-runtime'")
+            .get()?.min_snapshot_created_at,
+        ).toBeNull();
+      } finally {
+        verifyDb.close();
+      }
+      expect(deviceSyncRequests).toContain(
+        "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+      );
+      const missingStateResponse = await fetch(
+        jsonRequest("/api/v1/sync/pairing/flow/state", { flowId }),
+      );
+      expect(missingStateResponse.status).toBe(500);
+      await expect(missingStateResponse.json()).resolves.toMatchObject({
+        message: "Flow not found",
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime pairing flow overwrite approval to waiting snapshot", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-pairing-flow-"));
     const runtime = createSqliteBackedBackendServices({
