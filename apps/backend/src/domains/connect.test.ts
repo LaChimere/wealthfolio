@@ -9299,7 +9299,12 @@ describe("TS Connect device sync local service", () => {
       }),
     );
     const requests: string[] = [];
-    let reconcileMode: "noop" | "duplicate-action" = "noop";
+    let reconcileMode:
+      | "noop"
+      | "duplicate-action"
+      | "invalid-json"
+      | "invalid-key-escape"
+      | "non-object" = "noop";
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9314,6 +9319,17 @@ describe("TS Connect device sync local service", () => {
             return new Response('{"action":"WAIT_SNAPSHOT","action":"NOOP"}', {
               headers: { "content-type": "application/json" },
             });
+          }
+          if (reconcileMode === "invalid-json") {
+            return new Response("not-json", { headers: { "content-type": "application/json" } });
+          }
+          if (reconcileMode === "invalid-key-escape") {
+            return new Response('{"\\uZZZZ":"NOOP"}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (reconcileMode === "non-object") {
+            return Response.json([]);
           }
           return Response.json({ action: "NOOP" });
         }
@@ -9367,6 +9383,18 @@ describe("TS Connect device sync local service", () => {
       ]);
       reconcileMode = "duplicate-action";
       requests.length = 0;
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "invalid-json";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "invalid-key-escape";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "non-object";
       await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
         status: "state_error",
       });

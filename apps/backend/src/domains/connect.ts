@@ -7573,51 +7573,60 @@ async function fetchLocalReconcileReadyStateBestEffort(
       return emptyLocalReconcileReadyState();
     }
     const responseText = await response.text();
-    const rawActionTokens = topLevelJsonPropertyRawTokens(responseText, "action");
-    const rawActionToken = rawActionTokens[0];
-    const rawCursorTokens = topLevelJsonPropertyRawTokens(responseText, "cursor");
-    const rawCursorToken = rawCursorTokens[0];
-    const parsed = JSON.parse(responseText) as unknown;
-    if (!isRecord(parsed)) {
-      return emptyLocalReconcileReadyState();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(responseText) as unknown;
+    } catch {
+      return invalidLocalReconcileReadyState();
     }
-    const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
-    const latestSnapshotRawTokens = [
-      ...topLevelJsonPropertyRawTokens(responseText, "latestSnapshot"),
-      ...topLevelJsonPropertyRawTokens(responseText, "latest_snapshot"),
-    ];
-    const latestSnapshotRawToken = latestSnapshotRawTokens[0];
-    const cursorValue = parsed.cursor;
-    const cursor =
-      cursorValue === undefined || cursorValue === null
-        ? null
-        : isSafeI64Integer(cursorValue)
-          ? cursorValue
-          : null;
-    const parsedLatestSnapshot = parseLocalReconcileLatestSnapshot(
-      latestSnapshot,
-      latestSnapshotRawToken,
-    );
-    return {
-      action: optionalString(parsed.action),
-      actionInvalid:
-        rawActionTokens.length !== 1 ||
-        rawActionToken === undefined ||
-        !rawJsonStringTokenIsValid(rawActionToken) ||
-        optionalString(parsed.action) === null,
-      cursor,
-      cursorInvalid:
-        rawCursorTokens.length > 1 ||
-        (rawCursorToken !== undefined && !rawJsonI64OptionTokenIsValid(rawCursorToken)) ||
-        (cursorValue !== undefined && cursorValue !== null && cursor === null),
-      latestSnapshotId: parsedLatestSnapshot.snapshotId,
-      latestSnapshotSeq: i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq),
-      latestSnapshotInvalid:
-        latestSnapshotRawTokens.length > 1 ||
-        parsedLatestSnapshot.invalid ||
-        (parsedLatestSnapshot.oplogSeq !== null &&
-          i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq) === null),
-    };
+    if (!isRecord(parsed)) {
+      return invalidLocalReconcileReadyState();
+    }
+    try {
+      const rawActionTokens = topLevelJsonPropertyRawTokens(responseText, "action");
+      const rawActionToken = rawActionTokens[0];
+      const rawCursorTokens = topLevelJsonPropertyRawTokens(responseText, "cursor");
+      const rawCursorToken = rawCursorTokens[0];
+      const latestSnapshot = parsed.latestSnapshot ?? parsed.latest_snapshot;
+      const latestSnapshotRawTokens = [
+        ...topLevelJsonPropertyRawTokens(responseText, "latestSnapshot"),
+        ...topLevelJsonPropertyRawTokens(responseText, "latest_snapshot"),
+      ];
+      const latestSnapshotRawToken = latestSnapshotRawTokens[0];
+      const cursorValue = parsed.cursor;
+      const cursor =
+        cursorValue === undefined || cursorValue === null
+          ? null
+          : isSafeI64Integer(cursorValue)
+            ? cursorValue
+            : null;
+      const parsedLatestSnapshot = parseLocalReconcileLatestSnapshot(
+        latestSnapshot,
+        latestSnapshotRawToken,
+      );
+      return {
+        action: optionalString(parsed.action),
+        actionInvalid:
+          rawActionTokens.length !== 1 ||
+          rawActionToken === undefined ||
+          !rawJsonStringTokenIsValid(rawActionToken) ||
+          optionalString(parsed.action) === null,
+        cursor,
+        cursorInvalid:
+          rawCursorTokens.length > 1 ||
+          (rawCursorToken !== undefined && !rawJsonI64OptionTokenIsValid(rawCursorToken)) ||
+          (cursorValue !== undefined && cursorValue !== null && cursor === null),
+        latestSnapshotId: parsedLatestSnapshot.snapshotId,
+        latestSnapshotSeq: i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq),
+        latestSnapshotInvalid:
+          latestSnapshotRawTokens.length > 1 ||
+          parsedLatestSnapshot.invalid ||
+          (parsedLatestSnapshot.oplogSeq !== null &&
+            i64ToSafeNumberOrNull(parsedLatestSnapshot.oplogSeq) === null),
+      };
+    } catch {
+      return invalidLocalReconcileReadyState();
+    }
   } catch {
     return emptyLocalReconcileReadyState();
   }
@@ -7649,6 +7658,13 @@ function emptyLocalReconcileReadyState(): LocalReconcileReadyState {
     latestSnapshotId: null,
     latestSnapshotSeq: null,
     latestSnapshotInvalid: false,
+  };
+}
+
+function invalidLocalReconcileReadyState(): LocalReconcileReadyState {
+  return {
+    ...emptyLocalReconcileReadyState(),
+    actionInvalid: true,
   };
 }
 

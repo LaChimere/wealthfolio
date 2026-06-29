@@ -627,12 +627,11 @@ export function createLocalDeviceSyncService({
     async completePairingWithTransfer(request) {
       const deviceId = await requireCompositePairingDeviceIdOrDisabled(secretService);
       if (db) {
-        const hadPendingOutbox = localHasPendingSyncOutbox(db);
         if (!triggerSyncCycle) {
           throw deviceSyncDisabled();
         }
         const cycleResult = await Promise.resolve(triggerSyncCycle());
-        if (hadPendingOutbox && !pairingTransferCycleCanProceed(cycleResult)) {
+        if (!pairingTransferCycleCanProceed(cycleResult)) {
           throw deviceSyncDisabled();
         }
         if (localHasPendingSyncOutbox(db)) {

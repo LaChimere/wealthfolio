@@ -2713,6 +2713,8 @@ describe("TS local device sync service", () => {
     );
     const requests: string[] = [];
     let syncCycles = 0;
+    let cycleStatus = "ok";
+    let snapshotUploads = 0;
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -2722,14 +2724,17 @@ describe("TS local device sync service", () => {
       },
       triggerSyncCycle: () => {
         syncCycles += 1;
-        return { status: "ok", deadLetterCount: 0 };
+        return { status: cycleStatus, deadLetterCount: 0 };
       },
-      generateSnapshot: () => ({
-        status: "uploaded",
-        snapshotId: "snapshot-1",
-        oplogSeq: 1,
-        message: "Snapshot uploaded",
-      }),
+      generateSnapshot: () => {
+        snapshotUploads += 1;
+        return {
+          status: "uploaded",
+          snapshotId: "snapshot-1",
+          oplogSeq: 1,
+          message: "Snapshot uploaded",
+        };
+      },
       fetch: async (input) => {
         requests.push(String(input));
         return Response.json({ success: true });
@@ -2746,9 +2751,23 @@ describe("TS local device sync service", () => {
         }),
       ).resolves.toEqual({ success: true });
       expect(syncCycles).toBe(1);
+      expect(snapshotUploads).toBe(1);
       expect(requests.map((request) => request.split("/").pop())).toEqual(["approve", "complete"]);
       requests.length = 0;
 
+      cycleStatus = "wait_snapshot";
+      await expect(
+        service.completePairingWithTransfer?.({
+          pairingId: "pairing-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: { ok: true },
+          signature: "signature",
+        }),
+      ).rejects.toMatchObject({ code: "not_implemented", status: 501 });
+      expect(snapshotUploads).toBe(1);
+      expect(requests).toEqual([]);
+
+      cycleStatus = "ok";
       db.prepare(
         "INSERT INTO sync_outbox (id, status, sent, next_retry_at) VALUES ('future-event', 'pending', 0, '2999-01-01T00:00:00.000Z')",
       ).run();
