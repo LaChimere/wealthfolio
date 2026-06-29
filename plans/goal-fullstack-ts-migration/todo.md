@@ -6857,6 +6857,14 @@ contract:
   queued account changes wake the background cycle before the long cadence.
   Broad runtime/connect tests, full `bun run check`, `git diff --check`, and
   dual Claude/GPT xhigh review passed.
+- `pr5-runtime-device-sync-confirm-bootstrap-apply`: verification passed.
+  Standalone `/api/v1/sync/pairing/confirm-with-bootstrap` now delegates
+  snapshot disposition to the migrated Connect bootstrap apply service, maps
+  requested snapshots to waiting_snapshot, treats only applied/skipped as
+  applied, safely rejects not-ready or unknown bootstrap statuses, and covers
+  no-remote, available-snapshot, waiting, and not-ready branches through runtime
+  tests. Broad runtime/connect tests, full `bun run check`, `git diff --check`,
+  and dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
