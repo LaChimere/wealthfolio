@@ -16401,6 +16401,90 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to Metal Price API quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-metal-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.metalpriceapi.com/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const headers = init?.headers as Record<string, string> | undefined;
+        expect(headers?.["X-API-KEY"]).toBe("metal-key");
+        const parsed = new URL(url);
+        expect(parsed.pathname).toBe("/v1/timeframe");
+        expect(parsed.searchParams.get("base")).toBe("USD");
+        expect(parsed.searchParams.get("currencies")).toBe("XAU");
+        calls.push(
+          `${parsed.searchParams.get("start_date") ?? ""}:${parsed.searchParams.get("end_date") ?? ""}`,
+        );
+        return Promise.resolve(
+          Response.json({
+            success: true,
+            rates: {
+              "2026-01-05": { XAU: 0.0005 },
+            },
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("METAL_PRICE_API", "metal-key");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-metal-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_type = ?, instrument_symbol = ?, instrument_exchange_mic = NULL, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "XAU",
+            "METAL",
+            "XAU",
+            JSON.stringify({ preferred_provider: "METAL_PRICE_API" }),
+            "runtime-metal-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-metal-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(calls).toHaveLength(1);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { source: string; close: string; currency: string },
+              []
+            >("SELECT source, close, currency FROM quotes WHERE asset_id = 'runtime-metal-asset'")
+            .get(),
+        ).toEqual({
+          source: "METAL_PRICE_API",
+          close: "2000",
+          currency: "USD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime quote resolution route to Alpha Vantage option quotes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-option-route-"));
     const calls: string[] = [];
