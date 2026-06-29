@@ -16299,6 +16299,60 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to Alpha Vantage option quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-option-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        expect(init).toBeUndefined();
+        const url = String(input);
+        if (!url.startsWith("https://www.alphavantage.co/query")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+        expect(parsed.searchParams.get("function")).toBe("REALTIME_OPTIONS");
+        const call = `${parsed.searchParams.get("symbol")}:${parsed.searchParams.get("contract")}`;
+        calls.push(call);
+        return Promise.resolve(
+          Response.json({
+            data: [
+              {
+                contractID: "AAPL260117C00100000",
+                last: "12.34",
+                mark: "12.30",
+                volume: "42",
+                date: "2026-01-05",
+              },
+            ],
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("ALPHA_VANTAGE", "alpha-key");
+
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=AAPL260117C00100000&instrumentType=OPTION&quoteCcy=USD&providerId=ALPHA_VANTAGE`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        currency: "USD",
+        price: 12.34,
+        resolvedProviderId: "ALPHA_VANTAGE",
+      });
+      expect(calls).toEqual(["AAPL:AAPL260117C00100000"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
