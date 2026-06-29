@@ -6993,6 +6993,12 @@ contract:
   preserving the existing preflight/no-chat-row behavior and detailed
   provider/model error message. Full AI chat domain suite and backend type-check
   passed.
+- `pr5-device-sync-transfer-config-errors`: verification passed. DB-backed
+  complete-with-transfer now reports missing `triggerSyncCycle` or
+  `generateSnapshot` callbacks as explicit `internal_error`/500 configuration
+  failures instead of stale feature-disabled `not_implemented`/501 responses,
+  and still makes no cloud approve/complete calls before those prerequisites
+  pass. Full device-sync domain suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

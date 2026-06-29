@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 979
+turns_used: 980
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T05:13:53+09:00"
+updated_at: "2026-06-30T05:18:35+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5449,6 +5449,12 @@ updated_at: "2026-06-30T05:13:53+09:00"
   `invalid_input`/400 instead of migration-style `not_implemented`/501 while
   preserving the no-persistence preflight behavior and user-facing
   provider/model message; full AI chat validation and backend type-check passed.
+- Turn 980: Replaced complete-with-transfer missing callback gates with explicit
+  configuration errors. DB-backed pairing transfer now reports missing
+  sync-cycle or snapshot-upload wiring as `internal_error`/500 instead of
+  feature-disabled `not_implemented`/501, while preserving no-cloud-call
+  fail-closed behavior; full device-sync validation and backend type-check
+  passed.
 
 ## Deferred items
 
