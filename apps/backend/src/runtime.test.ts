@@ -1252,11 +1252,27 @@ describe("TS backend runtime composition", () => {
       expect(status.issues).toEqual([
         expect.objectContaining({
           id: expect.stringMatching(/^orphan_activity_account:/),
+          severity: "ERROR",
+          category: "DATA_CONSISTENCY",
           title: "Transaction references missing account",
+          affectedCount: 1,
+          navigateAction: {
+            route: "/activities",
+            query: { filter: "orphan" },
+            label: "View Activities",
+          },
         }),
         expect.objectContaining({
           id: expect.stringMatching(/^orphan_activity_asset:/),
+          severity: "ERROR",
+          category: "DATA_CONSISTENCY",
           title: "Transaction references missing asset",
+          affectedCount: 1,
+          navigateAction: {
+            route: "/activities",
+            query: { filter: "orphan" },
+            label: "View Activities",
+          },
         }),
       ]);
     } finally {
