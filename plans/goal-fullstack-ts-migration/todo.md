@@ -7086,6 +7086,12 @@ contract:
   stored source config, applies symbol overrides to the fetched URL, and
   persists `CUSTOM_SCRAPER:<code>` quote plus quote-sync-state rows. Full
   runtime suite and full repository check passed.
+- `pr5-marketdata-app-route-resolve-smoke`: verification passed. The runtime
+  `/api/v1/market-data/resolve-currency` route now has coverage for a
+  MarketData.app-preferred equity, proving backend-stored API key auth reaches
+  the price endpoint, exchange metadata maps XTSE quotes to CAD, and the route
+  returns the Rust-shaped resolved provider payload. Full runtime suite and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
