@@ -6850,6 +6850,13 @@ contract:
   during wait_snapshot/stale_cursor bootstrap states. Broad runtime/connect
   tests, full `bun run check`, `git diff --check`, and dual Claude/GPT xhigh
   review/refine passed.
+- `pr5-runtime-connect-background-outbox-wake`: verification passed. Sync outbox
+  enqueue now notifies the running device-sync background loop best-effort, the
+  loop debounces wake signals with Rust-compatible quiet/max-wait timing and
+  preserves wake requests during active cycles, and runtime coverage proves
+  queued account changes wake the background cycle before the long cadence.
+  Broad runtime/connect tests, full `bun run check`, `git diff --check`, and
+  dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

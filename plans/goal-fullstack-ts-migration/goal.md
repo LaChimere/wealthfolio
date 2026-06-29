@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 957
+turns_used: 958
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-29T21:40:11+09:00"
+updated_at: "2026-06-29T22:17:24+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5328,6 +5328,12 @@ updated_at: "2026-06-29T21:40:11+09:00"
   pending outbox can actually be pushed, and avoids busy polling while waiting
   for snapshots or stale-cursor bootstrap; broad validation and dual-model xhigh
   review/refine passed.
+- Turn 958: Added local outbox wake parity. Sync outbox enqueue now notifies the
+  running device-sync background loop best-effort, the loop debounces wake
+  signals with Rust-compatible quiet/max-wait timing and preserves wake requests
+  during active cycles, and runtime coverage proves queued account changes wake
+  the background cycle before the long cadence; broad validation and dual-model
+  xhigh review passed.
 
 ## Deferred items
 
