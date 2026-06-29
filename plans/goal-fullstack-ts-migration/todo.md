@@ -7056,6 +7056,12 @@ contract:
   Treasury bond asset, proving the route fetches Treasury yield curves, derives
   a calculated price from bond metadata, and persists the `US_TREASURY_CALC`
   provider quote. Full runtime suite and backend type-check passed.
+- `pr5-alpha-vantage-route-provider-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync` route now has SQLite-backed coverage for an Alpha
+  Vantage-preferred XTSE equity with backend-stored API key, proving the route
+  authenticates the `TIME_SERIES_DAILY` request, uses the Rust-compatible `.TRT`
+  provider symbol suffix, preserves MIC-derived CAD quote currency, and persists
+  the provider quote. Full runtime suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
