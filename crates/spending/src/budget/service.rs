@@ -200,6 +200,7 @@ pub struct BudgetService {
 }
 
 impl BudgetService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: Arc<dyn BudgetRepositoryTrait>,
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
@@ -968,6 +969,7 @@ impl BudgetService {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_allocated_actuals(
     month_actuals: &mut MonthActuals,
     activity_id: &str,

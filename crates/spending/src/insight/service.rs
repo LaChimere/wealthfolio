@@ -59,6 +59,7 @@ pub struct InsightService {
 }
 
 impl InsightService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         budget_repo: Arc<dyn BudgetRepositoryTrait>,
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
@@ -718,6 +719,7 @@ fn aggregate_spend_with_splits(
     agg
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_taxonomy_breakdown(
     bucket: &mut HashMap<String, (Decimal, u32)>,
     assignments_by_activity: &AssignmentsByActivity,
