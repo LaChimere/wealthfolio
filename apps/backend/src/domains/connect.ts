@@ -4136,6 +4136,8 @@ const SNAPSHOT_UPLOAD_MAX_ATTEMPTS = 5;
 const SNAPSHOT_UPLOAD_BASE_BACKOFF_MS = 250;
 const SNAPSHOT_UPLOAD_MAX_BACKOFF_MS = 8_000;
 const DEVICE_SYNC_BACKGROUND_INTERVAL_MS = 5 * 60 * 1000;
+const DEVICE_SYNC_INTERVAL_JITTER_MS = 5_000;
+const DEVICE_SYNC_PENDING_OUTBOX_DELAY_MS = 2_000;
 const DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_DEAD_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -4273,7 +4275,7 @@ export function createLocalConnectDeviceSyncService({
         }
         backgroundCycleInFlight = false;
         if (backgroundRunning) {
-          scheduleBackgroundCycle(DEVICE_SYNC_BACKGROUND_INTERVAL_MS);
+          scheduleBackgroundCycle(localBackgroundCycleDelayMs(db));
         }
       }
     })();
@@ -8547,6 +8549,72 @@ function localPruneAppliedEventsAfterSuccessfulCycle(db: Database, cursor: numbe
   } catch (error) {
     console.warn(`[Connect] Failed to prune applied sync events: ${errorMessage(error)}`);
   }
+}
+
+function localBackgroundCycleDelayMs(db: Database, nowMs = Date.now()): number {
+  const jitterMs = Math.abs(nowMs) % DEVICE_SYNC_INTERVAL_JITTER_MS;
+  let delayMs = DEVICE_SYNC_BACKGROUND_INTERVAL_MS + jitterMs;
+  let retryBackoffActive = false;
+  let blockedBySnapshotState = false;
+  if (sqliteTableExists(db, "sync_engine_state")) {
+    const engineState = db
+      .query<
+        { next_retry_at: string | null; last_cycle_status: string | null },
+        []
+      >("SELECT next_retry_at, last_cycle_status FROM sync_engine_state WHERE id = 1")
+      .get();
+    const nextRetryAt = engineState?.next_retry_at;
+    if (nextRetryAt) {
+      const retryAtMs = Date.parse(nextRetryAt);
+      if (!Number.isNaN(retryAtMs)) {
+        retryBackoffActive = retryAtMs > nowMs;
+        delayMs = Math.max(1_000, retryAtMs - nowMs + jitterMs);
+      }
+    }
+    blockedBySnapshotState =
+      engineState?.last_cycle_status === "wait_snapshot" ||
+      engineState?.last_cycle_status === "stale_cursor";
+  }
+  const outboxRetryAt = localEarliestPendingOutboxRetryAt(db);
+  if (
+    outboxRetryAt !== null &&
+    outboxRetryAt > nowMs &&
+    !retryBackoffActive &&
+    !blockedBySnapshotState
+  ) {
+    delayMs = Math.min(delayMs, Math.max(1_000, outboxRetryAt - nowMs + jitterMs));
+  }
+  if (!retryBackoffActive && !blockedBySnapshotState && localHasPendingSyncOutbox(db)) {
+    delayMs = Math.min(delayMs, DEVICE_SYNC_PENDING_OUTBOX_DELAY_MS + (jitterMs % 500));
+  }
+  return delayMs;
+}
+
+function localEarliestPendingOutboxRetryAt(db: Database): number | null {
+  if (
+    !sqliteTableExists(db, "sync_outbox") ||
+    !sqliteColumnExists(db, "sync_outbox", "next_retry_at")
+  ) {
+    return null;
+  }
+  const retryAt = db
+    .query<{ next_retry_at: string | null }, []>(
+      `
+        SELECT next_retry_at
+        FROM sync_outbox
+        WHERE status = 'pending'
+          AND sent = 0
+          AND next_retry_at IS NOT NULL
+        ORDER BY next_retry_at ASC
+        LIMIT 1
+      `,
+    )
+    .get()?.next_retry_at;
+  if (!retryAt) {
+    return null;
+  }
+  const parsed = Date.parse(retryAt);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function localApplyPushFailureToOutbox(
