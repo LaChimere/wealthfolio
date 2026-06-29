@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 962
+turns_used: 963
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T00:36:27+09:00"
+updated_at: "2026-06-30T01:27:06+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5359,6 +5359,12 @@ updated_at: "2026-06-30T00:36:27+09:00"
   provider-resolved MSFT equity asset with XNAS/USD metadata, and persist the
   linked broker activity through the SQLite-backed HTTP route; targeted and full
   runtime validation plus full repository check passed.
+- Turn 963: Ported transfer snapshot upload parity for standalone pairing.
+  `complete-with-transfer` now mirrors Rust by flushing due outbox work, then
+  requiring a successful migrated snapshot upload before approve/complete for
+  any local DB-backed source device, including already-bootstrapped trusted
+  sources; skipped/cancelled/malformed upload results block transfer, and broad
+  validation plus dual-model xhigh review/refine passed.
 
 ## Deferred items
 
