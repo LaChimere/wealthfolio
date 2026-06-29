@@ -7034,6 +7034,12 @@ contract:
   MarketData.app-preferred asset with backend-stored API key, proving the route
   authenticates requests to candles/current-price endpoints and persists both
   provider quotes. Full runtime suite and backend type-check passed.
+- `pr5-alpha-vantage-option-route-resolve`: verification passed. The runtime
+  `/api/v1/market-data/resolve-currency` route now proves Alpha Vantage option
+  quote resolution uses the backend-stored API key, dispatches
+  `REALTIME_OPTIONS` with OCC-derived underlying/contract parameters, and
+  returns the resolved USD price through the HTTP seam. Full runtime suite and
+  backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
