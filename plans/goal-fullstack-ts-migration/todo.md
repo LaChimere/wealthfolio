@@ -6927,6 +6927,12 @@ contract:
   token responses now become `state_error` outcomes instead of stale
   `not_implemented` gates. Full Connect/device-sync domain suites, full
   `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-reconcile-parse-route-smoke`: verification passed. The
+  runtime `/api/v1/connect/device/trigger-cycle` route now has SQLite-backed
+  coverage proving malformed reconcile-ready-state payloads persist
+  `state_error` and the expected last_error through the HTTP seam. The runtime
+  background wake smoke now waits across the intentional debounce window. Full
+  runtime suite, full `bun run check`, and `git diff --check` passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
