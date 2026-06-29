@@ -1355,10 +1355,23 @@ describe("TS backend runtime composition", () => {
         issues: [
           expect.objectContaining({
             id: expect.stringMatching(/^quote_sync:error:/),
+            severity: "ERROR",
             category: "PRICE_STALENESS",
             title: "Quotes sync failing for RUNTIME",
+            message:
+              "These assets have repeatedly failed to sync prices. Check the symbols or data provider settings.",
             affectedCount: 1,
+            affectedItems: [
+              {
+                id: "quote-sync-asset",
+                name: "RUNTIME",
+                symbol: "RUNTIME",
+                route: "/holdings/quote-sync-asset",
+              },
+            ],
             fixAction: { id: "retry_sync", label: "Retry Sync", payload: ["quote-sync-asset"] },
+            navigateAction: { route: "/settings/market-data", label: "View Market Data" },
+            details: "1. RUNTIME - 6 failures: provider unavailable",
           }),
         ],
       });
