@@ -625,26 +625,22 @@ export function createLocalDeviceSyncService({
       return result;
     },
     async completePairingWithTransfer(request) {
-      const { accessToken, deviceId } =
-        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
-          connectService,
-          secretService,
-        );
-      if (db && localHasPendingSyncOutbox(db)) {
+      const deviceId = await requireCompositePairingDeviceIdOrDisabled(secretService);
+      if (db) {
+        const hadPendingOutbox = localHasPendingSyncOutbox(db);
         if (!triggerSyncCycle) {
           throw deviceSyncDisabled();
         }
         const cycleResult = await Promise.resolve(triggerSyncCycle());
-        if (!pairingTransferCycleCanProceed(cycleResult)) {
+        if (hadPendingOutbox && !pairingTransferCycleCanProceed(cycleResult)) {
           throw deviceSyncDisabled();
         }
         if (localHasPendingSyncOutbox(db)) {
           throw deviceSyncDisabled();
         }
-      }
-      if (db) {
         await runPairingTransferSnapshot(generateSnapshot);
       }
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
       try {
         await fetchDeviceSyncJsonRaw(
           accessToken,
@@ -1001,6 +997,22 @@ export function createLocalDeviceSyncService({
       };
     },
   };
+}
+
+async function requireCompositePairingDeviceIdOrDisabled(
+  secretService: SecretService | undefined,
+): Promise<string> {
+  if (!secretService) {
+    throw deviceSyncDisabled();
+  }
+  const deviceId = await getLocalSyncIdentityDeviceId(secretService);
+  if (deviceId === undefined) {
+    throw new DeviceSyncServiceError("internal_error", "No sync identity configured", 500);
+  }
+  if (deviceId === null) {
+    throw new DeviceSyncServiceError("internal_error", "No device ID configured", 500);
+  }
+  return deviceId;
 }
 
 async function requireCompositePairingPrerequisitesWithTokenOrDisabled(

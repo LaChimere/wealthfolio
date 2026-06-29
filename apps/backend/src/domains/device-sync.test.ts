@@ -206,6 +206,7 @@ describe("TS local device sync service", () => {
     secretService.entries.set("sync_identity", "{not-json");
     secretService.entries.set("sync_device_id", "legacy-device");
     const requests: string[] = [];
+    let syncCycles = 0;
     const service = createLocalDeviceSyncService({
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test" },
@@ -2584,6 +2585,7 @@ describe("TS local device sync service", () => {
     );
     const requests: string[] = [];
     let snapshotUploads = 0;
+    let restoredTokens = 0;
     const service = createLocalDeviceSyncService({
       db,
       secretService,
@@ -2601,9 +2603,14 @@ describe("TS local device sync service", () => {
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
-        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        restoreSyncSession: () => {
+          restoredTokens += 1;
+          return { accessToken: `token-${restoredTokens}`, refreshToken: "refresh" };
+        },
       },
+      triggerSyncCycle: () => ({ status: "ok", deadLetterCount: 0 }),
       generateSnapshot: () => {
+        expect(restoredTokens).toBe(0);
         snapshotUploads += 1;
         return {
           status: "uploaded",
@@ -2624,6 +2631,7 @@ describe("TS local device sync service", () => {
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
       },
+      triggerSyncCycle: () => ({ status: "ok", deadLetterCount: 0 }),
       generateSnapshot: () => ({
         status: "skipped",
         snapshotId: null,
@@ -2652,6 +2660,7 @@ describe("TS local device sync service", () => {
         success: true,
       });
       expect(snapshotUploads).toBe(1);
+      expect(restoredTokens).toBe(1);
       expect(requests.map((request) => request.split("/").pop())).toEqual(["approve", "complete"]);
       requests.length = 0;
       await expect(skippedService.completePairingWithTransfer?.(request)).rejects.toMatchObject({
@@ -2703,12 +2712,17 @@ describe("TS local device sync service", () => {
       JSON.stringify({ version: 2, deviceId: "device-1" }),
     );
     const requests: string[] = [];
+    let syncCycles = 0;
     const service = createLocalDeviceSyncService({
       db,
       secretService,
       env: { CONNECT_API_URL: "https://api.example.test/" },
       connectService: {
         restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      triggerSyncCycle: () => {
+        syncCycles += 1;
+        return { status: "ok", deadLetterCount: 0 };
       },
       generateSnapshot: () => ({
         status: "uploaded",
@@ -2731,6 +2745,7 @@ describe("TS local device sync service", () => {
           signature: "signature",
         }),
       ).resolves.toEqual({ success: true });
+      expect(syncCycles).toBe(1);
       expect(requests.map((request) => request.split("/").pop())).toEqual(["approve", "complete"]);
       requests.length = 0;
 

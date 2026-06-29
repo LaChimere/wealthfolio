@@ -12322,12 +12322,15 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 7)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 10)).toEqual([
         "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
         "token?grant_type=refresh_token",
         "device-runtime",
         "cursor",
         "latest",
+        "token?grant_type=refresh_token",
         "approve",
         "complete",
       ]);
@@ -12364,7 +12367,6 @@ describe("TS backend runtime composition", () => {
       await expect(blockedResponse.json()).resolves.toEqual({ success: true });
       expect(requests.map((request) => request.split("/").pop()).slice(0, 10)).toEqual([
         "token?grant_type=refresh_token",
-        "token?grant_type=refresh_token",
         "device-runtime",
         "reconcile-ready-state",
         "push",
@@ -12372,6 +12374,7 @@ describe("TS backend runtime composition", () => {
         "device-runtime",
         "cursor",
         "latest",
+        "token?grant_type=refresh_token",
         "approve",
       ]);
       requests.length = 0;
@@ -12410,8 +12413,7 @@ describe("TS backend runtime composition", () => {
       await expect(deadLetteredResponse.json()).resolves.toMatchObject({
         code: "not_implemented",
       });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 5)).toEqual([
-        "token?grant_type=refresh_token",
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 4)).toEqual([
         "token?grant_type=refresh_token",
         "device-runtime",
         "reconcile-ready-state",
@@ -12453,8 +12455,7 @@ describe("TS backend runtime composition", () => {
       await expect(invalidEntityResponse.json()).resolves.toMatchObject({
         code: "not_implemented",
       });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 4)).toEqual([
-        "token?grant_type=refresh_token",
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
         "token?grant_type=refresh_token",
         "device-runtime",
         "reconcile-ready-state",
@@ -12489,6 +12490,9 @@ describe("TS backend runtime composition", () => {
             trust_state: "trusted",
             trusted_key_version: 2,
           });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
         }
         if (url.endsWith("/api/v1/sync/events/cursor")) {
           return Response.json({ cursor: 0 });
@@ -12570,13 +12574,16 @@ describe("TS backend runtime composition", () => {
       expect(completeResponse.status).toBe(200);
       await expect(completeResponse.json()).resolves.toEqual({ success: true });
       expect(uploadAttempts).toBe(1);
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 8)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 11)).toEqual([
         "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
         "token?grant_type=refresh_token",
         "device-runtime",
         "cursor",
         "latest",
         "upload",
+        "token?grant_type=refresh_token",
         "approve",
         "complete",
       ]);
@@ -12609,6 +12616,9 @@ describe("TS backend runtime composition", () => {
             trust_state: "trusted",
             trusted_key_version: 2,
           });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
         }
         if (url.endsWith("/api/v1/sync/events/cursor")) {
           return Response.json({ cursor: 0 });
@@ -12691,12 +12701,15 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 7)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 10)).toEqual([
         "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
         "token?grant_type=refresh_token",
         "device-runtime",
         "cursor",
         "latest",
+        "token?grant_type=refresh_token",
         "approve",
         "complete",
       ]);
@@ -12731,6 +12744,9 @@ describe("TS backend runtime composition", () => {
             trust_state: "trusted",
             trusted_key_version: 2,
           });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
         }
         if (url.endsWith("/api/v1/sync/events/cursor")) {
           return Response.json({ cursor: 0 });
@@ -12813,12 +12829,15 @@ describe("TS backend runtime composition", () => {
         code: "internal_error",
         message: expect.stringContaining("PAIRING_CLOSED"),
       });
-      expect(requests.map((request) => request.split("/").pop()).slice(0, 6)).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 9)).toEqual([
         "token?grant_type=refresh_token",
+        "device-runtime",
+        "reconcile-ready-state",
         "token?grant_type=refresh_token",
         "device-runtime",
         "cursor",
         "latest",
+        "token?grant_type=refresh_token",
         "approve",
       ]);
     } finally {
