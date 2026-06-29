@@ -7110,6 +7110,12 @@ contract:
   source config, avoids Yahoo fallback, fetches the custom URL, and returns the
   Rust-shaped `CUSTOM_SCRAPER:<code>` payload. Full runtime suite and full
   repository check passed.
+- `pr5-metal-price-route-resolve-smoke`: verification passed. The runtime
+  `/api/v1/market-data/resolve-currency` route now has coverage for a Metal
+  Price API XAG quote summary, proving backend-stored API key auth reaches the
+  `latest` endpoint, USD/XAG rates convert into Rust-compatible metal prices,
+  and the route returns the resolved provider payload. Full runtime suite and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
