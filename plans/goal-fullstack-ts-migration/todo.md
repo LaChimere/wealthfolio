@@ -6817,6 +6817,13 @@ contract:
   `device_sync_pull_complete`, and returns Rust-shaped applied responses. Broad
   runtime/connect tests, full `bun run check`, `git diff --check`, and repeated
   dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-snapshot-upload-cancel-route-smoke`: verification passed.
+  Cancel-snapshot now cooperates with generate-snapshot upload: snapshot
+  generation is serialized, cancellation is reset per run, checked after
+  trusted-device confirmation, before/after export, and before retrying
+  transfer, and returns Rust-shaped cancelled responses for preflight and retry
+  cancellation. Broad runtime/connect tests, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
