@@ -596,6 +596,7 @@ function createServicesFromDatabase(
       env: runtimeOptions.env,
       fetch: runtimeOptions.marketDataFetch,
       onPairingComplete: () => connectDeviceSyncService.startDeviceSyncBackgroundEngine(),
+      bootstrapSnapshot: () => connectDeviceSyncService.bootstrapDeviceSnapshot(),
     }),
     exchangeRateService,
     goalService,

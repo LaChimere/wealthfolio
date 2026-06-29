@@ -10565,7 +10565,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -11998,8 +12006,9 @@ describe("TS backend runtime composition", () => {
       const confirmResponse = await fetch(
         jsonRequest("/api/v1/sync/pairing/pairing-1/confirm", { proof: "proof" }),
       );
-      expect(confirmResponse.status).toBe(200);
-      await expect(confirmResponse.json()).resolves.toEqual({
+      const confirmBody = await confirmResponse.text();
+      expect(confirmResponse.status, confirmBody).toBe(200);
+      expect(JSON.parse(confirmBody)).toEqual({
         success: true,
         keyVersion: 2,
         remoteSeedPresent: true,
@@ -12062,7 +12071,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12098,7 +12115,7 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop())).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
         "token?grant_type=refresh_token",
         "approve",
         "complete",
@@ -12176,7 +12193,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12261,7 +12286,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12298,7 +12331,7 @@ describe("TS backend runtime composition", () => {
       );
       expect(successResponse.status).toBe(200);
       await expect(successResponse.json()).resolves.toEqual({ success: true });
-      expect(requests.map((request) => request.split("/").pop())).toEqual([
+      expect(requests.map((request) => request.split("/").pop()).slice(0, 3)).toEqual([
         "token?grant_type=refresh_token",
         "approve",
         "complete",
@@ -12623,6 +12656,18 @@ describe("TS backend runtime composition", () => {
           method: init?.method ?? "GET",
           body: typeof init?.body === "string" ? init.body : null,
         });
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
         if (url.endsWith("/api/v1/sync/snapshots/latest")) {
           return Response.json(
             { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
@@ -12639,7 +12684,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 42).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12677,10 +12730,11 @@ describe("TS backend runtime composition", () => {
           }),
         },
       );
-      expect(confirmResponse.status).toBe(200);
-      await expect(confirmResponse.json()).resolves.toEqual({
+      const confirmBody = await confirmResponse.text();
+      expect(confirmResponse.status, confirmBody).toBe(200);
+      expect(JSON.parse(confirmBody)).toEqual({
         status: "waiting_snapshot",
-        message: "Snapshot is not available yet. Waiting for upload from a trusted device.",
+        message: "Waiting for a trusted device to upload a snapshot",
         localRows: null,
         nonEmptyTables: null,
       });
@@ -12691,11 +12745,397 @@ describe("TS backend runtime composition", () => {
           body: JSON.stringify({ proof: "proof" }),
         },
         {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          method: "GET",
+          body: null,
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+          method: "GET",
+          body: null,
+        },
+        {
           url: "https://api.example.test/api/v1/sync/snapshots/latest",
           method: "GET",
           body: null,
         },
+        {
+          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+          method: "GET",
+          body: null,
+        },
       ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime bootstrap confirm route when no remote snapshot is required", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-bootstrap-confirm-no-remote-"),
+    );
+    const deviceSyncRequests: string[] = [];
+    let reconcileCalls = 0;
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/pairings/pairing-no-remote/confirm")) {
+          return Response.json({ success: true, key_version: 5, remote_seed_present: true });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 5,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          reconcileCalls += 1;
+          return Response.json({ action: reconcileCalls === 1 ? "BOOTSTRAP_SNAPSHOT" : "NOOP" });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({
+          cursor: 0,
+          latest_snapshot: null,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 41).toString("base64"),
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES ('device-runtime', 5, 'trusted', NULL, NULL);
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const confirmResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/pairing/confirm-with-bootstrap`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            pairingId: "pairing-no-remote",
+            proof: "proof",
+            allowOverwrite: true,
+          }),
+        },
+      );
+      expect(confirmResponse.status).toBe(200);
+      await expect(confirmResponse.json()).resolves.toEqual({
+        status: "applied",
+        message: "Snapshot bootstrap completed",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      expect(deviceSyncRequests).not.toContain(
+        "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime bootstrap confirm route to apply available snapshot", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-bootstrap-apply-confirm-"),
+    );
+    const rootKey = Buffer.alloc(32, 39).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const snapshotPath = path.join(appDataDir, "confirm-remote-snapshot.db");
+    let encryptedBlob = Buffer.alloc(0);
+    let checksum = "";
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/pairings/pairing-apply/confirm")) {
+          return Response.json({ success: true, key_version: 5, remote_seed_present: true });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "BOOTSTRAP_SNAPSHOT" });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: 88,
+            created_at: "2026-01-02T00:00:00Z",
+            schema_version: 1,
+            covers_tables: ["quotes"],
+            size_bytes: encryptedBlob.byteLength,
+            checksum,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return new Response(new Uint8Array(encryptedBlob), {
+            headers: {
+              "content-type": "application/octet-stream",
+              "x-snapshot-schema-version": "1",
+              "x-snapshot-covers-tables": "quotes",
+              "x-snapshot-checksum": checksum,
+            },
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    copyFileSync(runtime.dbPath, snapshotPath);
+    const snapshotDb = openSqliteDatabase(snapshotPath);
+    try {
+      seedRuntimeAsset(snapshotDb, "confirm-bootstrap-asset");
+      snapshotDb.exec(`
+        INSERT INTO quotes (
+          id, asset_id, day, source, close, currency, created_at, timestamp
+        )
+        VALUES (
+          'confirm-remote-manual', 'confirm-bootstrap-asset', '2026-01-02',
+          'MANUAL', '456', 'USD', '2026-01-02T00:00:00+00:00',
+          '2026-01-02T00:00:00+00:00'
+        );
+      `);
+      snapshotDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } finally {
+      snapshotDb.close();
+    }
+    const snapshotBytes = readFileSync(snapshotPath);
+    encryptedBlob = Buffer.from(
+      (await crypto.encrypt(dek, snapshotBytes.toString("base64"))).value,
+      "utf8",
+    );
+    checksum = `sha256:${createHash("sha256").update(encryptedBlob).digest("hex")}`;
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "confirm-bootstrap-asset");
+        seedDb.exec(`
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES ('device-runtime', 5, 'trusted', NULL, NULL);
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const confirmResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/pairing/confirm-with-bootstrap`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            pairingId: "pairing-apply",
+            proof: "proof",
+            allowOverwrite: true,
+          }),
+        },
+      );
+      const confirmBody = await confirmResponse.text();
+      expect(confirmResponse.status, confirmBody).toBe(200);
+      expect(JSON.parse(confirmBody)).toEqual({
+        status: "applied",
+        message: "Snapshot bootstrap completed",
+        localRows: null,
+        nonEmptyTables: null,
+      });
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { id: string; close: string },
+              []
+            >("SELECT id, close FROM quotes WHERE source = 'MANUAL' ORDER BY id ASC")
+            .all(),
+        ).toEqual([{ id: "confirm-remote-manual", close: "456" }]);
+      } finally {
+        verifyDb.close();
+      }
+      expect(deviceSyncRequests).toContain(
+        "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime bootstrap confirm route to reject not-ready bootstrap", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-bootstrap-not-ready-confirm-"),
+    );
+    const deviceSyncRequests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        deviceSyncRequests.push(url);
+        if (url.endsWith("/pairings/pairing-not-ready/confirm")) {
+          return Response.json({ success: true, key_version: 5, remote_seed_present: true });
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: 88,
+            created_at: "2026-01-02T00:00:00Z",
+            schema_version: 1,
+            covers_tables: ["quotes"],
+            size_bytes: 1,
+            checksum: "sha256:not-used-before-not-ready",
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "untrusted",
+          trusted_key_version: null,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 40).toString("base64"),
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          INSERT INTO sync_device_config (
+            device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+          )
+          VALUES ('device-runtime', 5, 'trusted', NULL, NULL);
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const confirmResponse = await fetch(
+        `${server.baseUrl}/api/v1/sync/pairing/confirm-with-bootstrap`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            pairingId: "pairing-not-ready",
+            proof: "proof",
+            allowOverwrite: true,
+          }),
+        },
+      );
+      expect(confirmResponse.status).toBe(500);
+      await expect(confirmResponse.json()).resolves.toMatchObject({
+        code: "internal_error",
+        message: "Device is not in READY state",
+      });
+      expect(deviceSyncRequests).not.toContain(
+        "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+      );
     } finally {
       server.stop();
       await runtime.close();

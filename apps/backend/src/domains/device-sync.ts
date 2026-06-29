@@ -165,6 +165,7 @@ export interface LocalDeviceSyncServiceDependencies {
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   onPairingComplete?: () => Promise<unknown> | unknown;
+  bootstrapSnapshot?: () => Promise<unknown> | unknown;
 }
 
 export function createDisabledDeviceSyncService(): DeviceSyncService {
@@ -257,6 +258,7 @@ export function createLocalDeviceSyncService({
   env = process.env,
   fetch: fetchImpl = fetch,
   onPairingComplete,
+  bootstrapSnapshot,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const disabledService = createDisabledDeviceSyncService();
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
@@ -719,22 +721,48 @@ export function createLocalDeviceSyncService({
           };
         }
       }
-      const bootstrapWait = await latestSnapshotBootstrapWaitState(
-        accessToken,
-        env,
-        fetchImpl,
-        deviceId,
-        db,
-      );
-      if (bootstrapWait.waiting) {
+      if (!bootstrapSnapshot) {
+        const bootstrapWait = await latestSnapshotBootstrapWaitState(
+          accessToken,
+          env,
+          fetchImpl,
+          deviceId,
+          db,
+        );
+        if (bootstrapWait.waiting) {
+          return {
+            status: "waiting_snapshot",
+            message: bootstrapWait.message,
+            localRows: null,
+            nonEmptyTables: null,
+          };
+        }
+        throw deviceSyncDisabled();
+      }
+      const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
+      if (bootstrap.status === "requested") {
         return {
           status: "waiting_snapshot",
-          message: bootstrapWait.message,
+          message: optionalString(bootstrap.message) ?? WAITING_FOR_TRUSTED_SNAPSHOT_MESSAGE,
           localRows: null,
           nonEmptyTables: null,
         };
       }
-      throw deviceSyncDisabled();
+      if (bootstrap.status !== "applied" && bootstrap.status !== "skipped") {
+        throw new DeviceSyncServiceError(
+          "internal_error",
+          optionalString(bootstrap.message) ?? "Snapshot bootstrap did not complete",
+          500,
+        );
+      }
+      pairingOverwriteApprovals.delete(request.pairingId);
+      void notifyPairingComplete(onPairingComplete);
+      return {
+        status: "applied",
+        message: "Snapshot bootstrap completed",
+        localRows: null,
+        nonEmptyTables: null,
+      };
     },
     async beginPairingConfirm(request) {
       const { accessToken, deviceId } =
@@ -2704,6 +2732,19 @@ function getLocalMinSnapshotCreatedAt(db: Database | undefined, deviceId: string
     return null;
   }
   return new Date(normalized);
+}
+
+async function runPairingBootstrapSnapshot(
+  bootstrapSnapshot: (() => Promise<unknown> | unknown) | undefined,
+): Promise<Record<string, unknown>> {
+  if (!bootstrapSnapshot) {
+    throw deviceSyncDisabled();
+  }
+  const result = await Promise.resolve(bootstrapSnapshot());
+  if (!isRecord(result)) {
+    throw new DeviceSyncServiceError("internal_error", "Failed to parse bootstrap response", 500);
+  }
+  return result;
 }
 
 function localBootstrapRequired(db: Database, deviceId: string): boolean {
