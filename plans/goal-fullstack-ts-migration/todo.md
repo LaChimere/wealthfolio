@@ -6920,6 +6920,13 @@ contract:
   activities with `asset_id = NULL`, `needs_review = 1`, and preserved
   `source_record_id`. Targeted review-draft route smoke, full runtime suite,
   full `bun run check`, and `git diff --check` passed.
+- `pr5-runtime-connect-transfer-reconcile-review-fixes`: review feedback
+  resolved. Complete-with-transfer now blocks before snapshot/approve/complete
+  unless the pre-transfer sync cycle returns clean `ok` with zero dead letters,
+  even when no outbox was pending, and malformed reconcile JSON/non-object/raw
+  token responses now become `state_error` outcomes instead of stale
+  `not_implemented` gates. Full Connect/device-sync domain suites, full
+  `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
