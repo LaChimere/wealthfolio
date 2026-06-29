@@ -6964,6 +6964,13 @@ contract:
   `min_snapshot_created_at`, returns success, and removes the completed flow.
   Targeted pairing-flow tests, full runtime suite, and backend type-check
   passed.
+- `pr5-runtime-device-sync-transfer-gate-errors`: verification passed.
+  Complete-with-transfer no longer reports stale `not_implemented` disabled
+  errors when the migrated pre-transfer sync cycle is dirty or pending outbox
+  rows remain after the cycle. Those safety gates now return explicit
+  `internal_error` failures before snapshot generation or cloud approve/complete
+  calls. Full device-sync domain tests, full runtime suite, and backend
+  type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
