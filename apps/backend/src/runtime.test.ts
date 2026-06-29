@@ -16090,6 +16090,38 @@ describe("TS backend runtime composition", () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=route-sync; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=route-sync");
+          return Promise.resolve(new Response("route-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/ROUTE?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=route-sync");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("crumb")).toBe("route-crumb");
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    meta: { currency: "USD" },
+                    timestamp: [1767571200],
+                    indicators: { quote: [{ close: [23.45] }] },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
       repositoryRoot,
       secretKey: config.secretKey,
     });
@@ -16111,17 +16143,29 @@ describe("TS backend runtime composition", () => {
     });
 
     try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-market-sync-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ? WHERE id = ?",
+          )
+          .run("ROUTE", "ROUTE", "XNAS", "runtime-market-sync-asset");
+      } finally {
+        seedDb.close();
+      }
+
       const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ assetIds: [], refetchAll: false }),
+        body: JSON.stringify({ assetIds: ["runtime-market-sync-asset"], refetchAll: false }),
       });
       expect(response.status).toBe(204);
       await waitForEventCount(events, "portfolio:update-complete", 1);
       expect(portfolioJobConfigs).toEqual([
         {
           accountIds: null,
-          marketSyncMode: { type: "incremental", asset_ids: [] },
+          marketSyncMode: { type: "incremental", asset_ids: ["runtime-market-sync-asset"] },
           snapshotMode: "incremental_from_last",
           valuationMode: "incremental_from_last",
           sinceDate: null,
@@ -16133,6 +16177,24 @@ describe("TS backend runtime composition", () => {
         "portfolio:update-start",
         "portfolio:update-complete",
       ]);
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { asset_id: string; source: string; close: string; currency: string },
+              []
+            >("SELECT asset_id, source, close, currency FROM quotes WHERE asset_id = 'runtime-market-sync-asset'")
+            .get(),
+        ).toEqual({
+          asset_id: "runtime-market-sync-asset",
+          source: "YAHOO",
+          close: "23.45",
+          currency: "USD",
+        });
+      } finally {
+        verifyDb.close();
+      }
     } finally {
       unsubscribe?.();
       server.stop();
