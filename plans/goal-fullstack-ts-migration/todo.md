@@ -7104,6 +7104,12 @@ contract:
   equity ISIN resolution, direct bond ISIN lookup, Rust-compatible user-agent
   price-information requests, and percent-to-decimal bond price conversion. Full
   runtime suite and full repository check passed.
+- `pr5-custom-provider-route-resolve-smoke`: verification passed. The runtime
+  `/api/v1/market-data/resolve-currency` route now has coverage for a persisted
+  custom provider latest source, proving `CUSTOM:<code>` resolution loads stored
+  source config, avoids Yahoo fallback, fetches the custom URL, and returns the
+  Rust-shaped `CUSTOM_SCRAPER:<code>` payload. Full runtime suite and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
