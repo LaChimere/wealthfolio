@@ -208,6 +208,7 @@ function createServicesFromDatabase(
     await worker.flushAndDispose();
   };
   const prepareDatabaseRestore = async () => {
+    await Promise.resolve(connectDeviceSyncService.stopDeviceSyncBackgroundEngine());
     await flushAndDisposeDomainEventWorker();
     if (!closed) {
       try {
@@ -618,6 +619,7 @@ function createServicesFromDatabase(
     domainEventWorker,
     async close() {
       try {
+        await Promise.resolve(connectDeviceSyncService.stopDeviceSyncBackgroundEngine());
         await flushAndDisposeDomainEventWorker();
       } finally {
         closeDatabase();

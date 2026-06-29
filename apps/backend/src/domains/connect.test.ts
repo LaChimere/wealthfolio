@@ -8545,7 +8545,7 @@ describe("TS Connect device sync local service", () => {
         status: "skipped",
         message: "Background engine not started because sync identity is not configured",
       });
-      expect(service.stopDeviceSyncBackgroundEngine()).toEqual({
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
         status: "stopped",
         message: "Device sync background engine stopped",
       });
@@ -8583,7 +8583,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps background engine start feature-gated when sync state is READY", async () => {
+  test("starts and stops background engine when sync state is READY", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
     secretService.entries.set("sync_refresh_token", "refresh-token");
@@ -8615,9 +8615,66 @@ describe("TS Connect device sync local service", () => {
     });
 
     try {
-      await expect(service.startDeviceSyncBackgroundEngine()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "started",
+        message: "Device sync background engine started",
+      });
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not start background engine after stop races an in-flight start", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let resolveDevice: ((response: Response) => void) | undefined;
+    const deviceResponse = new Promise<Response>((resolve) => {
+      resolveDevice = resolve;
+    });
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return await deviceResponse;
+      },
+    });
+
+    try {
+      const startPromise = service.startDeviceSyncBackgroundEngine();
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+      resolveDevice?.(
+        Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        }),
+      );
+      await expect(startPromise).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started because start was cancelled",
       });
     } finally {
       db.close();

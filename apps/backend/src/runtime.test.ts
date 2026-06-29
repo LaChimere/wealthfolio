@@ -2990,6 +2990,9 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
+        }
         return Response.json({
           id: "device-runtime",
           display_name: "MacBook",
@@ -9332,6 +9335,7 @@ describe("TS backend runtime composition", () => {
     let encryptedBlob = Buffer.alloc(0);
     let checksum = "";
     const deviceSyncRequests: string[] = [];
+    let reconcileCalls = 0;
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -9345,7 +9349,8 @@ describe("TS backend runtime composition", () => {
         }
         deviceSyncRequests.push(url);
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "BOOTSTRAP_SNAPSHOT" });
+          reconcileCalls += 1;
+          return Response.json({ action: reconcileCalls === 1 ? "BOOTSTRAP_SNAPSHOT" : "NOOP" });
         }
         if (url.endsWith("/api/v1/sync/snapshots/latest")) {
           return Response.json({
@@ -9539,13 +9544,15 @@ describe("TS backend runtime composition", () => {
       } finally {
         verifyDb.close();
       }
-      expect(deviceSyncRequests).toEqual([
+      expect(deviceSyncRequests.slice(0, 4)).toEqual([
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
         "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
         "https://api.example.test/api/v1/sync/snapshots/latest",
         "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
-        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
       ]);
+      expect(deviceSyncRequests).toContain(
+        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+      );
     } finally {
       unsubscribe?.();
       server.stop();
@@ -9553,7 +9560,7 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime Connect start-background route to ready feature gate", async () => {
+  test("wires runtime Connect start-background route to ready background loop", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-start-ready-"));
     const deviceSyncRequests: string[] = [];
     const runtime = createSqliteBackedBackendServices({
@@ -9605,14 +9612,28 @@ describe("TS backend runtime composition", () => {
         `${server.baseUrl}/api/v1/connect/device/start-background`,
         { method: "POST" },
       );
-      expect(startResponse.status).toBe(501);
-      await expect(startResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-        message: "Device sync feature is disabled in this build.",
+      expect(startResponse.status).toBe(200);
+      await expect(startResponse.json()).resolves.toEqual({
+        status: "started",
+        message: "Device sync background engine started",
       });
-      expect(deviceSyncRequests).toEqual([
-        "https://api.example.test/api/v1/sync/team/devices/device-runtime",
-      ]);
+      await waitForCondition(() =>
+        deviceSyncRequests.includes(
+          "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        ),
+      );
+      const statusResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/engine-status`);
+      expect(statusResponse.status).toBe(200);
+      await expect(statusResponse.json()).resolves.toMatchObject({ backgroundRunning: true });
+
+      const stopResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/stop-background`, {
+        method: "POST",
+      });
+      expect(stopResponse.status).toBe(200);
+      await expect(stopResponse.json()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
     } finally {
       server.stop();
       await runtime.close();
@@ -17947,6 +17968,17 @@ async function waitForEventCount(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   expect(events.filter((event) => event === eventName)).toHaveLength(count);
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(condition()).toBe(true);
 }
 
 function readRuntimeSyncOutbox(

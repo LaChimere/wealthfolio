@@ -4134,6 +4134,7 @@ const SNAPSHOT_EXPORT_FILTERS: Partial<Record<(typeof APP_SYNC_TABLES)[number], 
 const SNAPSHOT_UPLOAD_MAX_ATTEMPTS = 5;
 const SNAPSHOT_UPLOAD_BASE_BACKOFF_MS = 250;
 const SNAPSHOT_UPLOAD_MAX_BACKOFF_MS = 8_000;
+const DEVICE_SYNC_BACKGROUND_INTERVAL_MS = 5 * 60 * 1000;
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -4210,6 +4211,71 @@ export function createLocalConnectDeviceSyncService({
   const runWithSnapshotGenerationLock = createAsyncOperationLock();
   const readyStateOverwriteApprovals = new Set<string>();
   let snapshotUploadCancelled = false;
+  let backgroundRunning = false;
+  let backgroundCycleInFlight = false;
+  let backgroundCyclePromise: Promise<void> | null = null;
+  let backgroundLifecycleVersion = 0;
+  let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearBackgroundTimer = () => {
+    if (backgroundTimer !== null) {
+      clearTimeout(backgroundTimer);
+      backgroundTimer = null;
+    }
+  };
+  const scheduleBackgroundCycle = (delayMs: number) => {
+    clearBackgroundTimer();
+    backgroundTimer = setTimeout(() => {
+      backgroundTimer = null;
+      void runBackgroundCycle();
+    }, delayMs);
+    unrefTimer(backgroundTimer);
+  };
+  const runBackgroundCycle = async () => {
+    if (!backgroundRunning || backgroundCycleInFlight) {
+      return;
+    }
+    backgroundCycleInFlight = true;
+    const cycle = (async () => {
+      try {
+        if (!(await localSyncIdentityCanRunBackground(secretService))) {
+          backgroundRunning = false;
+          clearBackgroundTimer();
+          return;
+        }
+        await triggerLocalDeviceSyncCycle(
+          db,
+          secretService,
+          env,
+          fetchImpl,
+          restoreDeviceSyncSession,
+        );
+      } catch (error) {
+        console.warn(`[Connect] Device sync background cycle failed: ${errorMessage(error)}`);
+      } finally {
+        backgroundCycleInFlight = false;
+        if (backgroundRunning) {
+          scheduleBackgroundCycle(DEVICE_SYNC_BACKGROUND_INTERVAL_MS);
+        }
+      }
+    })();
+    backgroundCyclePromise = cycle;
+    try {
+      await cycle;
+    } finally {
+      if (backgroundCyclePromise === cycle) {
+        backgroundCyclePromise = null;
+      }
+    }
+  };
+  const stopBackgroundEngine = async () => {
+    backgroundLifecycleVersion += 1;
+    backgroundRunning = false;
+    clearBackgroundTimer();
+    const cycle = backgroundCyclePromise;
+    if (cycle) {
+      await cycle;
+    }
+  };
   const restoreDeviceSyncSession = () => {
     if (!secretService) {
       throw deviceSyncDisabled();
@@ -4335,7 +4401,10 @@ export function createLocalConnectDeviceSyncService({
       }
     },
     async getDeviceSyncEngineStatus() {
-      return getLocalDeviceSyncEngineStatus(db, secretService);
+      return {
+        ...(await getLocalDeviceSyncEngineStatus(db, secretService)),
+        backgroundRunning,
+      };
     },
     async getDeviceSyncBootstrapOverwriteCheck() {
       return getLocalDeviceSyncBootstrapOverwriteCheck(
@@ -4348,6 +4417,7 @@ export function createLocalConnectDeviceSyncService({
       if (!secretService) {
         throw deviceSyncDisabled();
       }
+      await stopBackgroundEngine();
       await runWithEnrollLock(() => clearLocalDeviceSyncData(db, secretService));
     },
     async getDeviceSyncPairingSourceStatus() {
@@ -4383,6 +4453,7 @@ export function createLocalConnectDeviceSyncService({
       });
     },
     async startDeviceSyncBackgroundEngine() {
+      const startVersion = ++backgroundLifecycleVersion;
       if (!(await localSyncIdentityCanRunBackground(secretService))) {
         return {
           status: "skipped",
@@ -4410,15 +4481,29 @@ export function createLocalConnectDeviceSyncService({
         fetchImpl,
         session.accessToken,
       );
+      if (startVersion !== backgroundLifecycleVersion) {
+        return {
+          status: "skipped",
+          message: "Background engine not started because start was cancelled",
+        };
+      }
       if (state.state !== "READY") {
         return {
           status: "skipped",
           message: "Background engine not started because device is not in READY state",
         };
       }
-      throw deviceSyncDisabled();
+      if (!backgroundRunning) {
+        backgroundRunning = true;
+        scheduleBackgroundCycle(0);
+      }
+      return {
+        status: "started",
+        message: "Device sync background engine started",
+      };
     },
-    stopDeviceSyncBackgroundEngine() {
+    async stopDeviceSyncBackgroundEngine() {
+      await stopBackgroundEngine();
       return {
         status: "stopped",
         message: "Device sync background engine stopped",
@@ -7825,6 +7910,13 @@ function snapshotUploadBackoffMs(attempt: number): number {
 
 async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: () => void }).unref;
+  if (typeof maybeUnref === "function") {
+    maybeUnref.call(timer);
+  }
 }
 
 async function requireLocalSyncIdentityDeviceId(
