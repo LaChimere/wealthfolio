@@ -7127,6 +7127,12 @@ contract:
   Yahoo quoteSummary resolution, proving cookie/crumb authentication, stale-auth
   clearing after a 401, retry with fresh auth, and the Rust-shaped resolved
   `YAHOO` payload. Full runtime suite and full repository check passed.
+- `pr5-alpha-vantage-route-search-smoke`: verification passed. The runtime
+  `/api/v1/market-data/search` route now has coverage for Alpha Vantage fallback
+  search, proving empty Yahoo primary/secondary results and empty authenticated
+  Finnhub results fall through to backend-stored Alpha Vantage API key auth,
+  `SYMBOL_SEARCH`, XNAS exchange metadata mapping, and Rust-shaped search result
+  payloads. Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
