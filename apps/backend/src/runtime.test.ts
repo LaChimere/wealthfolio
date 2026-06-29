@@ -16311,6 +16311,127 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to custom provider quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-custom-sync-route-"));
+    const requests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        requests.push(url);
+        if (url !== "https://prices.example.test/latest/FUND.TO") {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        return Promise.resolve(
+          Response.json({
+            price: 27.5,
+            date: "2026-06-29",
+            currency: "CAD",
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO market_data_custom_providers (
+                id, code, name, description, enabled, priority, config, created_at, updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+          )
+          .run(
+            "runtime-custom-provider-id",
+            "my-feed",
+            "My Feed",
+            "Runtime custom feed",
+            1,
+            7,
+            JSON.stringify({
+              sources: [
+                {
+                  kind: "latest",
+                  format: "json",
+                  url: "https://prices.example.test/latest/{SYMBOL}",
+                  pricePath: "$.price",
+                  datePath: "$.date",
+                  currencyPath: "$.currency",
+                },
+              ],
+            }),
+            "2026-05-14T00:00:00Z",
+            "2026-05-14T00:00:00Z",
+          );
+        seedRuntimeAsset(seedDb, "runtime-custom-sync-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "FUND",
+            "CAD",
+            "FUND",
+            "XTSE",
+            JSON.stringify({
+              preferred_provider: "CUSTOM_SCRAPER",
+              custom_provider_code: "my-feed",
+              overrides: {
+                "CUSTOM:my-feed": { type: "equity_symbol", symbol: "FUND.TO" },
+              },
+            }),
+            "runtime-custom-sync-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-custom-sync-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(requests).toEqual(["https://prices.example.test/latest/FUND.TO"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { id: string; source: string; close: string; currency: string; data_source: string },
+              []
+            >(
+              `
+                SELECT q.id, q.source, q.close, q.currency, s.data_source
+                FROM quotes q
+                JOIN quote_sync_state s ON s.asset_id = q.asset_id
+                WHERE q.asset_id = 'runtime-custom-sync-asset'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          id: "runtime-custom-sync-asset_2026-06-29_CUSTOM_SCRAPER:my-feed",
+          source: "CUSTOM_SCRAPER:my-feed",
+          close: "27.5",
+          currency: "CAD",
+          data_source: "CUSTOM_SCRAPER:my-feed",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to MarketData.app provider quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-marketdata-app-route-"),
