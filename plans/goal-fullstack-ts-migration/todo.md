@@ -7161,6 +7161,11 @@ contract:
   `retry_sync` payload, proving it dispatches through the migrated market-data
   sync seam and persists the requested asset's Yahoo provider quote. Full
   runtime suite and full repository check passed.
+- `pr5-market-data-history-route-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync/history` route now has coverage for Yahoo backfill,
+  proving cookie/crumb-authenticated chart history fetching and OHLC/adjclose/
+  volume provider quote persistence for active assets. Full runtime suite and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
