@@ -7183,6 +7183,11 @@ contract:
   coverage, proving ERROR severity, `DATA_CONSISTENCY` category, affected
   counts, and activities navigation actions through the HTTP seam. Full runtime
   suite and full repository check passed.
+- `pr5-health-quote-sync-issue-runtime`: verification passed. The runtime
+  `/api/v1/health/check` route now strengthens quote sync error coverage,
+  proving ERROR severity, PRICE_STALENESS category, affected holdings routes,
+  retry fix payloads, market-data navigation, and details text through the HTTP
+  seam. Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
