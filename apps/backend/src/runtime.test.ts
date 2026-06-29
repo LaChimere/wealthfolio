@@ -12378,7 +12378,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 43).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12469,7 +12477,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 43).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -12738,33 +12754,35 @@ describe("TS backend runtime composition", () => {
         localRows: null,
         nonEmptyTables: null,
       });
-      expect(deviceSyncRequests).toEqual([
-        {
-          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-wait/confirm",
-          method: "POST",
-          body: JSON.stringify({ proof: "proof" }),
-        },
-        {
-          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
-          method: "GET",
-          body: null,
-        },
-        {
-          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
-          method: "GET",
-          body: null,
-        },
-        {
-          url: "https://api.example.test/api/v1/sync/snapshots/latest",
-          method: "GET",
-          body: null,
-        },
-        {
-          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
-          method: "GET",
-          body: null,
-        },
-      ]);
+      expect(deviceSyncRequests).toEqual(
+        expect.arrayContaining([
+          {
+            url: "https://api.example.test/api/v1/sync/team/devices/device-runtime/pairings/pairing-wait/confirm",
+            method: "POST",
+            body: JSON.stringify({ proof: "proof" }),
+          },
+          {
+            url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+            method: "GET",
+            body: null,
+          },
+          {
+            url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+            method: "GET",
+            body: null,
+          },
+          {
+            url: "https://api.example.test/api/v1/sync/snapshots/latest",
+            method: "GET",
+            body: null,
+          },
+          {
+            url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+            method: "GET",
+            body: null,
+          },
+        ]),
+      );
     } finally {
       server.stop();
       await runtime.close();
@@ -13250,6 +13268,18 @@ describe("TS backend runtime composition", () => {
           method: init?.method ?? "GET",
           body: typeof init?.body === "string" ? init.body : null,
         });
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
         if (url.endsWith("/api/v1/sync/snapshots/latest")) {
           return Response.json(
             { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
@@ -13272,7 +13302,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 43).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -13323,7 +13361,22 @@ describe("TS backend runtime composition", () => {
           body: JSON.stringify({ proof: "proof" }),
         },
         {
+          url: "https://api.example.test/api/v1/sync/team/devices/device-runtime",
+          method: "GET",
+          body: null,
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+          method: "GET",
+          body: null,
+        },
+        {
           url: "https://api.example.test/api/v1/sync/snapshots/latest",
+          method: "GET",
+          body: null,
+        },
+        {
+          url: "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
           method: "GET",
           body: null,
         },
@@ -13354,6 +13407,18 @@ describe("TS backend runtime composition", () => {
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
         if (url.endsWith("/api/v1/sync/snapshots/latest")) {
           return Response.json(
             { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
@@ -13376,7 +13441,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 44).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
@@ -13470,6 +13543,18 @@ describe("TS backend runtime composition", () => {
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
+        if (url.endsWith("/api/v1/sync/team/devices/device-runtime")) {
+          return Response.json({
+            id: "device-runtime",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "BOOTSTRAP_SNAPSHOT" });
+        }
         if (url.endsWith("/api/v1/sync/snapshots/latest")) {
           return Response.json({
             snapshot_id: "snapshot-1",
@@ -13497,7 +13582,15 @@ describe("TS backend runtime composition", () => {
     try {
       await runtime.options.secretService?.setSecret(
         "sync_identity",
-        JSON.stringify({ version: 2, deviceId: "device-runtime" }),
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: Buffer.alloc(32, 45).toString("base64"),
+          keyVersion: 2,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
       );
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {

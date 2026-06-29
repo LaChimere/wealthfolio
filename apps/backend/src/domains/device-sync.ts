@@ -815,18 +815,36 @@ export function createLocalDeviceSyncService({
           return { flowId, phase };
         }
       }
-      const bootstrapWait = await latestSnapshotBootstrapWaitState(
-        accessToken,
-        env,
-        fetchImpl,
-        deviceId,
-        db,
-      );
-      if (bootstrapWait.waiting) {
-        const flowId = randomUUID();
-        const phase = { phase: "syncing", detail: "waiting_snapshot" };
-        pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
-        return { flowId, phase };
+      if (bootstrapSnapshot) {
+        const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
+        const phase = pairingBootstrapPhase(bootstrap);
+        if (phase) {
+          if (pairingBootstrapPhaseIsError(phase)) {
+            throw new DeviceSyncServiceError("internal_error", phase.message, 500);
+          }
+          const flowId = randomUUID();
+          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          return { flowId, phase };
+        }
+        void notifyPairingComplete(onPairingComplete);
+        return {
+          flowId: randomUUID(),
+          phase: { phase: "success" },
+        };
+      } else {
+        const bootstrapWait = await latestSnapshotBootstrapWaitState(
+          accessToken,
+          env,
+          fetchImpl,
+          deviceId,
+          db,
+        );
+        if (bootstrapWait.waiting) {
+          const flowId = randomUUID();
+          const phase = { phase: "syncing", detail: "waiting_snapshot" };
+          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          return { flowId, phase };
+        }
       }
       throw deviceSyncDisabled();
     },
@@ -842,20 +860,38 @@ export function createLocalDeviceSyncService({
               connectService,
               secretService,
             );
-          const bootstrapWait = await latestSnapshotBootstrapWaitState(
-            accessToken,
-            env,
-            fetchImpl,
-            deviceId,
-            db,
-          );
-          if (bootstrapWait.waiting) {
-            return { flowId: request.flowId, phase: flow.phase };
+          if (bootstrapSnapshot) {
+            const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
+            const phase = pairingBootstrapPhase(bootstrap);
+            if (phase) {
+              if (pairingBootstrapPhaseIsError(phase)) {
+                pairingFlows.delete(request.flowId);
+                pairingOverwriteApprovals.delete(flow.pairingId);
+                return { flowId: request.flowId, phase };
+              }
+              pairingFlows.set(request.flowId, { ...flow, phase });
+              return { flowId: request.flowId, phase };
+            }
+          } else {
+            const bootstrapWait = await latestSnapshotBootstrapWaitState(
+              accessToken,
+              env,
+              fetchImpl,
+              deviceId,
+              db,
+            );
+            if (bootstrapWait.waiting) {
+              return { flowId: request.flowId, phase: flow.phase };
+            }
+            const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+            pairingFlows.delete(request.flowId);
+            pairingOverwriteApprovals.delete(flow.pairingId);
+            return { flowId: request.flowId, phase };
           }
-          const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
           pairingFlows.delete(request.flowId);
           pairingOverwriteApprovals.delete(flow.pairingId);
-          return { flowId: request.flowId, phase };
+          void notifyPairingComplete(onPairingComplete);
+          return { flowId: request.flowId, phase: { phase: "success" } };
         } catch (error) {
           const phase = { phase: "error", message: errorMessage(error) };
           pairingFlows.delete(request.flowId);
@@ -884,16 +920,34 @@ export function createLocalDeviceSyncService({
         );
       pairingOverwriteApprovals.add(flow.pairingId);
       try {
-        const bootstrapWait = await latestSnapshotBootstrapWaitState(
-          accessToken,
-          env,
-          fetchImpl,
-          deviceId,
-          db,
-        );
-        if (bootstrapWait.waiting) {
-          const phase = { phase: "syncing", detail: "waiting_snapshot" };
-          pairingFlows.set(request.flowId, { ...flow, phase });
+        if (bootstrapSnapshot) {
+          const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
+          const phase = pairingBootstrapPhase(bootstrap);
+          if (phase) {
+            if (pairingBootstrapPhaseIsError(phase)) {
+              pairingFlows.delete(request.flowId);
+              pairingOverwriteApprovals.delete(flow.pairingId);
+              return { flowId: request.flowId, phase };
+            }
+            pairingFlows.set(request.flowId, { ...flow, phase });
+            return { flowId: request.flowId, phase };
+          }
+        } else {
+          const bootstrapWait = await latestSnapshotBootstrapWaitState(
+            accessToken,
+            env,
+            fetchImpl,
+            deviceId,
+            db,
+          );
+          if (bootstrapWait.waiting) {
+            const phase = { phase: "syncing", detail: "waiting_snapshot" };
+            pairingFlows.set(request.flowId, { ...flow, phase });
+            return { flowId: request.flowId, phase };
+          }
+          const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+          pairingFlows.delete(request.flowId);
+          pairingOverwriteApprovals.delete(flow.pairingId);
           return { flowId: request.flowId, phase };
         }
       } catch (error) {
@@ -902,10 +956,10 @@ export function createLocalDeviceSyncService({
         pairingOverwriteApprovals.delete(flow.pairingId);
         return { flowId: request.flowId, phase };
       }
-      const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
       pairingFlows.delete(request.flowId);
       pairingOverwriteApprovals.delete(flow.pairingId);
-      return { flowId: request.flowId, phase };
+      void notifyPairingComplete(onPairingComplete);
+      return { flowId: request.flowId, phase: { phase: "success" } };
     },
     async cancelPairingFlow(request) {
       const flow = pairingFlows.get(request.flowId);
@@ -2745,6 +2799,27 @@ async function runPairingBootstrapSnapshot(
     throw new DeviceSyncServiceError("internal_error", "Failed to parse bootstrap response", 500);
   }
   return result;
+}
+
+function pairingBootstrapPhase(bootstrap: Record<string, unknown>): Record<string, unknown> | null {
+  const status = optionalString(bootstrap.status);
+  if (status === "requested") {
+    return { phase: "syncing", detail: "waiting_snapshot" };
+  }
+  if (status === "applied" || status === "skipped") {
+    return null;
+  }
+  return {
+    phase: "error",
+    message: optionalString(bootstrap.message) ?? "Snapshot bootstrap did not complete",
+  };
+}
+
+function pairingBootstrapPhaseIsError(phase: Record<string, unknown>): phase is {
+  phase: "error";
+  message: string;
+} {
+  return phase.phase === "error" && typeof phase.message === "string";
 }
 
 function localBootstrapRequired(db: Database, deviceId: string): boolean {
