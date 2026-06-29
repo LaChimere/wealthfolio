@@ -264,12 +264,10 @@ export function createLocalDeviceSyncService({
   triggerSyncCycle,
   generateSnapshot,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
-  const disabledService = createDisabledDeviceSyncService();
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
   const pairingOverwriteApprovals = new Set<string>();
 
   return {
-    ...disabledService,
     async registerDevice(request) {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
       if (!secretService) {

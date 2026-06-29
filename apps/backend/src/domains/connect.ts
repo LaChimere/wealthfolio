@@ -258,7 +258,6 @@ export function createLocalConnectService({
   env = process.env,
   fetch: fetchImpl = fetch,
 }: LocalConnectServiceDependencies): ConnectService {
-  const disabledService = createDisabledConnectService();
   let restorePromise: Promise<{ accessToken: string; refreshToken: string }> | null = null;
   let sessionGeneration = 0;
   const restoreSession = async () => {
@@ -276,7 +275,6 @@ export function createLocalConnectService({
     return await restorePromise;
   };
   return {
-    ...disabledService,
     async storeSyncSession(refreshToken) {
       if (!secretService) {
         throw cloudSyncDisabled();
@@ -4263,7 +4261,6 @@ export function createLocalConnectDeviceSyncService({
   reinitializeDelayMs = 350,
   backgroundOutboxPruneIntervalMs = DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS,
 }: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
-  const disabledService = createDisabledConnectDeviceSyncService();
   const runWithEnrollLock = createAsyncOperationLock();
   const runWithSessionRestoreLock = createAsyncOperationLock();
   const runWithSnapshotGenerationLock = createAsyncOperationLock();
@@ -4387,7 +4384,6 @@ export function createLocalConnectDeviceSyncService({
     );
   };
   return {
-    ...disabledService,
     async getDeviceSyncState() {
       if (!secretService) {
         throw deviceSyncDisabled();
