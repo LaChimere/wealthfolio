@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1005
+turns_used: 1006
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T08:06:59+09:00"
+updated_at: "2026-06-30T08:11:58+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5596,6 +5596,12 @@ updated_at: "2026-06-30T08:06:59+09:00"
   results and empty OpenFIGI search results fall through to Börse TradingView
   search, use the Rust-compatible user agent, map XETR exchange metadata to EUR,
   and return the Rust-shaped search payload; full runtime validation and full
+  repository check passed.
+- Turn 1006: Added Finnhub market-data search route evidence.
+  `/api/v1/market-data/search` now has runtime coverage proving a non-MIC Yahoo
+  result falls through to backend-keyed Finnhub search, authenticated Finnhub
+  results map `.TO` symbols to XTSE/CAD exchange metadata, and the HTTP route
+  returns the Rust-shaped search payload; full runtime validation and full
   repository check passed.
 
 ## Deferred items

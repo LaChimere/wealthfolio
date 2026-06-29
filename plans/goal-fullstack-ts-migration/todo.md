@@ -7145,6 +7145,12 @@ contract:
   TradingView search, requests use the Rust-compatible user agent, XETR exchange
   metadata maps to EUR, and the route returns the Rust-shaped search payload.
   Full runtime suite and full repository check passed.
+- `pr5-finnhub-route-search-smoke`: verification passed. The runtime
+  `/api/v1/market-data/search` route now has coverage for Finnhub fallback
+  search, proving a non-MIC Yahoo result falls through to backend-stored Finnhub
+  API key auth, `.TO` symbols map to XTSE/CAD exchange metadata, and the route
+  returns the Rust-shaped search payload. Full runtime suite and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
