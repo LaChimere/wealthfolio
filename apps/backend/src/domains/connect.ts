@@ -1852,7 +1852,6 @@ async function syncEmptyTransactionActivityPages(
         break;
       }
       const cashActivityCreates: Record<string, unknown>[] = [];
-      let hasUnsupportedMappableActivity = false;
       for (const activity of data) {
         if (!hasBrokerActivityMappableId(activity)) {
           continue;
@@ -1884,15 +1883,11 @@ async function syncEmptyTransactionActivityPages(
             exchangeMetadata,
           );
         if (createInput === null) {
-          hasUnsupportedMappableActivity = true;
-        } else if (!brokerActivityAlreadyImported(db, activity, createInput)) {
+          continue;
+        }
+        if (!brokerActivityAlreadyImported(db, activity, createInput)) {
           cashActivityCreates.push(createInput);
         }
-      }
-      if (hasUnsupportedMappableActivity) {
-        const message = "Broker activity mapping is not available in this build.";
-        upsertBrokerSyncFailure(db, account.id, message);
-        throw new ConnectNotImplementedError(message);
       }
       if (cashActivityCreates.length > 0) {
         if (!activityService.bulkMutateActivities) {
