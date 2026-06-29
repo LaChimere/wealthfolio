@@ -17544,6 +17544,56 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime quote resolution route to Metal Price API quote summaries", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-metal-resolve-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.metalpriceapi.com/v1/latest?")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        expect((init?.headers as Record<string, string>)["X-API-KEY"]).toBe("metal-key");
+        const parsed = new URL(url);
+        calls.push(
+          `${parsed.pathname.replace("/v1/", "")}:${parsed.searchParams.get("base")}:${parsed.searchParams.get("currencies")}`,
+        );
+        expect(parsed.searchParams.get("base")).toBe("USD");
+        expect(parsed.searchParams.get("currencies")).toBe("XAG");
+        return Promise.resolve(
+          Response.json({
+            success: true,
+            base: "USD",
+            timestamp: 1767657600,
+            rates: { XAG: 0.05 },
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("METAL_PRICE_API", "metal-key");
+
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/resolve-currency?symbol=XAG&instrumentType=METAL&quoteCcy=USD&providerId=METAL_PRICE_API`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        currency: "USD",
+        price: 20,
+        resolvedProviderId: "METAL_PRICE_API",
+      });
+      expect(calls).toEqual(["latest:USD:XAG"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
