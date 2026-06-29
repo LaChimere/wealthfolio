@@ -6801,6 +6801,14 @@ contract:
   aliases, FK-aware retry behavior through the shared replay fallback, and sync
   metadata/applied-event tracking. Broad runtime/connect tests, full
   `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-snapshot-upload-route-smoke`: verification passed.
+  Trusted generate-snapshot now exports the Rust APP_SYNC_TABLES snapshot image
+  with table filters, encrypts the base64 SQLite image and metadata with the
+  sync DEK, uploads with Rust-shaped headers, retries transient upload failures
+  with a stable snapshot event id, and resolves snapshot-index conflicts by
+  rechecking remote snapshot coverage. Broad runtime/connect tests, full
+  `bun run check`, `git diff --check`, and dual Claude/GPT xhigh re-review
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
