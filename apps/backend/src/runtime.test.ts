@@ -2478,6 +2478,173 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime Connect broker activity sync to provider-resolved asset creation", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-connect-broker-provider-asset-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      domainEventDebounceMs: 10_000,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.includes("/api/v1/sync/brokerage/accounts/provider-account-provider/activities")) {
+          return Response.json({
+            data: [
+              {
+                id: "broker-buy-provider-1",
+                type: "BUY",
+                trade_date: "2026-01-05T10:00:00Z",
+                units: 3,
+                price: 420,
+                amount: 1260,
+                currency: { code: "USD" },
+                provider_type: "SNAPTRADE",
+                symbol: {
+                  symbol: "MSFT",
+                  raw_symbol: "MSFT",
+                },
+              },
+            ],
+            pagination: { has_more: false, total: 1, limit: 1000 },
+          });
+        }
+        if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT") {
+          return Response.json({
+            quotes: [
+              {
+                symbol: "MSFT",
+                exchange: "NMS",
+                quoteType: "EQUITY",
+                shortname: "Microsoft Corporation",
+                score: 99,
+              },
+            ],
+          });
+        }
+        return Response.json({});
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const seedDb = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedDb
+        .prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode, provider, provider_account_id
+            )
+            VALUES (
+              'broker-provider-account', 'Broker Provider Account', 'SECURITIES', NULL,
+              'USD', 0, 1, 0, 'TRANSACTIONS', 'SNAPTRADE', 'provider-account-provider'
+            )
+          `,
+        )
+        .run();
+    } finally {
+      seedDb.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const syncActivitiesResponse = await fetch(
+        `${server.baseUrl}/api/v1/connect/sync/activities`,
+        { method: "POST" },
+      );
+      expect(syncActivitiesResponse.status).toBe(200);
+      await expect(syncActivitiesResponse.json()).resolves.toMatchObject({
+        accountsSynced: 1,
+        activitiesUpserted: 1,
+        assetsInserted: 1,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [expect.any(String)],
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const asset = verifyDb
+          .query<
+            {
+              id: string;
+              name: string | null;
+              display_code: string;
+              quote_ccy: string;
+              instrument_type: string | null;
+              instrument_symbol: string | null;
+              instrument_exchange_mic: string | null;
+            },
+            []
+          >(
+            `
+              SELECT id, name, display_code, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic
+              FROM assets
+              WHERE instrument_symbol = 'MSFT'
+            `,
+          )
+          .get();
+        expect(asset).toEqual({
+          id: expect.any(String),
+          name: "Microsoft Corporation",
+          display_code: "MSFT",
+          quote_ccy: "USD",
+          instrument_type: "EQUITY",
+          instrument_symbol: "MSFT",
+          instrument_exchange_mic: "XNAS",
+        });
+        expect(
+          verifyDb
+            .query<
+              {
+                activity_type: string;
+                asset_id: string | null;
+                quantity: string | null;
+                unit_price: string | null;
+                amount: string | null;
+                currency: string;
+                source_record_id: string | null;
+              },
+              []
+            >(
+              `
+                SELECT activity_type, asset_id, quantity, unit_price, amount, currency, source_record_id
+                FROM activities
+                WHERE source_record_id = 'broker-buy-provider-1'
+              `,
+            )
+            .get(),
+        ).toEqual({
+          activity_type: "BUY",
+          asset_id: asset?.id,
+          quantity: "3",
+          unit_price: "420",
+          amount: "1260",
+          currency: "USD",
+          source_record_id: "broker-buy-provider-1",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires disabled device sync runtime behavior", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-device-sync-disabled-"),
