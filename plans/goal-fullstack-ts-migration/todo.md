@@ -7012,6 +7012,12 @@ contract:
   leaving only the explicit error helpers still used by real runtime
   precondition gates. Full Connect/device-sync domain suites and backend
   type-check passed.
+- `pr5-health-targeted-classification-runtime-smoke`: verification passed. The
+  runtime `/api/v1/health/fix` route now has SQLite-backed coverage for a
+  non-empty `migrate_classifications` payload, proving only the requested legacy
+  asset migrates into GICS/region assignments, migrated metadata is cleaned,
+  unrequested legacy assets remain untouched, and `asset_taxonomy_assignment`
+  sync-outbox rows are queued. Full runtime suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

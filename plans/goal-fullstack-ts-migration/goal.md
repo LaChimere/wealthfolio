@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 982
+turns_used: 983
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T05:32:34+09:00"
+updated_at: "2026-06-30T05:46:22+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5464,6 +5464,12 @@ updated_at: "2026-06-30T05:32:34+09:00"
   factory exports after local runtime factories stopped spreading them. This
   deletes unreachable feature-disabled `not_implemented` fallback code while
   preserving the explicit runtime configuration gates; full Connect/device-sync
+  validation and backend type-check passed.
+- Turn 983: Strengthened targeted classification health-fix runtime evidence.
+  `/api/v1/health/fix` with a non-empty `migrate_classifications` payload now
+  has SQLite-backed coverage proving only selected legacy assets are migrated,
+  legacy metadata is cleaned for migrated assets, unselected assets remain
+  untouched, and assignment sync-outbox events are queued; full runtime
   validation and backend type-check passed.
 
 ## Deferred items
