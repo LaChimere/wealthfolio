@@ -2725,7 +2725,7 @@ function brokerUnresolvedAssetActivityCreateInput(
   const activityId = optionalString(activity.id);
   const rawActivityType = brokerActivityType(activity) ?? "UNKNOWN";
   const assetSymbol = brokerActivitySymbol(activity, exchangeMetadata);
-  if (!activityId || !assetSymbol) {
+  if (!activityId) {
     return null;
   }
   const sourceRecordId = brokerActivitySourceRecordId(activity) ?? activityId;
@@ -2736,6 +2736,14 @@ function brokerUnresolvedAssetActivityCreateInput(
     activityType !== "UNKNOWN"
   ) {
     return null;
+  }
+  if (!assetSymbol) {
+    return brokerUnresolvedReviewActivityCreateInput(
+      activity,
+      accountId,
+      accountCurrency,
+      baseCurrency,
+    );
   }
   const instrumentType = brokerActivityInstrumentType(activity, assetSymbol);
   if (!instrumentType) {

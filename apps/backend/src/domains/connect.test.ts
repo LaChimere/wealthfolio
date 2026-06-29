@@ -2506,7 +2506,17 @@ describe("TS Connect local session service", () => {
           return Response.json({ access_token: "access-token" });
         }
         return Response.json({
-          data: [{ id: "activity-1", symbol: { symbol: "AAPL", raw_symbol: "AAPL" } }],
+          data: [
+            { id: "activity-1", symbol: { symbol: "AAPL", raw_symbol: "AAPL" } },
+            {
+              id: "activity-2",
+              type: "BUY",
+              trade_date: "2026-01-06T10:00:00Z",
+              units: 3,
+              price: 40,
+              amount: 120,
+            },
+          ],
         });
       },
       accountService: {
@@ -2540,7 +2550,12 @@ describe("TS Connect local session service", () => {
         saveBrokerSyncProfileRules: (request) => request,
         bulkMutateActivities: (request) => {
           bulkRequests.push(request);
-          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+          return {
+            created: [{ id: "created-review-1" }, { id: "created-review-2" }],
+            updated: [],
+            deleted: [],
+            errors: [],
+          };
         },
       },
     });
@@ -2549,9 +2564,10 @@ describe("TS Connect local session service", () => {
       await expect(service.syncBrokerActivities()).resolves.toMatchObject({
         accountsSynced: 1,
         accountsFailed: 0,
-        activitiesUpserted: 1,
+        activitiesUpserted: 2,
       });
-      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+      const creates = bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined;
+      expect(creates).toEqual([
         expect.objectContaining({
           activityType: "UNKNOWN",
           allowMissingAsset: true,
@@ -2561,6 +2577,16 @@ describe("TS Connect local session service", () => {
           metadata: expect.objectContaining({
             symbol: expect.objectContaining({ symbol: "AAPL", raw_symbol: "AAPL" }),
           }),
+        }),
+        expect.objectContaining({
+          activityType: "BUY",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-2",
+          quantity: "3",
+          unitPrice: "40",
+          amount: "120",
         }),
       ]);
       expect(
