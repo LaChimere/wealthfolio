@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 994
+turns_used: 995
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T06:59:50+09:00"
+updated_at: "2026-06-30T07:06:16+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5531,6 +5531,12 @@ updated_at: "2026-06-30T06:59:50+09:00"
   an OpenFIGI-preferred asset does not call OpenFIGI for quote sync, falls back
   through Yahoo chart fetching, and records both quote and sync-state source as
   `YAHOO`; full runtime validation and full repository check passed.
+- Turn 995: Added custom-provider latest quote evidence for the market-data sync
+  route. `/api/v1/market-data/sync` now has SQLite-backed coverage proving a
+  persisted custom provider source is loaded by the runtime service, symbol
+  overrides expand into the source URL, and `CUSTOM_SCRAPER:<code>` quote plus
+  sync-state rows are persisted; full runtime validation and full repository
+  check passed.
 
 ## Deferred items
 
