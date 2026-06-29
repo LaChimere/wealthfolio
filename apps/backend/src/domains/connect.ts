@@ -165,8 +165,6 @@ export class ConnectNotImplementedError extends ConnectServiceError {
 const CLOUD_SYNC_DISABLED_MESSAGE = "Cloud sync features are disabled in this build.";
 const CONNECT_SYNC_DISABLED_MESSAGE = "Connect sync feature is disabled in this build.";
 const DEVICE_SYNC_DISABLED_MESSAGE = "Device sync feature is disabled in this build.";
-const BROKER_SYNC_PROFILE_DEFERRED_MESSAGE =
-  "Broker sync profile persistence is not available in this build.";
 const BROKER_ACTIVITY_MAX_PAGES = 10_000;
 const BROKER_SYNC_START = "broker:sync-start";
 const BROKER_SYNC_COMPLETE = "broker:sync-complete";
@@ -184,68 +182,6 @@ const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 type I64Value = number | bigint;
-
-export function createDisabledConnectService(): ConnectService {
-  return {
-    async storeSyncSession() {
-      throw cloudSyncDisabled();
-    },
-    async clearSyncSession() {
-      throw cloudSyncDisabled();
-    },
-    async getSyncSessionStatus() {
-      throw cloudSyncDisabled();
-    },
-    async restoreSyncSession() {
-      throw cloudSyncDisabled();
-    },
-    async listBrokerConnections() {
-      throw connectSyncDisabled();
-    },
-    async listBrokerAccounts() {
-      throw connectSyncDisabled();
-    },
-    async syncBrokerData() {
-      return (await syncBrokerDataBounded(this)).result;
-    },
-    async syncBrokerConnections() {
-      throw connectSyncDisabled();
-    },
-    async syncBrokerAccounts() {
-      throw connectSyncDisabled();
-    },
-    async syncBrokerActivities() {
-      throw connectSyncDisabled();
-    },
-    getSyncedAccounts() {
-      return [];
-    },
-    getPlatforms() {
-      return [];
-    },
-    getBrokerSyncStates() {
-      return [];
-    },
-    getImportRuns() {
-      return [];
-    },
-    async getBrokerSyncProfile() {
-      throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
-    },
-    async saveBrokerSyncProfileRules() {
-      throw new ConnectNotImplementedError(BROKER_SYNC_PROFILE_DEFERRED_MESSAGE);
-    },
-    async getSubscriptionPlans() {
-      throw cloudSyncDisabled();
-    },
-    async getSubscriptionPlansPublic() {
-      throw cloudSyncDisabled();
-    },
-    async getUserInfo() {
-      throw cloudSyncDisabled();
-    },
-  };
-}
 
 export function createLocalConnectService({
   db,
@@ -4046,54 +3982,6 @@ export interface ConnectDeviceSyncService {
   generateDeviceSnapshotNow(): Promise<unknown> | unknown;
   cancelDeviceSnapshotUpload(): Promise<unknown> | unknown;
   notifySyncWorkAvailable(): void;
-}
-
-export function createDisabledConnectDeviceSyncService(): ConnectDeviceSyncService {
-  return {
-    async getDeviceSyncState() {
-      throw deviceSyncDisabled();
-    },
-    async enableDeviceSync() {
-      throw deviceSyncDisabled();
-    },
-    async clearDeviceSyncData() {
-      throw deviceSyncDisabled();
-    },
-    async reinitializeDeviceSync() {
-      throw deviceSyncDisabled();
-    },
-    async getDeviceSyncEngineStatus() {
-      throw deviceSyncDisabled();
-    },
-    async getDeviceSyncPairingSourceStatus() {
-      throw deviceSyncDisabled();
-    },
-    async getDeviceSyncBootstrapOverwriteCheck() {
-      throw deviceSyncDisabled();
-    },
-    async reconcileDeviceSyncReadyState() {
-      throw deviceSyncDisabled();
-    },
-    async bootstrapDeviceSnapshot() {
-      throw deviceSyncDisabled();
-    },
-    async triggerDeviceSyncCycle() {
-      throw deviceSyncDisabled();
-    },
-    async startDeviceSyncBackgroundEngine() {
-      throw deviceSyncDisabled();
-    },
-    async stopDeviceSyncBackgroundEngine() {
-      throw deviceSyncDisabled();
-    },
-    async generateDeviceSnapshotNow() {
-      throw deviceSyncDisabled();
-    },
-    async cancelDeviceSnapshotUpload() {
-      throw deviceSyncDisabled();
-    },
-    notifySyncWorkAvailable() {},
-  };
 }
 
 interface SyncEngineStateRow {
