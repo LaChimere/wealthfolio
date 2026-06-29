@@ -6843,6 +6843,13 @@ contract:
   tails, with prune errors logged without changing successful cycle results.
   Broad runtime/connect tests, full `bun run check`, `git diff --check`, and
   dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-background-cadence`: verification passed. The local
+  background loop now schedules by Rust-style 5-minute jittered cadence, honors
+  sync_engine_state retry backoff and future pending outbox retry timestamps,
+  quick-wakes only when pending outbox can be pushed, and avoids busy polling
+  during wait_snapshot/stale_cursor bootstrap states. Broad runtime/connect
+  tests, full `bun run check`, `git diff --check`, and dual Claude/GPT xhigh
+  review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
