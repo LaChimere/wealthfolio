@@ -7062,6 +7062,12 @@ contract:
   authenticates the `TIME_SERIES_DAILY` request, uses the Rust-compatible `.TRT`
   provider symbol suffix, preserves MIC-derived CAD quote currency, and persists
   the provider quote. Full runtime suite and backend type-check passed.
+- `pr5-boerse-frankfurt-route-provider-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync` route now has SQLite-backed coverage for a
+  Börse-preferred XETR equity, proving the route searches TradingView metadata,
+  resolves the matching ISIN, fetches daily history with the Rust-compatible
+  user agent, and persists the EUR `BOERSE_FRANKFURT` provider quote. Full
+  runtime suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
