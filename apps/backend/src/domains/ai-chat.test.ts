@@ -2241,8 +2241,8 @@ describe("TS AI chat domain", () => {
           attachments: [{ name: "scan.svg", contentType: "image/svg+xml", data: "aGVsbG8=" }],
         }),
       ).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "invalid_input",
+        status: 400,
         message:
           "AI chat image/svg+xml attachments are not available for provider 'anthropic' model 'claude-vision'",
       });
@@ -2254,8 +2254,8 @@ describe("TS AI chat domain", () => {
           ],
         }),
       ).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "invalid_input",
+        status: 400,
         message:
           "AI chat application/pdf attachments are not available for provider 'ollama' model 'llava'",
       });

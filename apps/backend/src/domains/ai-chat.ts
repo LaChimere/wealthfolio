@@ -336,9 +336,9 @@ export function createAiChatService(
       );
       if (unsupportedAttachment) {
         throw aiChatError(
-          "not_implemented",
+          "invalid_input",
           `AI chat ${safeContentTypeLabel(unsupportedAttachment.contentType)} attachments are not available for provider '${providerConfig.providerId}' model '${providerConfig.modelId}'`,
-          501,
+          400,
         );
       }
       if (providerConfig.providerType === "api" && !providerConfig.apiKey) {
