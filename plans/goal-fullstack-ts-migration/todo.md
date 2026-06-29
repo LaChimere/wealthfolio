@@ -6895,6 +6895,13 @@ contract:
   pending-outbox, approve-retry, approve-failure, and bootstrap-required paths.
   Broad runtime/device-sync tests, full `bun run check`, `git diff --check`, and
   dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-broker-unresolved-review-drafts`: verification passed.
+  Broker activity sync now mirrors Rust sync preparation for symbol-bearing
+  activities that cannot be matched to a local or provider-resolved asset by
+  importing review DRAFT activities with `allowMissingAsset`, no linked asset,
+  preserved source/idempotency metadata, and existing duplicate/stuck-pagination
+  guards. Full Connect domain suite, full `bun run check`, `git diff --check`,
+  and dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
