@@ -7074,6 +7074,12 @@ contract:
   route dispatches `FX_DAILY` and `DIGITAL_CURRENCY_DAILY`, preserves USD/CAD
   quote currencies, and persists both provider quotes. Full runtime suite and
   full repository check passed.
+- `pr5-openfigi-fallback-route-provider-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync` route now has SQLite-backed coverage for an
+  OpenFIGI-preferred asset, proving quote sync avoids profile-only OpenFIGI
+  calls, falls back to Yahoo chart fetching, and records both quote and
+  quote-sync-state source as `YAHOO`. Full runtime suite and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
