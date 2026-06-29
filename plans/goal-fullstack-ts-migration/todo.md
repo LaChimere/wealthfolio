@@ -7156,6 +7156,11 @@ contract:
   dividend fetching, proving cookie/crumb authentication, dividend chart query
   parameters, sorted dividend payloads, and crumb reuse across repeated HTTP
   calls. Full runtime suite and full repository check passed.
+- `pr5-health-retry-sync-fix-runtime`: verification passed. The runtime
+  `/api/v1/health/fix` route now has focused coverage for a non-empty
+  `retry_sync` payload, proving it dispatches through the migrated market-data
+  sync seam and persists the requested asset's Yahoo provider quote. Full
+  runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
