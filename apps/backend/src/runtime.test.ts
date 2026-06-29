@@ -16401,6 +16401,107 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to Alpha Vantage provider quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-alpha-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        expect(init).toBeUndefined();
+        const url = String(input);
+        if (!url.startsWith("https://www.alphavantage.co/query")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const parsed = new URL(url);
+        expect(parsed.searchParams.get("apikey")).toBe("alpha-key");
+        expect(parsed.searchParams.get("function")).toBe("TIME_SERIES_DAILY");
+        expect(parsed.searchParams.get("outputsize")).toBe("compact");
+        calls.push(parsed.searchParams.get("symbol") ?? "");
+        return Promise.resolve(
+          Response.json({
+            "Time Series (Daily)": {
+              "2026-06-29": {
+                "1. open": "10",
+                "2. high": "12",
+                "3. low": "9",
+                "4. close": "11",
+                "5. volume": "123456",
+              },
+            },
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("ALPHA_VANTAGE", "alpha-key");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-alpha-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "AAPL",
+            "USD",
+            "AAPL",
+            "XTSE",
+            JSON.stringify({ preferred_provider: "ALPHA_VANTAGE" }),
+            "runtime-alpha-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-alpha-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(calls).toEqual(["AAPL.TRT"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                source: string;
+                open: string | null;
+                high: string | null;
+                low: string | null;
+                close: string;
+                volume: string | null;
+                currency: string;
+              },
+              []
+            >(
+              "SELECT source, open, high, low, close, volume, currency FROM quotes WHERE asset_id = 'runtime-alpha-asset'",
+            )
+            .get(),
+        ).toEqual({
+          source: "ALPHA_VANTAGE",
+          open: "10",
+          high: "12",
+          low: "9",
+          close: "11",
+          volume: "123456",
+          currency: "CAD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to Metal Price API quotes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-metal-route-"));
     const calls: string[] = [];
