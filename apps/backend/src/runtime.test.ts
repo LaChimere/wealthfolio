@@ -1622,6 +1622,98 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime health retry sync fix to provider quote persistence", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-retry-fix-"));
+    const chartSymbols: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=health-retry; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=health-retry");
+          return Promise.resolve(new Response("health-retry-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/RETRY?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=health-retry");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("crumb")).toBe("health-retry-crumb");
+          chartSymbols.push("RETRY");
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: [
+                  {
+                    meta: { currency: "USD" },
+                    timestamp: [1767571200],
+                    indicators: { quote: [{ close: [34.56] }] },
+                  },
+                ],
+                error: null,
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "health-retry-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ? WHERE id = ?",
+          )
+          .run("RETRY", "RETRY", "XNAS", "health-retry-asset");
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "retry_sync",
+          label: "Retry Sync",
+          payload: ["health-retry-asset"],
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(chartSymbols).toEqual(["RETRY"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { asset_id: string; source: string; close: string; currency: string },
+              []
+            >("SELECT asset_id, source, close, currency FROM quotes WHERE asset_id = 'health-retry-asset'")
+            .get(),
+        ).toEqual({
+          asset_id: "health-retry-asset",
+          source: "YAHOO",
+          close: "34.56",
+          currency: "USD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime database backup list download and delete routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-backup-routes-"));
     const runtime = createSqliteBackedBackendServices({
