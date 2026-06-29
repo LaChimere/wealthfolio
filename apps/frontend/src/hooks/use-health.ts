@@ -112,8 +112,8 @@ export function useExecuteHealthFix() {
       // Invalidate holdings so related pages refresh
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
-      // Skip toast for sync actions — global event listeners handle feedback
-      if (actionId !== "sync_prices" && actionId !== "retry_sync") {
+      // Skip toast for sync actions — global event listeners handle feedback.
+      if (!isSyncHealthFixAction(actionId)) {
         toast.success("Fix applied successfully");
       }
     },
@@ -121,6 +121,10 @@ export function useExecuteHealthFix() {
       toast.error("Fix failed", { description: error.message });
     },
   });
+}
+
+function isSyncHealthFixAction(actionId: string): boolean {
+  return actionId === "sync_prices" || actionId === "retry_sync" || actionId === "fetch_fx";
 }
 
 /**
