@@ -16247,6 +16247,84 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data search route to Boerse Frankfurt fallback", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-boerse-search-route-"));
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith("https://query")) {
+          calls.push({ url, body: null });
+          return Promise.resolve(Response.json({ quotes: [] }));
+        }
+        if (url === "https://api.openfigi.com/v3/search") {
+          const body = JSON.parse(String(init?.body)) as unknown;
+          calls.push({ url, body });
+          return Promise.resolve(Response.json({ data: [] }));
+        }
+        if (url.startsWith("https://api.live.deutsche-boerse.com/v1/tradingview/search?")) {
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("query")).toBe("SAP");
+          expect(parsed.searchParams.get("limit")).toBe("10");
+          expect((init?.headers as Record<string, string>)["User-Agent"]).toContain("Mozilla");
+          calls.push({ url, body: null });
+          return Promise.resolve(
+            Response.json([
+              {
+                symbol: "XETR:DE0007164600",
+                description: "SAP SE",
+                exchange: "Xetra",
+                type: "Aktie",
+              },
+              {
+                symbol: "XETR:DAX",
+                description: "DAX",
+                exchange: "Xetra",
+                type: "Index",
+              },
+            ]),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/search?query=SAP`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual([
+        expect.objectContaining({
+          symbol: "DE0007164600",
+          shortName: "SAP SE",
+          longName: "SAP SE",
+          exchange: "Xetra",
+          exchangeMic: "XETR",
+          exchangeName: "XETRA",
+          quoteType: "EQUITY",
+          currency: "EUR",
+          currencySource: "exchange_inferred",
+          dataSource: "BOERSE_FRANKFURT",
+          isExisting: false,
+          existingAssetId: null,
+        }),
+      ]);
+      expect(calls.map(({ url }) => url)).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SAP",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=SAP",
+        "https://api.openfigi.com/v3/search",
+        expect.stringContaining("https://api.live.deutsche-boerse.com/v1/tradingview/search?"),
+      ]);
+      expect(calls[2]?.body).toEqual({ query: "SAP" });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
