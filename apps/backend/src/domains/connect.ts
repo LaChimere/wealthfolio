@@ -4000,6 +4000,7 @@ export interface ConnectDeviceSyncService {
   stopDeviceSyncBackgroundEngine(): Promise<unknown> | unknown;
   generateDeviceSnapshotNow(): Promise<unknown> | unknown;
   cancelDeviceSnapshotUpload(): Promise<unknown> | unknown;
+  notifySyncWorkAvailable(): void;
 }
 
 export function createDisabledConnectDeviceSyncService(): ConnectDeviceSyncService {
@@ -4046,6 +4047,7 @@ export function createDisabledConnectDeviceSyncService(): ConnectDeviceSyncServi
     async cancelDeviceSnapshotUpload() {
       throw deviceSyncDisabled();
     },
+    notifySyncWorkAvailable() {},
   };
 }
 
@@ -4138,6 +4140,8 @@ const SNAPSHOT_UPLOAD_MAX_BACKOFF_MS = 8_000;
 const DEVICE_SYNC_BACKGROUND_INTERVAL_MS = 5 * 60 * 1000;
 const DEVICE_SYNC_INTERVAL_JITTER_MS = 5_000;
 const DEVICE_SYNC_PENDING_OUTBOX_DELAY_MS = 2_000;
+const DEVICE_SYNC_WAKE_DEBOUNCE_MS = 1_000;
+const DEVICE_SYNC_WAKE_DEBOUNCE_MAX_WAIT_MS = 30_000;
 const DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_DEAD_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -4223,6 +4227,8 @@ export function createLocalConnectDeviceSyncService({
   let backgroundCyclePromise: Promise<void> | null = null;
   let backgroundLifecycleVersion = 0;
   let backgroundNextOutboxPruneAt = Date.now() + backgroundOutboxPruneIntervalMs;
+  let backgroundWakeFirstAt: number | null = null;
+  let backgroundWakePending = false;
   let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   const clearBackgroundTimer = () => {
     if (backgroundTimer !== null) {
@@ -4238,10 +4244,29 @@ export function createLocalConnectDeviceSyncService({
     }, delayMs);
     unrefTimer(backgroundTimer);
   };
+  const resetBackgroundWake = () => {
+    backgroundWakeFirstAt = null;
+    backgroundWakePending = false;
+  };
+  const scheduleBackgroundWake = (now = Date.now()) => {
+    if (!backgroundRunning) {
+      return;
+    }
+    if (backgroundWakeFirstAt === null) {
+      backgroundWakeFirstAt = now;
+    }
+    const elapsed = now - backgroundWakeFirstAt;
+    const delayMs =
+      elapsed >= DEVICE_SYNC_WAKE_DEBOUNCE_MAX_WAIT_MS
+        ? 0
+        : Math.min(DEVICE_SYNC_WAKE_DEBOUNCE_MS, DEVICE_SYNC_WAKE_DEBOUNCE_MAX_WAIT_MS - elapsed);
+    scheduleBackgroundCycle(Math.max(0, delayMs));
+  };
   const runBackgroundCycle = async () => {
     if (!backgroundRunning || backgroundCycleInFlight) {
       return;
     }
+    resetBackgroundWake();
     backgroundCycleInFlight = true;
     const cycle = (async () => {
       let shouldPruneAfterCycle = false;
@@ -4275,7 +4300,12 @@ export function createLocalConnectDeviceSyncService({
         }
         backgroundCycleInFlight = false;
         if (backgroundRunning) {
-          scheduleBackgroundCycle(localBackgroundCycleDelayMs(db));
+          if (backgroundWakePending) {
+            backgroundWakePending = false;
+            scheduleBackgroundWake();
+          } else {
+            scheduleBackgroundCycle(localBackgroundCycleDelayMs(db));
+          }
         }
       }
     })();
@@ -4291,6 +4321,7 @@ export function createLocalConnectDeviceSyncService({
   const stopBackgroundEngine = async () => {
     backgroundLifecycleVersion += 1;
     backgroundRunning = false;
+    resetBackgroundWake();
     clearBackgroundTimer();
     const cycle = backgroundCyclePromise;
     if (cycle) {
@@ -4545,6 +4576,19 @@ export function createLocalConnectDeviceSyncService({
         status: "cancel_requested",
         message: "Snapshot upload cancellation requested",
       };
+    },
+    notifySyncWorkAvailable() {
+      if (!backgroundRunning) {
+        return;
+      }
+      if (backgroundCycleInFlight) {
+        if (backgroundWakeFirstAt === null) {
+          backgroundWakeFirstAt = Date.now();
+        }
+        backgroundWakePending = true;
+        return;
+      }
+      scheduleBackgroundWake();
     },
   };
 }

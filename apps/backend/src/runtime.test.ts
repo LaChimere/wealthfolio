@@ -9674,6 +9674,7 @@ describe("TS backend runtime composition", () => {
   test("wires runtime Connect start-background route to ready background loop", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-start-ready-"));
     const deviceSyncRequests: string[] = [];
+    const rootKey = Buffer.alloc(32, 38).toString("base64");
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
@@ -9686,6 +9687,16 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         deviceSyncRequests.push(url);
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP", cursor: 0 });
+        }
+        if (url.endsWith("/api/v1/sync/events/push")) {
+          return Response.json({
+            accepted: [],
+            duplicate: [],
+            server_cursor: 0,
+          });
+        }
         return Response.json({
           id: "device-runtime",
           display_name: "MacBook",
@@ -9706,7 +9717,7 @@ describe("TS backend runtime composition", () => {
           version: 2,
           deviceNonce: "nonce-runtime",
           deviceId: "device-runtime",
-          rootKey: "root-key",
+          rootKey,
           keyVersion: 5,
           deviceSecretKey: "secret-key",
           devicePublicKey: "public-key",
@@ -9736,6 +9747,28 @@ describe("TS backend runtime composition", () => {
       const statusResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/engine-status`);
       expect(statusResponse.status).toBe(200);
       await expect(statusResponse.json()).resolves.toMatchObject({ backgroundRunning: true });
+
+      const firstRequestCount = deviceSyncRequests.length;
+      const createResponse = await fetch(`${server.baseUrl}/api/v1/accounts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Wake Brokerage",
+          accountType: "SECURITIES",
+          group: "Investing",
+          currency: "USD",
+          isDefault: false,
+          isActive: true,
+          trackingMode: "HOLDINGS",
+          provider: "MANUAL",
+        }),
+      });
+      expect(createResponse.status).toBe(200);
+      await waitForCondition(() =>
+        deviceSyncRequests
+          .slice(firstRequestCount)
+          .includes("https://api.example.test/api/v1/sync/events/reconcile-ready-state"),
+      );
 
       const stopResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/stop-background`, {
         method: "POST",

@@ -13,6 +13,10 @@ export interface SyncOutboxQueue {
   queueSyncEvent(event: SyncOutboxQueueEvent): string;
 }
 
+export interface SyncOutboxQueueOptions {
+  onQueued?: () => void;
+}
+
 interface SyncDeviceConfigRow {
   device_id: string;
   key_version: number | null;
@@ -42,10 +46,23 @@ const SYNC_ENTITY_BY_EVENT_ENTITY: Record<string, string> = {
   portfolio_accounts: "portfolio_account",
 };
 
-export function createSyncOutboxQueue(db: Database): SyncOutboxQueue {
+export function createSyncOutboxQueue(
+  db: Database,
+  options: SyncOutboxQueueOptions = {},
+): SyncOutboxQueue {
   return {
     queueSyncEvent(event) {
-      return insertSyncOutboxEvent(db, event);
+      const eventId = insertSyncOutboxEvent(db, event);
+      try {
+        options.onQueued?.();
+      } catch (error) {
+        console.warn(
+          `[SyncOutbox] Failed to notify queued sync work: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      return eventId;
     },
   };
 }

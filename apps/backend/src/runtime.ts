@@ -228,7 +228,10 @@ function createServicesFromDatabase(
     }
     restartRequired = true;
   };
-  const syncOutboxQueue = createSyncOutboxQueue(db);
+  let notifySyncWorkAvailable = () => {};
+  const syncOutboxQueue = createSyncOutboxQueue(db, {
+    onQueued: () => notifySyncWorkAvailable(),
+  });
   const appDataDir = runtimeOptions.appDataDir;
   const secretService = createRuntimeSecretService({
     appDataDir,
@@ -478,6 +481,7 @@ function createServicesFromDatabase(
     eventBus,
     appVersion: readPackageVersion(runtimeOptions.env, runtimeOptions.repositoryRoot),
   });
+  notifySyncWorkAvailable = () => connectDeviceSyncService.notifySyncWorkAvailable();
   const options: BackendRequestHandlerOptions = {
     accountService,
     activityService,
