@@ -8041,6 +8041,7 @@ async function triggerLocalDeviceSyncCycle(
     }
     if (reconcile.action === "NOOP" && !localHasPendingSyncOutbox(db)) {
       markLocalSyncCycleOutcome(db, "ok");
+      localPruneAppliedEventsAfterSuccessfulCycle(db, cursor);
       return localSyncCycleResult("ok", 0, cursor);
     }
     if (reconcile.action === "WAIT_SNAPSHOT") {
@@ -8065,6 +8066,7 @@ async function triggerLocalDeviceSyncCycle(
     ) {
       const acquiredLockVersion = localAcquireSyncCycleLock(db);
       markLocalSyncCycleOutcome(db, "ok");
+      localPruneAppliedEventsAfterSuccessfulCycle(db, cursor);
       return localSyncCycleResult("ok", acquiredLockVersion, cursor);
     }
     if (
@@ -8102,6 +8104,7 @@ async function triggerLocalDeviceSyncCycle(
         return localSyncCycleResult("pull_error", acquiredLockVersion, cursor);
       }
       markLocalSyncCycleOutcome(db, "ok");
+      localPruneAppliedEventsAfterSuccessfulCycle(db, pullResult.cursor);
       return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
         pulledCount: pullResult.pulledCount,
       });
@@ -8133,6 +8136,7 @@ async function triggerLocalDeviceSyncCycle(
       if (pushResult.status !== undefined) {
         if (pushResult.status === "ok") {
           markLocalSyncCycleOutcome(db, "ok");
+          localPruneAppliedEventsAfterSuccessfulCycle(db, cursor);
         } else {
           markLocalSyncCycleError(
             db,
@@ -8184,6 +8188,7 @@ async function triggerLocalDeviceSyncCycle(
           });
         }
         markLocalSyncCycleOutcome(db, "ok");
+        localPruneAppliedEventsAfterSuccessfulCycle(db, pullResult.cursor);
         return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
           pushedCount: pushResult.pushedCount,
           pulledCount: pullResult.pulledCount,
@@ -8191,6 +8196,7 @@ async function triggerLocalDeviceSyncCycle(
         });
       }
       markLocalSyncCycleOutcome(db, "ok");
+      localPruneAppliedEventsAfterSuccessfulCycle(db, cursor);
       return localSyncCycleResult("ok", acquiredLockVersion, cursor, null, null, {
         pushedCount: pushResult.pushedCount,
         deadLetterCount: pushResult.deadLetterCount,
@@ -8516,6 +8522,31 @@ function localPruneSyncOutbox(db: Database, nowMs = Date.now()): number {
     )
     .run(deadCutoff).changes;
   return sentDeleted + deadDeleted;
+}
+
+function localPruneAppliedEventsUpToSeq(db: Database, seqCutoff: number): number {
+  if (!sqliteTableExists(db, "sync_applied_events")) {
+    return 0;
+  }
+  return db
+    .prepare(
+      `
+        DELETE FROM sync_applied_events
+        WHERE seq <= ?
+      `,
+    )
+    .run(seqCutoff).changes;
+}
+
+function localPruneAppliedEventsAfterSuccessfulCycle(db: Database, cursor: number): void {
+  if (cursor <= 20_000) {
+    return;
+  }
+  try {
+    localPruneAppliedEventsUpToSeq(db, cursor - 10_000);
+  } catch (error) {
+    console.warn(`[Connect] Failed to prune applied sync events: ${errorMessage(error)}`);
+  }
 }
 
 function localApplyPushFailureToOutbox(

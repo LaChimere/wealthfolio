@@ -4007,7 +4007,7 @@ describe("TS backend runtime composition", () => {
         }
         deviceSyncRequests.push(url);
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "PULL_TAIL", cursor: 12 });
+          return Response.json({ action: "PULL_TAIL", cursor: 25001 });
         }
         return Response.json({
           id: "device-runtime",
@@ -4038,7 +4038,7 @@ describe("TS backend runtime composition", () => {
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
         seedDb.exec(`
-          UPDATE sync_cursor SET cursor = 12 WHERE id = 1;
+          UPDATE sync_cursor SET cursor = 25001 WHERE id = 1;
           UPDATE sync_engine_state SET
             lock_version = 4,
             last_cycle_status = 'state_error',
@@ -4046,6 +4046,10 @@ describe("TS backend runtime composition", () => {
             consecutive_failures = 3,
             next_retry_at = '2030-01-01T00:00:00Z'
           WHERE id = 1;
+          INSERT INTO sync_applied_events (event_id, seq, entity, entity_id, applied_at)
+          VALUES
+            ('covered-pruned', 15001, 'account', 'account-pruned', '2026-01-01T00:00:00Z'),
+            ('covered-kept', 15002, 'account', 'account-kept', '2026-01-01T00:00:00Z');
         `);
       } finally {
         seedDb.close();
@@ -4066,7 +4070,7 @@ describe("TS backend runtime composition", () => {
         lockVersion: 5,
         pushedCount: 0,
         pulledCount: 0,
-        cursor: 12,
+        cursor: 25001,
         needsBootstrap: false,
         bootstrapSnapshotId: null,
         bootstrapSnapshotSeq: null,
@@ -4100,6 +4104,14 @@ describe("TS backend runtime composition", () => {
           consecutive_failures: 0,
           next_retry_at: null,
         });
+        expect(
+          verifyDb
+            .query<
+              { event_id: string; seq: number },
+              []
+            >("SELECT event_id, seq FROM sync_applied_events ORDER BY event_id ASC")
+            .all(),
+        ).toEqual([{ event_id: "covered-kept", seq: 15002 }]);
       } finally {
         verifyDb.close();
       }
@@ -4293,6 +4305,105 @@ describe("TS backend runtime composition", () => {
           outbox_status: "dead",
           outbox_error: "invalid_entity_id",
         });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
+  test("wires runtime Connect pull-tail to prune old applied events", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-applied-prune-"),
+    );
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 25001 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=20000&limit=500")) {
+          return Response.json({
+            from: 20000,
+            to: 25001,
+            next_cursor: 25001,
+            has_more: false,
+            events: [],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey: "root-key",
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec(`
+          UPDATE sync_cursor SET cursor = 20000 WHERE id = 1;
+          INSERT INTO sync_applied_events (event_id, seq, entity, entity_id, applied_at)
+          VALUES
+            ('applied-pruned', 15001, 'account', 'account-pruned', '2026-01-01T00:00:00Z'),
+            ('applied-kept', 15002, 'account', 'account-kept', '2026-01-01T00:00:00Z');
+        `);
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "ok",
+        cursor: 25001,
+      });
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { event_id: string; seq: number },
+              []
+            >("SELECT event_id, seq FROM sync_applied_events ORDER BY event_id ASC")
+            .all(),
+        ).toEqual([{ event_id: "applied-kept", seq: 15002 }]);
       } finally {
         verifyDb.close();
       }
