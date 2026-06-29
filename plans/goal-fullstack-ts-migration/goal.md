@@ -8,7 +8,7 @@ turns_used: 963
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T01:27:06+09:00"
+updated_at: "2026-06-30T02:00:10+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5360,11 +5360,13 @@ updated_at: "2026-06-30T01:27:06+09:00"
   linked broker activity through the SQLite-backed HTTP route; targeted and full
   runtime validation plus full repository check passed.
 - Turn 963: Ported transfer snapshot upload parity for standalone pairing.
-  `complete-with-transfer` now mirrors Rust by flushing due outbox work, then
-  requiring a successful migrated snapshot upload before approve/complete for
-  any local DB-backed source device, including already-bootstrapped trusted
-  sources; skipped/cancelled/malformed upload results block transfer, and broad
-  validation plus dual-model xhigh review/refine passed.
+  `complete-with-transfer` now mirrors Rust by always running the migrated sync
+  cycle, then requiring a successful migrated snapshot upload, then minting a
+  fresh post-snapshot token before approve/complete for any local DB-backed
+  source device, including already-bootstrapped trusted sources; pending
+  outbox/dead-letter safety gates remain enforced, skipped/cancelled/malformed
+  upload results block transfer, and broad validation plus dual-model xhigh
+  review/refine passed.
 
 ## Deferred items
 

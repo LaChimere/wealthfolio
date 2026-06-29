@@ -6886,14 +6886,15 @@ contract:
   persist linked broker activities. Targeted provider-resolved route smoke, full
   runtime suite, full `bun run check`, and `git diff --check` passed.
 - `pr5-runtime-device-sync-pairing-transfer-snapshot-upload`: verification
-  passed. Standalone complete-with-transfer now mirrors Rust by flushing due
-  outbox rows, then requiring the migrated Connect generate-snapshot/upload path
-  to return `uploaded` before cloud pairing approve/complete for any local
-  DB-backed source device. Skipped/cancelled/malformed snapshot outcomes block
-  transfer, and runtime coverage proves both already-bootstrapped and
-  bootstrap-required transfer paths. Broad runtime/device-sync tests, full
-  `bun run check`, `git diff --check`, and dual Claude/GPT xhigh review/refine
-  passed.
+  passed. Standalone complete-with-transfer now mirrors Rust by always running
+  the migrated Connect sync cycle, preserving pending-outbox/dead-letter safety
+  gates, requiring generate-snapshot/upload to return `uploaded`, and then
+  minting a fresh post-snapshot token before cloud pairing approve/complete for
+  any local DB-backed source device. Skipped/cancelled/malformed snapshot
+  outcomes block transfer, and runtime coverage proves already-bootstrapped,
+  pending-outbox, approve-retry, approve-failure, and bootstrap-required paths.
+  Broad runtime/device-sync tests, full `bun run check`, `git diff --check`, and
+  dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
