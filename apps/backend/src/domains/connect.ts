@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 
 import type { BackendEventBus } from "../events";
@@ -4091,6 +4094,45 @@ type LocalReplayEntity =
   | "snapshot"
   | "asset";
 
+const APP_SYNC_TABLES = [
+  "platforms",
+  "assets",
+  "market_data_custom_providers",
+  "quotes",
+  "goals",
+  "goal_plans",
+  "ai_threads",
+  "contribution_limits",
+  "accounts",
+  "import_runs",
+  "activities",
+  "import_templates",
+  "import_account_templates",
+  "taxonomies",
+  "taxonomy_categories",
+  "asset_taxonomy_assignments",
+  "goals_allocation",
+  "ai_messages",
+  "ai_thread_tags",
+  "holdings_snapshots",
+  "portfolios",
+  "portfolio_accounts",
+] as const;
+
+const SNAPSHOT_EXPORT_FILTERS: Partial<Record<(typeof APP_SYNC_TABLES)[number], string>> = {
+  holdings_snapshots: "source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')",
+  quotes: "source = 'MANUAL'",
+  taxonomies: "is_system = 0",
+  taxonomy_categories: "taxonomy_id = 'custom_groups'",
+  import_runs: "UPPER(run_type) = 'IMPORT' AND UPPER(source_system) IN ('CSV', 'MANUAL')",
+  activities:
+    "is_user_modified = 1 OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') AND (source_record_id IS NULL OR TRIM(source_record_id) = ''))",
+};
+
+const SNAPSHOT_UPLOAD_MAX_ATTEMPTS = 5;
+const SNAPSHOT_UPLOAD_BASE_BACKOFF_MS = 250;
+const SNAPSHOT_UPLOAD_MAX_BACKOFF_MS = 8_000;
+
 class LocalPullStaleCursorError extends Error {
   constructor(
     message: string,
@@ -4110,6 +4152,18 @@ class LocalPushSyncFailureError extends Error {
   ) {
     super(message);
     this.name = "LocalPushSyncFailureError";
+  }
+}
+
+class LocalSnapshotUploadError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+    readonly cloudMessage: string | null,
+  ) {
+    super(message);
+    this.name = "LocalSnapshotUploadError";
   }
 }
 
@@ -7125,7 +7179,8 @@ async function generateSnapshotIfTrusted(
   if (!secretService) {
     throw deviceSyncDisabled();
   }
-  const deviceId = await requireLocalSyncIdentityDeviceId(secretService);
+  const identity = await requireLocalSyncIdentity(secretService);
+  const deviceId = identity.deviceId;
   const session = restoreSession
     ? await restoreSession()
     : await restoreLocalSyncSession(secretService, env, fetchImpl, () => 0);
@@ -7169,7 +7224,285 @@ async function generateSnapshotIfTrusted(
       message: "Latest remote snapshot already covers current cursor",
     };
   }
-  throw deviceSyncDisabled();
+  return await uploadLocalDeviceSnapshot(
+    db,
+    env,
+    fetchImpl,
+    session.accessToken,
+    identity,
+    localCursor,
+  );
+}
+
+async function uploadLocalDeviceSnapshot(
+  db: Database,
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  identity: ReturnType<typeof parseSyncIdentity> & { deviceId: string },
+  baseSeq: number,
+): Promise<Record<string, unknown>> {
+  if (!identity.rootKey) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Snapshot export failed: No root key configured",
+      500,
+    );
+  }
+  const keyVersion = Math.max(1, identity.keyVersion ?? 1);
+  const sqliteBytes = exportLocalSnapshotSqliteImage(db);
+  const crypto = createSyncCryptoService();
+  const dek = (await crypto.deriveDek(identity.rootKey, keyVersion)).value;
+  const encryptedSnapshot = (await crypto.encrypt(dek, sqliteBytes.toString("base64"))).value;
+  const payload = Buffer.from(encryptedSnapshot, "utf8");
+  const checksum = `sha256:${createHash("sha256").update(payload).digest("hex")}`;
+  const metadataPayload = (
+    await crypto.encrypt(
+      dek,
+      JSON.stringify({
+        schemaVersion: 1,
+        coversTables: APP_SYNC_TABLES,
+        generatedAt: snapshotMetadataTimestampNow(),
+      }),
+    )
+  ).value;
+  const uploadHeaders = {
+    eventId: randomUUID(),
+    schemaVersion: 1,
+    coversTables: APP_SYNC_TABLES,
+    sizeBytes: payload.byteLength,
+    checksum,
+    metadataPayload,
+    payloadKeyVersion: keyVersion,
+    baseSeq,
+  };
+  let response: { snapshotId: string; oplogSeq: I64Value };
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      response = await postLocalSnapshotUpload(
+        env,
+        fetchImpl,
+        accessToken,
+        identity.deviceId,
+        uploadHeaders,
+        payload,
+      );
+      break;
+    } catch (error) {
+      if (
+        error instanceof LocalSnapshotUploadError &&
+        localSnapshotUploadErrorIsRetryable(error) &&
+        attempt < SNAPSHOT_UPLOAD_MAX_ATTEMPTS
+      ) {
+        await delay(snapshotUploadBackoffMs(attempt));
+        continue;
+      }
+      if (localSnapshotUploadErrorIsIndexConflict(error)) {
+        const latestSnapshotStatus = await localLatestSnapshotStatusBestEffort(
+          env,
+          fetchImpl,
+          accessToken,
+          identity.deviceId,
+        );
+        if (
+          latestSnapshotStatus.kind === "present" &&
+          compareI64Values(latestSnapshotStatus.oplogSeq, baseSeq) >= 0
+        ) {
+          return {
+            status: "uploaded",
+            snapshotId: latestSnapshotStatus.snapshotId,
+            oplogSeq: i64ToSafeNumberOrNull(latestSnapshotStatus.oplogSeq),
+            message: "Latest remote snapshot already covers current cursor",
+          };
+        }
+      }
+      throw error;
+    }
+  }
+  return {
+    status: "uploaded",
+    snapshotId: response.snapshotId,
+    oplogSeq: i64ToSafeNumberOrNull(response.oplogSeq),
+    message: "Snapshot uploaded",
+  };
+}
+
+function exportLocalSnapshotSqliteImage(db: Database): Buffer {
+  const snapshotPath = join(tmpdir(), `wf_snapshot_export_${randomUUID()}.db`);
+  const alias = `snapshot_export_${randomUUID().replaceAll("-", "")}`;
+  let attached = false;
+  try {
+    db.prepare(
+      `ATTACH DATABASE '${escapeSqliteString(snapshotPath)}' AS ${quoteReplayIdentifier(alias)}`,
+    ).run();
+    attached = true;
+    const exportTransaction = db.transaction(() => {
+      for (const table of APP_SYNC_TABLES) {
+        const filter = SNAPSHOT_EXPORT_FILTERS[table];
+        const sql =
+          filter === undefined
+            ? `CREATE TABLE ${quoteReplayIdentifier(alias)}.${quoteReplayIdentifier(table)} AS SELECT * FROM main.${quoteReplayIdentifier(table)}`
+            : `CREATE TABLE ${quoteReplayIdentifier(alias)}.${quoteReplayIdentifier(table)} AS SELECT * FROM main.${quoteReplayIdentifier(table)} WHERE ${filter}`;
+        db.prepare(sql).run();
+      }
+    });
+    exportTransaction();
+    db.prepare(`DETACH DATABASE ${quoteReplayIdentifier(alias)}`).run();
+    attached = false;
+    return readFileSync(snapshotPath);
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to export snapshot SQLite image: ${errorMessage(error)}`,
+      500,
+    );
+  } finally {
+    if (attached) {
+      try {
+        db.prepare(`DETACH DATABASE ${quoteReplayIdentifier(alias)}`).run();
+      } catch {
+        // Best-effort cleanup mirrors Rust's detach-on-error behavior.
+      }
+    }
+    rmSync(snapshotPath, { force: true });
+  }
+}
+
+async function postLocalSnapshotUpload(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  accessToken: string,
+  deviceId: string,
+  headers: {
+    eventId: string;
+    schemaVersion: number;
+    coversTables: readonly string[];
+    sizeBytes: number;
+    checksum: string;
+    metadataPayload: string;
+    payloadKeyVersion: number;
+    baseSeq: number;
+  },
+  payload: Buffer,
+): Promise<{ snapshotId: string; oplogSeq: I64Value }> {
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${normalizeConnectApiUrl(env.CONNECT_API_URL)}/api/v1/sync/snapshots/upload`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/octet-stream",
+          "content-length": String(headers.sizeBytes),
+          "x-wf-client-request-id": deviceSyncClientRequestId(deviceId),
+          "x-wf-device-id": deviceId,
+          "x-snapshot-event-id": headers.eventId,
+          "x-snapshot-schema-version": String(headers.schemaVersion),
+          "x-snapshot-covers-tables": headers.coversTables.join(","),
+          "x-snapshot-size-bytes": String(headers.sizeBytes),
+          "x-snapshot-checksum": headers.checksum,
+          "x-snapshot-metadata-payload": headers.metadataPayload,
+          "x-snapshot-payload-key-version": String(headers.payloadKeyVersion),
+          "x-snapshot-base-seq": String(headers.baseSeq),
+        },
+        body: new Uint8Array(payload),
+      },
+    );
+  } catch (error) {
+    throw new LocalSnapshotUploadError(`Request failed: ${errorMessage(error)}`, 0, null, null);
+  }
+  const bodyText = await response.text();
+  if (!response.ok) {
+    const parsedError = parseLocalSnapshotUploadError(response.status, bodyText);
+    throw new LocalSnapshotUploadError(
+      connectDeviceSyncApiErrorMessage(response.status, bodyText),
+      response.status,
+      parsedError.code,
+      parsedError.message,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw new ConnectServiceError(
+      "internal_error",
+      `Failed to parse snapshot upload response: ${errorMessage(error)}`,
+      500,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse snapshot upload response",
+      500,
+    );
+  }
+  const snapshotId = requiredStringValue(
+    parsed.snapshotId ?? parsed.snapshot_id,
+    "snapshot upload response",
+  );
+  requiredStringValue(parsed.r2Key ?? parsed.r2_key, "snapshot upload response");
+  requiredStringValue(parsed.createdAt ?? parsed.created_at, "snapshot upload response");
+  return {
+    snapshotId,
+    oplogSeq: requiredI64FromRawJson(bodyText, ["oplogSeq", "oplog_seq"]),
+  };
+}
+
+function escapeSqliteString(value: string): string {
+  return value.replaceAll("'", "''");
+}
+
+function snapshotMetadataTimestampNow(): string {
+  const iso = new Date().toISOString();
+  return iso.endsWith(".000Z") ? `${iso.slice(0, -5)}+00:00` : iso.replace(/Z$/u, "+00:00");
+}
+
+function parseLocalSnapshotUploadError(
+  status: number,
+  bodyText: string,
+): { code: string | null; message: string | null } {
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (!isRecord(parsed)) {
+      return { code: null, message: null };
+    }
+    return {
+      code: optionalString(parsed.code) ?? optionalString(parsed.error),
+      message: optionalString(parsed.message) ?? `HTTP ${status}`,
+    };
+  } catch {
+    return { code: null, message: bodyText.trim() || `HTTP ${status}` };
+  }
+}
+
+function localSnapshotUploadErrorIsRetryable(error: LocalSnapshotUploadError): boolean {
+  if (error.status === 0) {
+    return true;
+  }
+  if (error.status === 408 || error.status === 429 || error.status >= 500) {
+    return true;
+  }
+  if (error.code === "SYNC_TRANSACTION_FAILED") {
+    return !error.cloudMessage?.toLowerCase().includes("snapshot index conflict");
+  }
+  return false;
+}
+
+function localSnapshotUploadErrorIsIndexConflict(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("sync_transaction_failed") && message.includes("snapshot index conflict");
+}
+
+function snapshotUploadBackoffMs(attempt: number): number {
+  const exponent = Math.min(Math.max(attempt - 1, 0), 8);
+  return Math.min(SNAPSHOT_UPLOAD_BASE_BACKOFF_MS * 2 ** exponent, SNAPSHOT_UPLOAD_MAX_BACKOFF_MS);
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requireLocalSyncIdentityDeviceId(

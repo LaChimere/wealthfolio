@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10434,16 +10435,49 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime Connect generate-snapshot route to export feature gate", async () => {
+  test("wires runtime Connect generate-snapshot route to upload snapshot", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-generate-gated-"));
     const deviceSyncRequests: string[] = [];
+    const rootKey = Buffer.alloc(32, 34).toString("base64");
+    const crypto = createSyncCryptoService();
+    const dek = (await crypto.deriveDek(rootKey, 5)).value;
+    const expectedTables = [
+      "platforms",
+      "assets",
+      "market_data_custom_providers",
+      "quotes",
+      "goals",
+      "goal_plans",
+      "ai_threads",
+      "contribution_limits",
+      "accounts",
+      "import_runs",
+      "activities",
+      "import_templates",
+      "import_account_templates",
+      "taxonomies",
+      "taxonomy_categories",
+      "asset_taxonomy_assignments",
+      "goals_allocation",
+      "ai_messages",
+      "ai_thread_tags",
+      "holdings_snapshots",
+      "portfolios",
+      "portfolio_accounts",
+    ];
+    let capturedUpload: {
+      headers: Headers;
+      body: Buffer;
+    } | null = null;
+    let uploadAttempts = 0;
+    const uploadEventIds: string[] = [];
     const runtime = createSqliteBackedBackendServices({
       appDataDir,
       env: {
         CONNECT_API_URL: "https://api.example.test",
         CONNECT_AUTH_URL: "https://auth.example.test",
       },
-      marketDataFetch: (async (input) => {
+      marketDataFetch: (async (input, init) => {
         const url = String(input);
         if (url.includes("/auth/v1/token")) {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
@@ -10457,6 +10491,31 @@ describe("TS backend runtime composition", () => {
             { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
             { status: 404 },
           );
+        }
+        if (url.endsWith("/api/v1/sync/snapshots/upload")) {
+          uploadAttempts += 1;
+          const headers = new Headers(init?.headers);
+          uploadEventIds.push(headers.get("x-snapshot-event-id") ?? "");
+          const body = init?.body;
+          capturedUpload = {
+            headers,
+            body:
+              body instanceof Uint8Array
+                ? Buffer.from(body)
+                : Buffer.from(await new Response(body as BodyInit).arrayBuffer()),
+          };
+          if (uploadAttempts === 1) {
+            return Response.json(
+              { code: "SYNC_TRANSACTION_FAILED", message: "temporary transaction failure" },
+              { status: 500 },
+            );
+          }
+          return Response.json({
+            snapshot_id: "snapshot-uploaded",
+            r2_key: "snapshots/snapshot-uploaded",
+            oplog_seq: 11,
+            created_at: "2026-01-02T00:00:00Z",
+          });
         }
         return Response.json({
           id: "device-runtime",
@@ -10478,7 +10537,7 @@ describe("TS backend runtime composition", () => {
           version: 2,
           deviceNonce: "nonce-runtime",
           deviceId: "device-runtime",
-          rootKey: "root-key",
+          rootKey,
           keyVersion: 5,
           deviceSecretKey: "secret-key",
           devicePublicKey: "public-key",
@@ -10487,6 +10546,23 @@ describe("TS backend runtime composition", () => {
       const seedDb = openSqliteDatabase(runtime.dbPath);
       try {
         seedDb.prepare("UPDATE sync_cursor SET cursor = 10 WHERE id = 1").run();
+        seedRuntimeAsset(seedDb, "snapshot-upload-asset");
+        seedDb.exec(`
+          INSERT INTO quotes (
+            id, asset_id, day, source, close, currency, created_at, timestamp
+          )
+          VALUES
+            (
+              'manual-upload-quote', 'snapshot-upload-asset', '2026-01-01',
+              'MANUAL', '42', 'USD', '2026-01-01T00:00:00+00:00',
+              '2026-01-01T00:00:00+00:00'
+            ),
+            (
+              'provider-upload-quote', 'snapshot-upload-asset', '2026-01-02',
+              'YAHOO', '99', 'USD', '2026-01-02T00:00:00+00:00',
+              '2026-01-02T00:00:00+00:00'
+            );
+        `);
       } finally {
         seedDb.close();
       }
@@ -10501,16 +10577,62 @@ describe("TS backend runtime composition", () => {
         `${server.baseUrl}/api/v1/connect/device/generate-snapshot`,
         { method: "POST" },
       );
-      expect(generateResponse.status).toBe(501);
+      expect(generateResponse.status).toBe(200);
       await expect(generateResponse.json()).resolves.toMatchObject({
-        code: "not_implemented",
-        message: "Device sync feature is disabled in this build.",
+        status: "uploaded",
+        snapshotId: "snapshot-uploaded",
+        oplogSeq: 11,
+        message: "Snapshot uploaded",
       });
       expect(deviceSyncRequests).toEqual([
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
         "https://api.example.test/api/v1/sync/events/cursor",
         "https://api.example.test/api/v1/sync/snapshots/latest",
+        "https://api.example.test/api/v1/sync/snapshots/upload",
+        "https://api.example.test/api/v1/sync/snapshots/upload",
       ]);
+      expect(uploadAttempts).toBe(2);
+      expect(new Set(uploadEventIds).size).toBe(1);
+      expect(capturedUpload).not.toBeNull();
+      const upload = capturedUpload!;
+      expect(upload.headers.get("authorization")).toBe("Bearer access-token");
+      expect(upload.headers.get("x-wf-device-id")).toBe("device-runtime");
+      expect(upload.headers.get("x-snapshot-schema-version")).toBe("1");
+      expect(upload.headers.get("x-snapshot-covers-tables")).toBe(expectedTables.join(","));
+      expect(upload.headers.get("x-snapshot-payload-key-version")).toBe("5");
+      expect(upload.headers.get("x-snapshot-base-seq")).toBe("10");
+      expect(upload.headers.get("x-snapshot-size-bytes")).toBe(String(upload.body.byteLength));
+      expect(upload.headers.get("x-snapshot-checksum")).toBe(
+        `sha256:${createHash("sha256").update(upload.body).digest("hex")}`,
+      );
+      const metadataCiphertext = upload.headers.get("x-snapshot-metadata-payload");
+      expect(metadataCiphertext).toBeTruthy();
+      const metadata = JSON.parse((await crypto.decrypt(dek, metadataCiphertext!)).value) as {
+        schemaVersion: number;
+        coversTables: string[];
+      };
+      expect(metadata).toMatchObject({
+        schemaVersion: 1,
+        coversTables: expectedTables,
+      });
+      const snapshotBase64 = (await crypto.decrypt(dek, upload.body.toString("utf8"))).value;
+      const snapshotBytes = Buffer.from(snapshotBase64, "base64");
+      expect(snapshotBytes.subarray(0, 16).toString("utf8")).toBe("SQLite format 3\u0000");
+      const snapshotPath = path.join(appDataDir, "uploaded-snapshot.db");
+      writeFileSync(snapshotPath, snapshotBytes);
+      const snapshotDb = openSqliteDatabase(snapshotPath);
+      try {
+        expect(
+          snapshotDb
+            .query<
+              { id: string; source: string },
+              []
+            >("SELECT id, source FROM quotes ORDER BY id ASC")
+            .all(),
+        ).toEqual([{ id: "manual-upload-quote", source: "MANUAL" }]);
+      } finally {
+        snapshotDb.close();
+      }
     } finally {
       server.stop();
       await runtime.close();

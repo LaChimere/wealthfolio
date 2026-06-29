@@ -9964,8 +9964,9 @@ describe("TS Connect device sync local service", () => {
       latestSnapshotBody = null;
       latestSnapshotOplogSeq = 9;
       await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot export failed: No root key configured",
       });
     } finally {
       db.close();
