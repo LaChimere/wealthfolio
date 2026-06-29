@@ -7151,6 +7151,11 @@ contract:
   API key auth, `.TO` symbols map to XTSE/CAD exchange metadata, and the route
   returns the Rust-shaped search payload. Full runtime suite and full repository
   check passed.
+- `pr5-yahoo-dividends-route-smoke`: verification passed. The runtime
+  `/api/v1/market-data/yahoo/dividends` route now has coverage for Yahoo
+  dividend fetching, proving cookie/crumb authentication, dividend chart query
+  parameters, sorted dividend payloads, and crumb reuse across repeated HTTP
+  calls. Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
