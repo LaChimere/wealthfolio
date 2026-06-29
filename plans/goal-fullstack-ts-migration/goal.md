@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 959
+turns_used: 960
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-29T23:10:57+09:00"
+updated_at: "2026-06-29T23:45:19+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5340,6 +5340,12 @@ updated_at: "2026-06-29T23:10:57+09:00"
   waiting_snapshot, treats only applied/skipped as applied, rejects not-ready or
   unknown bootstrap statuses safely, and passes broad validation plus dual-model
   xhigh review.
+- Turn 960: Ported pairing-flow bootstrap application. Flow
+  begin/state/overwrite approval now reuse the migrated bootstrapSnapshot
+  callback when available, keep requested snapshots in syncing/waiting_snapshot,
+  complete flows after applied/skipped bootstrap, clean up approvals on terminal
+  errors, preserve legacy no-apply fallback behavior, and passed broad
+  validation plus dual-model xhigh review/refine.
 
 ## Deferred items
 

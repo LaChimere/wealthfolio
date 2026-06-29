@@ -6865,6 +6865,13 @@ contract:
   no-remote, available-snapshot, waiting, and not-ready branches through runtime
   tests. Broad runtime/connect tests, full `bun run check`, `git diff --check`,
   and dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-device-sync-pairing-flow-bootstrap-apply`: verification passed.
+  Pairing flow begin/state/overwrite approval now reuse the migrated
+  bootstrapSnapshot callback when available, keep requested snapshots in
+  syncing/waiting_snapshot, complete flows after applied/skipped bootstrap,
+  clean up approvals on terminal errors, and preserve legacy no-apply fallback
+  behavior. Broad runtime/connect/device-sync tests, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
