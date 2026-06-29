@@ -6908,6 +6908,12 @@ contract:
   gates, while preserving existing no-mutation behavior for malformed snapshot
   state. Full Connect domain suite, full `bun run check`, `git diff --check`,
   and dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-reconcile-parse-state-error`: verification passed.
+  Trigger-cycle now handles malformed reconcile-ready-state action/cursor/latest
+  snapshot responses as `state_error` cycle outcomes instead of stale
+  `not_implemented` gates, preserving migrated sync-engine error-state
+  semantics. Full Connect domain suite, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
