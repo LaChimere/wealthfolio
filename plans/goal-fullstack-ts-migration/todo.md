@@ -7029,6 +7029,11 @@ contract:
   sync, persists the quote, emits market/portfolio events, and enqueues the
   bounded portfolio job with the requested asset target. Full runtime suite and
   backend type-check passed.
+- `pr5-market-data-app-route-provider-smoke`: verification passed. The runtime
+  `/api/v1/market-data/sync` route now has SQLite-backed coverage for a
+  MarketData.app-preferred asset with backend-stored API key, proving the route
+  authenticates requests to candles/current-price endpoints and persists both
+  provider quotes. Full runtime suite and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
