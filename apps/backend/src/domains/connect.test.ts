@@ -10329,7 +10329,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps bootstrap snapshot feature-gated when READY reconcile requires snapshot", async () => {
+  test("reports latest snapshot parse errors when READY reconcile requires snapshot", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (
@@ -10395,15 +10395,16 @@ describe("TS Connect device sync local service", () => {
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
     } finally {
       db.close();
     }
   });
 
-  test("keeps bootstrap snapshot feature-gated when READY freshness gate is active", async () => {
+  test("reports latest snapshot parse errors when READY freshness gate is active", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (
@@ -10468,8 +10469,9 @@ describe("TS Connect device sync local service", () => {
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       expect(requests).toEqual([
         "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
@@ -11074,7 +11076,7 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
-  test("keeps READY bootstrap feature-gated for malformed empty snapshot metadata", async () => {
+  test("reports READY bootstrap latest snapshot metadata parse errors", async () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE sync_cursor (
@@ -11162,20 +11164,23 @@ describe("TS Connect device sync local service", () => {
 
     try {
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       latestSnapshotRawText =
         '{"snapshot_id":"","oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       latestSnapshotRawText =
         '{"snapshot_id":"","oplog_seq":0,"oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       latestSnapshotRawText = null;
       expect(
@@ -11191,8 +11196,9 @@ describe("TS Connect device sync local service", () => {
         checksum: "sha256:empty",
       };
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
@@ -11207,8 +11213,9 @@ describe("TS Connect device sync local service", () => {
         checksum: "sha256:empty",
       };
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
@@ -11224,8 +11231,9 @@ describe("TS Connect device sync local service", () => {
       };
       cursorResponse = { cursor: 42, gc_watermark: "bad", latest_snapshot: null };
       await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
-        code: "not_implemented",
-        status: 501,
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
       });
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),

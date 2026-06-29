@@ -6567,6 +6567,13 @@ async function bootstrapSnapshotIfNotReady(
     );
   }
   const latestSnapshotMissing = latestSnapshotStatus.kind === "missing";
+  if (latestSnapshotStatus.kind === "unknown") {
+    throw new ConnectServiceError(
+      "internal_error",
+      "Failed to parse latest snapshot response",
+      500,
+    );
+  }
   if (freshnessGate.kind === "present" && latestSnapshotMissing) {
     return {
       status: "requested",
