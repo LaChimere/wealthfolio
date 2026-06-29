@@ -6914,6 +6914,12 @@ contract:
   `not_implemented` gates, preserving migrated sync-engine error-state
   semantics. Full Connect domain suite, full `bun run check`,
   `git diff --check`, and dual Claude/GPT xhigh review passed.
+- `pr5-runtime-connect-broker-review-draft-route-smoke`: verification passed.
+  The runtime `/api/v1/connect/sync/activities` route now has SQLite-backed
+  coverage proving provider-unresolved broker BUY records import as DRAFT review
+  activities with `asset_id = NULL`, `needs_review = 1`, and preserved
+  `source_record_id`. Targeted review-draft route smoke, full runtime suite,
+  full `bun run check`, and `git diff --check` passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

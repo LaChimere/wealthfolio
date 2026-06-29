@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 966
+turns_used: 967
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T02:36:52+09:00"
+updated_at: "2026-06-30T02:43:41+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5385,6 +5385,11 @@ updated_at: "2026-06-30T02:36:52+09:00"
   instead of throwing `not_implemented`, preserving engine error-state
   semantics; full Connect validation, repo check, and dual-model xhigh review
   passed.
+- Turn 967: Strengthened runtime broker review-draft route evidence. The runtime
+  `/api/v1/connect/sync/activities` smoke now proves provider-unresolved broker
+  BUY records are imported through the SQLite-backed route as DRAFT review
+  activities with no linked asset and preserved source identity; targeted/full
+  runtime validation plus repo check passed.
 
 ## Deferred items
 
