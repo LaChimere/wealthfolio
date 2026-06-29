@@ -6824,6 +6824,13 @@ contract:
   transfer, and returns Rust-shaped cancelled responses for preflight and retry
   cancellation. Broad runtime/connect tests, full `bun run check`,
   `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-background-loop-route-smoke`: verification passed.
+  Start-background now starts a READY-only local background loop using chained
+  timers and the migrated trigger-cycle path, reports live backgroundRunning
+  status, prevents overlapping cycles, cancels stale in-flight starts, and
+  drains timers/in-flight cycles before stop, clear-sync-data, database restore,
+  and runtime close. Broad runtime/connect tests, full `bun run check`,
+  `git diff --check`, and dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

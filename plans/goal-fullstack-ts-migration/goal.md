@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 953
+turns_used: 954
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-29T19:26:35+09:00"
+updated_at: "2026-06-29T20:29:47+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5307,6 +5307,11 @@ updated_at: "2026-06-29T19:26:35+09:00"
   cancel-snapshot after trusted-device confirmation, before/after export, and
   before retrying transfers, returns Rust-shaped cancelled responses, and passed
   broad validation plus dual-model xhigh review/refine.
+- Turn 954: Ported a bounded local device-sync background loop. Start-background
+  now starts a READY-only chained timer loop that reuses trigger-cycle, prevents
+  overlapping cycles, reports live backgroundRunning status, and stop/clear/
+  restore/close drain timers and in-flight cycles before mutating or closing the
+  database; broad validation and dual-model xhigh review/refine passed.
 
 ## Deferred items
 
