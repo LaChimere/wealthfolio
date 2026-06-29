@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 970
+turns_used: 971
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T04:01:52+09:00"
+updated_at: "2026-06-30T04:15:08+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5406,6 +5406,11 @@ updated_at: "2026-06-30T04:01:52+09:00"
   pre-transfer sync cycle blocks before snapshot, approve, or complete through
   the SQLite-backed HTTP route; targeted/full runtime validation plus repo check
   passed.
+- Turn 971: Ported no-symbol broker activity review-draft fallback. Broker sync
+  now imports asset-backed broker activities that have a mappable id but no
+  symbol as DRAFT review activities without linked assets, matching Rust sync
+  preparation behavior; full Connect validation, repo check, and dual-model
+  xhigh review passed.
 
 ## Deferred items
 

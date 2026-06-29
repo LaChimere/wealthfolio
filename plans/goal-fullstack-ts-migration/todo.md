@@ -6939,6 +6939,13 @@ contract:
   before snapshot generation, cloud approve, or cloud complete. Targeted pairing
   transfer route suite, full runtime suite, full `bun run check`, and
   `git diff --check` passed.
+- `pr5-runtime-connect-broker-no-symbol-review-drafts`: verification passed.
+  Broker activity sync now mirrors Rust sync preparation for asset-backed broker
+  activities that have a mappable id but no symbol by importing DRAFT review
+  activities with `allowMissingAsset`, no linked asset, preserved
+  source/idempotency metadata, and no account-level mapping failure. Full
+  Connect domain suite, full `bun run check`, `git diff --check`, and dual
+  Claude/GPT xhigh review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
