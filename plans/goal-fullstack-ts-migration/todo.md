@@ -7172,6 +7172,12 @@ contract:
   migrated, legacy metadata is cleaned on each migrated asset, and
   `asset_taxonomy_assignment` sync-outbox rows are queued. Full runtime suite
   and full repository check passed.
+- `pr5-health-legacy-classification-issue-runtime`: verification passed. The
+  runtime `/api/v1/health/check` route now has focused coverage for
+  SQLite-backed legacy classification issue generation, proving affected-item
+  names/symbols, encoded holdings routes, and the
+  `migrate_legacy_classifications` fix action through the HTTP seam. Full
+  runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
