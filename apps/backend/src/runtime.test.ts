@@ -16502,6 +16502,125 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to Boerse Frankfurt quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-boerse-route-"));
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.live.deutsche-boerse.com/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        expect((init?.headers as Record<string, string>)["User-Agent"]).toContain(
+          "Chrome/131.0.0.0",
+        );
+        calls.push(url);
+        const parsed = new URL(url);
+        if (parsed.pathname === "/v1/tradingview/search") {
+          expect(parsed.searchParams.get("query")).toBe("SAP");
+          expect(parsed.searchParams.get("limit")).toBe("5");
+          return Promise.resolve(
+            Response.json([
+              {
+                symbol: "XETR:DE0007164600",
+                description: "SAP SE",
+                exchange: "Xetra",
+                type: "Aktie",
+              },
+            ]),
+          );
+        }
+        if (parsed.pathname === "/v1/tradingview/history") {
+          expect(parsed.searchParams.get("symbol")).toBe("XETR:DE0007164600");
+          expect(parsed.searchParams.get("resolution")).toBe("1D");
+          return Promise.resolve(
+            Response.json({
+              s: "ok",
+              t: [1782691200],
+              o: [69.5],
+              h: [71],
+              l: [68.75],
+              c: [70.02],
+              v: [98765],
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-boerse-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "SAP",
+            "EUR",
+            "SAP",
+            "XETR",
+            JSON.stringify({ preferred_provider: "BOERSE_FRANKFURT" }),
+            "runtime-boerse-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-boerse-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(calls.map((url) => new URL(url).pathname)).toEqual([
+        "/v1/tradingview/search",
+        "/v1/tradingview/history",
+      ]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                source: string;
+                open: string | null;
+                high: string | null;
+                low: string | null;
+                close: string;
+                volume: string | null;
+                currency: string;
+              },
+              []
+            >(
+              "SELECT source, open, high, low, close, volume, currency FROM quotes WHERE asset_id = 'runtime-boerse-asset'",
+            )
+            .get(),
+        ).toEqual({
+          source: "BOERSE_FRANKFURT",
+          open: "69.5",
+          high: "71",
+          low: "68.75",
+          close: "70.02",
+          volume: "98765",
+          currency: "EUR",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to Metal Price API quotes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-metal-route-"));
     const calls: string[] = [];
