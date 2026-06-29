@@ -16163,6 +16163,90 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data search route to OpenFIGI bond mapping fallback", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-openfigi-search-route-"),
+    );
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith("https://query")) {
+          calls.push({ url, body: null });
+          return Promise.resolve(Response.json({ quotes: [] }));
+        }
+        if (url === "https://api.openfigi.com/v3/mapping") {
+          expect(init?.method).toBe("POST");
+          expect((init?.headers as Record<string, string>)["Content-Type"]).toBe(
+            "application/json",
+          );
+          const body = JSON.parse(String(init?.body)) as unknown;
+          calls.push({ url, body });
+          return Promise.resolve(
+            Response.json([
+              {
+                data: [
+                  {
+                    name: "United States Treasury Note",
+                    ticker: "T 2.75 02/15/28",
+                    exchCode: "TRACE",
+                    marketSector: "Govt",
+                  },
+                  {
+                    name: "United States Treasury Note",
+                    ticker: "T 2.75 02/15/28",
+                    exchCode: "TRACE",
+                    marketSector: "Govt",
+                  },
+                ],
+              },
+            ]),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(
+        `${server.baseUrl}/api/v1/market-data/search?query=US912810TH12`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual([
+        {
+          symbol: "US912810TH12",
+          shortName: "United States Treasury Note - T 2.75 02/15/28",
+          longName: "United States Treasury Note - T 2.75 02/15/28",
+          exchange: "TRACE",
+          exchangeMic: null,
+          exchangeName: null,
+          quoteType: "BOND",
+          typeDisplay: "",
+          currency: null,
+          currencySource: null,
+          dataSource: "OPENFIGI",
+          isExisting: false,
+          existingAssetId: null,
+          index: "",
+          score: 0,
+        },
+      ]);
+      expect(calls.map(({ url }) => url)).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=US912810TH12",
+        "https://query1.finance.yahoo.com/v1/finance/search?q=US912810TH12",
+        "https://api.openfigi.com/v3/mapping",
+      ]);
+      expect(calls.at(-1)?.body).toEqual([{ idType: "ID_ISIN", idValue: "US912810TH12" }]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to portfolio job execution", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-route-"));
     const runtime = createSqliteBackedBackendServices({
