@@ -6837,6 +6837,12 @@ contract:
   after attempted background cycles even when trigger-cycle fails. Broad
   runtime/connect tests, full `bun run check`, `git diff --check`, and dual
   Claude/GPT xhigh review/refine passed.
+- `pr5-runtime-connect-applied-event-prune`: verification passed. Successful
+  sync cycles now prune sync_applied_events at cursor minus 10,000 when the
+  cursor is above 20,000, including no-pull covered PULL_TAIL cycles and pulled
+  tails, with prune errors logged without changing successful cycle results.
+  Broad runtime/connect tests, full `bun run check`, `git diff --check`, and
+  dual Claude/GPT xhigh review/refine passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
