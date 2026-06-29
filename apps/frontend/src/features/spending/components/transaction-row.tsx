@@ -128,7 +128,7 @@ function TransactionRowImpl({
             className="hover:bg-muted/60 -mx-1 inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors"
             onClick={() => onEditSplits(row)}
           >
-            <Icons.Split className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <Icons.SplitHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="truncate text-sm">Split · {row.splitCount} lines</span>
           </button>
         ) : (
@@ -234,7 +234,7 @@ function TransactionRowImpl({
             )}
             {!isNeutral && (
               <DropdownMenuItem onClick={() => onEditSplits(row)}>
-                <Icons.Split className="mr-2 h-4 w-4" aria-hidden="true" />
+                <Icons.SplitHorizontal className="mr-2 h-4 w-4" aria-hidden="true" />
                 Split transaction
               </DropdownMenuItem>
             )}

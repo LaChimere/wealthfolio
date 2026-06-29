@@ -306,7 +306,7 @@ export function SplitTransactionSheet({
               onClick={handleDistribute}
               disabled={!canDistribute}
             >
-              <Icons.Split className="mr-2 h-4 w-4" />
+              <Icons.SplitHorizontal className="mr-2 h-4 w-4" />
               Distribute evenly
             </Button>
           </div>

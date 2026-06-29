@@ -136,7 +136,7 @@ function TransactionCardImpl({
           <span className="text-muted-foreground text-xs">Neutral</span>
         ) : row.splitCount > 0 ? (
           <button type="button" className={cn(CHIP, "min-w-0")} onClick={() => onEditSplits(row)}>
-            <Icons.Split className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <Icons.SplitHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="truncate">Split · {row.splitCount} lines</span>
           </button>
         ) : (
@@ -231,7 +231,7 @@ function TransactionCardImpl({
             )}
             {!isNeutral && (
               <DropdownMenuItem onClick={() => onEditSplits(row)}>
-                <Icons.Split className="mr-2 h-4 w-4" aria-hidden="true" />
+                <Icons.SplitHorizontal className="mr-2 h-4 w-4" aria-hidden="true" />
                 Split transaction
               </DropdownMenuItem>
             )}
