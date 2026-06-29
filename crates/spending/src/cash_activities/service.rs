@@ -20,6 +20,9 @@ use super::{
     },
     CASH_ACTIVITY_TYPES,
 };
+use crate::activity_allocations::{
+    group_assignments as group_assignments_owned, group_splits as group_splits_owned,
+};
 use crate::activity_assignments::{
     ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService, BulkCategoryAssignment,
 };
@@ -503,9 +506,8 @@ impl CashActivityService {
     ) -> Result<ActivityTaxonomyAssignment> {
         self.ensure_activity_assignment_allowed(activity_id, taxonomy_id, true)
             .await?;
-        self.splits.clear_for_activity(activity_id).await?;
         self.assignments
-            .assign_single(activity_id, taxonomy_id, category_id)
+            .assign_single_clearing_splits(activity_id, taxonomy_id, category_id)
             .await
     }
 
@@ -523,10 +525,9 @@ impl CashActivityService {
             self.ensure_activity_assignment_allowed(&item.activity_id, &item.taxonomy_id, true)
                 .await?;
         }
-        for item in items {
-            self.splits.clear_for_activity(&item.activity_id).await?;
-        }
-        self.assignments.assign_many_single_select(items).await
+        self.assignments
+            .assign_many_single_select_clearing_splits(items)
+            .await
     }
 
     pub async fn list_splits(&self, activity_id: &str) -> Result<Vec<ActivitySplit>> {
@@ -590,10 +591,9 @@ impl CashActivityService {
             .into());
         }
 
-        self.assignments
-            .unassign(activity_id, expected_taxonomy)
-            .await?;
-        self.splits.replace_for_activity(activity_id, splits).await
+        self.splits
+            .replace_for_activity_clearing_assignment(activity_id, expected_taxonomy, splits)
+            .await
     }
 
     pub async fn clear_splits(&self, activity_id: &str) -> Result<()> {
@@ -936,30 +936,10 @@ fn group_assignments(
     map
 }
 
-fn group_assignments_owned(
-    assignments: Vec<ActivityTaxonomyAssignment>,
-) -> HashMap<String, Vec<ActivityTaxonomyAssignment>> {
-    let mut map: HashMap<String, Vec<ActivityTaxonomyAssignment>> = HashMap::new();
-    for a in assignments {
-        map.entry(a.activity_id.clone()).or_default().push(a);
-    }
-    map
-}
-
 fn group_splits(splits: &[ActivitySplit]) -> HashMap<&str, Vec<&ActivitySplit>> {
     let mut map: HashMap<&str, Vec<&ActivitySplit>> = HashMap::new();
     for split in splits {
         map.entry(split.activity_id.as_str())
-            .or_default()
-            .push(split);
-    }
-    map
-}
-
-fn group_splits_owned(splits: Vec<ActivitySplit>) -> HashMap<String, Vec<ActivitySplit>> {
-    let mut map: HashMap<String, Vec<ActivitySplit>> = HashMap::new();
-    for split in splits {
-        map.entry(split.activity_id.clone())
             .or_default()
             .push(split);
     }
@@ -1425,6 +1405,13 @@ mod tests {
             unimplemented!()
         }
 
+        async fn assign_many_single_select_clearing_splits(
+            &self,
+            _: Vec<NewActivityTaxonomyAssignment>,
+        ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+            unimplemented!()
+        }
+
         async fn assign_rule_many_single_select(
             &self,
             _: Vec<NewActivityTaxonomyAssignment>,
@@ -1449,6 +1436,7 @@ mod tests {
     #[derive(Default)]
     struct MockSplitRepo {
         replaced: Mutex<Vec<(String, Vec<NewActivitySplit>)>>,
+        assignment_clears: Mutex<Vec<(String, String)>>,
         cleared: Mutex<Vec<String>>,
         categories_valid: Mutex<bool>,
     }
@@ -1491,6 +1479,19 @@ mod tests {
                     updated_at: now_naive(),
                 })
                 .collect())
+        }
+
+        async fn replace_for_activity_clearing_assignment(
+            &self,
+            activity_id: &str,
+            taxonomy_id: &str,
+            splits: Vec<NewActivitySplit>,
+        ) -> Result<Vec<ActivitySplit>> {
+            self.assignment_clears
+                .lock()
+                .unwrap()
+                .push((activity_id.to_string(), taxonomy_id.to_string()));
+            self.replace_for_activity(activity_id, splits).await
         }
 
         async fn clear_for_activity(&self, activity_id: &str) -> Result<()> {
@@ -1714,8 +1715,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(splits.len(), 2);
+        assert!(assignment_repo.cleared.lock().unwrap().is_empty());
         assert_eq!(
-            assignment_repo.cleared.lock().unwrap().as_slice(),
+            split_repo.assignment_clears.lock().unwrap().as_slice(),
             &[("activity-1".to_string(), SPENDING_TAXONOMY.to_string())]
         );
         assert_eq!(split_repo.replaced.lock().unwrap().len(), 1);

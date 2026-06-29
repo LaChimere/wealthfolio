@@ -84,7 +84,8 @@ function categoryLabel(
 }
 
 function formatCents(cents: number) {
-  return centsToAmount(Math.abs(cents)).toFixed(2);
+  const prefix = cents < 0 ? "-" : "";
+  return `${prefix}${centsToAmount(Math.abs(cents)).toFixed(2)}`;
 }
 
 function fallbackLineColor(index: number) {
