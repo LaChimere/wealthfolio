@@ -8628,6 +8628,145 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("background engine prunes old sent and dead outbox rows", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, created_at
+      )
+      VALUES
+        ('sent-old', 'account', 'a1', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2020-01-01T00:00:00.000Z'),
+        ('sent-new', 'account', 'a2', 'update', '2999-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2999-01-01T00:00:00.000Z'),
+        ('dead-old', 'account', 'a3', 'update', '2020-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2020-01-01T00:00:00.000Z'),
+        ('dead-new', 'account', 'a4', 'update', '2999-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2999-01-01T00:00:00.000Z'),
+        ('pending-old', 'account', 'a5', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'pending', 0, '2020-01-01T00:00:00.000Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let failReconcile = false;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      backgroundOutboxPruneIntervalMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (failReconcile) {
+            return new Response("temporary reconcile failure", { status: 500 });
+          }
+          return Response.json({ action: "NOOP", cursor: 0 });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await service.startDeviceSyncBackgroundEngine();
+      const deadline = Date.now() + 1_000;
+      let firstPruneDone = false;
+      while (Date.now() < deadline) {
+        const remaining = db
+          .query<{ event_id: string }, []>("SELECT event_id FROM sync_outbox ORDER BY event_id")
+          .all()
+          .map((row) => row.event_id);
+        if (!remaining.includes("sent-old") && !remaining.includes("dead-old")) {
+          expect(remaining).toEqual(["dead-new", "pending-old", "sent-new"]);
+          firstPruneDone = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      if (!firstPruneDone) {
+        throw new Error("Timed out waiting for background outbox pruning");
+      }
+      await service.stopDeviceSyncBackgroundEngine();
+      db.exec(`
+        INSERT INTO sync_outbox (
+          event_id, entity, entity_id, op, client_timestamp, payload,
+          payload_key_version, sent, status, retry_count, created_at
+        )
+        VALUES
+          ('sent-old-after-error', 'account', 'a6', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2020-01-01T00:00:00.000Z'),
+          ('dead-old-after-error', 'account', 'a7', 'update', '2020-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2020-01-01T00:00:00.000Z');
+      `);
+      failReconcile = true;
+      await service.startDeviceSyncBackgroundEngine();
+      const secondDeadline = Date.now() + 1_000;
+      while (Date.now() < secondDeadline) {
+        const remaining = db
+          .query<{ event_id: string }, []>("SELECT event_id FROM sync_outbox ORDER BY event_id")
+          .all()
+          .map((row) => row.event_id);
+        if (
+          !remaining.includes("sent-old-after-error") &&
+          !remaining.includes("dead-old-after-error")
+        ) {
+          expect(remaining).toEqual(["dead-new", "pending-old", "sent-new"]);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("Timed out waiting for background outbox pruning after failed cycle");
+    } finally {
+      await service.stopDeviceSyncBackgroundEngine();
+      db.close();
+    }
+  });
+
   test("does not start background engine after stop races an in-flight start", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();

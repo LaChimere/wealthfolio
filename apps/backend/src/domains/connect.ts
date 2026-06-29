@@ -49,6 +49,7 @@ export interface LocalConnectDeviceSyncServiceDependencies {
   deviceDisplayName?: string;
   platform?: string;
   reinitializeDelayMs?: number;
+  backgroundOutboxPruneIntervalMs?: number;
 }
 
 export type ConnectSyncBrokerDataStatus = "accepted" | "forbidden" | "not_implemented";
@@ -4135,6 +4136,9 @@ const SNAPSHOT_UPLOAD_MAX_ATTEMPTS = 5;
 const SNAPSHOT_UPLOAD_BASE_BACKOFF_MS = 250;
 const SNAPSHOT_UPLOAD_MAX_BACKOFF_MS = 8_000;
 const DEVICE_SYNC_BACKGROUND_INTERVAL_MS = 5 * 60 * 1000;
+const DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEVICE_SYNC_SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEVICE_SYNC_DEAD_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -4204,6 +4208,7 @@ export function createLocalConnectDeviceSyncService({
   deviceDisplayName = DEVICE_ENROLL_DISPLAY_NAME,
   platform = detectDevicePlatform(process.platform),
   reinitializeDelayMs = 350,
+  backgroundOutboxPruneIntervalMs = DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS,
 }: LocalConnectDeviceSyncServiceDependencies): ConnectDeviceSyncService {
   const disabledService = createDisabledConnectDeviceSyncService();
   const runWithEnrollLock = createAsyncOperationLock();
@@ -4215,6 +4220,7 @@ export function createLocalConnectDeviceSyncService({
   let backgroundCycleInFlight = false;
   let backgroundCyclePromise: Promise<void> | null = null;
   let backgroundLifecycleVersion = 0;
+  let backgroundNextOutboxPruneAt = Date.now() + backgroundOutboxPruneIntervalMs;
   let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
   const clearBackgroundTimer = () => {
     if (backgroundTimer !== null) {
@@ -4236,12 +4242,14 @@ export function createLocalConnectDeviceSyncService({
     }
     backgroundCycleInFlight = true;
     const cycle = (async () => {
+      let shouldPruneAfterCycle = false;
       try {
         if (!(await localSyncIdentityCanRunBackground(secretService))) {
           backgroundRunning = false;
           clearBackgroundTimer();
           return;
         }
+        shouldPruneAfterCycle = true;
         await triggerLocalDeviceSyncCycle(
           db,
           secretService,
@@ -4252,6 +4260,17 @@ export function createLocalConnectDeviceSyncService({
       } catch (error) {
         console.warn(`[Connect] Device sync background cycle failed: ${errorMessage(error)}`);
       } finally {
+        if (shouldPruneAfterCycle) {
+          try {
+            const now = Date.now();
+            if (now >= backgroundNextOutboxPruneAt) {
+              backgroundNextOutboxPruneAt = now + backgroundOutboxPruneIntervalMs;
+              localPruneSyncOutbox(db, now);
+            }
+          } catch (error) {
+            console.warn(`[Connect] Failed to prune sync outbox: ${errorMessage(error)}`);
+          }
+        }
         backgroundCycleInFlight = false;
         if (backgroundRunning) {
           scheduleBackgroundCycle(DEVICE_SYNC_BACKGROUND_INTERVAL_MS);
@@ -8470,6 +8489,33 @@ function localMarkSyncOutboxDead(
       WHERE event_id IN (${placeholders})
     `,
   ).run(lastError, lastErrorCode, ...eventIds);
+}
+
+function localPruneSyncOutbox(db: Database, nowMs = Date.now()): number {
+  if (!sqliteTableExists(db, "sync_outbox")) {
+    return 0;
+  }
+  const sentCutoff = new Date(nowMs - DEVICE_SYNC_SENT_OUTBOX_RETENTION_MS).toISOString();
+  const deadCutoff = new Date(nowMs - DEVICE_SYNC_DEAD_OUTBOX_RETENTION_MS).toISOString();
+  const sentDeleted = db
+    .prepare(
+      `
+        DELETE FROM sync_outbox
+        WHERE status = 'sent'
+          AND created_at < ?
+      `,
+    )
+    .run(sentCutoff).changes;
+  const deadDeleted = db
+    .prepare(
+      `
+        DELETE FROM sync_outbox
+        WHERE status = 'dead'
+          AND created_at < ?
+      `,
+    )
+    .run(deadCutoff).changes;
+  return sentDeleted + deadDeleted;
 }
 
 function localApplyPushFailureToOutbox(
