@@ -16202,6 +16202,103 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route to MarketData.app provider quotes", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-marketdata-app-route-"),
+    );
+    const calls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.startsWith("https://api.marketdata.app/v1/")) {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        const headers = init?.headers as Record<string, string> | undefined;
+        expect(headers?.Authorization).toBe("Bearer test-key");
+        calls.push(url);
+        const parsed = new URL(url);
+        if (parsed.pathname === "/v1/stocks/candles/D/AAPL") {
+          return Promise.resolve(
+            Response.json({
+              s: "ok",
+              t: [1767571200],
+              c: [10.5],
+            }),
+          );
+        }
+        if (parsed.pathname === "/v1/stocks/prices/AAPL/") {
+          return Promise.resolve(
+            Response.json({
+              s: "ok",
+              mid: [11.25],
+              updated: [1767657600],
+            }),
+          );
+        }
+        throw new Error(`unexpected MarketData.app path: ${parsed.pathname}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret("MARKETDATA_APP", "test-key");
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-marketdata-app-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "AAPL",
+            "WRONG",
+            "XNAS",
+            JSON.stringify({
+              preferred_provider: "MARKETDATA_APP",
+              overrides: { MARKETDATA_APP: { symbol: "AAPL" } },
+            }),
+            "runtime-marketdata-app-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetIds: ["runtime-marketdata-app-asset"], refetchAll: false }),
+      });
+      expect(response.status).toBe(204);
+      expect(calls.map((url) => new URL(url).pathname)).toEqual([
+        "/v1/stocks/candles/D/AAPL",
+        "/v1/stocks/prices/AAPL/",
+      ]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { day: string; source: string; close: string; currency: string },
+              []
+            >("SELECT day, source, close, currency FROM quotes WHERE asset_id = 'runtime-marketdata-app-asset' ORDER BY day ASC")
+            .all(),
+        ).toEqual([
+          { day: "2026-01-05", source: "MARKETDATA_APP", close: "10.5", currency: "USD" },
+          { day: "2026-01-06", source: "MARKETDATA_APP", close: "11.25", currency: "USD" },
+        ]);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime AI chat sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-sync-"));
     const runtime = createSqliteBackedBackendServices({
