@@ -7704,6 +7704,13 @@ contract:
   wired post-bootstrap device-sync cycle by returning a NOOP reconcile response
   and asserting sync engine status is reset to `ok` before the flow is removed.
   Focused runtime test and full repository check passed.
+- `cutover-cleanup-sidecar-target-aliases`: verification passed. Removed stale
+  `TARGET_DESCRIPTORS` map and its call site from
+  `scripts/build-electron-sidecar.mjs`. The map held Rust cross-compilation
+  triple aliases (for example `x86_64-apple-darwin`) carried over from before
+  the TS backend migration; release workflow inputs now use `bun-*` targets
+  handled by the existing regex branch. Node syntax check, unsupported legacy
+  target failure check, and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

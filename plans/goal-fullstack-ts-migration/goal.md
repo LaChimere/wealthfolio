@@ -6149,6 +6149,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   post-bootstrap device-sync cycle by returning a NOOP reconcile response and
   asserting sync engine status is reset to `ok` before the flow is removed.
   Focused runtime test and full repository check passed.
+- Turn 1115: Removed stale Rust-triple Electron sidecar target aliases. The
+  sidecar build script now accepts only current `bun-*` targets or host
+  defaults, matching release workflow inputs and eliminating the pre-TS Rust
+  cross-compilation compatibility map. Node syntax check, unsupported legacy
+  target failure check, and full repository check passed.
 
 ## Deferred items
 

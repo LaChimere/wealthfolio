@@ -313,11 +313,6 @@ function resolveTargetDescriptor(target) {
   }
 
   const normalized = target.trim();
-  const known = TARGET_DESCRIPTORS.get(normalized);
-  if (known) {
-    return known;
-  }
-
   const bunTarget = normalized.match(/^bun-(darwin|linux|windows)-(x64|arm64)(?:-.+)?$/);
   if (bunTarget) {
     return descriptorFor(bunPlatformToNodePlatform(bunTarget[1]), bunTarget[2], normalized);
@@ -338,15 +333,6 @@ function descriptorFor(
     platform,
   };
 }
-
-const TARGET_DESCRIPTORS = new Map([
-  ["x86_64-apple-darwin", descriptorFor("darwin", "x64", "bun-darwin-x64")],
-  ["aarch64-apple-darwin", descriptorFor("darwin", "arm64", "bun-darwin-arm64")],
-  ["x86_64-pc-windows-msvc", descriptorFor("win32", "x64", "bun-windows-x64")],
-  ["aarch64-pc-windows-msvc", descriptorFor("win32", "arm64", "bun-windows-arm64")],
-  ["x86_64-unknown-linux-gnu", descriptorFor("linux", "x64", "bun-linux-x64")],
-  ["aarch64-unknown-linux-gnu", descriptorFor("linux", "arm64", "bun-linux-arm64")],
-]);
 
 function nodePlatformToBunPlatform(platform) {
   if (platform === "win32") {
