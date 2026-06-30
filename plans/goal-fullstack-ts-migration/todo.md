@@ -7312,6 +7312,10 @@ contract:
   of exposing stale “service not available” branches for goals and
   portfolio-history exports. Focused data-export/runtime tests, backend
   type-check, and full repository check passed.
+- `pr5-data-export-csv-format-parity`: verification passed. TS data-export
+  domain tests now mirror the Rust export helper for `assetId` header renaming
+  to `symbol` and JSON string escaping of quotes, commas, and newlines. Focused
+  data-export tests, backend type-check, and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
