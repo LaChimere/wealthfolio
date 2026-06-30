@@ -107,4 +107,81 @@ describe("addon development mode", () => {
 
     expect(globals.__ASYNC_DEV_ADDON_DISABLED__).toBe(true);
   });
+
+  it("loads dev addons with installed-addon enable export styles", async () => {
+    const addonSources = [
+      {
+        id: "default-object-addon",
+        globalName: "__DEFAULT_OBJECT_ADDON_ENABLED__",
+        source: `
+          export default {
+            enable() {
+              globalThis.__DEFAULT_OBJECT_ADDON_ENABLED__ = true;
+              return {};
+            },
+          };
+        `,
+      },
+      {
+        id: "named-enable-addon",
+        globalName: "__NAMED_ENABLE_ADDON_ENABLED__",
+        source: `
+          export function enable() {
+            globalThis.__NAMED_ENABLE_ADDON_ENABLED__ = true;
+            return {};
+          }
+        `,
+      },
+      {
+        id: "legacy-addon",
+        globalName: "__LEGACY_ADDON_ENABLED__",
+        source: `
+          export function PortfolioTrackerAddon() {
+            globalThis.__LEGACY_ADDON_ENABLED__ = true;
+            return {};
+          }
+        `,
+      },
+    ] as const;
+    const blobUrls = addonSources.map(
+      ({ source }) => `data:text/javascript,${encodeURIComponent(source)}`,
+    );
+    URL.createObjectURL = (() => blobUrls[0] ?? "") as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const blobUrl = blobUrls.shift();
+      if (!blobUrl) {
+        throw new Error("Unexpected addon blob creation");
+      }
+      return blobUrl;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    (globalThis as unknown as { ReactDOM?: { createPortal: () => null } }).ReactDOM = {
+      createPortal: () => null,
+    };
+    const globals = globalThis as unknown as Record<string, boolean | undefined>;
+    for (const addon of addonSources) {
+      delete globals[addon.globalName];
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/health")) {
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith("/addon.js")) {
+        return new Response("export default function enable() {}", { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    for (const addon of addonSources) {
+      addonDevManager.registerDevServer({
+        id: addon.id,
+        name: addon.id,
+        port: 3001,
+      });
+      await expect(addonDevManager.loadAddonFromDevServer(addon.id)).resolves.toBe(true);
+      expect(globals[addon.globalName]).toBe(true);
+    }
+  });
 });

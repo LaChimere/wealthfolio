@@ -6164,6 +6164,10 @@ updated_at: "2026-07-01T00:39:21+09:00"
   functions before marking load success and storing returned disable hooks, so
   hot-reload cleanup sees the resolved add-on instance. Focused frontend add-on
   tests and full repository check passed.
+- Turn 1118: Aligned add-on dev-mode enable export resolution with installed
+  add-ons. Development server add-ons now accept default object `enable`, named
+  `enable`, and legacy `PortfolioTrackerAddon` exports in addition to default
+  functions. Focused frontend add-on tests and full repository check passed.
 
 ## Deferred items
 

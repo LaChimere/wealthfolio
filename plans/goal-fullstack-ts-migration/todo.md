@@ -7721,6 +7721,11 @@ contract:
   storing returned disable hooks, matching installed add-on behavior so
   hot-reload cleanup sees the resolved add-on instance. Focused frontend add-on
   tests and full repository check passed.
+- `pr5-addon-dev-enable-export-parity`: verification passed. Development-server
+  add-ons now accept default object `enable`, named `enable`, and legacy
+  `PortfolioTrackerAddon` exports in addition to default functions, matching
+  installed add-on export resolution. Focused frontend add-on tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
