@@ -48,6 +48,22 @@ describe("electron event adapter", () => {
       id: 1,
       payload: { ok: true },
     });
+
+    const marketPayload = {
+      failed_syncs: [["BAD", "Symbol not found: BAD"]],
+      skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+    };
+    const [, marketBridgeHandler] = listen.mock.calls[1];
+    marketBridgeHandler({
+      event: "market:sync-complete",
+      id: 2,
+      payload: marketPayload,
+    });
+    expect(marketHandler).toHaveBeenCalledWith({
+      event: "market:sync-complete",
+      id: 2,
+      payload: marketPayload,
+    });
   });
 
   it("delegates database restore listeners through preload", async () => {
