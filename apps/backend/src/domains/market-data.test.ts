@@ -5019,6 +5019,7 @@ describe("TS market data domain", () => {
         networkCalls += 1;
         throw new Error("fixture mode should not call network");
       }) as typeof fetch,
+      now: () => new Date("2026-05-12T22:00:00.000Z"),
     });
 
     try {

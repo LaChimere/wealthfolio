@@ -252,9 +252,7 @@ fn test_detect_addon_permissions() {
         "searchTicker should be detected"
     );
 
-    let events_permission = detected_permissions
-        .iter()
-        .find(|p| p.category == "events");
+    let events_permission = detected_permissions.iter().find(|p| p.category == "events");
     assert!(
         events_permission.is_some(),
         "Events permissions should be detected"

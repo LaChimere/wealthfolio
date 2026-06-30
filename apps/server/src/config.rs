@@ -17,96 +17,6 @@ pub struct Config {
     pub sidecar: Option<SidecarConfig>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-    const TEST_SECRET_KEY: &str = "012345678901234567890123456789!!";
-
-    fn with_env<T>(vars: &[(&str, Option<&str>)], run: impl FnOnce() -> T) -> T {
-        let guard = ENV_LOCK.lock().expect("env lock poisoned");
-        let previous = vars
-            .iter()
-            .map(|(key, _)| (*key, std::env::var(key).ok()))
-            .collect::<Vec<_>>();
-
-        for (key, value) in vars {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
-
-        for (key, value) in previous {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-
-        drop(guard);
-
-        match result {
-            Ok(value) => value,
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
-    }
-
-    #[test]
-    fn sidecar_profile_accepts_loopback_token() {
-        let config = with_env(
-            &[
-                ("WF_LISTEN_ADDR", Some("127.0.0.1:0")),
-                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
-                ("WF_SIDECAR_TOKEN", Some("sidecar-token")),
-                ("WF_AUTH_REQUIRED", Some("false")),
-            ],
-            Config::from_env,
-        );
-
-        assert_eq!(config.listen_addr.ip().to_string(), "127.0.0.1");
-        assert_eq!(
-            config
-                .sidecar
-                .as_ref()
-                .map(|sidecar| sidecar.token.as_str()),
-            Some("sidecar-token")
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "WF_SIDECAR_TOKEN must not be empty when set")]
-    fn sidecar_profile_rejects_empty_token() {
-        with_env(
-            &[
-                ("WF_LISTEN_ADDR", Some("127.0.0.1:0")),
-                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
-                ("WF_SIDECAR_TOKEN", Some("   ")),
-                ("WF_AUTH_REQUIRED", Some("false")),
-            ],
-            Config::from_env,
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "WF_SIDECAR_TOKEN requires a loopback WF_LISTEN_ADDR")]
-    fn sidecar_profile_rejects_non_loopback_listener() {
-        with_env(
-            &[
-                ("WF_LISTEN_ADDR", Some("0.0.0.0:8088")),
-                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
-                ("WF_SIDECAR_TOKEN", Some("sidecar-token")),
-                ("WF_AUTH_REQUIRED", Some("false")),
-            ],
-            Config::from_env,
-        );
-    }
-}
-
 pub struct SidecarConfig {
     pub token: String,
 }
@@ -237,5 +147,95 @@ impl Config {
             auth,
             sidecar,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    const TEST_SECRET_KEY: &str = "012345678901234567890123456789!!";
+
+    fn with_env<T>(vars: &[(&str, Option<&str>)], run: impl FnOnce() -> T) -> T {
+        let guard = ENV_LOCK.lock().expect("env lock poisoned");
+        let previous = vars
+            .iter()
+            .map(|(key, _)| (*key, std::env::var(key).ok()))
+            .collect::<Vec<_>>();
+
+        for (key, value) in vars {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        drop(guard);
+
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    #[test]
+    fn sidecar_profile_accepts_loopback_token() {
+        let config = with_env(
+            &[
+                ("WF_LISTEN_ADDR", Some("127.0.0.1:0")),
+                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
+                ("WF_SIDECAR_TOKEN", Some("sidecar-token")),
+                ("WF_AUTH_REQUIRED", Some("false")),
+            ],
+            Config::from_env,
+        );
+
+        assert_eq!(config.listen_addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(
+            config
+                .sidecar
+                .as_ref()
+                .map(|sidecar| sidecar.token.as_str()),
+            Some("sidecar-token")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "WF_SIDECAR_TOKEN must not be empty when set")]
+    fn sidecar_profile_rejects_empty_token() {
+        with_env(
+            &[
+                ("WF_LISTEN_ADDR", Some("127.0.0.1:0")),
+                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
+                ("WF_SIDECAR_TOKEN", Some("   ")),
+                ("WF_AUTH_REQUIRED", Some("false")),
+            ],
+            Config::from_env,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "WF_SIDECAR_TOKEN requires a loopback WF_LISTEN_ADDR")]
+    fn sidecar_profile_rejects_non_loopback_listener() {
+        with_env(
+            &[
+                ("WF_LISTEN_ADDR", Some("0.0.0.0:8088")),
+                ("WF_SECRET_KEY", Some(TEST_SECRET_KEY)),
+                ("WF_SIDECAR_TOKEN", Some("sidecar-token")),
+                ("WF_AUTH_REQUIRED", Some("false")),
+            ],
+            Config::from_env,
+        );
     }
 }
