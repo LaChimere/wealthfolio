@@ -3681,6 +3681,134 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat record activities batch results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-records-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO accounts (
+                id, name, account_type, "group", currency, is_default, is_active,
+                is_archived, tracking_mode
+              )
+              VALUES ('ai-records-account', 'AI Batch Cash', 'CASH', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS')
+            `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["record_activities"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            '{"message":{"tool_calls":[{"id":"runtime-records-call","function":{"name":"record_activities","arguments":{"activities":[{"activityType":"DEPOSIT","activityDate":"2026-01-03","amount":25,"account":"AI Batch Cash"},{"activityType":"WITHDRAWAL","activityDate":"2026-01-04","amount":10,"account":"AI Batch Cash"}]}}}]},"done":false}\n{"done":true}\n',
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response(
+          '{"message":{"content":"Batch drafts prepared."},"done":false}\n{"done":true}\n',
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Draft cash flow batch" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      ).map((tool) => tool.function?.name);
+      expect(exposedToolNames).toEqual(["record_activities"]);
+      expect(JSON.stringify(events)).toContain('"totalRows":2');
+      expect(JSON.stringify(events)).toContain('"validRows":2');
+      const recordsToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(recordsToolMessage?.content))).toMatchObject({
+        drafts: [
+          {
+            rowIndex: 0,
+            draft: { activityType: "DEPOSIT", accountId: "ai-records-account", amount: 25 },
+            validation: { isValid: true, missingFields: [], errors: [] },
+          },
+          {
+            rowIndex: 1,
+            draft: { activityType: "WITHDRAWAL", accountId: "ai-records-account", amount: 10 },
+            validation: { isValid: true, missingFields: [], errors: [] },
+          },
+        ],
+        validation: { totalRows: 2, validRows: 2, errorRows: 0 },
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()
+            ?.count,
+        ).toBe(0);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
