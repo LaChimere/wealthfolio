@@ -2411,7 +2411,7 @@ describe("TS backend runtime composition", () => {
       secretKey: config.secretKey,
     });
     const server = startBackendServer(config, runtime.options);
-    const events: string[] = [];
+    const events: Array<{ name: string; payload?: unknown }> = [];
     const portfolioJobConfigs: PortfolioJobConfig[] = [];
     const originalPortfolioJobService = runtime.options.portfolioJobService;
     if (!originalPortfolioJobService) {
@@ -2424,7 +2424,7 @@ describe("TS backend runtime composition", () => {
       },
     };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
-      events.push(event.name);
+      events.push(event);
     });
 
     try {
@@ -2435,7 +2435,11 @@ describe("TS backend runtime composition", () => {
       });
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ baseCurrency: "USD" });
-      await waitForEventCount(events, "portfolio:update-complete", 1);
+      await waitForEventCount(
+        events.map((event) => event.name),
+        "portfolio:update-complete",
+        1,
+      );
       expect(portfolioJobConfigs).toEqual([
         {
           accountIds: null,
@@ -2445,12 +2449,16 @@ describe("TS backend runtime composition", () => {
           sinceDate: null,
         },
       ]);
-      expect(events).toEqual([
+      expect(events.map((event) => event.name)).toEqual([
         "market:sync-start",
         "market:sync-complete",
         "portfolio:update-start",
         "portfolio:update-complete",
       ]);
+      expect(events.find((event) => event.name === "market:sync-complete")?.payload).toEqual({
+        failed_syncs: [],
+        skipped_reasons: [],
+      });
     } finally {
       unsubscribe?.();
       server.stop();
@@ -17305,7 +17313,7 @@ describe("TS backend runtime composition", () => {
       secretKey: config.secretKey,
     });
     const server = startBackendServer(config, runtime.options);
-    const events: string[] = [];
+    const events: Array<{ name: string; payload?: unknown }> = [];
     const portfolioJobConfigs: PortfolioJobConfig[] = [];
     const originalPortfolioJobService = runtime.options.portfolioJobService;
     if (!originalPortfolioJobService) {
@@ -17318,7 +17326,7 @@ describe("TS backend runtime composition", () => {
       },
     };
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
-      events.push(event.name);
+      events.push(event);
     });
 
     try {
@@ -17340,7 +17348,11 @@ describe("TS backend runtime composition", () => {
         body: JSON.stringify({ assetIds: ["runtime-market-sync-asset"], refetchAll: false }),
       });
       expect(response.status).toBe(204);
-      await waitForEventCount(events, "portfolio:update-complete", 1);
+      await waitForEventCount(
+        events.map((event) => event.name),
+        "portfolio:update-complete",
+        1,
+      );
       expect(portfolioJobConfigs).toEqual([
         {
           accountIds: null,
@@ -17350,12 +17362,16 @@ describe("TS backend runtime composition", () => {
           sinceDate: null,
         },
       ]);
-      expect(events).toEqual([
+      expect(events.map((event) => event.name)).toEqual([
         "market:sync-start",
         "market:sync-complete",
         "portfolio:update-start",
         "portfolio:update-complete",
       ]);
+      expect(events.find((event) => event.name === "market:sync-complete")?.payload).toEqual({
+        failed_syncs: [],
+        skipped_reasons: [],
+      });
       const verifyDb = openSqliteDatabase(runtime.dbPath);
       try {
         expect(
