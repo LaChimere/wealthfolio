@@ -7414,6 +7414,12 @@ contract:
   and asserting the Portfolio filter includes only the scoped holding source
   while preserving the other query-route coverage. Focused runtime tests and
   full repository check passed.
+- `pr5-runtime-portfolio-scope-full-discriminating-data`: verification passed.
+  The Portfolio account-scope runtime smoke now also seeds shared
+  allocation-category assignments and scoped/excluded income activities, proving
+  allocation-holdings and income summary query routes include scoped account
+  data and exclude the out-of-scope account. Focused runtime tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

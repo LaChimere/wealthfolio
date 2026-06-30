@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1059
+turns_used: 1060
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T15:12:37+09:00"
+updated_at: "2026-06-30T15:28:02+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5868,6 +5868,11 @@ updated_at: "2026-06-30T15:12:37+09:00"
   asserts the Portfolio filter includes only the scoped holding source while
   keeping the remaining query-route coverage. Focused runtime tests and full
   repository check passed.
+- Turn 1060: Completed the Portfolio account-scope runtime smoke hardening. The
+  test now also seeds shared allocation-category assignments and scoped/excluded
+  income activities, proving allocation-holdings and income summary query routes
+  include the scoped account data and exclude the out-of-scope account. Focused
+  runtime tests and full repository check passed.
 
 ## Deferred items
 
