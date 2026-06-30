@@ -207,7 +207,7 @@ class AddonDevManager {
         if (typeof mod.default === "function") {
           // Create addon-specific context with scoped secrets
           const addonSpecificContext = createAddonContext(addonId);
-          const addonInstance = mod.default(addonSpecificContext);
+          const addonInstance = await mod.default(addonSpecificContext);
 
           // Store for cleanup
           if (addonInstance && typeof addonInstance.disable === "function") {

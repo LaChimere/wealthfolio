@@ -7716,6 +7716,11 @@ contract:
   import or enable execution fails, matching installed add-on cleanup behavior
   and reducing browser-runtime resource leakage. Focused frontend add-on tests
   and full repository check passed.
+- `pr5-addon-dev-async-enable`: verification passed. Development-server add-ons
+  now await async default `enable()` functions before marking load success and
+  storing returned disable hooks, matching installed add-on behavior so
+  hot-reload cleanup sees the resolved add-on instance. Focused frontend add-on
+  tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

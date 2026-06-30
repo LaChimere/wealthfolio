@@ -6159,6 +6159,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   module import or enable execution fails, matching installed add-on cleanup
   behavior and reducing browser-runtime resource leakage. Focused frontend
   add-on tests and full repository check passed.
+- Turn 1117: Aligned add-on dev-mode async enable handling with installed
+  add-ons. Development server add-ons now await async default `enable()`
+  functions before marking load success and storing returned disable hooks, so
+  hot-reload cleanup sees the resolved add-on instance. Focused frontend add-on
+  tests and full repository check passed.
 
 ## Deferred items
 

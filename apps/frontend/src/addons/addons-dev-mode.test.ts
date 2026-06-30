@@ -8,10 +8,18 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 const originalReactDOM = (globalThis as unknown as { ReactDOM?: unknown }).ReactDOM;
 
 afterEach(() => {
+  const globals = globalThis as unknown as {
+    __ASYNC_DEV_ADDON_ENABLED__?: boolean;
+    __ASYNC_DEV_ADDON_DISABLED__?: boolean;
+    __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
+  };
   globalThis.fetch = originalFetch;
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
   (globalThis as unknown as { ReactDOM?: unknown }).ReactDOM = originalReactDOM;
+  delete globals.__ASYNC_DEV_ADDON_ENABLED__;
+  delete globals.__ASYNC_DEV_ADDON_DISABLED__;
+  globals.__DEV_ADDONS__?.clear();
   vi.restoreAllMocks();
   addonDevManager.disableDevMode();
 });
@@ -46,5 +54,57 @@ describe("addon development mode", () => {
 
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith(blobUrl);
+  });
+
+  it("awaits async dev addon enable functions before storing disable hooks", async () => {
+    const blobUrl = [
+      "data:text/javascript,",
+      encodeURIComponent(`
+        export default async function enable() {
+          globalThis.__ASYNC_DEV_ADDON_ENABLED__ = true;
+          return {
+            disable() {
+              globalThis.__ASYNC_DEV_ADDON_DISABLED__ = true;
+            },
+          };
+        }
+      `),
+    ].join("");
+    URL.createObjectURL = (() => blobUrl) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    vi.spyOn(URL, "createObjectURL").mockReturnValue(blobUrl);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    (globalThis as unknown as { ReactDOM?: { createPortal: () => null } }).ReactDOM = {
+      createPortal: () => null,
+    };
+    const globals = globalThis as unknown as {
+      __ASYNC_DEV_ADDON_ENABLED__?: boolean;
+      __ASYNC_DEV_ADDON_DISABLED__?: boolean;
+      __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
+    };
+    delete globals.__ASYNC_DEV_ADDON_ENABLED__;
+    delete globals.__ASYNC_DEV_ADDON_DISABLED__;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/health")) {
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith("/addon.js")) {
+        return new Response("export default async function enable() {}", { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    addonDevManager.registerDevServer({ id: "async-addon", name: "Async Addon", port: 3001 });
+
+    await expect(addonDevManager.loadAddonFromDevServer("async-addon")).resolves.toBe(true);
+
+    expect(globals.__ASYNC_DEV_ADDON_ENABLED__).toBe(true);
+    const disable = globals.__DEV_ADDONS__?.get("async-addon")?.disable;
+    expect(disable).toEqual(expect.any(Function));
+
+    disable?.();
+
+    expect(globals.__ASYNC_DEV_ADDON_DISABLED__).toBe(true);
   });
 });
