@@ -7804,6 +7804,11 @@ contract:
   refresh-token rotation, and clears the cache when the stored session changes.
   Full Connect tests, backend type-check, `git diff --check`, and focused
   code-review passed.
+- `pr5-health-unclassified-taxonomy-message`: verification passed. The
+  unclassified-assets health check now uses the specific taxonomy name in its
+  issue message via a simple `a`/`an` article helper, aligning the message with
+  the affected classification dimension. Focused health tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -1625,6 +1625,10 @@ function formatHealthDecimal(value: Decimal): string {
   return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
 }
 
+function indefiniteArticle(word: string): string {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
+}
+
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1801,14 +1805,15 @@ async function analyzeUnclassifiedAssets(
     return [];
   }
 
-  let systemTaxonomyIds: string[];
+  type TaxonomyRef = { id: string; name: string };
+  let systemTaxonomies: TaxonomyRef[];
   try {
-    systemTaxonomyIds = options.classificationCheckProvider
+    systemTaxonomies = options.classificationCheckProvider
       .getTaxonomies()
       .filter(
         (taxonomy) => taxonomy.isSystem && !OPTIONAL_CLASSIFICATION_TAXONOMY_IDS.has(taxonomy.id),
       )
-      .map((taxonomy) => taxonomy.id);
+      .map((taxonomy) => ({ id: taxonomy.id, name: taxonomy.name }));
   } catch (error) {
     options.warn?.(
       `Failed to load system taxonomies for classification check: ${formatErrorMessage(error)}`,
@@ -1816,7 +1821,7 @@ async function analyzeUnclassifiedAssets(
     return [];
   }
 
-  if (systemTaxonomyIds.length === 0) {
+  if (systemTaxonomies.length === 0) {
     return [];
   }
 
@@ -1837,7 +1842,7 @@ async function analyzeUnclassifiedAssets(
 
   const issues: HealthIssue[] = [];
 
-  for (const taxonomyId of systemTaxonomyIds) {
+  for (const taxonomy of systemTaxonomies) {
     const unclassified: UnclassifiedHolding[] = [];
     let unclassifiedMarketValue = 0;
 
@@ -1846,7 +1851,7 @@ async function analyzeUnclassifiedAssets(
         continue;
       }
       const assigned = assignedTaxonomiesByAsset.get(assetId);
-      if (!assigned?.has(taxonomyId)) {
+      if (!assigned?.has(taxonomy.id)) {
         unclassified.push(holdingData);
         unclassifiedMarketValue += holdingData.marketValue;
       }
@@ -1869,12 +1874,11 @@ async function analyzeUnclassifiedAssets(
     const count = unclassified.length;
 
     issues.push({
-      id: `classification:${taxonomyId}:${dataHash}`,
+      id: `classification:${taxonomy.id}:${dataHash}`,
       severity,
       category: "CLASSIFICATION",
       title: count === 1 ? "1 holding needs a category" : `${count} holdings need categories`,
-      message:
-        "Some holdings don't have a classification assigned. This affects your allocation charts and analytics.",
+      message: `Some holdings don't have ${indefiniteArticle(taxonomy.name)} ${taxonomy.name} category assigned. This affects your allocation charts and analytics.`,
       affectedCount: count,
       affectedMvPct,
       affectedItems: unclassified.map((h) => ({

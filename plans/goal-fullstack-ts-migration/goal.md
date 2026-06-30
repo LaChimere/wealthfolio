@@ -6240,6 +6240,10 @@ updated_at: "2026-07-01T00:39:21+09:00"
   the refresh buffer from JWT `exp`/`expires_in`, preserves refresh-token
   rotation, and invalidates the cache when the stored session changes. Full
   Connect tests and full repository check passed.
+- Turn 1133: Improved health unclassified-assets taxonomy messages. The
+  classification health issue now names the specific missing taxonomy and uses a
+  simple `a`/`an` article helper, so users can tell which allocation dimension
+  needs assignment. Focused health tests and full repository check passed.
 
 ## Deferred items
 

@@ -2283,6 +2283,66 @@ describe("TS health domain", () => {
     }
   });
 
+  test("uses taxonomy name in unclassified assets issue message", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 50 }),
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 50 }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "industries_gics",
+            name: "Industries (GICS)",
+            color: "#da702c",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "regions",
+            name: "Regions",
+            color: "#8b7ec8",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: () => [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const gicsIssue = status?.issues.find((i) =>
+        i.id.startsWith("classification:industries_gics:"),
+      );
+      const regionsIssue = status?.issues.find((i) => i.id.startsWith("classification:regions:"));
+      expect(gicsIssue?.message).toBe(
+        "Some holdings don't have an Industries (GICS) category assigned. This affects your allocation charts and analytics.",
+      );
+      expect(regionsIssue?.message).toBe(
+        "Some holdings don't have a Regions category assigned. This affects your allocation charts and analytics.",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("emits separate unclassified assets issues per system taxonomy, skips non-system", async () => {
     const db = createHealthDb();
     const now = "2026-05-14T12:00:00.000Z";
