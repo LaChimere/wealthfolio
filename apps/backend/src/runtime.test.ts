@@ -17496,6 +17496,141 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route failures to event payloads", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-failure-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "https://fc.yahoo.com") {
+          return Promise.resolve(
+            new Response("", { headers: { "set-cookie": "B=market-failure; Path=/; Secure" } }),
+          );
+        }
+        if (url === "https://query1.finance.yahoo.com/v1/test/getcrumb") {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=market-failure");
+          return Promise.resolve(new Response("market-failure-crumb"));
+        }
+        if (url.startsWith("https://query1.finance.yahoo.com/v8/finance/chart/BAD?")) {
+          expect((init?.headers as Record<string, string>).Cookie).toBe("B=market-failure");
+          const parsed = new URL(url);
+          expect(parsed.searchParams.get("crumb")).toBe("market-failure-crumb");
+          return Promise.resolve(
+            Response.json({
+              chart: {
+                result: null,
+                error: {
+                  code: "Not Found",
+                  description: "No data found, symbol may be delisted",
+                },
+              },
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const events: Array<{ name: string; payload?: unknown }> = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime market-data failure route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event);
+    });
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-market-sync-failure-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "BAD",
+            "BAD",
+            "XNAS",
+            JSON.stringify({ preferred_provider: "YAHOO" }),
+            "runtime-market-sync-failure-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assetIds: ["runtime-market-sync-failure-asset"],
+          refetchAll: false,
+        }),
+      });
+      expect(response.status).toBe(204);
+      await waitForEventCount(
+        events.map((event) => event.name),
+        "portfolio:update-complete",
+        1,
+      );
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: {
+            type: "incremental",
+            asset_ids: ["runtime-market-sync-failure-asset"],
+          },
+          snapshotMode: "incremental_from_last",
+          valuationMode: "incremental_from_last",
+          sinceDate: null,
+        },
+      ]);
+      expect(events.find((event) => event.name === "market:sync-complete")?.payload).toEqual({
+        failed_syncs: [["BAD", "Symbol not found: BAD"]],
+        skipped_reasons: [],
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM quotes WHERE asset_id = 'runtime-market-sync-failure-asset'")
+            .get()?.count,
+        ).toBe(0);
+        expect(
+          verifyDb
+            .query<
+              { data_source: string; error_count: number; last_error: string | null },
+              []
+            >("SELECT data_source, error_count, last_error FROM quote_sync_state WHERE asset_id = 'runtime-market-sync-failure-asset'")
+            .get(),
+        ).toEqual({
+          data_source: "YAHOO",
+          error_count: 1,
+          last_error: "Symbol not found: BAD",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to fall back from OpenFIGI to Yahoo quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-openfigi-fallback-route-"),
