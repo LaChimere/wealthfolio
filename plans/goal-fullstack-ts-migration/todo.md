@@ -7200,6 +7200,11 @@ contract:
   default config reads, in-memory updates, invalid stale-threshold validation
   errors, and preservation of the last valid config through the HTTP seam. Full
   runtime suite and full repository check passed.
+- `pr5-health-fx-integrity-issue-runtime`: verification passed. The runtime
+  `/api/v1/health/check` route now strengthens missing FX-rate issue coverage,
+  proving CRITICAL severity, FX_INTEGRITY category, Rust-shaped message text,
+  affected pair items, and `fetch_fx` fix payloads through the HTTP seam. Full
+  runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
