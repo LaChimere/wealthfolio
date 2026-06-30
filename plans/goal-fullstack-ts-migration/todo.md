@@ -7222,6 +7222,12 @@ contract:
   Rust-shaped message text, affected account routes, activity navigation, and
   details text through the HTTP seam. Full runtime suite and full repository
   check passed.
+- `pr5-health-fix-error-runtime`: verification passed. The runtime
+  `/api/v1/health/fix` route now has focused coverage for malformed
+  `sync_prices`, `retry_sync`, `fetch_fx`, and `migrate_classifications`
+  payloads plus unknown/missing actions, proving Rust-shaped 400/404 errors
+  occur before market data, FX, or taxonomy side effects. Full runtime suite and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
