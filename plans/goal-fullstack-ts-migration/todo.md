@@ -7469,6 +7469,12 @@ contract:
   an unrelated Connect session test, and the AI stream assertion verifies
   `get_cash_balances` returns the seeded USD cash total. Focused Connect/AI
   runtime tests and full repository check passed.
+- `pr5-runtime-ai-search-activities-tool`: verification passed. The standalone
+  TS runtime now proves `/api/v1/ai/chat/stream` can execute `search_activities`
+  against persisted activity data, expose the normalized activity-tool allowlist
+  including draft/mutation helpers, stream the tool result, and pass it into the
+  follow-up provider request. Focused runtime AI tests and full repository check
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
