@@ -7303,6 +7303,10 @@ contract:
   `broker:sync-error` object payloads are preserved unchanged for React
   listeners. Focused adapter validation, frontend type-check, and full
   repository check passed.
+- `pr5-event-payload-dual-review`: verification passed. Claude Opus 4.8 xhigh
+  and GPT-5.5 xhigh reviewed the recent market/broker event and add-on
+  permission slices and found no actionable correctness, compatibility,
+  security, or test-validity issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
