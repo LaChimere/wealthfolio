@@ -7711,6 +7711,11 @@ contract:
   the TS backend migration; release workflow inputs now use `bun-*` targets
   handled by the existing regex branch. Node syntax check, unsupported legacy
   target failure check, and full repository check passed.
+- `pr5-addon-dev-blob-cleanup`: verification passed. Development-server add-on
+  imports now revoke generated Blob URLs in a `finally` block even when module
+  import or enable execution fails, matching installed add-on cleanup behavior
+  and reducing browser-runtime resource leakage. Focused frontend add-on tests
+  and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

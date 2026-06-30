@@ -195,30 +195,34 @@ class AddonDevManager {
         );
       }
 
-      // Create a blob URL for the addon code
-      const blob = new Blob([code], { type: "text/javascript" });
-      const blobUrl = URL.createObjectURL(blob);
+      let blobUrl: string | null = null;
+      try {
+        // Create a blob URL for the addon code
+        const blob = new Blob([code], { type: "text/javascript" });
+        blobUrl = URL.createObjectURL(blob);
 
-      // Import and execute the addon
-      const mod = await import(/* @vite-ignore */ blobUrl);
+        // Import and execute the addon
+        const mod = await import(/* @vite-ignore */ blobUrl);
 
-      if (typeof mod.default === "function") {
-        // Create addon-specific context with scoped secrets
-        const addonSpecificContext = createAddonContext(addonId);
-        const addonInstance = mod.default(addonSpecificContext);
+        if (typeof mod.default === "function") {
+          // Create addon-specific context with scoped secrets
+          const addonSpecificContext = createAddonContext(addonId);
+          const addonInstance = mod.default(addonSpecificContext);
 
-        // Store for cleanup
-        if (addonInstance && typeof addonInstance.disable === "function") {
-          const g2 = globalThis as unknown as {
-            __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
-          };
-          g2.__DEV_ADDONS__ = g2.__DEV_ADDONS__ ?? new Map();
-          g2.__DEV_ADDONS__.set(addonId, addonInstance);
+          // Store for cleanup
+          if (addonInstance && typeof addonInstance.disable === "function") {
+            const g2 = globalThis as unknown as {
+              __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
+            };
+            g2.__DEV_ADDONS__ = g2.__DEV_ADDONS__ ?? new Map();
+            g2.__DEV_ADDONS__.set(addonId, addonInstance);
+          }
+        }
+      } finally {
+        if (blobUrl) {
+          URL.revokeObjectURL(blobUrl);
         }
       }
-
-      // Cleanup blob URL
-      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       logger.error(`Failed to execute addon code for ${addonId}: ${error}`);
       throw error;

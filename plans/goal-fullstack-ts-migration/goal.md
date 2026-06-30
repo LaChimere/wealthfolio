@@ -6154,6 +6154,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   defaults, matching release workflow inputs and eliminating the pre-TS Rust
   cross-compilation compatibility map. Node syntax check, unsupported legacy
   target failure check, and full repository check passed.
+- Turn 1116: Hardened add-on dev-mode Blob URL cleanup. Development server
+  add-on imports now revoke generated Blob URLs in a `finally` block even when
+  module import or enable execution fails, matching installed add-on cleanup
+  behavior and reducing browser-runtime resource leakage. Focused frontend
+  add-on tests and full repository check passed.
 
 ## Deferred items
 
