@@ -1553,17 +1553,35 @@ describe("TS backend runtime composition", () => {
         issues: [
           expect.objectContaining({
             id: expect.stringMatching(/^negative_account_balance:/),
+            severity: "WARNING",
+            category: "DATA_CONSISTENCY",
             title: "Account has negative portfolio balance",
+            message:
+              "One or more accounts show a negative total value in their history. This is usually caused by missing buy transactions. Review your activities to fix this.",
+            affectedCount: 1,
             affectedItems: [
-              expect.objectContaining({ id: "negative-investment", name: "Negative Investment" }),
+              {
+                id: "negative-investment",
+                name: "Negative Investment",
+                route: "/accounts/negative-investment",
+              },
             ],
+            navigateAction: { route: "/activities", label: "View Activities" },
+            details: expect.stringContaining("Negative Investment"),
           }),
           expect.objectContaining({
             id: expect.stringMatching(/^negative_cash_balance:/),
+            severity: "INFO",
+            category: "DATA_CONSISTENCY",
             title: "Cash account had a negative balance",
+            message:
+              "One or more cash accounts show a negative balance in their history. This may be a normal bank overdraft or a missing deposit entry.",
+            affectedCount: 1,
             affectedItems: [
-              expect.objectContaining({ id: "negative-cash", name: "Negative Cash" }),
+              { id: "negative-cash", name: "Negative Cash", route: "/accounts/negative-cash" },
             ],
+            navigateAction: { route: "/activities", label: "View Activities" },
+            details: expect.stringContaining("Negative Cash"),
           }),
         ],
       });
