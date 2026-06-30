@@ -66,8 +66,12 @@ describe("web event adapter", () => {
     expect(eventSource.url).toBe("/api/v1/events/stream");
     expect(eventSource.options).toEqual({ withCredentials: true });
 
+    const marketPayload = {
+      failed_syncs: [["BAD", "Symbol not found: BAD"]],
+      skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+    };
     eventSource.dispatch("portfolio:update-start", JSON.stringify({ accountId: "account-1" }));
-    eventSource.dispatch("market:sync-complete", "null");
+    eventSource.dispatch("market:sync-complete", JSON.stringify(marketPayload));
     eventSource.dispatch("broker:sync-start", "plain payload");
 
     expect(portfolioHandler).toHaveBeenCalledWith({
@@ -78,7 +82,7 @@ describe("web event adapter", () => {
     expect(marketHandler).toHaveBeenCalledWith({
       event: "market:sync-complete",
       id: 2,
-      payload: null,
+      payload: marketPayload,
     });
     expect(brokerHandler).toHaveBeenCalledWith({
       event: "broker:sync-start",
