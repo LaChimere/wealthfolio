@@ -1546,9 +1546,13 @@ describe("TS backend runtime composition", () => {
         issues: [
           expect.objectContaining({
             id: expect.stringMatching(/^fx_missing:/),
+            severity: "CRITICAL",
             category: "FX_INTEGRITY",
             title: "Missing exchange rate for EUR",
+            message:
+              "We can't convert some holdings to your base currency. This affects your total portfolio value.",
             affectedCount: 1,
+            affectedItems: [{ id: "EUR:USD", name: "EUR → USD" }],
             fixAction: { id: "fetch_fx", label: "Fetch Exchange Rates", payload: ["EUR:USD"] },
           }),
         ],
