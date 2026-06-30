@@ -7484,6 +7484,11 @@ contract:
   dividend activity data, stream YTD income totals and top-asset payloads, and
   pass the parsed tool result into the follow-up provider request. Focused
   runtime AI tests and full repository check passed.
+- `pr5-runtime-ai-income-total-period`: verification passed. Review feedback was
+  addressed by changing the runtime `get_income` stream smoke to request the
+  year-independent `TOTAL` period instead of `YTD`, keeping the seeded dividend
+  assertion stable across calendar years. Focused runtime AI tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
