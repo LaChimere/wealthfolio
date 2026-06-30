@@ -2694,6 +2694,17 @@ describe("TS backend runtime composition", () => {
         expect.objectContaining({ name: "CAD Brokerage", currency: "CAD" }),
       ]);
 
+      const accountCsvExportResponse = await fetch(
+        `${server.baseUrl}/api/v1/utilities/export/accounts/csv`,
+      );
+      expect(accountCsvExportResponse.status).toBe(200);
+      expect(accountCsvExportResponse.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+      const accountCsv = await accountCsvExportResponse.text();
+      expect(accountCsv).toContain('"name"');
+      expect(accountCsv).toContain('"currency"');
+      expect(accountCsv).toContain('"CAD Brokerage"');
+      expect(accountCsv).toContain('"CAD"');
+
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         const fxAsset = db
