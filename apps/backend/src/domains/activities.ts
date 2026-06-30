@@ -669,14 +669,15 @@ export function createActivityService(
     },
 
     updateActivity(input) {
-      if (options.ensureFxPairs) {
+      if (options.ensureFxPairs || options.symbolSearch) {
         return (async () => {
+          const resolvedInput = await directActivityInputWithProviderResolution(db, input, options);
           const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
-          const activityId = requiredNonEmptyString(input.id, "id");
+          const activityId = requiredNonEmptyString(resolvedInput.id, "id");
           const existing = readActivityRow(db, activityId);
-          const update = normalizeActivityUpdateInput(db, input, existing, assetContext);
-          const assetQuoteMode = activityAssetQuoteModeFromRecord(input);
-          const shouldWriteQuote = shouldWriteManualQuoteForUpdate(input);
+          const update = normalizeActivityUpdateInput(db, resolvedInput, existing, assetContext);
+          const assetQuoteMode = activityAssetQuoteModeFromRecord(resolvedInput);
+          const shouldWriteQuote = shouldWriteManualQuoteForUpdate(resolvedInput);
           const fxPairs = collectActivityFxPairs(db, update, assetContext);
           if (fxPairs.length > 0) {
             await options.ensureFxPairs?.(fxPairs);

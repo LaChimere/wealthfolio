@@ -4342,6 +4342,108 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("provider-resolves direct runtime activity updates to activity-created assets", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-activity-provider-update-"),
+    );
+    const marketCalls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input) => {
+        const url = String(input);
+        marketCalls.push(url);
+        if (url === "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP") {
+          return Promise.resolve(
+            Response.json({
+              quotes: [
+                {
+                  symbol: "SHOP",
+                  exchange: "NYQ",
+                  quoteType: "EQUITY",
+                  shortname: "Shopify US",
+                  currency: "USD",
+                  score: 5,
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(seedDb);
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/activities`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "tx-buy",
+          accountId: "tx-account",
+          asset: { symbol: "SHOP" },
+          activityType: "BUY",
+          activityDate: "2026-05-14T12:00:00.000Z",
+          quantity: "1",
+          unitPrice: "50",
+          amount: "50",
+          currency: "USD",
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+      const updated = (await updateResponse.json()) as { assetId?: string };
+      expect(updated.assetId).toEqual(expect.any(String));
+      expect(updated.assetId).not.toBe("tx-asset");
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              {
+                name: string | null;
+                display_code: string | null;
+                quote_ccy: string | null;
+                instrument_type: string | null;
+                instrument_symbol: string | null;
+                instrument_exchange_mic: string | null;
+              },
+              [string]
+            >(
+              `
+                SELECT name, display_code, quote_ccy, instrument_type, instrument_symbol,
+                  instrument_exchange_mic
+                FROM assets
+                WHERE id = ?
+              `,
+            )
+            .get(String(updated.assetId)),
+        ).toMatchObject({
+          name: "Shopify US",
+          display_code: "SHOP",
+          quote_ccy: "USD",
+          instrument_type: "EQUITY",
+          instrument_symbol: "SHOP",
+          instrument_exchange_mic: "XNYS",
+        });
+      } finally {
+        verifyDb.close();
+      }
+      expect(marketCalls).toEqual(["https://query2.finance.yahoo.com/v1/finance/search?q=SHOP"]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("exports runtime activities through SQLite-backed data export route", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-export-"));
     const runtime = createSqliteBackedBackendServices({

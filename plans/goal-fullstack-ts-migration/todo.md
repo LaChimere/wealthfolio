@@ -7666,6 +7666,11 @@ contract:
   from legacy `symbol: { ... }` asset objects; the resolver now preserves that
   metadata while converting to canonical `asset` inputs. Focused activity
   unit/runtime tests and full repository check passed.
+- `pr5-direct-activity-provider-update-resolution`: verification passed. Direct
+  `/api/v1/activities` updates can now resolve symbol-only asset inputs through
+  the market-data search seam before staging a new activity-created asset,
+  matching direct create behavior while preserving existing update paths.
+  Focused activity unit/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -3387,6 +3387,76 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("provider-resolves direct activity updates to activity-created assets", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: () => [
+        {
+          symbol: "SHOP",
+          shortName: "Shopify Provider",
+          longName: "Shopify Provider",
+          exchange: "NYSE",
+          exchangeMic: "XNYS",
+          exchangeName: "NYSE",
+          quoteType: "EQUITY",
+          typeDisplay: "",
+          currency: "USD",
+          dataSource: "FINNHUB",
+          isExisting: false,
+          index: "",
+          score: 1,
+        },
+      ],
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+      });
+      insertActivity(db, {
+        id: "update-provider",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "USD",
+      });
+
+      const updated = (await service.updateActivity?.({
+        id: "update-provider",
+        accountId: "account-1",
+        asset: { symbol: "SHOP" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "USD",
+      })) as Activity;
+
+      expect(readAssetById(db, updated.assetId ?? "")).toMatchObject({
+        name: "Shopify Provider",
+        display_code: "SHOP",
+        instrument_symbol: "SHOP",
+        instrument_exchange_mic: "XNYS",
+      });
+      expect(readAssetCount(db)).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {
