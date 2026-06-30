@@ -5775,22 +5775,29 @@ impl ActivityService {
 
             // Normalize minor currency units (e.g., GBp -> GBP) and convert amounts
             if get_normalization_rule(&activity.currency).is_some() {
+                let input_currency = activity.currency.clone();
                 if let Some(unit_price) = activity.unit_price {
-                    let (normalized_price, _) = normalize_amount(unit_price, &activity.currency);
+                    let (normalized_price, _) = normalize_amount(unit_price, &input_currency);
                     activity.unit_price = Some(normalized_price);
                 }
                 if let Some(amount) = activity.amount {
-                    let (normalized_amount, _) = normalize_amount(amount, &activity.currency);
+                    let (normalized_amount, _) = normalize_amount(amount, &input_currency);
                     activity.amount = Some(normalized_amount);
                 }
                 if let Some(fee) = activity.fee {
                     let (normalized_fee, normalized_currency) =
-                        normalize_amount(fee, &activity.currency);
+                        normalize_amount(fee, &input_currency);
                     activity.fee = Some(normalized_fee);
                     activity.currency = normalized_currency.to_string();
-                } else {
-                    let (_, normalized_currency) =
-                        normalize_amount(Decimal::ZERO, &activity.currency);
+                }
+                if let Some(tax) = activity.tax {
+                    let (normalized_tax, normalized_currency) =
+                        normalize_amount(tax, &input_currency);
+                    activity.tax = Some(normalized_tax);
+                    activity.currency = normalized_currency.to_string();
+                }
+                if activity.fee.is_none() && activity.tax.is_none() {
+                    let (_, normalized_currency) = normalize_amount(Decimal::ZERO, &input_currency);
                     activity.currency = normalized_currency.to_string();
                 }
             }

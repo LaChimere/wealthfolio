@@ -3798,6 +3798,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_import_prepare_normalizes_minor_currency_tax() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "GBP");
+        account_service.add_account(account.clone());
+        asset_service.add_asset(create_test_asset("SEC:AZN:XLON", "GBp"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_import(
+                vec![NewActivity {
+                    id: Some("gbp-tax-import".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: Some(AssetResolutionInput {
+                        id: Some("SEC:AZN:XLON".to_string()),
+                        ..Default::default()
+                    }),
+                    activity_type: "BUY".to_string(),
+                    subtype: None,
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: Some(dec!(10)),
+                    unit_price: Some(dec!(14082)),
+                    currency: "GBp".to_string(),
+                    fee: Some(dec!(999)),
+                    tax: Some(dec!(150)),
+                    amount: Some(dec!(140820)),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: None,
+                    source_record_id: None,
+                    source_group_id: None,
+                    idempotency_key: None,
+                    import_run_id: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("import preparation should normalize minor currency values");
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.prepared.len(), 1);
+
+        let prepared = &result.prepared[0].activity;
+        assert_eq!(prepared.currency, "GBP");
+        assert_eq!(prepared.unit_price, Some(dec!(140.82)));
+        assert_eq!(prepared.amount, Some(dec!(1408.20)));
+        assert_eq!(prepared.fee, Some(dec!(9.99)));
+        assert_eq!(prepared.tax, Some(dec!(1.50)));
+    }
+
+    #[tokio::test]
     async fn test_sync_prepare_keeps_incomplete_valid_asset_backed_subtype_for_review() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
