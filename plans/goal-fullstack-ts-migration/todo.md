@@ -7298,6 +7298,11 @@ contract:
   loading toast, invalidate queries, and show the broker failure message from
   the runtime payload. Focused hook validation, frontend type-check, and full
   repository check passed.
+- `pr5-frontend-broker-sync-event-payload`: verification passed. Web EventSource
+  and Electron preload adapter tests now prove `broker:sync-complete` and
+  `broker:sync-error` object payloads are preserved unchanged for React
+  listeners. Focused adapter validation, frontend type-check, and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
