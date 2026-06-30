@@ -89,6 +89,15 @@ describe("TS local device sync service", () => {
       trust_state: "trusted",
     });
     expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toEqual({
+      version: 2,
+      deviceNonce: "instance-1",
+      deviceId: "device-1",
+      rootKey: null,
+      keyVersion: null,
+      deviceSecretKey: null,
+      devicePublicKey: null,
+    });
     expect(requests).toEqual([
       {
         url: "https://api.example.test/api/v1/sync/team/devices",

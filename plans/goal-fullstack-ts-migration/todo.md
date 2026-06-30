@@ -7571,6 +7571,12 @@ contract:
   issues in restricted query API blocking, `getClient()` facade method guards,
   legacy unrestricted compatibility, SDK metadata, TS backend detection, or Rust
   legacy detection.
+- `pr5-device-registration-identity-persistence`: verification passed.
+  Successful TS `/api/v1/sync/device/register` now stores both the legacy
+  `sync_device_id` secret and a Rust-shaped `sync_identity` with the request
+  device nonce and returned cloud device ID, keeping E2EE keys unset until later
+  key initialization. Focused device-sync unit/runtime tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -7603,5 +7609,5 @@ contract:
   trusted-device snapshot/upload runtime, feature-flag errors, background
   workers, device-sync cloud clients, token lifecycle, team-key operations, key
   material handling, pairing flows, remaining freshness gate persistence,
-  bootstrap transfer, and remaining secret side effects move with
-  Connect/device-sync parity slices.
+  bootstrap transfer, and remaining secret side effects beyond device
+  registration identity persistence move with Connect/device-sync parity slices.

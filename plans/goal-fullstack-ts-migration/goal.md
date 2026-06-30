@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1088
+turns_used: 1089
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T19:42:58+09:00"
+updated_at: "2026-06-30T19:56:21+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -6020,6 +6020,12 @@ updated_at: "2026-06-30T19:42:58+09:00"
   restricted query API blocking, `getClient()` facade method guards, legacy
   unrestricted compatibility, SDK metadata, TS backend detection, or Rust legacy
   detection.
+- Turn 1089: Strengthened device registration runtime persistence. Successful TS
+  `/api/v1/sync/device/register` now stores both the legacy `sync_device_id`
+  secret and a Rust-shaped `sync_identity` with the request device nonce and
+  returned cloud device ID, matching Rust enrollment identity persistence while
+  keeping E2EE keys unset until later key initialization. Focused device-sync
+  unit/runtime tests and full repository check passed.
 
 ## Deferred items
 
@@ -6225,14 +6231,16 @@ updated_at: "2026-06-30T19:42:58+09:00"
   snapshot/upload runtime, background workers, and remaining secret/freshness
   side effects remain active follow-ups. reason=the standalone TS backend now
   wires local status/precondition/no-op and clear-data behavior for
-  `/connect/device/*`, plus Connect session-clear freshness-gate cleanup, while
-  cloud runtime behavior must move with dedicated Connect/device-sync parity
-  slices.
-- Real device-sync cloud clients, token lifecycle, device-id secret storage,
-  enrollment side effects, team-key operations, pairing flows, and E2EE runtime
-  remain active follow-ups. reason=the standalone TS backend now wires disabled
-  device-management feature-flag responses, while runtime behavior must move
-  with dedicated device-sync parity slices.
+  `/connect/device/*`, Connect session-clear freshness-gate cleanup, and device
+  registration persistence for both `sync_device_id` and Rust-shaped
+  `sync_identity`, while broader cloud runtime behavior must move with dedicated
+  Connect/device-sync parity slices.
+- Real device-sync cloud clients, token lifecycle, broader enrollment side
+  effects, team-key operations, pairing flows, and E2EE runtime remain active
+  follow-ups. reason=the standalone TS backend now wires disabled
+  device-management feature-flag responses and persists device registration
+  identity/device-id secrets, while remaining runtime behavior must move with
+  dedicated device-sync parity slices.
 - Real device-sync team-key cloud calls, key material handling, device identity
   lookup, reset side effects, pairing flows, and E2EE runtime remain active
   follow-ups. reason=the standalone TS backend now wires disabled team-key/reset

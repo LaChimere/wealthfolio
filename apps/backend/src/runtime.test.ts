@@ -14579,6 +14579,17 @@ describe("TS backend runtime composition", () => {
       expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
         "device-runtime",
       );
+      expect(
+        JSON.parse((await runtime.options.secretService?.getSecret("sync_identity")) ?? "{}"),
+      ).toEqual({
+        version: 2,
+        deviceNonce: "instance-runtime",
+        deviceId: "device-runtime",
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
     } finally {
       server.stop();
       await runtime.close();

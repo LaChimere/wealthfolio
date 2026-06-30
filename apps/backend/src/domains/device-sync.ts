@@ -209,11 +209,10 @@ export function createLocalDeviceSyncService({
         },
       );
       const result = enrollDeviceResponseFromCloud(enrollResponse.value, enrollResponse.bodyText);
+      const deviceId = requiredString(result.device_id, "enroll response");
       try {
-        await secretService.setSecret(
-          DEVICE_SYNC_DEVICE_ID_KEY,
-          requiredString(result.device_id, "enroll response"),
-        );
+        await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
+        await saveEnrolledSyncIdentity(secretService, request.instanceId, deviceId);
       } catch (error) {
         throw new DeviceSyncServiceError(
           "internal_error",
@@ -2214,6 +2213,25 @@ async function getLocalDeviceId(secretService: SecretService): Promise<string | 
     }
   }
   return await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+}
+
+async function saveEnrolledSyncIdentity(
+  secretService: SecretService,
+  deviceNonce: string,
+  deviceId: string,
+): Promise<void> {
+  await secretService.setSecret(
+    DEVICE_SYNC_IDENTITY_KEY,
+    JSON.stringify({
+      version: 2,
+      deviceNonce,
+      deviceId,
+      rootKey: null,
+      keyVersion: null,
+      deviceSecretKey: null,
+      devicePublicKey: null,
+    }),
+  );
 }
 
 async function getLocalSyncIdentityDeviceId(
