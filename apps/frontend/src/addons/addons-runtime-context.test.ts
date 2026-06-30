@@ -108,4 +108,42 @@ describe("addon runtime context permissions", () => {
     expect(refetchQueries).toHaveBeenCalledWith({ queryKey: ["holdings"], exact: false });
     expect(clear).not.toHaveBeenCalled();
   });
+
+  it("blocks query cache access for restricted add-ons without query permission", () => {
+    const invalidateQueries = vi.fn();
+    const refetchQueries = vi.fn();
+    setAddonHostQueryClient({
+      invalidateQueries,
+      refetchQueries,
+    });
+
+    const blocked = createAddonContext("restricted-query-addon", []);
+    expect(() => blocked.api.query.getClient()).toThrow(
+      "Addon restricted-query-addon is not permitted to call api.query.getClient",
+    );
+    expect(() => blocked.api.query.invalidateQueries("accounts")).toThrow(
+      "Addon restricted-query-addon is not permitted to call api.query.invalidateQueries",
+    );
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    const allowed = createAddonContext("allowed-query-addon", [
+      declaredPermission("query", ["getClient", "invalidateQueries"]),
+    ]);
+    const queryClient = allowed.api.query.getClient();
+    expect(queryClient).toMatchObject({
+      invalidateQueries: expect.any(Function),
+      refetchQueries: expect.any(Function),
+    });
+    queryClient?.invalidateQueries("accounts");
+    allowed.api.query.invalidateQueries("accounts");
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["accounts"], exact: false });
+    expect(() => allowed.api.query.refetchQueries("holdings")).toThrow(
+      "Addon allowed-query-addon is not permitted to call api.query.refetchQueries",
+    );
+    expect(() => queryClient?.refetchQueries("holdings")).toThrow(
+      "Addon allowed-query-addon is not permitted to call api.query.refetchQueries",
+    );
+    expect(refetchQueries).not.toHaveBeenCalled();
+  });
 });

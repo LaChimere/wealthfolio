@@ -194,6 +194,11 @@ const PERMISSION_PATTERNS = [
   ["settings", ["get", "update", "backupDatabase"], "Access to application settings"],
   ["files", ["openCsvDialog", "openSaveDialog"], "Access to file dialogs"],
   [
+    "query",
+    ["getClient", "invalidateQueries", "refetchQueries"],
+    "Access to invalidate or refetch application query cache entries",
+  ],
+  [
     "events",
     [
       "onDropHover",

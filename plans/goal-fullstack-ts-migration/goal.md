@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1086
+turns_used: 1087
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T19:17:03+09:00"
+updated_at: "2026-06-30T19:34:12+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -6009,6 +6009,12 @@ updated_at: "2026-06-30T19:17:03+09:00"
 - Turn 1086: Ran dual-model add-on dot-ID hardening review with Claude Opus 4.8
   xhigh and GPT-5.5 xhigh. Both reviews confirmed the `.`/`..` install, staging,
   and store-download issue is remediated and found no new actionable issues.
+- Turn 1087: Hardened add-on query-cache access. Query cache helpers now require
+  explicit `query` permissions in the SDK metadata, frontend bridge/runtime, TS
+  backend static detection, and legacy Rust detection; `getClient()` returns a
+  facade whose methods still enforce `invalidateQueries`/`refetchQueries`
+  permissions. Focused frontend/backend/SDK/Rust add-on tests and full
+  repository check passed.
 
 ## Deferred items
 
@@ -6254,9 +6260,9 @@ updated_at: "2026-06-30T19:17:03+09:00"
   traversal, absolute paths, drive prefixes, backslashes, dot components,
   invalid UTF-8, control-character entries, and unsafe add-on IDs before
   installed/staged filesystem writes; and the frontend now enforces manifest
-  permissions for SDK domain APIs, UI registration, and scoped secrets, while
-  complete browser sandbox isolation and React Query cache access hardening
-  still need dedicated add-on parity slices.
+  permissions for SDK domain APIs, UI registration, scoped secrets, and query
+  cache invalidation/refetch helpers, while complete browser sandbox isolation
+  still needs dedicated add-on parity slices.
 - Market-data provider breadth and background orchestration remain active
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
   dividends/search/resolve, bounded custom-provider symbol quote resolution,

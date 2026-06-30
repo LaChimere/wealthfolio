@@ -14,4 +14,17 @@ describe('addon SDK permissions', () => {
     expect(isPermissionRequired('onSyncError', 'events')).toBe(true);
     expect(getFunctionRiskLevel('onSyncError')).toBe('low');
   });
+
+  test('exposes query cache helpers as medium-risk query permissions', () => {
+    const query = getPermissionCategory('query');
+
+    expect(query?.functions).toEqual([
+      'getClient',
+      'invalidateQueries',
+      'refetchQueries',
+    ]);
+    expect(isPermissionRequired('invalidateQueries', 'query')).toBe(true);
+    expect(isPermissionRequired('refetchQueries', 'query')).toBe(true);
+    expect(getFunctionRiskLevel('invalidateQueries')).toBe('medium');
+  });
 });

@@ -175,6 +175,7 @@ fn test_detect_addon_permissions() {
                     return ctx.api.market.searchTicker('AAPL');
                 }
                 ctx.api.events.market.onSyncError(() => {});
+                ctx.api.query.invalidateQueries(['holdings']);
             "#
             .to_string(),
             is_main: false,
@@ -267,6 +268,23 @@ fn test_detect_addon_permissions() {
     assert!(
         event_functions.contains(&"onSyncError"),
         "onSyncError should be detected"
+    );
+
+    let query_permission = detected_permissions.iter().find(|p| p.category == "query");
+    assert!(
+        query_permission.is_some(),
+        "Query permissions should be detected"
+    );
+
+    let query_permission = query_permission.unwrap();
+    let query_functions: Vec<&str> = query_permission
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        query_functions.contains(&"invalidateQueries"),
+        "invalidateQueries should be detected"
     );
 }
 

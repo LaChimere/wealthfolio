@@ -7560,6 +7560,12 @@ contract:
   GPT-5.5 xhigh re-reviewed the dot-ID hardening fix, confirmed the `.`/`..`
   install, staging, and store-download issue is remediated, and found no new
   actionable issues.
+- `pr5-addon-query-cache-permissions`: verification passed. Query cache helpers
+  now require explicit `query` permissions in SDK metadata, frontend
+  bridge/runtime, TS backend static detection, and legacy Rust detection;
+  `getClient()` returns a facade whose methods still enforce
+  `invalidateQueries`/`refetchQueries` permissions. Focused frontend, backend,
+  SDK, and Rust add-on tests plus full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -7579,18 +7585,18 @@ contract:
   provider-backed symbol fetch/resolution and sync breadth moves with
   market-data/provider parity slices; full portfolio snapshot rebuilding side
   effects move with holdings/portfolio parity slices; complete browser sandbox
-  isolation and query-cache hardening move with add-on runtime parity slices;
-  provider-backed asset resolution, remaining quote sync-outbox emission outside
-  migrated alternative-asset and market-data quote paths, remaining
-  activity/provider-backed asset resolution beyond import flows, sync engine
-  push/pull, and portfolio recalculation side effects move with
-  activities/import/device-sync runtime parity slices; device-sync integration
-  for sync crypto moves with device-sync parity slices; broader health checks
-  and real market sync fix execution move with health/calculation parity slices;
-  real Connect token lifecycle, cloud HTTP clients, broker sync orchestration,
-  subscription entitlement checks, event production, E2EE enrollment, sync
-  engine, trusted-device snapshot/upload runtime, feature-flag errors,
-  background workers, device-sync cloud clients, token lifecycle, team-key
-  operations, key material handling, pairing flows, remaining freshness gate
-  persistence, bootstrap transfer, and remaining secret side effects move with
+  isolation moves with add-on runtime parity slices; provider-backed asset
+  resolution, remaining quote sync-outbox emission outside migrated
+  alternative-asset and market-data quote paths, remaining activity/provider-
+  backed asset resolution beyond import flows, sync engine push/pull, and
+  portfolio recalculation side effects move with activities/import/device-sync
+  runtime parity slices; device-sync integration for sync crypto moves with
+  device-sync parity slices; broader health checks and real market sync fix
+  execution move with health/calculation parity slices; real Connect token
+  lifecycle, cloud HTTP clients, broker sync orchestration, subscription
+  entitlement checks, event production, E2EE enrollment, sync engine,
+  trusted-device snapshot/upload runtime, feature-flag errors, background
+  workers, device-sync cloud clients, token lifecycle, team-key operations, key
+  material handling, pairing flows, remaining freshness gate persistence,
+  bootstrap transfer, and remaining secret side effects move with
   Connect/device-sync parity slices.

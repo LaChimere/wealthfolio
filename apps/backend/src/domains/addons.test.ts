@@ -200,7 +200,7 @@ describe("TS addon domain", () => {
         ],
       }),
       "pkg/dist/addon.js":
-        "ctx.api.portfolio.getHoldings(); ctx.api.market.sync(); ctx.api.events.market.onSyncError(() => {});",
+        "ctx.api.portfolio.getHoldings(); ctx.api.market.sync(); ctx.api.events.market.onSyncError(() => {}); ctx.api.query.invalidateQueries(['holdings']);",
     });
 
     const extracted = (await service.extractAddonZip({ zipData })) as TestExtractedAddon;
@@ -230,6 +230,18 @@ describe("TS addon domain", () => {
             functions: [
               {
                 name: "sync",
+                isDeclared: false,
+                isDetected: true,
+                detectedAt: expect.stringMatching(/\+00:00$/) as string,
+              },
+            ],
+          },
+          {
+            category: "query",
+            purpose: "Access to invalidate or refetch application query cache entries",
+            functions: [
+              {
+                name: "invalidateQueries",
                 isDeclared: false,
                 isDetected: true,
                 detectedAt: expect.stringMatching(/\+00:00$/) as string,

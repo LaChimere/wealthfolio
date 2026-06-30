@@ -315,6 +315,11 @@ const PERMISSION_PATHS_BY_CATEGORY: Record<string, Record<string, readonly strin
     openCsvDialog: ["api.files.openCsvDialog"],
     openSaveDialog: ["api.files.openSaveDialog"],
   },
+  query: {
+    getClient: ["api.query.getClient"],
+    invalidateQueries: ["api.query.invalidateQueries"],
+    refetchQueries: ["api.query.refetchQueries"],
+  },
   snapshots: {
     getAll: ["api.snapshots.getAll"],
     getByDate: ["api.snapshots.getByDate"],
@@ -721,9 +726,19 @@ export function createSDKHostAPIBridge(
     },
 
     query: {
-      getClient: internalAPI.getQueryClient,
-      invalidateQueries: internalAPI.invalidateQueries,
-      refetchQueries: internalAPI.refetchQueries,
+      getClient: () => {
+        permissionGuard.assertAllowed("api.query.getClient");
+        const queryClient = internalAPI.getQueryClient();
+        if (!queryClient) {
+          return undefined;
+        }
+        return {
+          invalidateQueries: guarded("api.query.invalidateQueries", queryClient.invalidateQueries),
+          refetchQueries: guarded("api.query.refetchQueries", queryClient.refetchQueries),
+        };
+      },
+      invalidateQueries: guarded("api.query.invalidateQueries", internalAPI.invalidateQueries),
+      refetchQueries: guarded("api.query.refetchQueries", internalAPI.refetchQueries),
     },
 
     toast: {

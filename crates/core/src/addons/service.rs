@@ -241,6 +241,11 @@ pub fn detect_addon_permissions(addon_files: &[AddonFile]) -> Vec<AddonPermissio
             "Access to file dialogs",
         ),
         (
+            "query",
+            vec!["getClient", "invalidateQueries", "refetchQueries"],
+            "Access to invalidate or refetch application query cache entries",
+        ),
+        (
             "events",
             vec![
                 // Import events

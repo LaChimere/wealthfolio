@@ -205,6 +205,72 @@ describe("Addon Type Bridge", () => {
       );
     });
 
+    it("guards query cache APIs behind query permissions", () => {
+      const facadeInvalidateQueries = vi.fn();
+      const facadeRefetchQueries = vi.fn();
+      const getQueryClient = vi.fn(() => ({
+        invalidateQueries: facadeInvalidateQueries,
+        refetchQueries: facadeRefetchQueries,
+      }));
+      const invalidateQueries = vi.fn();
+      const refetchQueries = vi.fn();
+      const warn = vi.fn();
+
+      const blockedApi = createSDKHostAPIBridge(
+        {
+          getQueryClient,
+          invalidateQueries,
+          refetchQueries,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "query-addon",
+        createAddonPermissionGuard({
+          addonId: "query-addon",
+          permissions: [],
+          onDenied: warn,
+        }),
+      );
+
+      expect(() => blockedApi.query.getClient()).toThrow(
+        "Addon query-addon is not permitted to call api.query.getClient",
+      );
+      expect(() => blockedApi.query.invalidateQueries("accounts")).toThrow(
+        "Addon query-addon is not permitted to call api.query.invalidateQueries",
+      );
+      expect(() => blockedApi.query.refetchQueries(["holdings"])).toThrow(
+        "Addon query-addon is not permitted to call api.query.refetchQueries",
+      );
+      expect(getQueryClient).not.toHaveBeenCalled();
+      expect(invalidateQueries).not.toHaveBeenCalled();
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      const allowedApi = createSDKHostAPIBridge(
+        {
+          getQueryClient,
+          invalidateQueries,
+          refetchQueries,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "query-addon",
+        createAddonPermissionGuard({
+          addonId: "query-addon",
+          permissions: [
+            declaredPermission("query", ["getClient", "invalidateQueries", "refetchQueries"]),
+          ],
+        }),
+      );
+
+      const queryClient = allowedApi.query.getClient();
+      queryClient?.invalidateQueries("accounts");
+      queryClient?.refetchQueries(["holdings"]);
+      allowedApi.query.invalidateQueries("accounts");
+      allowedApi.query.refetchQueries(["holdings"]);
+
+      expect(getQueryClient).toHaveBeenCalledOnce();
+      expect(facadeInvalidateQueries).toHaveBeenCalledWith("accounts");
+      expect(facadeRefetchQueries).toHaveBeenCalledWith(["holdings"]);
+      expect(invalidateQueries).toHaveBeenCalledWith("accounts");
+      expect(refetchQueries).toHaveBeenCalledWith(["holdings"]);
+    });
+
     it("passes market sync completion payloads through permitted add-on event APIs", async () => {
       const listenMarketSyncComplete = vi.fn().mockResolvedValue(vi.fn());
       const listenMarketSyncError = vi.fn().mockResolvedValue(vi.fn());
