@@ -7250,6 +7250,11 @@ contract:
   `market:sync-complete` messages carry JSON payloads from the runtime event
   bus, including Rust-shaped `skipped_reasons` emitted by a market sync route.
   Full runtime suite and full repository check passed.
+- `pr5-web-event-adapter-market-sync-payload`: verification passed. The web
+  EventSource adapter test now proves `market:sync-complete` listeners receive
+  the Rust-shaped `{ failed_syncs, skipped_reasons }` object payload emitted by
+  the TS backend SSE stream. Focused frontend adapter validation, frontend
+  type-check, and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
