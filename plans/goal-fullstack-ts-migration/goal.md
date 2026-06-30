@@ -6189,6 +6189,10 @@ updated_at: "2026-07-01T00:39:21+09:00"
   load and mark the dev server errored instead of reporting success with no
   running instance. Focused frontend add-on tests and full repository check
   passed.
+- Turn 1123: Added cross-platform keyring CI evidence. PR checks now run the
+  keyring-focused backend selector on Ubuntu, macOS, and Windows, making native
+  keyring service-id/runtime startup parity visible outside the Linux-only full
+  backend test job. Focused keyring tests and full repository check passed.
 
 ## Deferred items
 

@@ -7749,6 +7749,10 @@ contract:
   errored instead of reporting success with no running instance, matching
   installed add-on invalid-export behavior. Focused frontend add-on tests and
   full repository check passed.
+- `pr5-cross-platform-keyring-ci`: verification passed. PR checks now run the
+  keyring-focused backend selector on Ubuntu, macOS, and Windows, making native
+  keyring service-id/runtime startup parity visible outside the Linux-only full
+  backend test job. Focused keyring tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
