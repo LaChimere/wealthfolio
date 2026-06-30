@@ -1304,6 +1304,67 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime health config routes to in-memory validation", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-config-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const getResponse = await fetch(`${server.baseUrl}/api/v1/health/config`);
+      expect(getResponse.status).toBe(200);
+      const defaultConfig = await getResponse.json();
+      expect(defaultConfig).toEqual({
+        priceStaleWarningHours: 24,
+        priceStaleCriticalHours: 72,
+        fxStaleWarningHours: 24,
+        fxStaleCriticalHours: 72,
+        mvEscalationThreshold: 0.3,
+        classificationWarnThreshold: 0.05,
+      });
+
+      const nextConfig = {
+        ...defaultConfig,
+        priceStaleWarningHours: 12,
+        priceStaleCriticalHours: 48,
+      };
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/health/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(nextConfig),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const updatedResponse = await fetch(`${server.baseUrl}/api/v1/health/config`);
+      expect(updatedResponse.status).toBe(200);
+      await expect(updatedResponse.json()).resolves.toEqual(nextConfig);
+
+      const invalidResponse = await fetch(`${server.baseUrl}/api/v1/health/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...nextConfig,
+          priceStaleWarningHours: 72,
+          priceStaleCriticalHours: 24,
+        }),
+      });
+      expect(invalidResponse.status).toBe(400);
+      await expect(invalidResponse.json()).resolves.toMatchObject({
+        message: "Invalid input: price_stale_warning_hours must be < price_stale_critical_hours",
+      });
+
+      const stillUpdatedResponse = await fetch(`${server.baseUrl}/api/v1/health/config`);
+      expect(stillUpdatedResponse.status).toBe(200);
+      await expect(stillUpdatedResponse.json()).resolves.toEqual(nextConfig);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("surfaces runtime orphan activity health issues from SQLite state", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-orphans-"));
     const runtime = createSqliteBackedBackendServices({
