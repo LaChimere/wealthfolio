@@ -21123,6 +21123,17 @@ describe("TS backend runtime composition", () => {
     const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
       events.push(event.name);
     });
+    const seedDb = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedDb
+        .prepare(
+          "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('base_currency', 'USD')",
+        )
+        .run();
+      seedRuntimeTransactionActivityInput(seedDb);
+    } finally {
+      seedDb.close();
+    }
     const server = startBackendServer(config, runtime.options);
 
     try {
@@ -21131,11 +21142,11 @@ describe("TS backend runtime composition", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           groupName: "TFSA",
-          contributionYear: 2027,
+          contributionYear: 2026,
           limitAmount: 7_000,
-          accountIds: "account-1",
-          startDate: "2027-01-01",
-          endDate: "2027-12-31",
+          accountIds: "tx-account",
+          startDate: null,
+          endDate: null,
         }),
       });
       expect(createResponse.status).toBe(200);
@@ -21146,6 +21157,23 @@ describe("TS backend runtime composition", () => {
       await expect(listResponse.json()).resolves.toEqual([
         expect.objectContaining({ id: created.id, groupName: "TFSA" }),
       ]);
+
+      const depositsResponse = await fetch(
+        `${server.baseUrl}/api/v1/limits/${created.id}/deposits`,
+      );
+      const depositsBody = await depositsResponse.text();
+      if (depositsResponse.status !== 200) {
+        throw new Error(
+          `Expected deposits response 200, got ${depositsResponse.status}: ${depositsBody}`,
+        );
+      }
+      expect(JSON.parse(depositsBody)).toEqual({
+        total: 100,
+        baseCurrency: "USD",
+        byAccount: {
+          "tx-account": { amount: 100, currency: "USD", convertedAmount: 100 },
+        },
+      });
 
       const updateResponse = await fetch(`${server.baseUrl}/api/v1/limits/${created.id}`, {
         method: "PUT",
@@ -21183,9 +21211,9 @@ describe("TS backend runtime composition", () => {
         expect(JSON.parse(String(rows[0]?.payload))).toMatchObject({
           id: created.id,
           group_name: "TFSA",
-          contribution_year: 2027,
+          contribution_year: 2026,
           limit_amount: 7_000,
-          account_ids: "account-1",
+          account_ids: "tx-account",
         });
         expect(JSON.parse(String(rows[1]?.payload))).toMatchObject({
           id: created.id,
