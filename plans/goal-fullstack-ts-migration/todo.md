@@ -7205,6 +7205,12 @@ contract:
   proving CRITICAL severity, FX_INTEGRITY category, Rust-shaped message text,
   affected pair items, and `fetch_fx` fix payloads through the HTTP seam. Full
   runtime suite and full repository check passed.
+- `pr5-health-price-staleness-issue-runtime`: verification passed. The runtime
+  `/api/v1/health/check` route now has focused coverage for stale provider
+  quotes from SQLite holdings, proving CRITICAL PRICE_STALENESS issues,
+  Rust-shaped message text, affected holdings routes, `sync_prices` fix
+  payloads, and details through the HTTP seam. Full runtime suite and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
