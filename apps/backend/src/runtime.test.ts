@@ -3066,6 +3066,122 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat income tool results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-income-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('base_currency', 'USD')",
+          )
+          .run();
+        seedRuntimeTransactionActivityInput(seedDb);
+        seedDb
+          .prepare(
+            `
+              INSERT INTO activities (
+                id, account_id, asset_id, activity_type, subtype, status, activity_date,
+                quantity, unit_price, amount, fee, currency, notes, metadata,
+                source_system, source_record_id, source_group_id, idempotency_key,
+                import_run_id, is_user_modified, needs_review, created_at, updated_at
+              )
+              VALUES (
+                'ai-income-dividend', 'tx-account', 'tx-asset', 'DIVIDEND', NULL, 'POSTED',
+                '2026-05-15T00:00:00.000Z', NULL, NULL, '12', NULL, 'USD', NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, 0, 0,
+                '2026-05-15T00:00:00.000Z', '2026-05-15T00:00:00.000Z'
+              )
+            `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["get_income"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            '{"message":{"tool_calls":[{"id":"runtime-income-call","function":{"name":"get_income","arguments":{"period":"YTD"}}}]},"done":false}\n{"done":true}\n',
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response(
+          '{"message":{"content":"Income loaded."},"done":false}\n{"done":true}\n',
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Show income" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      expect(JSON.stringify(events)).toContain('"totalIncome":12');
+      expect(JSON.stringify(events)).toContain("TX");
+      const incomeToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(incomeToolMessage?.content))).toMatchObject({
+        totalIncome: 12,
+        period: "YTD",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
