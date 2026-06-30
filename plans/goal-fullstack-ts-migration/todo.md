@@ -7642,6 +7642,10 @@ contract:
   rather than fails, if the legacy `sync_device_id` compatibility secret cannot
   be written after enrollment succeeds. Focused Connect/runtime tests and full
   repository check passed.
+- `pr5-connect-legacy-device-id-dual-review`: verification passed. Claude Opus
+  4.8 xhigh and GPT-5.5 xhigh reviewed the Connect legacy device-id best-effort
+  slice and found no actionable correctness, security, parity, or
+  consumer-compatibility issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
