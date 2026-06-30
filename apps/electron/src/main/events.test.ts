@@ -31,6 +31,25 @@ describe("Electron sidecar event bridge", () => {
     });
   });
 
+  test("parses market sync complete failure and skipped-reason payloads", () => {
+    const parsed = parseSseMessages(
+      'event: market:sync-complete\ndata: {"failed_syncs":[["BAD","Symbol not found: BAD"]],"skipped_reasons":[["SKIP","Provider not supported for market sync: LEGACY_PROVIDER"]]}\n\n',
+    );
+
+    expect(parsed).toEqual({
+      messages: [
+        {
+          event: "market:sync-complete",
+          payload: {
+            failed_syncs: [["BAD", "Symbol not found: BAD"]],
+            skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+          },
+        },
+      ],
+      rest: "",
+    });
+  });
+
   test("sanitizes sidecar URLs and tokens in event payloads", () => {
     expect(
       sanitizeEventPayload(
