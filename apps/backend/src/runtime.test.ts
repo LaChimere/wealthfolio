@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { strToU8, zipSync } from "fflate";
 
 import type { BackendRuntimeConfig } from "./config";
+import { createBackendRequestHandler } from "./http";
 import type { PortfolioJobConfig } from "./domains/portfolio-jobs";
 import {
   createSqliteBackedBackendServices,
@@ -17631,6 +17632,80 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime market-sync payloads through the events route", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-sse-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() => {
+        throw new Error("fetch should not be called for unsupported preferred providers");
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const handler = createBackendRequestHandler(config, runtime.options);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-market-sync-sse-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "SSE",
+            "SSE",
+            "XNAS",
+            JSON.stringify({ preferred_provider: "legacy_provider" }),
+            "runtime-market-sync-sse-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const eventsResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/events/stream", {
+          headers: { accept: "text/event-stream" },
+        }),
+      );
+      expect(eventsResponse.status).toBe(200);
+      expect(eventsResponse.headers.get("content-type")).toBe("text/event-stream");
+      if (!eventsResponse.body) {
+        throw new Error("Expected events stream body");
+      }
+      reader = eventsResponse.body.getReader();
+
+      const syncResponse = await handler(
+        new Request("http://127.0.0.1/api/v1/market-data/sync", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            assetIds: ["runtime-market-sync-sse-asset"],
+            refetchAll: false,
+          }),
+        }),
+      );
+      expect(syncResponse.status).toBe(204);
+
+      await expect(readSseEvent(reader, "market:sync-complete")).resolves.toEqual({
+        event: "market:sync-complete",
+        payload: {
+          failed_syncs: [],
+          skipped_reasons: [
+            [
+              "runtime-market-sync-sse-asset",
+              "Provider not supported for market sync: LEGACY_PROVIDER",
+            ],
+          ],
+        },
+      });
+    } finally {
+      await reader?.cancel().catch(() => undefined);
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to fall back from OpenFIGI to Yahoo quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-openfigi-fallback-route-"),
@@ -22916,6 +22991,44 @@ async function waitForEventCount(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   expect(events.filter((event) => event === eventName)).toHaveLength(count);
+}
+
+async function readSseEvent(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  expectedEvent: string,
+): Promise<{ event: string; payload: unknown }> {
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + 1_000;
+  let buffer = "";
+  while (Date.now() < deadline) {
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) =>
+        setTimeout(() => resolve({ done: false, value: new Uint8Array() }), 20),
+      ),
+    ]);
+    if (result.value) {
+      buffer += decoder.decode(result.value, { stream: !result.done });
+    }
+    const messages = buffer.split("\n\n");
+    buffer = messages.pop() ?? "";
+    for (const message of messages) {
+      const eventLine = message.split("\n").find((line) => line.startsWith("event: "));
+      const dataLine = message.split("\n").find((line) => line.startsWith("data: "));
+      const eventName = eventLine?.slice("event: ".length);
+      if (eventName !== expectedEvent || !dataLine) {
+        continue;
+      }
+      return {
+        event: eventName,
+        payload: JSON.parse(dataLine.slice("data: ".length)) as unknown,
+      };
+    }
+    if (result.done) {
+      break;
+    }
+  }
+  throw new Error(`Timed out waiting for SSE event ${expectedEvent}`);
 }
 
 async function waitForCondition(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
