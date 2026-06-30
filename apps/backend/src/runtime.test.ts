@@ -4112,6 +4112,7 @@ describe("TS backend runtime composition", () => {
       expect(exposedToolNames).toEqual(["get_holdings"]);
       expect(JSON.stringify(events)).toContain('"symbol":"AIHOLD"');
       expect(JSON.stringify(events)).toContain('"quantity":3');
+      expect(JSON.stringify(events)).toContain('"marketValueBase":36');
       const holdingsToolMessage = (
         (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
       ).find((message) => message.role === "tool");
@@ -4125,6 +4126,9 @@ describe("TS backend runtime composition", () => {
             symbol: "AIHOLD",
             name: "AI Holding Asset",
             quantity: 3,
+            marketValueBase: 36,
+            costBasisBase: 30,
+            unrealizedGainPct: 0.2,
           }),
         ],
       });

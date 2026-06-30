@@ -7538,6 +7538,11 @@ contract:
   holdings tool, stream Rust-shaped holdings payloads, and pass parsed holdings
   into the follow-up provider request. Focused runtime AI tests and full
   repository check passed.
+- `pr5-runtime-ai-holdings-review-fix`: verification passed. Dual-model review
+  found the holdings stream smoke did not make the seeded quote row
+  load-bearing; the test now asserts quote-derived `marketValueBase`,
+  `costBasisBase`, and `unrealizedGainPct`. Focused runtime AI tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
