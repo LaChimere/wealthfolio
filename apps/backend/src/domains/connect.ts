@@ -180,10 +180,16 @@ const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2U
 const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
 const DEVICE_ENROLL_DISPLAY_NAME = "Wealthfolio Server";
 const RESET_REASON_REINITIALIZE = "reinitialize";
+const ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 60;
 const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 type I64Value = number | bigint;
+
+interface CachedLocalAccessToken {
+  accessToken: string;
+  expiresAtMs: number;
+}
 
 export function createLocalConnectService({
   db,
@@ -197,16 +203,36 @@ export function createLocalConnectService({
   fetch: fetchImpl = fetch,
 }: LocalConnectServiceDependencies): ConnectService {
   let restorePromise: Promise<{ accessToken: string; refreshToken: string }> | null = null;
+  let accessTokenCache: CachedLocalAccessToken | null = null;
   let sessionGeneration = 0;
   const restoreSession = async () => {
     if (!secretService) {
       throw cloudSyncDisabled();
+    }
+    const cacheGeneration = sessionGeneration;
+    const cachedAccessToken = readCachedLocalAccessToken(accessTokenCache);
+    if (cachedAccessToken) {
+      const refreshToken = await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY);
+      if (
+        refreshToken &&
+        sessionGeneration === cacheGeneration &&
+        readCachedLocalAccessToken(accessTokenCache) === cachedAccessToken
+      ) {
+        return { accessToken: cachedAccessToken, refreshToken };
+      }
+      if (!refreshToken && sessionGeneration === cacheGeneration) {
+        accessTokenCache = null;
+        throw new ConnectServiceError("forbidden", "No sync session configured", 403);
+      }
     }
     restorePromise ??= restoreLocalSyncSession(
       secretService,
       env,
       fetchImpl,
       () => sessionGeneration,
+      (accessToken, expiresAtMs) => {
+        accessTokenCache = { accessToken, expiresAtMs };
+      },
     ).finally(() => {
       restorePromise = null;
     });
@@ -218,6 +244,7 @@ export function createLocalConnectService({
         throw cloudSyncDisabled();
       }
       sessionGeneration += 1;
+      accessTokenCache = null;
       await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, refreshToken);
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
     },
@@ -226,6 +253,7 @@ export function createLocalConnectService({
         throw cloudSyncDisabled();
       }
       sessionGeneration += 1;
+      accessTokenCache = null;
       await secretService.deleteSecret(CLOUD_REFRESH_TOKEN_KEY);
       await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
       clearAllDeviceSyncFreshnessGates(db);
@@ -672,11 +700,71 @@ function rustUtcString(date: Date): string {
   return date.toISOString().replace(".000Z", "Z");
 }
 
+function readCachedLocalAccessToken(cache: CachedLocalAccessToken | null): string | null {
+  if (!cache || cache.expiresAtMs <= Date.now()) {
+    return null;
+  }
+  if (!isLocalAccessTokenFresh(cache.accessToken, Date.now(), ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS)) {
+    return null;
+  }
+  return cache.accessToken;
+}
+
+function computeLocalAccessTokenExpiresAtMs(
+  accessToken: string,
+  expiresInSeconds: number | null,
+): number {
+  if (expiresInSeconds !== null && expiresInSeconds > 0) {
+    const adjustedSeconds = Math.max(
+      Math.floor(expiresInSeconds) - ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS,
+      1,
+    );
+    return Date.now() + adjustedSeconds * 1000;
+  }
+  const exp = parseLocalJwtExpSeconds(accessToken);
+  if (exp === null) {
+    return Date.now();
+  }
+  const adjustedMs = exp * 1000 - Date.now() - ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS * 1000;
+  return adjustedMs <= 0 ? Date.now() : Date.now() + adjustedMs;
+}
+
+function isLocalAccessTokenFresh(token: string, nowMs: number, bufferSeconds: number): boolean {
+  const exp = parseLocalJwtExpSeconds(token);
+  if (exp === null) {
+    return false;
+  }
+  return exp > Math.floor(nowMs / 1000) + bufferSeconds;
+}
+
+function parseLocalJwtExpSeconds(token: string): number | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const payload = parts[1];
+  if (!payload) {
+    return null;
+  }
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as unknown;
+    if (!isRecord(parsed) || !Number.isInteger(parsed.exp)) {
+      return null;
+    }
+    return parsed.exp as number;
+  } catch {
+    return null;
+  }
+}
+
 async function restoreLocalSyncSession(
   secretService: SecretService,
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   sessionGeneration: () => number,
+  cacheAccessToken?: (accessToken: string, expiresAtMs: number) => void,
 ): Promise<{ accessToken: string; refreshToken: string }> {
   const startedAtGeneration = sessionGeneration();
   const refreshToken = await secretService.getSecret(CLOUD_REFRESH_TOKEN_KEY);
@@ -743,8 +831,10 @@ async function restoreLocalSyncSession(
   ) {
     throw new ConnectServiceError("forbidden", "Sync session changed during token refresh", 403);
   }
+  const expiresAtMs = computeLocalAccessTokenExpiresAtMs(payload.accessToken, payload.expiresIn);
   await secretService.setSecret(CLOUD_REFRESH_TOKEN_KEY, rotatedRefreshToken);
   await secretService.deleteSecret(CLOUD_ACCESS_TOKEN_KEY);
+  cacheAccessToken?.(payload.accessToken, expiresAtMs);
   return { accessToken: payload.accessToken, refreshToken: rotatedRefreshToken };
 }
 
@@ -3820,6 +3910,7 @@ function normalizeConnectPublishableKey(value: string | undefined): string {
 function parseRefreshTokenResponse(bodyText: string): {
   accessToken: string;
   refreshToken: string | null;
+  expiresIn: number | null;
 } {
   let parsed: unknown;
   try {
@@ -3842,11 +3933,22 @@ function parseRefreshTokenResponse(bodyText: string): {
   ) {
     throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
   }
+  if (
+    parsed.expires_in !== undefined &&
+    parsed.expires_in !== null &&
+    (typeof parsed.expires_in !== "number" || !Number.isFinite(parsed.expires_in))
+  ) {
+    throw new ConnectServiceError("internal_error", "Failed to parse token response", 500);
+  }
   const refreshToken =
     typeof parsed.refresh_token === "string" && parsed.refresh_token.trim()
       ? parsed.refresh_token.trim()
       : null;
-  return { accessToken: parsed.access_token, refreshToken };
+  return {
+    accessToken: parsed.access_token,
+    refreshToken,
+    expiresIn: typeof parsed.expires_in === "number" ? parsed.expires_in : null,
+  };
 }
 
 function assertRefreshTokenResponseRawShape(rawJson: string): void {

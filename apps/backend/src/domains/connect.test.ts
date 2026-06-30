@@ -28,6 +28,12 @@ function createMemorySecretService(): SecretService & { entries: Map<string, str
   };
 }
 
+function fakeJwtWithExp(exp: number): string {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
+  return `${header}.${payload}.sig`;
+}
+
 function connectSubscriptionPlan(id: string): Record<string, unknown> {
   return {
     id,
@@ -218,6 +224,134 @@ describe("TS Connect local session service", () => {
         refresh_token: "old-refresh",
       });
     } finally {
+      db.close();
+    }
+  });
+
+  test("reuses fresh JWT access tokens in memory and clears the cache on session replacement", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+    let authCalls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test/",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input, init) => {
+        authCalls += 1;
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+        });
+        return Response.json({
+          access_token: fakeJwtWithExp(futureExp),
+          refresh_token: authCalls === 1 ? "rotated-refresh" : "replacement-refresh",
+          expires_in: 3600,
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "rotated-refresh",
+      });
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "rotated-refresh",
+      });
+      expect(authCalls).toBe(1);
+      expect(requests).toEqual([
+        {
+          url: "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+          body: { refresh_token: "old-refresh" },
+        },
+      ]);
+
+      await service.storeSyncSession("new-refresh");
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "replacement-refresh",
+      });
+      expect(authCalls).toBe(2);
+      expect(requests[1]).toEqual({
+        url: "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        body: { refresh_token: "new-refresh" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not return a cached access token when the session changes during cache lookup", async () => {
+    const db = new Database(":memory:");
+    const baseSecretService = createMemorySecretService();
+    baseSecretService.entries.set("sync_refresh_token", "old-refresh");
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+    const oldAccessToken = fakeJwtWithExp(futureExp);
+    const newAccessToken = fakeJwtWithExp(futureExp + 60);
+    let authCalls = 0;
+    let blockNextRefreshRead = false;
+    let releaseRefreshRead: (() => void) | null = null;
+    let refreshReadStarted: Promise<void> | null = null;
+    const secretService: SecretService & { entries: Map<string, string> } = {
+      ...baseSecretService,
+      async getSecret(secretKey) {
+        if (secretKey === "sync_refresh_token" && blockNextRefreshRead) {
+          blockNextRefreshRead = false;
+          refreshReadStarted = Promise.resolve();
+          await new Promise<void>((resolve) => {
+            releaseRefreshRead = resolve;
+          });
+        }
+        return baseSecretService.entries.get(secretKey) ?? null;
+      },
+    };
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_AUTH_URL: "https://auth.example.test/" },
+      fetch: async () => {
+        authCalls += 1;
+        return Response.json({
+          access_token: authCalls === 1 ? oldAccessToken : newAccessToken,
+          refresh_token: authCalls === 1 ? "rotated-refresh" : "replacement-refresh",
+          expires_in: 3600,
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toEqual({
+        accessToken: oldAccessToken,
+        refreshToken: "rotated-refresh",
+      });
+      blockNextRefreshRead = true;
+      const cachedRestore = service.restoreSyncSession();
+      while (refreshReadStarted === null) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await service.storeSyncSession("new-refresh");
+      releaseRefreshRead?.();
+      await expect(cachedRestore).resolves.toEqual({
+        accessToken: newAccessToken,
+        refreshToken: "replacement-refresh",
+      });
+      expect(authCalls).toBe(2);
+    } finally {
+      releaseRefreshRead?.();
       db.close();
     }
   });

@@ -7798,6 +7798,12 @@ contract:
   `#` sidebar placeholder), preventing add-on UI permissions from injecting
   unsafe navigation targets. Focused frontend add-on tests and full repository
   check passed.
+- `pr5-connect-token-cache-parity`: verification passed. The TS Connect session
+  service now keeps a Rust-compatible in-memory access-token cache, reuses only
+  JWTs whose wall-clock `exp` remains outside the refresh buffer, preserves
+  refresh-token rotation, and clears the cache when the stored session changes.
+  Full Connect tests, backend type-check, `git diff --check`, and focused
+  code-review passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

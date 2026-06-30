@@ -6235,6 +6235,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   `#` sidebar placeholder), preventing add-on UI permissions from injecting
   unsafe navigation targets. Focused frontend add-on tests and full repository
   check passed.
+- Turn 1132: Added Rust-compatible Connect access-token cache parity. The TS
+  Connect session service now caches fresh JWT access tokens in memory, honors
+  the refresh buffer from JWT `exp`/`expires_in`, preserves refresh-token
+  rotation, and invalidates the cache when the stored session changes. Full
+  Connect tests and full repository check passed.
 
 ## Deferred items
 
