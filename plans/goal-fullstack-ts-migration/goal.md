@@ -6203,6 +6203,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   warning/error/critical severity based on affected market value share and
   runtime wiring through the taxonomy service. Full health tests and full
   repository check passed.
+- Turn 1126: Added device-sync background not-ready backoff parity. The TS
+  Connect device-sync background engine now tracks consecutive `not_ready` and
+  `config_error` cycles, applies Rust-compatible exponential backoff after five
+  repeats, caps delay at one hour, and resets the counter on stop or successful
+  cycles. Full Connect/device-sync tests and full repository check passed.
 
 ## Deferred items
 

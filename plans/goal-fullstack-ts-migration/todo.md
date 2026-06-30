@@ -7763,6 +7763,11 @@ contract:
   holdings missing system-taxonomy assignments, with warning/error/critical
   severity based on affected market value share and runtime wiring through the
   taxonomy service. Full health tests and full repository check passed.
+- `pr5-device-sync-not-ready-backoff`: verification passed. The TS Connect
+  device-sync background engine now tracks consecutive `not_ready` and
+  `config_error` cycles, applies Rust-compatible exponential backoff after five
+  repeats, caps delay at one hour, and resets the counter on stop or successful
+  cycles. Full Connect/device-sync tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

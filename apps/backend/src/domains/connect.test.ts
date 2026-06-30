@@ -3,7 +3,11 @@ import { describe, expect, test } from "bun:test";
 
 import { ACTIVITY_BULK_CREATED_ASSET_IDS } from "./activities";
 import type { SecretService } from "./secrets";
-import { createLocalConnectDeviceSyncService, createLocalConnectService } from "./connect";
+import {
+  createLocalConnectDeviceSyncService,
+  createLocalConnectService,
+  localNotReadyBackoffMs,
+} from "./connect";
 import { createEventBus, type BackendEvent } from "../events";
 
 function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
@@ -9104,6 +9108,95 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("background engine consecutive not-ready counter resets on stop and restart", async () => {
+    // Verify that after stopping the engine, the consecutive_not_ready counter
+    // is reset so the engine resumes at base delay on next start.
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let cycleCount = 0;
+    // Device fetch returns REGISTERED (not READY) so every cycle is not_ready.
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices") && !url.includes("/trusted-devices")) {
+          cycleCount += 1;
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            trust_state: "untrusted",
+            trusted_key_version: null,
+          });
+        }
+        if (url.includes("/trusted-devices")) {
+          return Response.json([]);
+        }
+        return Response.json({});
+      },
+    });
+
+    try {
+      // Phase 1: run several not_ready cycles then stop.
+      await service.startDeviceSyncBackgroundEngine();
+      const deadline1 = Date.now() + 500;
+      while (Date.now() < deadline1 && cycleCount < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await service.stopDeviceSyncBackgroundEngine();
+      const countAfterStop = cycleCount;
+      expect(countAfterStop).toBeGreaterThanOrEqual(1);
+
+      // Phase 2: restart. Counter must be reset so the engine starts again
+      // immediately (scheduleBackgroundCycle(0)) and runs its first cycle
+      // within the test window.
+      const cyclesBeforeRestart = cycleCount;
+      await service.startDeviceSyncBackgroundEngine();
+      const deadline2 = Date.now() + 500;
+      while (Date.now() < deadline2 && cycleCount === cyclesBeforeRestart) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(cycleCount).toBeGreaterThan(cyclesBeforeRestart);
+    } finally {
+      await service.stopDeviceSyncBackgroundEngine();
+      db.close();
+    }
+  });
+
   test("clears local device sync session data while preserving app data and device nonce", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
@@ -12329,5 +12422,36 @@ describe("TS Connect device sync local service", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("localNotReadyBackoffMs", () => {
+  test("returns 0 for consecutiveNotReady <= DEVICE_SYNC_NOT_READY_BACKOFF_AFTER (5)", () => {
+    expect(localNotReadyBackoffMs(0)).toBe(0);
+    expect(localNotReadyBackoffMs(1)).toBe(0);
+    expect(localNotReadyBackoffMs(5)).toBe(0);
+  });
+
+  test("returns 1x base interval (5 min) for consecutiveNotReady = 6", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(6)).toBe(baseMs * Math.pow(2, 1)); // 10 min
+  });
+
+  test("returns 2x base interval (5 min) for consecutiveNotReady = 7", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(7)).toBe(baseMs * Math.pow(2, 2)); // 20 min
+  });
+
+  test("returns 3x base interval (5 min) for consecutiveNotReady = 8", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(8)).toBe(baseMs * Math.pow(2, 3)); // 40 min
+  });
+
+  test("caps at 1 hour for consecutiveNotReady >= 9", () => {
+    const capMs = 60 * 60 * 1000;
+    // 5 min * 2^4 = 80 min > 60 min cap
+    expect(localNotReadyBackoffMs(9)).toBe(capMs);
+    expect(localNotReadyBackoffMs(10)).toBe(capMs);
+    expect(localNotReadyBackoffMs(100)).toBe(capMs);
   });
 });

@@ -4134,6 +4134,8 @@ const DEVICE_SYNC_WAKE_DEBOUNCE_MAX_WAIT_MS = 30_000;
 const DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEVICE_SYNC_DEAD_OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEVICE_SYNC_NOT_READY_BACKOFF_AFTER = 5;
+const DEVICE_SYNC_NOT_READY_BACKOFF_CAP_MS = 60 * 60 * 1000;
 
 class LocalPullStaleCursorError extends Error {
   constructor(
@@ -4215,6 +4217,7 @@ export function createLocalConnectDeviceSyncService({
   let backgroundCyclePromise: Promise<void> | null = null;
   let backgroundLifecycleVersion = 0;
   let backgroundNextOutboxPruneAt = Date.now() + backgroundOutboxPruneIntervalMs;
+  let backgroundConsecutiveNotReady = 0;
   let backgroundWakeFirstAt: number | null = null;
   let backgroundWakePending = false;
   let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4265,15 +4268,22 @@ export function createLocalConnectDeviceSyncService({
           return;
         }
         shouldPruneAfterCycle = true;
-        await triggerLocalDeviceSyncCycle(
+        const cycleResult = await triggerLocalDeviceSyncCycle(
           db,
           secretService,
           env,
           fetchImpl,
           restoreDeviceSyncSession,
         );
+        const cycleStatus = optionalString(cycleResult.status);
+        if (cycleStatus === "not_ready" || cycleStatus === "config_error") {
+          backgroundConsecutiveNotReady += 1;
+        } else {
+          backgroundConsecutiveNotReady = 0;
+        }
       } catch (error) {
         console.warn(`[Connect] Device sync background cycle failed: ${errorMessage(error)}`);
+        backgroundConsecutiveNotReady = 0;
       } finally {
         if (shouldPruneAfterCycle) {
           try {
@@ -4292,7 +4302,9 @@ export function createLocalConnectDeviceSyncService({
             backgroundWakePending = false;
             scheduleBackgroundWake();
           } else {
-            scheduleBackgroundCycle(localBackgroundCycleDelayMs(db));
+            const baseDelayMs = localBackgroundCycleDelayMs(db);
+            const notReadyDelayMs = localNotReadyBackoffMs(backgroundConsecutiveNotReady);
+            scheduleBackgroundCycle(Math.max(baseDelayMs, notReadyDelayMs));
           }
         }
       }
@@ -4309,6 +4321,7 @@ export function createLocalConnectDeviceSyncService({
   const stopBackgroundEngine = async () => {
     backgroundLifecycleVersion += 1;
     backgroundRunning = false;
+    backgroundConsecutiveNotReady = 0;
     resetBackgroundWake();
     clearBackgroundTimer();
     const cycle = backgroundCyclePromise;
@@ -8642,6 +8655,15 @@ function localPruneAppliedEventsAfterSuccessfulCycle(db: Database, cursor: numbe
   } catch (error) {
     console.warn(`[Connect] Failed to prune applied sync events: ${errorMessage(error)}`);
   }
+}
+
+export function localNotReadyBackoffMs(consecutiveNotReady: number): number {
+  if (consecutiveNotReady <= DEVICE_SYNC_NOT_READY_BACKOFF_AFTER) {
+    return 0;
+  }
+  const exponent = Math.min(consecutiveNotReady - DEVICE_SYNC_NOT_READY_BACKOFF_AFTER, 4);
+  const delayMs = DEVICE_SYNC_BACKGROUND_INTERVAL_MS * Math.pow(2, exponent);
+  return Math.min(delayMs, DEVICE_SYNC_NOT_READY_BACKOFF_CAP_MS);
 }
 
 function localBackgroundCycleDelayMs(db: Database, nowMs = Date.now()): number {
