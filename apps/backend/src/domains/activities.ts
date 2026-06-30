@@ -673,13 +673,21 @@ export function createActivityService(
         return (async () => {
           const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
           const activityId = requiredNonEmptyString(input.id, "id");
-          const existing = readActivityRow(db, activityId);
-          const resolvedInput = await directActivityInputWithProviderResolution(
+          const initialExisting = readActivityRow(db, activityId);
+          const initiallyResolvedInput = await directActivityInputWithProviderResolution(
             db,
             input,
             options,
-            existing,
+            initialExisting,
           );
+          const existing = readActivityRow(db, activityId);
+          const resolvedInput = activityUpdateProviderContextChanged(
+            input,
+            initialExisting,
+            existing,
+          )
+            ? await directActivityInputWithProviderResolution(db, input, options, existing)
+            : initiallyResolvedInput;
           const update = normalizeActivityUpdateInput(db, resolvedInput, existing, assetContext);
           const assetQuoteMode = activityAssetQuoteModeFromRecord(resolvedInput);
           const shouldWriteQuote = shouldWriteManualQuoteForUpdate(resolvedInput);
@@ -2391,6 +2399,18 @@ function directActivityEffectiveDecimal(
     return parseOptionalImportDecimal(existingValue);
   }
   return parseOptionalImportDecimal(input[field]);
+}
+
+function activityUpdateProviderContextChanged(
+  input: Record<string, unknown>,
+  previous: ActivityRow,
+  current: ActivityRow,
+): boolean {
+  return (
+    (!hasOwn(input, "subtype") && previous.subtype !== current.subtype) ||
+    (!hasOwn(input, "quantity") && previous.quantity !== current.quantity) ||
+    (!hasOwn(input, "unitPrice") && previous.unit_price !== current.unit_price)
+  );
 }
 
 async function checkActivitiesImportRows(

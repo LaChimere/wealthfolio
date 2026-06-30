@@ -3515,6 +3515,66 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("preserves concurrent update fields while provider-resolving direct activity updates", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: () => {
+        db.prepare("UPDATE activities SET quantity = '5' WHERE id = 'transfer-race'").run();
+        return [
+          {
+            symbol: "SHOP",
+            shortName: "Shopify Provider",
+            longName: "Shopify Provider",
+            exchange: "NYSE",
+            exchangeMic: "XNYS",
+            exchangeName: "NYSE",
+            quoteType: "EQUITY",
+            typeDisplay: "",
+            currency: "USD",
+            dataSource: "FINNHUB",
+            isExisting: false,
+            index: "",
+            score: 1,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertActivity(db, {
+        id: "transfer-race",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        quantity: "2",
+        amount: null,
+        currency: "USD",
+      });
+
+      const updated = (await service.updateActivity?.({
+        id: "transfer-race",
+        accountId: "account-1",
+        asset: { symbol: "SHOP" },
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        currency: "USD",
+      })) as Activity;
+
+      expect(updated.quantity).toBe("5");
+      expect(readAssetById(db, updated.assetId ?? "")).toMatchObject({
+        display_code: "SHOP",
+        instrument_exchange_mic: "XNYS",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {

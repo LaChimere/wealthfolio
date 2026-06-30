@@ -7676,6 +7676,11 @@ contract:
   quantity/unit-price values when those numeric fields are omitted, so valid
   symbol-only transfer patches do not skip provider resolution. Focused activity
   unit/runtime tests and full repository check passed.
+- `pr5-direct-activity-provider-update-race-fix`: verification passed. Activity
+  updates now re-read the row after provider search and recompute symbol
+  resolution when disposition-driving fields changed during the await,
+  preventing stale omitted fields from overwriting concurrent updates. Focused
+  activity unit/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
