@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1054
+turns_used: 1055
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T14:24:04+09:00"
+updated_at: "2026-06-30T14:35:39+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5845,6 +5845,10 @@ updated_at: "2026-06-30T14:24:04+09:00"
   satisfy clippy, and the market-data E2E fixture smoke injects a fixed
   post-market `now` so its Yahoo sync day is stable.
   `bash scripts/ci-check.sh --full` passed.
+- Turn 1055: Ran dual-model CI-fix review with Claude Opus 4.8 xhigh and GPT-5.5
+  xhigh over package test wiring, add-on canary coverage, Rust config test
+  relocation, and market-data fixture time stabilization. Both reviews found no
+  actionable CI, runtime/test, canary, date/time, or scope issues.
 
 ## Deferred items
 

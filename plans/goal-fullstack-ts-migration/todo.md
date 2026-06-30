@@ -7391,6 +7391,10 @@ contract:
   date-sensitive market-data E2E fixture smoke.
   `bash scripts/ci-check.sh --full` now passes with the add-on SDK and
   backend-contracts tests wired in.
+- `pr5-ci-fixes-dual-review`: verification passed. Claude Opus 4.8 xhigh and
+  GPT-5.5 xhigh reviewed package test wiring, add-on canary coverage, Rust
+  config test relocation, and market-data fixture time stabilization, finding no
+  actionable CI, runtime/test, canary, date/time, or scope issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
