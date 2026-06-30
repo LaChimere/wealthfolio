@@ -6168,6 +6168,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   add-ons. Development server add-ons now accept default object `enable`, named
   `enable`, and legacy `PortfolioTrackerAddon` exports in addition to default
   functions. Focused frontend add-on tests and full repository check passed.
+- Turn 1119: Addressed GPT bulk provider-resolution review findings. Bulk update
+  provider pre-resolution now performs a final stale-aware pass after sibling
+  provider lookups settle, preventing late sibling mutations from applying stale
+  asset resolutions, and validation-shaped pre-pass errors fall back to normal
+  bulk per-entry `errors[]` handling. Focused bulk activity tests and full
+  repository check passed.
 
 ## Deferred items
 

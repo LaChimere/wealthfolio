@@ -2403,14 +2403,16 @@ async function bulkActivityInputWithProviderResolution(
   const [resolvedCreates, resolvedUpdates] = await Promise.all([
     Promise.all(
       creates.map((createInput) =>
-        directActivityInputWithProviderResolution(db, createInput, options, undefined, searchCache),
+        safeDirectActivityInputWithProviderResolution(
+          db,
+          createInput,
+          options,
+          undefined,
+          searchCache,
+        ),
       ),
     ),
-    Promise.all(
-      updates.map((updateInput) =>
-        bulkUpdateInputWithProviderResolution(db, updateInput, options, searchCache),
-      ),
-    ),
+    bulkUpdateInputsWithProviderResolution(db, updates, options, searchCache),
   ]);
 
   return {
@@ -2418,6 +2420,24 @@ async function bulkActivityInputWithProviderResolution(
     creates: resolvedCreates,
     updates: resolvedUpdates,
   };
+}
+
+async function bulkUpdateInputsWithProviderResolution(
+  db: Database,
+  updates: Record<string, unknown>[],
+  options: ActivityServiceOptions,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown>[]> {
+  await Promise.all(
+    updates.map((updateInput) =>
+      bulkUpdateInputWithProviderResolution(db, updateInput, options, searchCache),
+    ),
+  );
+  return Promise.all(
+    updates.map((updateInput) =>
+      bulkUpdateInputWithProviderResolution(db, updateInput, options, searchCache),
+    ),
+  );
 }
 
 async function bulkUpdateInputWithProviderResolution(
@@ -2441,7 +2461,7 @@ async function bulkUpdateInputWithProviderResolution(
     return input;
   }
 
-  const initiallyResolvedInput = await directActivityInputWithProviderResolution(
+  const initiallyResolvedInput = await safeDirectActivityInputWithProviderResolution(
     db,
     input,
     options,
@@ -2458,8 +2478,31 @@ async function bulkUpdateInputWithProviderResolution(
     return initiallyResolvedInput;
   }
   return activityUpdateProviderContextChanged(input, initialExisting, existing)
-    ? directActivityInputWithProviderResolution(db, input, options, existing, searchCache)
+    ? safeDirectActivityInputWithProviderResolution(db, input, options, existing, searchCache)
     : initiallyResolvedInput;
+}
+
+async function safeDirectActivityInputWithProviderResolution(
+  db: Database,
+  input: Record<string, unknown>,
+  options: ActivityServiceOptions,
+  existing: ActivityRow | undefined,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown>> {
+  try {
+    return await directActivityInputWithProviderResolution(
+      db,
+      input,
+      options,
+      existing,
+      searchCache,
+    );
+  } catch (error) {
+    if (errorMessage(error).startsWith("Invalid input: ")) {
+      return input;
+    }
+    throw error;
+  }
 }
 
 function directActivityEffectiveSubtype(

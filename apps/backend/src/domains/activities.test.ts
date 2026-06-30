@@ -4647,6 +4647,195 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("rechecks bulk update provider resolution after sibling lookups settle", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const providerResult = (symbol: string, name: string) => ({
+      symbol,
+      shortName: name,
+      longName: name,
+      exchange: "NYSE",
+      exchangeMic: "XNYS",
+      exchangeName: "NYSE",
+      quoteType: "EQUITY",
+      typeDisplay: "",
+      currency: "USD",
+      dataSource: "FINNHUB",
+      isExisting: false,
+      index: "",
+      score: 1,
+    });
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      async symbolSearch(query) {
+        calls.push(query);
+        if (query === "MSFT") {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          db.prepare(
+            "UPDATE activities SET quantity = NULL, unit_price = NULL WHERE id = 'bulk-sibling-race'",
+          ).run();
+          return [providerResult("MSFT", "Microsoft Provider")];
+        }
+        if (query === "SHOP") {
+          return [providerResult("SHOP", "Shopify Provider")];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+      });
+      insertActivity(db, {
+        id: "bulk-sibling-race",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        quantity: "2",
+        amount: null,
+        currency: "USD",
+      });
+      insertActivity(db, {
+        id: "bulk-sibling-mutator",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "USD",
+      });
+
+      const result = (await service.bulkMutateActivities?.({
+        updates: [
+          {
+            id: "bulk-sibling-race",
+            accountId: "account-1",
+            asset: { symbol: "SHOP" },
+            activityType: "TRANSFER_IN",
+            activityDate: "2025-01-18",
+            currency: "USD",
+          },
+          {
+            id: "bulk-sibling-mutator",
+            accountId: "account-1",
+            asset: { symbol: "MSFT" },
+            activityType: "BUY",
+            activityDate: "2025-01-18",
+            quantity: "1",
+            unitPrice: "60",
+            amount: "60",
+            currency: "USD",
+          },
+        ],
+      })) as ActivityBulkMutationResult;
+
+      expect(result).toMatchObject({
+        created: [],
+        updated: [],
+        deleted: [],
+        createdMappings: [],
+        errors: [
+          {
+            id: "bulk-sibling-race",
+            action: "update",
+            message: "Quote currency is required. Please re-select the symbol.",
+          },
+        ],
+      });
+      expect(readAssetCount(db)).toBe(1);
+      expect(readActivityValue(db, "bulk-sibling-mutator", "currency")).toBe("USD");
+      expect(calls).toEqual(["SHOP", "MSFT"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps bulk provider pre-pass validation errors per entry", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: () => [
+        {
+          symbol: "SHOP",
+          shortName: "Shopify Provider",
+          longName: "Shopify Provider",
+          exchange: "NYSE",
+          exchangeMic: "XNYS",
+          exchangeName: "NYSE",
+          quoteType: "EQUITY",
+          typeDisplay: "",
+          currency: "USD",
+          dataSource: "FINNHUB",
+          isExisting: false,
+          index: "",
+          score: 1,
+        },
+      ],
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertActivity(db, {
+        id: "bulk-invalid-subtype",
+        accountId: "account-1",
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "USD",
+      });
+
+      const result = (await service.bulkMutateActivities?.({
+        updates: [
+          {
+            id: "bulk-invalid-subtype",
+            accountId: "account-1",
+            asset: { symbol: "SHOP" },
+            activityType: "BUY",
+            activityDate: "2025-01-18",
+            subtype: 123,
+            quantity: "1",
+            unitPrice: "60",
+            amount: "60",
+            currency: "USD",
+          },
+        ],
+      })) as ActivityBulkMutationResult;
+
+      expect(result).toMatchObject({
+        created: [],
+        updated: [],
+        deleted: [],
+        createdMappings: [],
+        errors: [
+          {
+            id: "bulk-invalid-subtype",
+            action: "update",
+            message: "Invalid input: subtype must be a string",
+          },
+        ],
+      });
+      expect(readAssetCount(db)).toBe(0);
+      expect(readActivityValue(db, "bulk-invalid-subtype", "currency")).toBe("USD");
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures bulk activity FX pairs before writes", async () => {
     const db = createActivitiesDb();
 

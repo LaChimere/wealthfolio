@@ -7726,6 +7726,13 @@ contract:
   `PortfolioTrackerAddon` exports in addition to default functions, matching
   installed add-on export resolution. Focused frontend add-on tests and full
   repository check passed.
+- `pr5-bulk-activity-provider-gpt-review-fix`: verification passed. GPT review
+  found sibling provider lookups could mutate a bulk update row after another
+  update's stale check, and invalid provider pre-pass inputs could reject the
+  whole bulk request. Bulk updates now run a final stale-aware pass after
+  sibling lookups settle and validation-shaped pre-pass errors defer to normal
+  per-entry `errors[]` handling. Focused bulk activity tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
