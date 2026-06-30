@@ -471,6 +471,22 @@ describe("TS addon domain", () => {
     expect(existsSync(path.join(appDataDir, "addons", "nested"))).toBe(false);
 
     await expect(
+      service.installAddonZip({
+        zipData: addonZip({
+          "manifest.json": JSON.stringify({
+            id: ".",
+            name: "Dot Addon",
+            version: "1.0.0",
+            main: "main.js",
+          }),
+          "main.js": "export default {};",
+        }),
+        enableAfterInstall: true,
+      }),
+    ).rejects.toThrow("dot paths are not allowed");
+    await expect(service.downloadAddonToStaging(".")).rejects.toThrow("dot paths are not allowed");
+    await expect(service.downloadAddonToStaging("..")).rejects.toThrow("dot paths are not allowed");
+    await expect(
       service.installAddonFromStaging({ addonId: "../escape", enableAfterInstall: true }),
     ).rejects.toThrow("path separators are not allowed");
     await expect(service.downloadAddonToStaging("bad\u0000id")).rejects.toThrow(

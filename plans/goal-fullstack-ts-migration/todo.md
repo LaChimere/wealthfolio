@@ -7551,6 +7551,11 @@ contract:
   with path separators, absolute paths, drive prefixes, or control characters
   before writing installed or staged ZIP paths. Focused add-on tests and full
   repository check passed.
+- `pr5-addon-dot-id-hardening-fix`: verification passed. Dual-model security
+  review found bare dot add-on IDs could still resolve to the add-ons root or
+  normalized store endpoints; the filesystem add-on ID guard now rejects `.` and
+  `..` before install, staging, or store-download work. Focused add-on tests and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

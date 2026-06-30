@@ -873,6 +873,9 @@ function validateAddonFilesystemId(addonId: string): void {
   if (addonId.trim() === "") {
     throw new Error("Unsafe addon id: id is empty");
   }
+  if (addonId === "." || addonId === "..") {
+    throw new Error(`Unsafe addon id '${addonId}': dot paths are not allowed`);
+  }
   if (addonId.includes("/") || addonId.includes("\\")) {
     throw new Error(`Unsafe addon id '${addonId}': path separators are not allowed`);
   }
