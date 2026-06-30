@@ -7693,6 +7693,12 @@ contract:
   fields during provider lookup and expects bulk validation to fail per-entry
   instead of creating an asset from stale pre-await data. Focused bulk activity
   tests and backend type-check passed.
+- `pr5-device-sync-post-bootstrap-cycle`: verification passed. Pairing bootstrap
+  success paths now run the injected sync cycle before post-pairing engine
+  notification, matching Rust's best-effort post-bootstrap cycle behavior across
+  confirm-with-bootstrap, direct flow begin, overwrite approval, and waiting
+  snapshot polling completion. Focused device-sync tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

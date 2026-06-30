@@ -704,6 +704,7 @@ export function createLocalDeviceSyncService({
         );
       }
       pairingOverwriteApprovals.delete(request.pairingId);
+      await runPostBootstrapSyncCycle(triggerSyncCycle);
       void notifyPairingComplete(onPairingComplete);
       return {
         status: "applied",
@@ -774,6 +775,7 @@ export function createLocalDeviceSyncService({
           pairingFlows.set(flowId, { pairingId: request.pairingId, deviceId, phase });
           return { flowId, phase };
         }
+        await runPostBootstrapSyncCycle(triggerSyncCycle);
         void notifyPairingComplete(onPairingComplete);
         return {
           flowId: randomUUID(),
@@ -834,6 +836,7 @@ export function createLocalDeviceSyncService({
           }
           pairingFlows.delete(request.flowId);
           pairingOverwriteApprovals.delete(flow.pairingId);
+          await runPostBootstrapSyncCycle(triggerSyncCycle);
           void notifyPairingComplete(onPairingComplete);
           return { flowId: request.flowId, phase: { phase: "success" } };
         } catch (error) {
@@ -898,6 +901,7 @@ export function createLocalDeviceSyncService({
       }
       pairingFlows.delete(request.flowId);
       pairingOverwriteApprovals.delete(flow.pairingId);
+      await runPostBootstrapSyncCycle(triggerSyncCycle);
       void notifyPairingComplete(onPairingComplete);
       return { flowId: request.flowId, phase: { phase: "success" } };
     },
@@ -3121,6 +3125,19 @@ async function notifyPairingComplete(
     await onPairingComplete();
   } catch (error) {
     console.warn(`[DeviceSync] Post-pairing engine start failed: ${errorMessage(error)}`);
+  }
+}
+
+async function runPostBootstrapSyncCycle(
+  triggerSyncCycle: (() => Promise<unknown> | unknown) | undefined,
+): Promise<void> {
+  if (!triggerSyncCycle) {
+    return;
+  }
+  try {
+    await triggerSyncCycle();
+  } catch (error) {
+    console.warn(`[DeviceSync] Post-bootstrap sync cycle failed: ${errorMessage(error)}`);
   }
 }
 

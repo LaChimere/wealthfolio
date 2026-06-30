@@ -6138,6 +6138,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   bulk result records a per-entry validation error instead of creating an asset
   from stale pre-await data. Focused bulk activity tests and backend type-check
   passed.
+- Turn 1113: Advanced device-sync post-bootstrap parity. Pairing bootstrap
+  success paths now run the injected sync cycle before post-pairing engine
+  notification, matching Rust's best-effort post-bootstrap cycle behavior across
+  confirm-with-bootstrap, direct flow begin, overwrite approval, and waiting
+  snapshot polling completion. Focused device-sync tests and full repository
+  check passed.
 
 ## Deferred items
 

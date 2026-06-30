@@ -1344,6 +1344,124 @@ describe("TS local device sync service", () => {
     }
   });
 
+  test("runs post-bootstrap sync cycles before pairing completion notifications", async () => {
+    const createBootstrapDb = (withLocalRisk: boolean) => {
+      const db = new Database(":memory:");
+      db.exec(`
+        CREATE TABLE sync_device_config (
+          device_id TEXT PRIMARY KEY NOT NULL,
+          key_version INTEGER,
+          trust_state TEXT NOT NULL DEFAULT 'untrusted',
+          last_bootstrap_at TEXT,
+          min_snapshot_created_at TEXT
+        );
+        INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+        VALUES ('device-1', 2, 'untrusted', NULL);
+      `);
+      if (withLocalRisk) {
+        db.exec(`
+          CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+          INSERT INTO accounts (id) VALUES ('account-1');
+        `);
+      }
+      return db;
+    };
+    const createBootstrapService = (
+      db: Database,
+      label: string,
+      statuses: string[],
+      events: string[],
+    ) => {
+      const secretService = createMemorySecretService();
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      return createLocalDeviceSyncService({
+        db,
+        secretService,
+        connectService: {
+          restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+        },
+        fetch: async () => Response.json({ success: true, key_version: 2 }),
+        bootstrapSnapshot: () => {
+          events.push(`bootstrap:${label}`);
+          return { status: statuses.shift() ?? "applied", message: "snapshot ready" };
+        },
+        triggerSyncCycle: () => {
+          events.push(`cycle:${label}`);
+          return { status: "ok", deadLetterCount: 0 };
+        },
+        onPairingComplete: () => {
+          events.push(`notify:${label}`);
+        },
+      });
+    };
+    const events: string[] = [];
+    const beginDb = createBootstrapDb(false);
+    const confirmDb = createBootstrapDb(false);
+    const approveDb = createBootstrapDb(true);
+    const pollDb = createBootstrapDb(true);
+
+    try {
+      const beginService = createBootstrapService(beginDb, "begin", ["applied"], events);
+      await expect(
+        beginService.beginPairingConfirm?.({ pairingId: "pairing-begin", proof: "proof" }),
+      ).resolves.toMatchObject({ phase: { phase: "success" } });
+
+      const confirmService = createBootstrapService(confirmDb, "confirm", ["skipped"], events);
+      await expect(
+        confirmService.confirmPairingWithBootstrap?.({
+          pairingId: "pairing-confirm",
+          proof: "proof",
+          allowOverwrite: true,
+        }),
+      ).resolves.toMatchObject({ status: "applied" });
+
+      const approveService = createBootstrapService(approveDb, "approve", ["applied"], events);
+      const approveFlow = (await approveService.beginPairingConfirm?.({
+        pairingId: "pairing-approve",
+        proof: "proof",
+      })) as { flowId: string };
+      await expect(
+        approveService.approvePairingOverwrite?.({ flowId: approveFlow.flowId }),
+      ).resolves.toMatchObject({ phase: { phase: "success" } });
+
+      const pollService = createBootstrapService(pollDb, "poll", ["requested", "applied"], events);
+      const pollFlow = (await pollService.beginPairingConfirm?.({
+        pairingId: "pairing-poll",
+        proof: "proof",
+      })) as { flowId: string };
+      await expect(
+        pollService.approvePairingOverwrite?.({ flowId: pollFlow.flowId }),
+      ).resolves.toMatchObject({ phase: { phase: "syncing", detail: "waiting_snapshot" } });
+      await expect(
+        pollService.getPairingFlowState?.({ flowId: pollFlow.flowId }),
+      ).resolves.toMatchObject({ phase: { phase: "success" } });
+
+      expect(events).toEqual([
+        "bootstrap:begin",
+        "cycle:begin",
+        "notify:begin",
+        "bootstrap:confirm",
+        "cycle:confirm",
+        "notify:confirm",
+        "bootstrap:approve",
+        "cycle:approve",
+        "notify:approve",
+        "bootstrap:poll",
+        "bootstrap:poll",
+        "cycle:poll",
+        "notify:poll",
+      ]);
+    } finally {
+      beginDb.close();
+      confirmDb.close();
+      approveDb.close();
+      pollDb.close();
+    }
+  });
+
   test("removes pairing flow when cancel cleanup cannot update secrets", async () => {
     const db = new Database(":memory:");
     db.exec(`
