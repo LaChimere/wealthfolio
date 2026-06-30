@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
   return {
     brokerSyncStartHandler: undefined as ((event: unknown) => void) | undefined,
     brokerSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
+    brokerSyncErrorHandler: undefined as ((event: unknown) => void) | undefined,
     marketSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
     marketSyncErrorHandler: undefined as ((event: unknown) => void) | undefined,
     listenerNames,
@@ -52,6 +53,9 @@ vi.mock("@/adapters", () => {
         }
         if (name === "listenBrokerSyncComplete") {
           mocks.brokerSyncCompleteHandler = handler;
+        }
+        if (name === "listenBrokerSyncError") {
+          mocks.brokerSyncErrorHandler = handler;
         }
         if (name === "listenMarketSyncComplete") {
           mocks.marketSyncCompleteHandler = handler;
@@ -90,6 +94,7 @@ vi.mock("sonner", () => ({
 afterEach(() => {
   mocks.brokerSyncStartHandler = undefined;
   mocks.brokerSyncCompleteHandler = undefined;
+  mocks.brokerSyncErrorHandler = undefined;
   mocks.marketSyncCompleteHandler = undefined;
   mocks.marketSyncErrorHandler = undefined;
   mocks.updatePortfolio.mockClear();
@@ -175,6 +180,34 @@ describe("useGlobalEventListener", () => {
     const dispatched = dispatchEvent.mock.calls.at(-1)?.[0] as CustomEvent<typeof newAccounts>;
     expect(dispatched.type).toBe("open-new-accounts-modal");
     expect(dispatched.detail).toEqual(newAccounts);
+  });
+
+  it("handles broker sync error payloads from the event bridge", async () => {
+    const queryClient = new QueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    }
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    renderHook(() => useGlobalEventListener(), { wrapper: Wrapper });
+    await waitFor(() => expect(mocks.brokerSyncErrorHandler).toBeDefined());
+
+    act(() => {
+      mocks.brokerSyncErrorHandler?.({
+        event: "broker:sync-error",
+        id: 3,
+        payload: {
+          error: "Broker API unavailable",
+        },
+      });
+    });
+
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith("broker-sync-start");
+    expect(invalidateQueries).toHaveBeenCalled();
+    expect(mocks.toast.error).toHaveBeenCalledWith("Broker Sync Failed", {
+      description: "Broker API unavailable",
+      duration: 10000,
+    });
   });
 
   it("handles market sync completion payloads with failed and skipped syncs", async () => {
